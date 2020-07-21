@@ -219,6 +219,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VersionInfo::record_nearest_disjoint_complete_node(RegionNode *node,
+                                                          const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      nearest_disjoint_complete_nodes.insert(node, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::pack_version_info(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(nearest_disjoint_complete_nodes.size());
+      for (FieldMaskSet<RegionNode>::const_iterator it = 
+            nearest_disjoint_complete_nodes.begin(); it != 
+            nearest_disjoint_complete_nodes.end(); it++)
+      {
+        rez.serialize(it->first->handle);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::unpack_version_info(Deserializer &derez, 
+                                          RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_nodes;
+      derez.deserialize(num_nodes);
+      for (unsigned idx = 0; idx < num_nodes; idx++)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        FieldMask mask;
+        derez.deserialize(mask);
+        RegionNode *node = forest->get_node(handle);
+        nearest_disjoint_complete_nodes.insert(node, mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void VersionInfo::record_equivalence_set(VersionManager *own,
                                              EquivalenceSet *set,
                                              const FieldMask &set_mask)
@@ -237,6 +277,7 @@ namespace Legion {
     {
       owner = NULL;
       equivalence_sets.clear();
+      nearest_disjoint_complete_nodes.clear();
     }
 
     /////////////////////////////////////////////////////////////
@@ -2572,6 +2613,8 @@ namespace Legion {
       assert(curr_epoch_users.empty());
       assert(prev_epoch_users.empty());
       assert(!reduction_fields);
+      assert(!disjoint_complete_tree);
+      assert(disjoint_complete_children.empty());
 #endif
     }
 
@@ -2609,6 +2652,8 @@ namespace Legion {
       clear_logical_users(); 
       reduction_fields.clear();
       outstanding_reductions.clear();
+      disjoint_complete_tree.clear();
+      disjoint_complete_children.clear();
     } 
 
     //--------------------------------------------------------------------------

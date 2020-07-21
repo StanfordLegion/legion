@@ -362,6 +362,8 @@ namespace Legion {
       std::set<ApEvent>                         effects_postconditions;
     protected:
       std::vector<unsigned>                     parent_req_indexes; 
+      // The version infos for this task
+      LegionVector<VersionInfo>::aligned        version_infos;
     protected:
       bool complete_received;
       bool commit_received;
@@ -570,9 +572,7 @@ namespace Legion {
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool>                     virtual_mapped;
       // Regions which are NO_ACCESS or have no privilege fields
-      std::vector<bool>                     no_access_regions;
-      // The version infos for this operation
-      LegionVector<VersionInfo>::aligned    version_infos;
+      std::vector<bool>                     no_access_regions; 
     protected:
       std::vector<Processor>                target_processors;
       // Hold the result of the mapping 
@@ -765,8 +765,6 @@ namespace Legion {
                                       const DeferMappingArgs *args = NULL);
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
-      virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual ApEvent get_task_completion(void) const;
@@ -978,8 +976,6 @@ namespace Legion {
       virtual void trigger_task_complete(bool deferred = false);
       virtual void trigger_task_commit(void);
     public:
-      virtual VersionInfo& get_version_info(unsigned idx);
-    public:
       virtual void perform_physical_traversal(unsigned idx,
                                 RegionTreeContext ctx, InstanceSet &valid);
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
@@ -1094,8 +1090,6 @@ namespace Legion {
       virtual void perform_inlining(TaskContext *enclosing);
       virtual void end_inline_task(const void *result, size_t result_size, 
                                    bool owned, FutureFunctor *functor);
-      virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
     public:
@@ -1165,7 +1159,6 @@ namespace Legion {
       unsigned committed_points;
       RtUserEvent future_map_ready;
     protected:
-      LegionMap<unsigned/*idx*/,VersionInfo>::aligned version_infos;
       std::vector<RegionTreePath> privilege_paths;
       std::set<SliceTask*> origin_mapped_slices;
     protected:
@@ -1238,6 +1231,8 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
+      virtual VersionInfo& get_version_info(unsigned idx);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
       virtual void launch_task(void);

@@ -84,9 +84,16 @@ namespace Legion {
       VersionInfo& operator=(const VersionInfo &rhs);
     public:
       inline bool has_version_info(void) const { return (owner != NULL); }
+      inline const FieldMaskSet<RegionNode>& get_nearest_nodes(void) const
+        { return nearest_disjoint_complete_nodes; }
       inline const FieldMaskSet<EquivalenceSet>& get_equivalence_sets(void) 
         const { return equivalence_sets; }
       inline VersionManager* get_manager(void) const { return owner; }
+    public:
+      void record_nearest_disjoint_complete_node(RegionNode *node, 
+                                                 const FieldMask &mask);
+      void pack_version_info(Serializer &rez) const;
+      void unpack_version_info(Deserializer &derez, RegionTreeForest *forest);
     public:
       void record_equivalence_set(VersionManager *owner, 
                                   EquivalenceSet *set, 
@@ -95,6 +102,10 @@ namespace Legion {
     protected:
       VersionManager *owner;
       FieldMaskSet<EquivalenceSet> equivalence_sets;
+      // These are the nearest nodes in the disjoint complete
+      // tree that we should use for computing our equivalence
+      // sets if we do not have them in the cache.
+      FieldMaskSet<RegionNode> nearest_disjoint_complete_nodes;
     };
 
     /**
@@ -837,6 +848,14 @@ namespace Legion {
       // Keep track of which fields we've done a reduction to here
       FieldMask reduction_fields;
       LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
+    public:
+      // Track whether this node is part of the disjoint-complete tree
+      FieldMask disjoint_complete_tree;
+      // Use this data structure for tracking where the disjoint-complete
+      // tree is for this region tree. On region nodes there should be at
+      // most one child in this data structure. On partition nodes there
+      // can be any number of children with different field masks.
+      FieldMaskSet<RegionTreeNode> disjoint_complete_children;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;

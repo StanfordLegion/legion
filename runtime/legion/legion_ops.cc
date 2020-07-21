@@ -1255,9 +1255,6 @@ namespace Legion {
     void Operation::record_logical_dependence(const LogicalUser &user)
     //--------------------------------------------------------------------------
     {
-      // Record the advance operations separately, in many cases we don't
-      // need to include them in our analysis of above users, but in the case
-      // of creating new advance operations below in the tree we do
       logical_records.push_back(user);
     }
 
@@ -2914,6 +2911,7 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
+                                                   version_info,
                                                    map_applied_conditions);
     }
 
@@ -4419,6 +4417,7 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      projection_info,
                                                      src_privilege_paths[idx],
+                                                     src_versions[idx],
                                                      map_applied_conditions);
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -4432,6 +4431,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      projection_info,
                                                      dst_privilege_paths[idx],
+                                                     dst_versions[idx],
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -4446,6 +4446,7 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  projection_info,
                                                  gather_privilege_paths[idx],
+                                                 gather_versions[idx],
                                                  map_applied_conditions);
       }
       if (!dst_indirect_requirements.empty())
@@ -4457,6 +4458,7 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  projection_info,
                                                  scatter_privilege_paths[idx],
+                                                 scatter_versions[idx],
                                                  map_applied_conditions);
       }
     }
@@ -6608,6 +6610,7 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      src_info,
                                                      src_privilege_paths[idx],
+                                                     src_versions[idx],
                                                      map_applied_conditions);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -6623,6 +6626,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      dst_info,
                                                      dst_privilege_paths[idx],
+                                                     dst_versions[idx],
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -6639,6 +6643,7 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  gather_info,
                                                  gather_privilege_paths[idx],
+                                                 gather_versions[idx],
                                                  map_applied_conditions);
         }
       }
@@ -6653,6 +6658,7 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
                                                  scatter_privilege_paths[idx],
+                                                 scatter_versions[idx],
                                                  map_applied_conditions);
         }
       }
@@ -7160,6 +7166,10 @@ namespace Legion {
       gather_is_range           = owner->gather_is_range;
       scatter_is_range          = owner->scatter_is_range;
       predication_guard         = owner->predication_guard;
+      src_versions              = owner->src_versions;
+      dst_versions              = owner->dst_versions;
+      gather_versions           = owner->gather_versions;
+      scatter_versions          = owner->scatter_versions;
       possible_src_indirect_out_of_range 
                                 = owner->possible_src_indirect_out_of_range;
       possible_dst_indirect_out_of_range
@@ -8241,6 +8251,7 @@ namespace Legion {
       // region tree to serve as mapping dependences on things that might
       // use these data structures in the case of recycling, e.g. in the
       // case that we recycle a field index
+      version_infos.resize(deletion_requirements.size());
       for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
       {
         RegionRequirement &req = deletion_requirements[idx];
@@ -8248,7 +8259,8 @@ namespace Legion {
         RegionTreePath privilege_path;
         initialize_privilege_path(privilege_path, req);
         runtime->forest->perform_deletion_analysis(this, idx, req, 
-                           privilege_path, map_applied_conditions,
+                           privilege_path, version_infos[idx],
+                           map_applied_conditions,
                            (kind == LOGICAL_REGION_DELETION));
       }
       // Now pretend like this is going to be a mapping fence on everyone
@@ -8294,7 +8306,6 @@ namespace Legion {
       {
         // Field deletions need to compute their version infos
         std::set<RtEvent> preconditions;
-        version_infos.resize(deletion_requirements.size());
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, idx,
                                             deletion_requirements[idx],
@@ -9018,6 +9029,7 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
+                                                   version_info,
                                                    map_applied_conditions);
     }
 
@@ -9387,11 +9399,13 @@ namespace Legion {
       // Just doing the dependence analysis will precipitate any
       // close operations necessary for the virtual close op to
       // do its job, so it needs to do nothing else
+      VersionInfo version_info;
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
+                                                   version_info,
                                                    map_applied_conditions);
     }
 
@@ -9703,6 +9717,7 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
+                                                   version_info,
                                                    map_applied_conditions);
     }
 
@@ -10575,6 +10590,7 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
+                                                   version_info,
                                                    map_applied_conditions);
     }
 
@@ -13992,6 +14008,7 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
+                                                   version_info,
                                                    map_applied_conditions);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
@@ -15143,10 +15160,11 @@ namespace Legion {
       index_point = p;
       owner = own;
       index_domain = owner->index_domain;
-      requirement = owner->requirement;
-      parent_task = owner->parent_task;
-      map_id      = owner->map_id;
-      tag         = owner->tag;
+      requirement  = owner->requirement;
+      parent_task  = owner->parent_task;
+      map_id       = owner->map_id;
+      tag          = owner->tag;
+      version_info = owner->version_info;
       parent_req_index = owner->parent_req_index;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(own->get_unique_op_id(), unique_op_id, p);
@@ -15603,6 +15621,7 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
+                                                   version_info,
                                                    map_applied_conditions);
     }
 
@@ -16263,6 +16282,7 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
+                                                   version_info,
                                                    map_applied_conditions);
     }
 
@@ -16535,6 +16555,7 @@ namespace Legion {
       false_guard        = owner->false_guard;
       future             = owner->future;
       value_size         = owner->value_size;
+      version_info       = owner->version_info;
       if (value_size > 0)
       {
         value = malloc(value_size);
@@ -16971,6 +16992,7 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
+                                                   version_info,
                                                    map_applied_conditions); 
     }
 
@@ -17533,6 +17555,7 @@ namespace Legion {
                                                    requirement, 
                                                    projection_info,
                                                    privilege_path,
+                                                   version_info,
                                                    map_applied_conditions);
     }
 

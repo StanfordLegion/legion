@@ -647,6 +647,7 @@ namespace Legion {
       atomic_locks.clear(); 
       effects_postconditions.clear();
       parent_req_indexes.clear();
+      version_infos.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -1156,18 +1157,20 @@ namespace Legion {
     VersionInfo& TaskOp::get_version_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
-      // This should never be called
-      assert(false);
-      return (*(new VersionInfo()));
+#ifdef DEBUG_LEGION
+      assert(idx < version_infos.size());
+#endif
+      return version_infos[idx];
     }
 
     //--------------------------------------------------------------------------
     const VersionInfo& TaskOp::get_version_info(unsigned idx) const
     //--------------------------------------------------------------------------
     {
-      // This should never be called
-      assert(false);
-      return (*(new VersionInfo()));
+#ifdef DEBUG_LEGION
+      assert(idx < version_infos.size());
+#endif
+      return version_infos[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -2124,7 +2127,6 @@ namespace Legion {
       physical_instances.clear();
       virtual_mapped.clear();
       no_access_regions.clear();
-      version_infos.clear();
       intra_space_mapping_dependences.clear();
       map_applied_conditions.clear();
       task_profiling_requests.clear();
@@ -2470,9 +2472,8 @@ namespace Legion {
       if (is_remote() && is_origin_mapped())
         return RtEvent::NO_RT_EVENT;
 #ifdef DEBUG_LEGION
-      assert(version_infos.empty() || (version_infos.size() == regions.size()));
+      assert(version_infos.size() == regions.size());
 #endif
-      version_infos.resize(regions.size());
       std::set<RtEvent> ready_events;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -5460,6 +5461,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      projection_info,
                                                      privilege_paths[idx],
+                                                     version_infos[idx],
                                                      map_applied_conditions);
     }
 
@@ -5491,6 +5493,7 @@ namespace Legion {
         predicate_false_future.impl->register_dependence(this);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
+      version_infos.resize(regions.size());
     }
 
     //--------------------------------------------------------------------------
@@ -5749,26 +5752,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VersionInfo& IndividualTask::get_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < version_infos.size());
-#endif
-      return version_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
-    const VersionInfo& IndividualTask::get_version_info(unsigned idx) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < version_infos.size());
-#endif
-      return version_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
     RegionTreePath& IndividualTask::get_privilege_path(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -5997,6 +5980,14 @@ namespace Legion {
       rez.serialize(predicate_false_size);
       if (predicate_false_size > 0)
         rez.serialize(predicate_false_result, predicate_false_size);
+      if (!is_origin_mapped())
+      {
+#ifdef DEBUG_LEGION
+        assert(version_infos.size() == regions.size());
+#endif
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          version_infos[idx].pack_version_info(rez);
+      }
       // Mark that we sent this task remotely
       sent_remotely = true;
       // If this task is remote, then deactivate it, otherwise
@@ -6056,6 +6047,12 @@ namespace Legion {
 #endif
         predicate_false_result = malloc(predicate_false_size);
         derez.deserialize(predicate_false_result, predicate_false_size);
+      }
+      if (!is_origin_mapped())
+      {
+        version_infos.resize(regions.size());
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          version_infos[idx].unpack_version_info(derez, runtime->forest);
       }
       // Figure out what our parent context is
       RtEvent ctx_ready;
@@ -7360,16 +7357,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VersionInfo& ShardTask::get_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < version_infos.size());
-#endif
-      return version_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
     void ShardTask::perform_physical_traversal(unsigned idx,
                                       RegionTreeContext ctx, InstanceSet &valid)
     //--------------------------------------------------------------------------
@@ -8181,6 +8168,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      projection_info,
                                                      privilege_paths[idx],
+                                                     version_infos[idx],
                                                      map_applied_conditions);
       }
     }
@@ -8218,6 +8206,7 @@ namespace Legion {
         it->impl->register_dependence(this);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
+      version_infos.resize(regions.size());
     }
 
     //--------------------------------------------------------------------------
@@ -9034,25 +9023,6 @@ namespace Legion {
         }
         fold_reduction_future(res, res_size, owned, true/*exclusive*/);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    VersionInfo& IndexTask::get_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      return version_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
-    const VersionInfo& IndexTask::get_version_info(unsigned idx) const
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned,VersionInfo>::const_iterator finder = 
-        version_infos.find(idx);
-#ifdef DEBUG_LEGION
-      assert(finder != version_infos.end());
-#endif
-      return finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -10082,6 +10052,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    VersionInfo& SliceTask::get_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+        return TaskOp::get_version_info(idx);
+      else
+        return index_owner->get_version_info(idx);
+    }
+
+    //--------------------------------------------------------------------------
+    const VersionInfo& SliceTask::get_version_info(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+        return TaskOp::get_version_info(idx);
+      else
+        return index_owner->get_version_info(idx);
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent SliceTask::perform_mapping(MustEpochOp *epoch_owner/*=NULL*/,
                                        const DeferMappingArgs *args/*=NULL*/)
     //--------------------------------------------------------------------------
@@ -10244,6 +10234,8 @@ namespace Legion {
           assert(map_applied_conditions.empty());
 #endif
         }
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          get_version_info(idx).pack_version_info(rez);
         if (point_arguments.impl != NULL)
           point_arguments.impl->pack_future_map(rez);
         else
@@ -10352,6 +10344,9 @@ namespace Legion {
 #endif
         remote_trace_info = 
           TraceInfo::unpack_remote_trace_info(derez, this, runtime);
+        version_infos.resize(regions.size());
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          version_infos[idx].unpack_version_info(derez, runtime->forest);
         WrapperReferenceMutator mutator(ready_events);
         {
           FutureMapImpl *impl = FutureMapImpl::unpack_future_map(runtime,
@@ -10524,6 +10519,10 @@ namespace Legion {
       result->index_domain = this->index_domain;
       result->tpl = tpl;
       result->memo_state = memo_state;
+      // Clone the version infos at this point
+      result->version_infos.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        result->version_infos[idx] = get_version_info(idx);
       // Grab any remote trace info that we need from the slice
       if (remote_trace_info != NULL)
       {

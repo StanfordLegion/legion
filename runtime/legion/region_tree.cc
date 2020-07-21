@@ -1675,9 +1675,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_dependence_analysis(
                                         Operation *op, unsigned idx,
-                                        RegionRequirement &req,
+                                        const RegionRequirement &req,
                                         const ProjectionInfo &projection_info,
-                                        RegionTreePath &path,
+                                        const RegionTreePath &path,
+                                        VersionInfo &version_info,
                                         std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -1711,8 +1712,16 @@ namespace Legion {
       {
         FieldMask unopened_mask = user_mask;
         FieldMask already_closed_mask;
+        FieldMask disjoint_complete_capture_mask = user_mask;
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
-           projection_info, unopened_mask, already_closed_mask, applied_events);
+           projection_info, unopened_mask, already_closed_mask, 
+           disjoint_complete_capture_mask, version_info, applied_events);
+        // In the case of virtual mappings we might not find it so record
+        // that we start here at the privilege node since we know we've
+        // computed these when mapping this task
+        if (!!disjoint_complete_capture_mask)
+          version_info.record_nearest_disjoint_complete_node(parent_node, 
+              disjoint_complete_capture_mask);
       }
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
@@ -1727,12 +1736,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::perform_deletion_analysis(DeletionOp *op, 
-                                                     unsigned idx,
-                                                     RegionRequirement &req,
-                                                     RegionTreePath &path,
-                                                     std::set<RtEvent> &applied,
-                                                     bool invalidate_tree)
+    void RegionTreeForest::perform_deletion_analysis(DeletionOp *op,
+                                                 unsigned idx,
+                                                 const RegionRequirement &req,
+                                                 const RegionTreePath &path,
+                                                 VersionInfo &version_info,
+                                                 std::set<RtEvent> &applied,
+                                                 bool invalidate_tree)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
@@ -1758,8 +1768,16 @@ namespace Legion {
 #endif
       // Do the traversal
       FieldMask already_closed_mask;
+      FieldMask disjoint_complete_capture_mask = user_mask;
       parent_node->register_logical_deletion(ctx.get_id(), user, user_mask,
-          path, trace_info, already_closed_mask, applied, invalidate_tree);
+          path, trace_info, already_closed_mask, disjoint_complete_capture_mask,
+          version_info, applied, invalidate_tree);
+      // In the case of virtual mappings we might not find it so record
+      // that we start here at the privilege node since we know we've
+      // computed these when mapping this task
+      if (!!disjoint_complete_capture_mask)
+        version_info.record_nearest_disjoint_complete_node(parent_node, 
+            disjoint_complete_capture_mask);
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
 #ifdef DEBUG_LEGION
@@ -1885,6 +1903,11 @@ namespace Legion {
       RegionUsage usage(req);
       FieldMask user_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
+      // We only support changing the disjoint-complete tree if we are not
+      // virtually mapped and therefore know that our logical analysis can
+      // accurately track which partitions are being included
+      if (IS_WRITE(usage))
+        top_node->initialize_disjoint_complete_tree(ctx.get_id(), user_mask);
       // Do the normal versioning analysis since this will deal with
       // any aliasing of physical instances in the region requirements
       VersionInfo init_version_info;
@@ -14584,13 +14607,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::register_logical_user(ContextID ctx, 
-                                             const LogicalUser &user,
-                                             RegionTreePath &path,
-                                             const LogicalTraceInfo &trace_info,
-                                             const ProjectionInfo &proj_info,
-                                             FieldMask &unopened_field_mask,
-                                             FieldMask &already_closed_mask,
-                                             std::set<RtEvent> &applied_events)
+                                           const LogicalUser &user,
+                                           const RegionTreePath &path,
+                                           const LogicalTraceInfo &trace_info,
+                                           const ProjectionInfo &proj_info,
+                                           FieldMask &unopened_field_mask,
+                                           FieldMask &already_closed_mask,
+                                           FieldMask &disjoint_complete_capture,
+                                           VersionInfo &version_info,
+                                           std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -14727,7 +14752,23 @@ namespace Legion {
           assert(!open_below);
 #endif
         next_child->register_logical_user(ctx, user, path, trace_info,
-           proj_info, unopened_field_mask, already_closed_mask, applied_events);
+           proj_info, unopened_field_mask, already_closed_mask, 
+           disjoint_complete_capture, version_info, applied_events);
+      }
+      // See if we have any disjoint-complete capture fields to do here
+      // We do this here so that we capture this at the lowest level of
+      // the tree where we have an intersection
+      if (!trace_info.already_traced && 
+          !!disjoint_complete_capture && is_region())
+      {
+        const FieldMask overlap = disjoint_complete_capture & 
+          state.disjoint_complete_tree;
+        if (!!overlap)
+        {
+          RegionNode *reg_node = as_region_node();
+          version_info.record_nearest_disjoint_complete_node(reg_node, overlap);
+          disjoint_complete_capture -= overlap;
+        }
       }
     }
 
@@ -16159,13 +16200,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::register_logical_deletion(ContextID ctx,
-                                             const LogicalUser &user,
-                                             const FieldMask &check_mask,
-                                             RegionTreePath &path,
-                                             const LogicalTraceInfo &trace_info,
-                                             FieldMask &already_closed_mask,
-                                             std::set<RtEvent> &applied_events,
-                                             bool invalidate_tree)
+                                           const LogicalUser &user,
+                                           const FieldMask &check_mask,
+                                           const RegionTreePath &path,
+                                           const LogicalTraceInfo &trace_info,
+                                           FieldMask &already_closed_mask,
+                                           FieldMask &disjoint_complete_capture,
+                                           VersionInfo &version_info,
+                                           std::set<RtEvent> &applied_events,
+                                           bool invalidate_tree)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -16226,7 +16269,8 @@ namespace Legion {
         // Continue the traversal
         // Only continue checking the fields that are open below
         next_child->register_logical_deletion(ctx, user, open_below, path,
-            trace_info, already_closed_mask, applied_events, invalidate_tree);
+            trace_info, already_closed_mask, disjoint_complete_capture,
+            version_info, applied_events, invalidate_tree);
       }
       else
       {
@@ -16258,6 +16302,20 @@ namespace Legion {
           // all the operations for the original field at the same 
           // index are done mapping
           register_local_user(state, user, trace_info);
+        }
+      }
+      // See if we have any disjoint-complete capture fields to do here
+      // We do this here so that we capture this at the lowest level of
+      // the tree where we have an intersection
+      if (!!disjoint_complete_capture && is_region())
+      {
+        const FieldMask overlap = disjoint_complete_capture & 
+          state.disjoint_complete_tree;
+        if (!!overlap)
+        {
+          RegionNode *reg_node = as_region_node();
+          version_info.record_nearest_disjoint_complete_node(reg_node, overlap);
+          disjoint_complete_capture -= overlap;
         }
       }
     }
@@ -17205,6 +17263,19 @@ namespace Legion {
 #endif
       AutoLock n_lock(node_lock);
       partition_trackers.push_back(tracker);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::initialize_disjoint_complete_tree(ContextID ctx,
+                                                       const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      LogicalState &state = get_logical_state(ctx);
+#ifdef DEBUG_LEGION
+      sanity_check_logical_state(state);
+      assert(state.disjoint_complete_children.empty());
+#endif
+      state.disjoint_complete_tree |= mask;
     }
 
     //--------------------------------------------------------------------------

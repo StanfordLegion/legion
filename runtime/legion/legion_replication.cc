@@ -747,6 +747,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      projection_info,
                                                      privilege_paths[idx],
+                                                     version_infos[idx],
                                                      map_applied_conditions);
       }
     }
@@ -1416,6 +1417,7 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
+                                                   version_info,
                                                    map_applied_conditions);
     }
 
@@ -1863,6 +1865,7 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      projection_info,
                                                      src_privilege_paths[idx],
+                                                     src_versions[idx],
                                                      map_applied_conditions);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -1879,6 +1882,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      projection_info,
                                                      dst_privilege_paths[idx],
+                                                     dst_versions[idx],
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -1895,6 +1899,7 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  gather_info,
                                                  gather_privilege_paths[idx],
+                                                 gather_versions[idx],
                                                  map_applied_conditions);
         }
       }
@@ -1909,6 +1914,7 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
                                                  scatter_privilege_paths[idx],
+                                                 scatter_versions[idx],
                                                  map_applied_conditions);
         }
       }
@@ -3127,6 +3133,7 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
+                                                   version_info,
                                                    map_applied_conditions);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations

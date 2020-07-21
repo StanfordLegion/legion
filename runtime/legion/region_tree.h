@@ -455,13 +455,15 @@ namespace Legion {
     public:
       // Logical analysis methods
       void perform_dependence_analysis(Operation *op, unsigned idx,
-                                       RegionRequirement &req,
+                                       const RegionRequirement &req,
                                        const ProjectionInfo &projection_info,
-                                       RegionTreePath &path,
+                                       const RegionTreePath &path,
+                                       VersionInfo &version_info,
                                        std::set<RtEvent> &applied_events);
       void perform_deletion_analysis(DeletionOp *op, unsigned idx,
-                                     RegionRequirement &req,
-                                     RegionTreePath &path,
+                                     const RegionRequirement &req,
+                                     const RegionTreePath &path,
+                                     VersionInfo &version_info,
                                      std::set<RtEvent> &applied_events,
                                      bool invalidate_tree);
       // Used by dependent partition operations
@@ -3466,11 +3468,13 @@ namespace Legion {
       // Logical traversal operations
       void register_logical_user(ContextID ctx,
                                  const LogicalUser &user,
-                                 RegionTreePath &path,
+                                 const RegionTreePath &path,
                                  const LogicalTraceInfo &trace_info,
                                  const ProjectionInfo &projection_info,
                                  FieldMask &unopened_field_mask,
                                  FieldMask &already_closed_mask,
+                                 FieldMask &disjoint_complete_capture_mask,
+                                 VersionInfo &version_info,
                                  std::set<RtEvent> &applied_events);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
@@ -3539,9 +3543,11 @@ namespace Legion {
       void register_logical_deletion(ContextID ctx,
                                      const LogicalUser &user,
                                      const FieldMask &check_mask,
-                                     RegionTreePath &path,
+                                     const RegionTreePath &path,
                                      const LogicalTraceInfo &trace_info,
                                      FieldMask &already_closed_mask,
+                                     FieldMask &disjoint_complete_capture,
+                                     VersionInfo &version_info,
                                      std::set<RtEvent> &applied_events,
                                      bool invalidate_tree);
       void siphon_logical_deletion(LogicalCloser &closer,
@@ -3701,6 +3707,7 @@ namespace Legion {
       void add_child(PartitionNode *child);
       void remove_child(const LegionColor p);
       void add_tracker(PartitionTracker *tracker);
+      void initialize_disjoint_complete_tree(ContextID ctx, const FieldMask &m);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
