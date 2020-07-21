@@ -2318,7 +2318,6 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_phy; idx++)
           physical_instances[idx].unpack_references(runtime,
                                                     derez, ready_events);
-        update_no_access_regions();
         size_t num_task_requests;
         derez.deserialize(num_task_requests);
         if (num_task_requests > 0)
@@ -2348,6 +2347,7 @@ namespace Legion {
           TraceInfo::unpack_remote_trace_info(derez, this, runtime); 
         derez.deserialize(deferred_complete_mapping);
       }
+      update_no_access_regions();
     } 
 
     //--------------------------------------------------------------------------
