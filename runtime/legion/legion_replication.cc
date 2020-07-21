@@ -1884,6 +1884,34 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_REDUCE;
       }
+      if (!src_indirect_requirements.empty())
+      {
+        gather_versions.resize(src_indirect_requirements.size());
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
+        {
+          ProjectionInfo gather_info(runtime, src_indirect_requirements[idx], 
+                             launch_space, sharding_function, sharding_space);
+          runtime->forest->perform_dependence_analysis(this, idx, 
+                                                 src_indirect_requirements[idx],
+                                                 gather_info,
+                                                 gather_privilege_paths[idx],
+                                                 map_applied_conditions);
+        }
+      }
+      if (!dst_indirect_requirements.empty())
+      {
+        scatter_versions.resize(dst_indirect_requirements.size());
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
+        {
+          ProjectionInfo scatter_info(runtime, dst_indirect_requirements[idx],
+                              launch_space, sharding_function, sharding_space);
+          runtime->forest->perform_dependence_analysis(this, idx, 
+                                                 dst_indirect_requirements[idx],
+                                                 scatter_info,
+                                                 scatter_privilege_paths[idx],
+                                                 map_applied_conditions);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
