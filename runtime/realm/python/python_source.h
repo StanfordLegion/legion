@@ -20,7 +20,7 @@
 
 namespace Realm {
 
-  class PythonSourceImplementation : public CodeImplementation {
+  class REALM_PUBLIC_API PythonSourceImplementation : public CodeImplementation {
   public:
     PythonSourceImplementation(const std::string& _module_name,
                                const std::vector<std::string>& _function_name);

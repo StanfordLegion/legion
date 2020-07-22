@@ -53,7 +53,7 @@ namespace Realm {
   template <int N, typename T> class SparsityMapPublicImpl;
 
   template <int N, typename T>
-  class SparsityMap {
+  class REALM_PUBLIC_API SparsityMap {
   public:
     typedef ::realm_id_t id_t;
     id_t id;
@@ -66,17 +66,21 @@ namespace Realm {
     bool exists(void) const;
 
     // looks up the public subset of the implementation object
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     SparsityMapPublicImpl<N,T> *impl(void) const;
 
     // if 'always_create' is false and the points/rects completely fill their
     //  bounding box, returns NO_SPACE (i.e. id == 0)
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     static SparsityMap<N,T> construct(const std::vector<Point<N,T> >& points,
 				      bool always_create);
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     static SparsityMap<N,T> construct(const std::vector<Rect<N,T> >& rects,
 				      bool always_create);
   };
 
   template <int N, typename T>
+  REALM_PUBLIC_API
   inline std::ostream& operator<<(std::ostream& os, SparsityMap<N,T> s) { return os << std::hex << s.id << std::dec; }
 
   template <int N, typename T>
@@ -87,7 +91,7 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  class SparsityMapPublicImpl {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE SparsityMapPublicImpl {
   protected:
     // cannot be constructed directly
     SparsityMapPublicImpl(void);

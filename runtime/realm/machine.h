@@ -27,7 +27,7 @@ namespace Realm {
 
     class Runtime;
 
-    class Machine {
+    class REALM_PUBLIC_API Machine {
     protected:
       friend class Runtime;
       explicit Machine(void *_impl) : impl(_impl) {}
@@ -131,7 +131,7 @@ namespace Realm {
 
     template <typename QT, typename RT> class MachineQueryIterator;
 
-    class Machine::ProcessorQuery {
+    class REALM_PUBLIC_API Machine::ProcessorQuery {
     public:
       explicit ProcessorQuery(const Machine& m);
       ProcessorQuery(const ProcessorQuery& q);
@@ -187,7 +187,7 @@ namespace Realm {
       void *impl;
     };
 
-    class Machine::MemoryQuery {
+    class REALM_PUBLIC_API Machine::MemoryQuery {
     public:
       explicit MemoryQuery(const Machine& m);
       MemoryQuery(const MemoryQuery& q);
@@ -246,7 +246,7 @@ namespace Realm {
     };
 
     template <typename QT, typename RT>
-    class MachineQueryIterator : public std::iterator<std::input_iterator_tag, RT> {
+    class REALM_PUBLIC_API MachineQueryIterator : public std::iterator<std::input_iterator_tag, RT> {
       // would like this constructor to be protected and have QT be a friend, but that requires
       //  C++11 (or a compiler like g++ that supports it even without -std=c++11)
       //  The CUDA compiler also seems to be a little dense here as well

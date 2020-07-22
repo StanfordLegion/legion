@@ -25,7 +25,7 @@
 
 namespace Realm {
 
-    class Reservation {
+    class REALM_PUBLIC_API Reservation {
     public:
       typedef ::realm_id_t id_t;
       id_t id;
@@ -55,6 +55,7 @@ namespace Realm {
 
       // Create a new reservation, destroy an existing reservation 
       static Reservation create_reservation(size_t _data_size = 0);
+
       void destroy_reservation();
 
       size_t data_size(void) const;
@@ -70,7 +71,7 @@ namespace Realm {
   //  FastReservation _does_ play nice with other users of the underlying
   //  Reservation, on the same node or on others
 
-  class FastReservation {
+  class REALM_PUBLIC_API FastReservation {
   public:
     FastReservation(Reservation _rsrv = Reservation::NO_RESERVATION);
     ~FastReservation(void);

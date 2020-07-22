@@ -33,7 +33,8 @@ namespace Realm {
 extern "C" {
 
   using namespace Realm;
-  
+
+  REALM_PUBLIC_API
   int omp_get_num_threads(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -43,6 +44,7 @@ extern "C" {
       return 1;
   }
 
+  REALM_PUBLIC_API
   int omp_get_max_threads(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -52,6 +54,7 @@ extern "C" {
       return 1;
   }
 
+  REALM_PUBLIC_API
   int omp_get_thread_num(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -61,6 +64,7 @@ extern "C" {
       return 0;
   }
 
+  REALM_PUBLIC_API
   int omp_get_level(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -76,6 +80,7 @@ extern "C" {
       return 0;
   }
 
+  REALM_PUBLIC_API
   int omp_in_parallel(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -92,6 +97,7 @@ extern "C" {
       return 0;
   }
 
+  REALM_PUBLIC_API
   void omp_set_num_threads(int num_threads)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -109,6 +115,7 @@ extern "C" {
 
   using namespace Realm;
 
+  REALM_PUBLIC_API
   void GOMP_parallel_start(void (*fnptr)(void *data), void *data, int nthreads)
   {
     //printf("GOMP_parallel_start(%p, %p, %d)\n", fnptr, data, nthreads);
@@ -135,6 +142,7 @@ extern "C" {
     // in GOMP, the master thread runs fnptr itself, so we just return
   }
 
+  REALM_PUBLIC_API
   void GOMP_parallel_end(void)
   {
     //printf("GOMP_parallel_end()\n");
@@ -155,6 +163,7 @@ extern "C" {
     delete work;
   }
 
+  REALM_PUBLIC_API
   void GOMP_parallel(void (*fnptr)(void *data), void *data, unsigned nthreads, unsigned int flags)
   {
     GOMP_parallel_start(fnptr, data, nthreads);
@@ -162,6 +171,7 @@ extern "C" {
     GOMP_parallel_end();
   }
 
+  REALM_PUBLIC_API
   bool GOMP_single_start(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
@@ -184,6 +194,7 @@ extern "C" {
     }
   }
 
+  REALM_PUBLIC_API
   void GOMP_barrier(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
@@ -224,6 +235,7 @@ extern "C" {
     //log_omp.print() << "barrier exit: id=" << wi->thread_id;
   }
 
+  REALM_PUBLIC_API
   bool GOMP_loop_static_start(long start, long end, long incr, long chunk,
 			      long *istart, long *iend)
   {
@@ -255,6 +267,7 @@ extern "C" {
     return more;
   }
 
+  REALM_PUBLIC_API
   bool GOMP_loop_dynamic_start(long start, long end, long incr, long chunk,
 			       long *istart, long *iend)
   {
@@ -284,6 +297,7 @@ extern "C" {
     return more;
   }
 
+  REALM_PUBLIC_API
   void GOMP_loop_end_nowait(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -298,6 +312,7 @@ extern "C" {
     wi->work_item->schedule.end_loop(false /*!wait*/);
   }
 
+  REALM_PUBLIC_API
   void GOMP_loop_end(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -312,6 +327,7 @@ extern "C" {
     wi->work_item->schedule.end_loop(true /*wait*/);
   }
 
+  REALM_PUBLIC_API
   bool GOMP_loop_static_next(long *istart, long *iend)
   { 
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -335,6 +351,7 @@ extern "C" {
     return more;
   }
 
+  REALM_PUBLIC_API
   bool GOMP_loop_dynamic_next(long *istart, long *iend)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -372,6 +389,7 @@ extern "C" {
     return (v & 63);
   }
 
+  REALM_PUBLIC_API
   void GOMP_critical_name_start(void **pptr)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -391,6 +409,7 @@ extern "C" {
     }
   }
 
+  REALM_PUBLIC_API
   void GOMP_critical_name_end(void **pptr)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -407,11 +426,13 @@ extern "C" {
     assert((orig & mask) != 0);
   }
 
+  REALM_PUBLIC_API
   void GOMP_critical_start(void)
   {
     GOMP_critical_name_start(0);
   }
 
+  REALM_PUBLIC_API
   void GOMP_critical_end(void)
   {
     GOMP_critical_name_end(0);
@@ -561,22 +582,26 @@ extern "C" {
 
   using namespace Realm;
 
+  REALM_PUBLIC_API
   void __kmpc_begin(ident_t *loc, kmp_int32 flags)
   {
     // do nothing
   }
 
+  REALM_PUBLIC_API
   void __kmpc_end(ident_t *loc)
   {
     // do nothing
   }
 
+  REALM_PUBLIC_API
   kmp_int32 __kmpc_ok_to_fork(ident_t *loc)
   {
     // this is supposed to always return TRUE
     return 1;
   }
 
+  REALM_PUBLIC_API
   kmp_int32 __kmpc_global_thread_num(ident_t *loc)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -593,6 +618,7 @@ extern "C" {
       return 0;
   }
 
+  REALM_PUBLIC_API
   void __kmpc_push_num_threads(ident_t *loc, kmp_int32 global_tid,
                                kmp_int32 num_threads)
   {
@@ -604,6 +630,7 @@ extern "C" {
     }
   }
 
+  REALM_PUBLIC_API
   void __kmpc_fork_call(ident_t *loc, kmp_int32 argc, kmpc_micro microtask, ...)
   {
     //printf("kmpc_fork(%p, %d)\n", loc, argc);
@@ -799,6 +826,7 @@ extern "C" {
 
   using namespace Realm;
 
+  REALM_PUBLIC_API
   void __kmpc_for_static_init_4(ident_t *loc, kmp_int32 global_tid,
 				kmp_int32 schedtype,
 				kmp_int32 *plastiter,
@@ -810,6 +838,7 @@ extern "C" {
 				    plower, pupper, pstride, incr, chunk);
   }
 
+  REALM_PUBLIC_API
   void __kmpc_for_static_init_4u(ident_t *loc, kmp_int32 global_tid,
 				 kmp_int32 schedtype,
 				 kmp_int32 *plastiter,
@@ -821,6 +850,7 @@ extern "C" {
 				     plower, pupper, pstride, incr, chunk);
   }
 
+  REALM_PUBLIC_API
   void __kmpc_for_static_init_8(ident_t *loc, kmp_int32 global_tid,
 				kmp_int32 schedtype,
 				kmp_int32 *plastiter,
@@ -832,6 +862,7 @@ extern "C" {
 				    plower, pupper, pstride, incr, chunk);
   }
 
+  REALM_PUBLIC_API
   void __kmpc_for_static_init_8u(ident_t *loc, kmp_int32 global_tid,
 				 kmp_int32 schedtype,
 				 kmp_int32 *plastiter,
@@ -843,11 +874,13 @@ extern "C" {
 				     plower, pupper, pstride, incr, chunk);
   }
 
+  REALM_PUBLIC_API
   void __kmpc_for_static_fini(ident_t *loc, kmp_int32 global_tid)
   {
     //printf("static_fini(%p, %d)\n", loc, global_tid);
   }
 
+  REALM_PUBLIC_API
   void __kmpc_dispatch_init_4(ident_t *loc, kmp_int32 global_tid,
 			      kmp_int32 schedtype,
 			      kmp_int32 lb, kmp_int32 ub,
@@ -857,6 +890,7 @@ extern "C" {
 				  lb, ub, st, chunk);
   }
 
+  REALM_PUBLIC_API
   void __kmpc_dispatch_init_4u(ident_t *loc, kmp_int32 global_tid,
 			       kmp_int32 schedtype,
 			       kmp_uint32 lb, kmp_uint32 ub,
@@ -866,6 +900,7 @@ extern "C" {
 				   lb, ub, st, chunk);
   }
 
+  REALM_PUBLIC_API
   void __kmpc_dispatch_init_8(ident_t *loc, kmp_int32 global_tid,
 			      kmp_int32 schedtype,
 			      kmp_int64 lb, kmp_int64 ub,
@@ -875,6 +910,7 @@ extern "C" {
 				  lb, ub, st, chunk);
   }
 
+  REALM_PUBLIC_API
   void __kmpc_dispatch_init_8u(ident_t *loc, kmp_int32 global_tid,
 			       kmp_int32 schedtype,
 			       kmp_uint64 lb, kmp_uint64 ub,
@@ -888,6 +924,7 @@ extern "C" {
 				  lb_signed, ub_signed, st, chunk);
   }
 
+  REALM_PUBLIC_API
   int __kmpc_dispatch_next_4(ident_t *loc, kmp_int32 global_tid,
 			     kmp_int32 *p_last, kmp_int32 *p_lb,
 			     kmp_int32 *p_ub, kmp_int32 *p_st)
@@ -896,6 +933,7 @@ extern "C" {
 					 p_last, p_lb, p_ub, p_st);
   }
 
+  REALM_PUBLIC_API
   int __kmpc_dispatch_next_4u(ident_t *loc, kmp_int32 global_tid,
 			      kmp_int32 *p_last, kmp_uint32 *p_lb,
 			      kmp_uint32 *p_ub, kmp_int32 *p_st)
@@ -904,6 +942,7 @@ extern "C" {
 					  p_last, p_lb, p_ub, p_st);
   }
 
+  REALM_PUBLIC_API
   int __kmpc_dispatch_next_8(ident_t *loc, kmp_int32 global_tid,
 			     kmp_int32 *p_last, kmp_int64 *p_lb,
 			     kmp_int64 *p_ub, kmp_int64 *p_st)
@@ -912,6 +951,7 @@ extern "C" {
 					 p_last, p_lb, p_ub, p_st);
   }
 
+  REALM_PUBLIC_API
   int __kmpc_dispatch_next_8u(ident_t *loc, kmp_int32 global_tid,
 			      kmp_int32 *p_last, kmp_uint64 *p_lb,
 			      kmp_uint64 *p_ub, kmp_int64 *p_st)
@@ -925,6 +965,7 @@ extern "C" {
     return ret;
   }
 
+  REALM_PUBLIC_API
   kmp_int32 __kmpc_reduce_nowait(ident_t *loc, kmp_int32 global_tid,
 				 kmp_int32 nvars, size_t reduce_size,
 				 void *reduce_data, kmpc_reduce reduce_func,
@@ -934,12 +975,14 @@ extern "C" {
     return 2;
   }
 
+  REALM_PUBLIC_API
   void __kmpc_end_reduce_nowait(ident_t *loc, kmp_int32 global_tid,
 				kmp_critical_name *lck)
   {
     // do nothing
   }
 
+  REALM_PUBLIC_API
   void __kmpc_serialized_parallel(ident_t *loc, kmp_int32 global_tid)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
@@ -955,6 +998,7 @@ extern "C" {
     // caller will actually execute loop body, so return to them
   }
 
+  REALM_PUBLIC_API
   void __kmpc_end_serialized_parallel(ident_t *loc, kmp_int32 global_tid)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -970,6 +1014,7 @@ extern "C" {
     delete work;
   }
 
+  REALM_PUBLIC_API
   kmp_int32 __kmpc_single(ident_t *loc, kmp_int32 global_tid)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
@@ -992,11 +1037,13 @@ extern "C" {
     }
   }
 
+  REALM_PUBLIC_API
   void __kmpc_end_single(ident_t *loc, kmp_int32 global_tid)
   {
     // we didn't create a team for __kmpc_single, so nothing to do here
   }
 
+  REALM_PUBLIC_API
   void __kmpc_barrier(ident_t *loc, kmp_int32 global_tid)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
@@ -1047,6 +1094,7 @@ extern "C" {
     return (v & 63);
   }
 
+  REALM_PUBLIC_API
   void __kmpc_critical(ident_t *loc, kmp_int32 global_tid,
 		       kmp_critical_name *lck)
   {
@@ -1067,6 +1115,7 @@ extern "C" {
     }
   }
 
+  REALM_PUBLIC_API
   void __kmpc_end_critical(ident_t *loc, kmp_int32 global_tid,
 			   kmp_critical_name *lck)
   {

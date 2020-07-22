@@ -27,7 +27,7 @@ namespace Realm {
 
     typedef ::realm_address_space_t AddressSpace;
 
-    class Memory {
+    class REALM_PUBLIC_API Memory {
     public:
       typedef ::realm_id_t id_t;
       id_t id;
