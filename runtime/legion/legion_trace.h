@@ -526,12 +526,10 @@ namespace Legion {
                       EquivalenceSet *eq,
                       const FieldMask &mask);
     public:
-      bool dominates(InstanceView *view,
-                     EquivalenceSet *eq,
+      bool dominates(InstanceView *view, EquivalenceSet *eq,
                      FieldMask &non_dominated) const;
       bool subsumed_by(const TraceViewSet &set,
                        FailedPrecondition *condition = NULL) const;
-      bool has_refinements(void) const;
       bool empty(void) const;
     public:
       void dump(void) const;

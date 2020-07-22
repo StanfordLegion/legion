@@ -609,6 +609,36 @@ configure_file(${PROJECT_SOURCE_DIR}/cmake/realm_defines.h.in
 install(FILES ${PROJECT_BINARY_DIR}/runtime/realm_defines.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
+install(
+  FILES
+    ${PROJECT_SOURCE_DIR}/tools/legion_prof.py
+    ${PROJECT_SOURCE_DIR}/tools/legion_spy.py
+  DESTINATION
+    ${CMAKE_INSTALL_BINDIR}
+  PERMISSIONS
+    OWNER_EXECUTE OWNER_WRITE OWNER_READ
+    GROUP_EXECUTE GROUP_WRITE GROUP_READ
+    WORLD_EXECUTE WORLD_READ)
+
+install(
+  FILES
+    ${PROJECT_SOURCE_DIR}/tools/legion_serializer.py
+    ${PROJECT_SOURCE_DIR}/tools/legion_prof_copy.html.template
+  DESTINATION
+    ${CMAKE_INSTALL_BINDIR}
+  PERMISSIONS
+    OWNER_WRITE OWNER_READ
+    GROUP_WRITE GROUP_READ
+    WORLD_READ)
+
+install(
+  DIRECTORY
+    ${PROJECT_SOURCE_DIR}/tools/serializer_examples
+    ${PROJECT_SOURCE_DIR}/tools/legion_prof_files
+  DESTINATION
+    ${CMAKE_INSTALL_BINDIR}
+  USE_SOURCE_PERMISSIONS)
+
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :
 #------------------------------------------------------------------------------#

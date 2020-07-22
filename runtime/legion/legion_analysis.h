@@ -2318,12 +2318,6 @@ namespace Legion {
     public:
       EquivalenceSet& operator=(const EquivalenceSet &rhs);
     public:
-      inline bool has_refinements(const FieldMask &mask) const
-        {
-          AutoLock eq(eq_lock,1,false/*exclusive*/);
-          return is_refined(mask);
-        }
-    public:
       // Must be called while holding the lock
       inline bool is_logical_owner(void) const
         { return (local_space == logical_owner_space); }

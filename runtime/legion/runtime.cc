@@ -4974,7 +4974,17 @@ namespace Legion {
             for (std::map<const Task*,Processor>::const_iterator it = 
                   output.relocate_tasks.begin(); it != 
                   output.relocate_tasks.end(); it++)
+            {
+              if (it->second.kind() == Processor::UTIL_PROC)
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                    "Invalid mapper output. Mapper %s requested that task %s "
+                    "(UID %lld) be relocated to a utility processor in "
+                    "'select_tasks_to_map.' Only application processor kinds "
+                    "are permitted to be the target processor for tasks.",
+                    mapper->get_mapper_name(), it->first->get_task_name(),
+                    it->first->get_unique_id())
               selected.insert(it->first);
+            }
           }
           // Remove any tasks that are going to be triggered
           for (std::list<TaskOp*>::iterator it = 

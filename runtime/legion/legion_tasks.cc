@@ -943,6 +943,13 @@ namespace Legion {
       options.parent_priority = parent_priority;
       mapper->invoke_select_task_options(this, &options, &prioritize);
       options_selected = true;
+      if (options.initial_proc.kind() == Processor::UTIL_PROC)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+            "Invalid mapper output. Mapper %s requested that task %s (UID %lld)"
+            " initially be assigned to a utility processor in "
+            "'select_task_options.' Only application processor kinds are "
+            "permitted to be the target processor for tasks.",
+            mapper->get_mapper_name(), get_task_name(), get_unique_id())
       target_proc = options.initial_proc;
       stealable = options.stealable;
       map_origin = options.map_locally;
