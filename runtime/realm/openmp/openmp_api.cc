@@ -27,390 +27,402 @@ namespace Realm {
   void openmp_api_force_linkage(void)
   {}
 
-  // application-visible calls - always generated
-  extern "C" {
-    int omp_get_num_threads(void)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      if(wi)
-	return wi->num_threads;
-      else
-	return 1;
-    }
+};
 
-    int omp_get_max_threads(void)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      if(wi)
-	return wi->pool->get_num_workers() + 1;
-      else
-	return 1;
-    }
+// application-visible OpenMP API calls - always generated
+extern "C" {
 
-    int omp_get_thread_num(void)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      if(wi)
-	return wi->thread_id;
-      else
-	return 0;
-    }
+  using namespace Realm;
+  
+  int omp_get_num_threads(void)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(wi)
+      return wi->num_threads;
+    else
+      return 1;
+  }
 
-    int omp_get_level(void)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      if(wi) {
-	int level = 0;
-	Realm::ThreadPool::WorkItem *item = wi->work_item;
-	while(item) {
-	  level++;
-	  item = item->parent_work_item;
-	}
-	return level;
-      } else
-	return 0;
-    }
+  int omp_get_max_threads(void)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(wi)
+      return wi->pool->get_num_workers() + 1;
+    else
+      return 1;
+  }
 
-    int omp_in_parallel(void)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      if(wi) {
-	Realm::ThreadPool::WorkItem *item = wi->work_item;
-	if(item) {
-	  if((wi->num_threads > 1) && (item->single_winner.load() == -1))
-	    return 1;
-	  else
-	    return 0;  // single inside parallel
-	} else
-	  return 0;
-      } else
-	return 0;
-    }
+  int omp_get_thread_num(void)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(wi)
+      return wi->thread_id;
+    else
+      return 0;
+  }
 
-    void omp_set_num_threads(int num_threads)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      if(wi) {
-	wi->app_num_threads = num_threads; // TODO: connect this to something?
-      } else {
-	log_omp.warning() << "omp_set_num_threads(" << num_threads << ") called on non-OpenMP Realm proessor - ignoring";
+  int omp_get_level(void)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(wi) {
+      int level = 0;
+      Realm::ThreadPool::WorkItem *item = wi->work_item;
+      while(item) {
+	level++;
+	item = item->parent_work_item;
       }
-    }
-  };
+      return level;
+    } else
+      return 0;
+  }
 
+  int omp_in_parallel(void)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(wi) {
+      Realm::ThreadPool::WorkItem *item = wi->work_item;
+      if(item) {
+	if((wi->num_threads > 1) && (item->single_winner.load() == -1))
+	  return 1;
+	else
+	  return 0;  // single inside parallel
+      } else
+	return 0;
+    } else
+      return 0;
+  }
+
+  void omp_set_num_threads(int num_threads)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(wi) {
+      wi->app_num_threads = num_threads; // TODO: connect this to something?
+    } else {
+      log_omp.warning() << "omp_set_num_threads(" << num_threads << ") called on non-OpenMP Realm proessor - ignoring";
+    }
+  }
+};
+
+// runtime API calls used by compiler to interact with GOMP-style runtime
 #ifdef REALM_OPENMP_GOMP_SUPPORT
-  extern "C" {
-    void GOMP_parallel_start(void (*fnptr)(void *data), void *data, int nthreads)
-    {
-      //printf("GOMP_parallel_start(%p, %p, %d)\n", fnptr, data, nthreads);
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
-      if(!wi)
-	return;
+extern "C" {
 
-      std::set<int> worker_ids;
-      wi->pool->claim_workers(nthreads - 1, worker_ids);
-      int act_threads = 1 + worker_ids.size();
+  using namespace Realm;
 
-      ThreadPool::WorkItem *work = new ThreadPool::WorkItem(act_threads);
-      wi->push_work_item(work);
+  void GOMP_parallel_start(void (*fnptr)(void *data), void *data, int nthreads)
+  {
+    //printf("GOMP_parallel_start(%p, %p, %d)\n", fnptr, data, nthreads);
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+    if(!wi)
+      return;
 
-      wi->thread_id = 0;
-      wi->num_threads = act_threads;
-      int idx = 1;
-      for(std::set<int>::const_iterator it = worker_ids.begin();
-	  it != worker_ids.end();
-	  ++it) {
-	wi->pool->start_worker(*it, idx, act_threads, fnptr, data, work);
-	idx++;
-      }
-      // in GOMP, the master thread runs fnptr itself, so we just return
+    std::set<int> worker_ids;
+    wi->pool->claim_workers(nthreads - 1, worker_ids);
+    int act_threads = 1 + worker_ids.size();
+
+    ThreadPool::WorkItem *work = new ThreadPool::WorkItem(act_threads);
+    wi->push_work_item(work);
+
+    wi->thread_id = 0;
+    wi->num_threads = act_threads;
+    int idx = 1;
+    for(std::set<int>::const_iterator it = worker_ids.begin();
+	it != worker_ids.end();
+	++it) {
+      wi->pool->start_worker(*it, idx, act_threads, fnptr, data, work);
+      idx++;
+    }
+    // in GOMP, the master thread runs fnptr itself, so we just return
+  }
+
+  void GOMP_parallel_end(void)
+  {
+    //printf("GOMP_parallel_end()\n");
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    // if this isn't called from a openmp-enabled thread, we already
+    //  complained above
+    if(!wi)
+      return;
+
+    ThreadPool::WorkItem *work = wi->pop_work_item();
+    assert(work != 0);
+    // make sure all workers have finished
+    if(work->remaining_workers.fetch_sub(1) > 1) {
+      log_omp.info() << "waiting for workers to complete";
+      while(work->remaining_workers.load() > 0)
+	sched_yield();
+    }
+    delete work;
+  }
+
+  void GOMP_parallel(void (*fnptr)(void *data), void *data, unsigned nthreads, unsigned int flags)
+  {
+    GOMP_parallel_start(fnptr, data, nthreads);
+    fnptr(data);
+    GOMP_parallel_end();
+  }
+
+  bool GOMP_single_start(void)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+    if(!wi)
+      return true;  // trivially the winner
+
+    if(!wi->work_item) {
+      // not inside a larger construct - treat as nop
+      return true;
     }
 
-    void GOMP_parallel_end(void)
-    {
-      //printf("GOMP_parallel_end()\n");
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      // if this isn't called from a openmp-enabled thread, we already
-      //  complained above
-      if(!wi)
-	return;
-
-      ThreadPool::WorkItem *work = wi->pop_work_item();
-      assert(work != 0);
-      // make sure all workers have finished
-      if(work->remaining_workers.fetch_sub(1) > 1) {
-	log_omp.info() << "waiting for workers to complete";
-	while(work->remaining_workers.load() > 0)
-	  sched_yield();
-      }
-      delete work;
+    // try to become the "single" winner - the intent in OpenMP is that the
+    //  first worker to get here should do the work
+    int prev = -1;
+    if(wi->work_item->single_winner.compare_exchange(prev, wi->thread_id)) {
+      return true;
+    } else {
+      // if we were already the winner, that's ok too
+      return (prev == wi->thread_id);
     }
+  }
 
-    void GOMP_parallel(void (*fnptr)(void *data), void *data, unsigned nthreads, unsigned int flags)
-    {
-      GOMP_parallel_start(fnptr, data, nthreads);
-      fnptr(data);
-      GOMP_parallel_end();
-    }
+  void GOMP_barrier(void)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+    if(!wi)
+      return;
 
-    bool GOMP_single_start(void)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
-      if(!wi)
-	return true;  // trivially the winner
+    //log_omp.print() << "barrier enter: id=" << wi->thread_id;
 
-      if(!wi->work_item) {
-	// not inside a larger construct - treat as nop
-	return true;
-      }
-
-      // try to become the "single" winner - the intent in OpenMP is that the
-      //  first worker to get here should do the work
-      int prev = -1;
-      if(wi->work_item->single_winner.compare_exchange(prev, wi->thread_id)) {
-	return true;
+    if(wi->work_item && (wi->num_threads > 1)) {
+      // step 1: observe that barrier is not still being exited
+      int c;
+      do {
+	c = wi->work_item->barrier_count.load();
+      } while(c >= wi->num_threads);
+      // step 2: increment counter to enter
+      c = wi->work_item->barrier_count.fetch_add(1) + 1;
+      if(c == wi->num_threads) {
+	// last arriver - reset count once all others have exited
+	//   reset "single" winner too
+	wi->work_item->single_winner.store(-1);
+	while(true) {
+	  int expval = 2 * wi->num_threads - 1;
+	  if(wi->work_item->barrier_count.compare_exchange(expval, 0))
+	    break;
+	}
       } else {
-	// if we were already the winner, that's ok too
-	return (prev == wi->thread_id);
-      }
-    }
-
-    void GOMP_barrier(void)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
-      if(!wi)
-	return;
-
-      //log_omp.print() << "barrier enter: id=" << wi->thread_id;
-
-      if(wi->work_item && (wi->num_threads > 1)) {
-	// step 1: observe that barrier is not still being exited
-	int c;
+	// step 3: observe that all threads have entered
 	do {
 	  c = wi->work_item->barrier_count.load();
-	} while(c >= wi->num_threads);
-	// step 2: increment counter to enter
-	c = wi->work_item->barrier_count.fetch_add(1) + 1;
-	if(c == wi->num_threads) {
-	  // last arriver - reset count once all others have exited
-	  //   reset "single" winner too
-	  wi->work_item->single_winner.store(-1);
-	  while(true) {
-	    int expval = 2 * wi->num_threads - 1;
-	    if(wi->work_item->barrier_count.compare_exchange(expval, 0))
-	      break;
-	  }
-	} else {
-	  // step 3: observe that all threads have entered
-	  do {
-	    c = wi->work_item->barrier_count.load();
-	  } while(c < wi->num_threads);
-	  // step 4: increment counter again to exit
-	  wi->work_item->barrier_count.fetch_add(1);
-	}
-      } else {
-	// not inside a larger construct - nothing to do
+	} while(c < wi->num_threads);
+	// step 4: increment counter again to exit
+	wi->work_item->barrier_count.fetch_add(1);
       }
-
-      //log_omp.print() << "barrier exit: id=" << wi->thread_id;
+    } else {
+      // not inside a larger construct - nothing to do
     }
 
-    bool GOMP_loop_static_start(long start, long end, long incr, long chunk,
-				long *istart, long *iend)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
-      if(!wi) {
-	// give back the whole loop and hope for the best
-	*istart = start;
-	*iend = end;
-	return (start < end);
-      }
+    //log_omp.print() << "barrier exit: id=" << wi->thread_id;
+  }
 
-      // loops must be inside work items
-      assert(wi->work_item != 0);
-
-      log_omp.debug() << "loop static start: start=" << start
-		      << " end=" << end << " incr=" << incr
-		      << " chunk=" << chunk;
-
-      int64_t span_start, span_end;
-      bool more = wi->work_item->schedule.start_static(start, end,
-						       incr, chunk,
-						       wi->thread_id,
-						       span_start,
-						       span_end);
-      if(more) {
-	*istart = span_start;
-	*iend = span_end;
-      }
-      return more;
+  bool GOMP_loop_static_start(long start, long end, long incr, long chunk,
+			      long *istart, long *iend)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+    if(!wi) {
+      // give back the whole loop and hope for the best
+      *istart = start;
+      *iend = end;
+      return (start < end);
     }
 
-    bool GOMP_loop_dynamic_start(long start, long end, long incr, long chunk,
-				 long *istart, long *iend)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
-      if(!wi) {
-	// give back the whole loop and hope for the best
-	*istart = start;
-	*iend = end;
-	return (start < end);
-      }
+    // loops must be inside work items
+    assert(wi->work_item != 0);
 
-      // loops must be inside work items
-      assert(wi->work_item != 0);
+    log_omp.debug() << "loop static start: start=" << start
+		    << " end=" << end << " incr=" << incr
+		    << " chunk=" << chunk;
 
-      log_omp.debug() << "loop dynamic start: start=" << start
-		      << " end=" << end << " incr=" << incr
-		      << " chunk=" << chunk;
+    int64_t span_start, span_end;
+    bool more = wi->work_item->schedule.start_static(start, end,
+						     incr, chunk,
+						     wi->thread_id,
+						     span_start,
+						     span_end);
+    if(more) {
+      *istart = span_start;
+      *iend = span_end;
+    }
+    return more;
+  }
 
-      wi->work_item->schedule.start_dynamic(start, end, incr, chunk);
-      int64_t span_start, span_end;
-      long stride = 0; // not used
-      bool more = wi->work_item->schedule.next_dynamic(span_start, span_end, stride);
-      if(more) {
-	*istart = span_start;
-	*iend = span_end;
-      }
-      return more;
+  bool GOMP_loop_dynamic_start(long start, long end, long incr, long chunk,
+			       long *istart, long *iend)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+    if(!wi) {
+      // give back the whole loop and hope for the best
+      *istart = start;
+      *iend = end;
+      return (start < end);
     }
 
-    void GOMP_loop_end_nowait(void)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      if(!wi)
-	return;  // complained already above
+    // loops must be inside work items
+    assert(wi->work_item != 0);
 
-      // loops must be inside work items
-      assert(wi->work_item != 0);
+    log_omp.debug() << "loop dynamic start: start=" << start
+		    << " end=" << end << " incr=" << incr
+		    << " chunk=" << chunk;
 
-      log_omp.debug() << "loop end nowait";
+    wi->work_item->schedule.start_dynamic(start, end, incr, chunk);
+    int64_t span_start, span_end;
+    long stride = 0; // not used
+    bool more = wi->work_item->schedule.next_dynamic(span_start, span_end, stride);
+    if(more) {
+      *istart = span_start;
+      *iend = span_end;
+    }
+    return more;
+  }
 
-      wi->work_item->schedule.end_loop(false /*!wait*/);
+  void GOMP_loop_end_nowait(void)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(!wi)
+      return;  // complained already above
+
+    // loops must be inside work items
+    assert(wi->work_item != 0);
+
+    log_omp.debug() << "loop end nowait";
+
+    wi->work_item->schedule.end_loop(false /*!wait*/);
+  }
+
+  void GOMP_loop_end(void)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(!wi)
+      return;  // complained already above
+
+    // loops must be inside work items
+    assert(wi->work_item != 0);
+
+    log_omp.debug() << "loop end";
+
+    wi->work_item->schedule.end_loop(true /*wait*/);
+  }
+
+  bool GOMP_loop_static_next(long *istart, long *iend)
+  { 
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(!wi)
+      return false;  // complained already above
+
+    // loops must be inside work items
+    assert(wi->work_item != 0);
+
+    int64_t span_start, span_end;
+    bool more = wi->work_item->schedule.next_static(span_start, span_end);
+
+    if(more) {
+      *istart = span_start;
+      *iend = span_end;
+      log_omp.debug() << "loop static next: start=" << *istart
+		      << " end=" << *iend;
+    } else
+      log_omp.debug() << "loop static next: done";
+
+    return more;
+  }
+
+  bool GOMP_loop_dynamic_next(long *istart, long *iend)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(!wi)
+      return false;  // complained already above
+
+    // loops must be inside work items
+    assert(wi->work_item != 0);
+
+    log_omp.debug() << "loop dynamic next: pstart=" << *istart
+		    << " pend=" << *iend;
+
+    int64_t span_start, span_end, stride;
+    bool more = wi->work_item->schedule.next_dynamic(span_start, span_end,
+						     stride);
+
+    if(more) {
+      *istart = span_start;
+      *iend = span_end;
+      log_omp.debug() << "loop dynamic next: start=" << *istart
+		      << " end=" << *iend;
+    } else
+      log_omp.debug() << "loop dynamic next: done";
+
+    return more;
+  }
+
+  static unsigned hash_gomp_critical_name(void **pptr)
+  {
+    uintptr_t v = reinterpret_cast<uintptr_t>(pptr);
+    // two hashes pushes 24 bits worth of address into the bottom 6
+    v ^= (v >> 6);
+    v ^= (v >> 12);
+    // return bottom 6 bits
+    return (v & 63);
+  }
+
+  void GOMP_critical_name_start(void **pptr)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(!wi || !wi->work_item || (wi->num_threads == 1)) {
+      // already single-threaded, so no further effort needed
+      return;
     }
 
-    void GOMP_loop_end(void)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      if(!wi)
-	return;  // complained already above
+    unsigned bit = hash_gomp_critical_name(pptr);
+    uint64_t mask = uint64_t(1) << bit;
 
-      // loops must be inside work items
-      assert(wi->work_item != 0);
+    // try to set the bit in the critical flags - repeat until success
+    while(true) {
+      uint64_t orig = wi->work_item->critical_flags.fetch_or(mask);
+      if((orig & mask) == 0) break;
+      Thread::yield();
+    }
+  }
 
-      log_omp.debug() << "loop end";
-
-      wi->work_item->schedule.end_loop(true /*wait*/);
+  void GOMP_critical_name_end(void **pptr)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(!wi || !wi->work_item || (wi->num_threads == 1)) {
+      // already single-threaded, so no further effort needed
+      return;
     }
 
-    bool GOMP_loop_static_next(long *istart, long *iend)
-    { 
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      if(!wi)
-	return false;  // complained already above
+    unsigned bit = hash_gomp_critical_name(pptr);
+    uint64_t mask = uint64_t(1) << bit;
 
-      // loops must be inside work items
-      assert(wi->work_item != 0);
+    // clear the bit - it had better already be set
+    uint64_t orig = wi->work_item->critical_flags.fetch_and(~mask);
+    assert((orig & mask) != 0);
+  }
 
-      int64_t span_start, span_end;
-      bool more = wi->work_item->schedule.next_static(span_start, span_end);
+  void GOMP_critical_start(void)
+  {
+    GOMP_critical_name_start(0);
+  }
 
-      if(more) {
-	*istart = span_start;
-	*iend = span_end;
-	log_omp.debug() << "loop static next: start=" << *istart
-			<< " end=" << *iend;
-      } else
-	log_omp.debug() << "loop static next: done";
-
-      return more;
-    }
-
-    bool GOMP_loop_dynamic_next(long *istart, long *iend)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      if(!wi)
-	return false;  // complained already above
-
-      // loops must be inside work items
-      assert(wi->work_item != 0);
-
-      log_omp.debug() << "loop dynamic next: pstart=" << *istart
-		      << " pend=" << *iend;
-
-      int64_t span_start, span_end, stride;
-      bool more = wi->work_item->schedule.next_dynamic(span_start, span_end,
-						       stride);
-
-      if(more) {
-	*istart = span_start;
-	*iend = span_end;
-	log_omp.debug() << "loop dynamic next: start=" << *istart
-			<< " end=" << *iend;
-      } else
-	log_omp.debug() << "loop dynamic next: done";
-
-      return more;
-    }
-
-    static unsigned hash_gomp_critical_name(void **pptr)
-    {
-      uintptr_t v = reinterpret_cast<uintptr_t>(pptr);
-      // two hashes pushes 24 bits worth of address into the bottom 6
-      v ^= (v >> 6);
-      v ^= (v >> 12);
-      // return bottom 6 bits
-      return (v & 63);
-    }
-
-    void GOMP_critical_name_start(void **pptr)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      if(!wi || !wi->work_item || (wi->num_threads == 1)) {
-	// already single-threaded, so no further effort needed
-	return;
-      }
-
-      unsigned bit = hash_gomp_critical_name(pptr);
-      uint64_t mask = uint64_t(1) << bit;
-
-      // try to set the bit in the critical flags - repeat until success
-      while(true) {
-	uint64_t orig = wi->work_item->critical_flags.fetch_or(mask);
-	if((orig & mask) == 0) break;
-	Thread::yield();
-      }
-    }
-
-    void GOMP_critical_name_end(void **pptr)
-    {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-      if(!wi || !wi->work_item || (wi->num_threads == 1)) {
-	// already single-threaded, so no further effort needed
-	return;
-      }
-
-      unsigned bit = hash_gomp_critical_name(pptr);
-      uint64_t mask = uint64_t(1) << bit;
-
-      // clear the bit - it had better already be set
-      uint64_t orig = wi->work_item->critical_flags.fetch_and(~mask);
-      assert((orig & mask) != 0);
-    }
-
-    void GOMP_critical_start(void)
-    {
-      GOMP_critical_name_start(0);
-    }
-
-    void GOMP_critical_end(void)
-    {
-      GOMP_critical_name_end(0);
-    }
-  };
+  void GOMP_critical_end(void)
+  {
+    GOMP_critical_name_end(0);
+  }
+};
 #endif
 
+// runtime API calls used by compiler to interact with kmp(intel)-style runtime
 #ifdef REALM_OPENMP_KMP_SUPPORT
+namespace Realm {
+
   typedef int32_t kmp_int32;
   typedef uint32_t kmp_uint32;
   typedef int64_t kmp_int64;
@@ -419,93 +431,6 @@ namespace Realm {
   typedef struct ident ident_t;
   typedef void (*kmpc_reduce)(void *lhs_data, void *rhs_data);
   typedef int32_t kmp_critical_name;
-
-  extern "C" {
-    void __kmpc_begin(ident_t *loc, kmp_int32 flags);
-    void __kmpc_end(ident_t *loc);
-
-    kmp_int32 __kmpc_ok_to_fork(ident_t *loc);
-    kmp_int32 __kmpc_global_thread_num(ident_t *loc);
-
-    void __kmpc_push_num_threads(ident_t *loc, kmp_int32 global_tid,
-                                 kmp_int32 num_threads);
-
-    void __kmpc_fork_call(ident_t *loc, kmp_int32 argc, kmpc_micro microtask, ...);
-    void __kmpc_for_static_init_4(ident_t *loc, kmp_int32 global_tid,
-				  kmp_int32 schedtype,
-				  kmp_int32 *plastiter,
-				  kmp_int32 *plower, kmp_int32 *pupper,
-				  kmp_int32 *pstride,
-				  kmp_int32 incr, kmp_int32 chunk);
-    void __kmpc_for_static_init_4u(ident_t *loc, kmp_int32 global_tid,
-				   kmp_int32 schedtype,
-				   kmp_int32 *plastiter,
-				   kmp_uint32 *plower, kmp_uint32 *pupper,
-				   kmp_uint32 *pstride,
-				   kmp_int32 incr, kmp_int32 chunk);
-    void __kmpc_for_static_init_8(ident_t *loc, kmp_int32 global_tid,
-				  kmp_int32 schedtype,
-				  kmp_int32 *plastiter,
-				  kmp_int64 *plower, kmp_int64 *pupper,
-				  kmp_int64 *pstride,
-				  kmp_int64 incr, kmp_int64 chunk);
-    void __kmpc_for_static_init_8u(ident_t *loc, kmp_int32 global_tid,
-				   kmp_int32 schedtype,
-				   kmp_int32 *plastiter,
-				   kmp_uint64 *plower, kmp_uint64 *pupper,
-				   kmp_uint64 *pstride,
-				   kmp_int64 incr, kmp_int64 chunk);
-    void __kmpc_for_static_fini(ident_t *loc, kmp_int32 global_tid);
-
-    void __kmpc_dispatch_init_4(ident_t *loc, kmp_int32 global_tid,
-				kmp_int32 schedtype,
-				kmp_int32 lb, kmp_int32 ub,
-				kmp_int32 st, kmp_int32 chunk);
-    void __kmpc_dispatch_init_4u(ident_t *loc, kmp_int32 global_tid,
-				 kmp_int32 schedtype,
-				 kmp_uint32 lb, kmp_uint32 ub,
-				 kmp_int32 st, kmp_int32 chunk);
-    void __kmpc_dispatch_init_8(ident_t *loc, kmp_int32 global_tid,
-				kmp_int32 schedtype,
-				kmp_int64 lb, kmp_int64 ub,
-				kmp_int64 st, kmp_int64 chunk);
-    void __kmpc_dispatch_init_8u(ident_t *loc, kmp_int32 global_tid,
-				 kmp_int32 schedtype,
-				 kmp_uint64 lb, kmp_uint64 ub,
-				 kmp_int64 st, kmp_int64 chunk);
-    int __kmpc_dispatch_next_4(ident_t *loc, kmp_int32 global_tid,
-			       kmp_int32 *p_last, kmp_int32 *p_lb,
-			       kmp_int32 *p_ub, kmp_int32 *p_st);
-    int __kmpc_dispatch_next_4u(ident_t *loc, kmp_int32 global_tid,
-				kmp_int32 *p_last, kmp_uint32 *p_lb,
-				kmp_uint32 *p_ub, kmp_int32 *p_st);
-    int __kmpc_dispatch_next_8(ident_t *loc, kmp_int32 global_tid,
-			       kmp_int32 *p_last, kmp_int64 *p_lb,
-			       kmp_int64 *p_ub, kmp_int64 *p_st);
-    int __kmpc_dispatch_next_8u(ident_t *loc, kmp_int32 global_tid,
-				kmp_int32 *p_last, kmp_uint64 *p_lb,
-				kmp_uint64 *p_ub, kmp_int64 *p_st);
-    
-    kmp_int32 __kmpc_reduce_nowait(ident_t *loc, kmp_int32 global_tid,
-				   kmp_int32 nvars, size_t reduce_size,
-				   void *reduce_data, kmpc_reduce reduce_func,
-				   kmp_critical_name *lck);
-    void __kmpc_end_reduce_nowait(ident_t *loc, kmp_int32 global_tid,
-				  kmp_critical_name *lck);
-
-    void __kmpc_serialized_parallel(ident_t *loc, kmp_int32 global_tid);
-    void __kmpc_end_serialized_parallel(ident_t *loc, kmp_int32 global_tid);
-
-    kmp_int32 __kmpc_single(ident_t *loc, kmp_int32 global_tid);
-    void __kmpc_end_single(ident_t *loc, kmp_int32 global_tid);
-
-    void __kmpc_barrier(ident_t *loc, kmp_int32 global_tid);
-
-    void __kmpc_critical(ident_t *loc, kmp_int32 global_tid,
-			 kmp_critical_name *lck);
-    void __kmpc_end_critical(ident_t *loc, kmp_int32 global_tid,
-			     kmp_critical_name *lck);
-  };
 
   struct kmp_thunk {
     kmpc_micro microtask;
@@ -630,6 +555,12 @@ namespace Realm {
     }
   };
 
+};
+
+extern "C" {
+
+  using namespace Realm;
+
   void __kmpc_begin(ident_t *loc, kmp_int32 flags)
   {
     // do nothing
@@ -746,7 +677,11 @@ namespace Realm {
     }
     delete work;
   }
-  
+
+};
+
+namespace Realm {
+
   // templated code for __kmpc_for_static_init_{4,4u,8,8u}
   template <typename T>
   static inline void kmpc_for_static_init(ident_t *loc, kmp_int32 global_tid,
@@ -793,6 +728,76 @@ namespace Realm {
     default: assert(false);
     }
   }
+
+  // templated code for __kmpc_dispatch_init_{4,4u,8,8u}
+  template <typename T>
+  void kmpc_dispatch_init(ident_t *loc, kmp_int32 global_tid,
+			  kmp_int32 schedtype,
+			  T lb, T ub,
+			  typename make_signed<T>::type st,
+			  typename make_signed<T>::type chunk)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+    if(!wi) {
+      // no place to store the loop information, so this is a fatal error
+      log_omp.fatal() << "OpenMP loop with dynamic scheduling on non-OpenMP Realm processor!";
+      abort();
+    }
+
+    // loops must be inside work items
+    assert(wi->work_item != 0);
+
+    // kmp uses an inclusive upper bound, so add the increment to get
+    //  the exclusive form
+    ub += st;
+      
+    log_omp.debug() << "loop dynamic start: start=" << lb
+		    << " end=" << ub << " incr=" << st
+		    << " chunk=" << chunk;
+
+    wi->work_item->schedule.start_dynamic(lb, ub, st, chunk);
+  }
+
+  // templated code for __kmpc_dispatch_init_{4,4u,8,8u}
+  template <typename T>
+  int kmpc_dispatch_next(ident_t *loc, kmp_int32 global_tid,
+			 kmp_int32 *p_last,
+			 T *p_lb, T *p_ub,
+			 typename make_signed<T>::type *p_st)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(!wi) return false;  // complained already above
+
+    // loops must be inside work items
+    assert(wi->work_item != 0);
+
+    int64_t span_start, span_end, stride;
+    if(wi->work_item->schedule.next_dynamic(span_start, span_end,
+					    stride)) {
+      log_omp.debug() << "loop dynamic next: start=" << span_start
+		      << " end=" << span_end;
+
+      *p_last = 0; // no detection of last block
+      *p_lb = span_start;
+      *p_ub = span_end - stride;  // back to inclusive upper bound
+      *p_st = stride;
+      return 1;
+    } else {
+      log_omp.debug() << "loop dynamic next: done";
+
+      // no explicit call to end the loop, so do it here
+      // if the loop construct requires a wait, an explicit barrier is
+      //  inserted by the compiler
+      wi->work_item->schedule.end_loop(false /*!wait*/);
+      return 0;
+    }
+  }
+    
+};
+
+extern "C" {
+
+  using namespace Realm;
 
   void __kmpc_for_static_init_4(ident_t *loc, kmp_int32 global_tid,
 				kmp_int32 schedtype,
@@ -843,35 +848,6 @@ namespace Realm {
     //printf("static_fini(%p, %d)\n", loc, global_tid);
   }
 
-  // templated code for __kmpc_dispatch_init_{4,4u,8,8u}
-  template <typename T>
-  void kmpc_dispatch_init(ident_t *loc, kmp_int32 global_tid,
-			  kmp_int32 schedtype,
-			  T lb, T ub,
-			  typename make_signed<T>::type st,
-			  typename make_signed<T>::type chunk)
-  {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
-    if(!wi) {
-      // no place to store the loop information, so this is a fatal error
-      log_omp.fatal() << "OpenMP loop with dynamic scheduling on non-OpenMP Realm processor!";
-      abort();
-    }
-
-    // loops must be inside work items
-    assert(wi->work_item != 0);
-
-    // kmp uses an inclusive upper bound, so add the increment to get
-    //  the exclusive form
-    ub += st;
-      
-    log_omp.debug() << "loop dynamic start: start=" << lb
-		    << " end=" << ub << " incr=" << st
-		    << " chunk=" << chunk;
-
-    wi->work_item->schedule.start_dynamic(lb, ub, st, chunk);
-  }
-
   void __kmpc_dispatch_init_4(ident_t *loc, kmp_int32 global_tid,
 			      kmp_int32 schedtype,
 			      kmp_int32 lb, kmp_int32 ub,
@@ -912,41 +888,6 @@ namespace Realm {
 				  lb_signed, ub_signed, st, chunk);
   }
 
-  // templated code for __kmpc_dispatch_init_{4,4u,8,8u}
-  template <typename T>
-  int kmpc_dispatch_next(ident_t *loc, kmp_int32 global_tid,
-			 kmp_int32 *p_last,
-			 T *p_lb, T *p_ub,
-			 typename make_signed<T>::type *p_st)
-  {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
-    if(!wi) return false;  // complained already above
-
-    // loops must be inside work items
-    assert(wi->work_item != 0);
-
-    int64_t span_start, span_end, stride;
-    if(wi->work_item->schedule.next_dynamic(span_start, span_end,
-					    stride)) {
-      log_omp.debug() << "loop dynamic next: start=" << span_start
-		      << " end=" << span_end;
-
-      *p_last = 0; // no detection of last block
-      *p_lb = span_start;
-      *p_ub = span_end - stride;  // back to inclusive upper bound
-      *p_st = stride;
-      return 1;
-    } else {
-      log_omp.debug() << "loop dynamic next: done";
-
-      // no explicit call to end the loop, so do it here
-      // if the loop construct requires a wait, an explicit barrier is
-      //  inserted by the compiler
-      wi->work_item->schedule.end_loop(false /*!wait*/);
-      return 0;
-    }
-  }
-    
   int __kmpc_dispatch_next_4(ident_t *loc, kmp_int32 global_tid,
 			     kmp_int32 *p_last, kmp_int32 *p_lb,
 			     kmp_int32 *p_ub, kmp_int32 *p_st)
@@ -1142,6 +1083,6 @@ namespace Realm {
     uint64_t orig = wi->work_item->critical_flags.fetch_and(~mask);
     assert((orig & mask) != 0);
   }
-#endif
 
-}; // namespace Realm
+};
+#endif
