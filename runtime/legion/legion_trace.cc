@@ -2009,37 +2009,36 @@ namespace Legion {
       if (finder == conditions.end())
         return false;
 
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-           finder->second.begin(); it != finder->second.end(); ++it)
+      LegionList<FieldSet<EquivalenceSet*> >::aligned field_sets;
+      finder->second.compute_field_sets(non_dominated, field_sets);
+      for (LegionList<FieldSet<EquivalenceSet*> >::aligned::const_iterator it =
+            field_sets.begin(); it != field_sets.end(); it++)
       {
-        FieldMask overlap = non_dominated & it->second;
-        if (!overlap)
+        if (it->elements.empty())
           continue;
-
-        IndexSpaceExpression *expr1 = eq->set_expr;
-        IndexSpaceExpression *expr2 = it->first->set_expr;
-        if (expr1 == expr2)
+        std::set<IndexSpaceExpression*> exprs;
+        for (std::set<EquivalenceSet*>::const_iterator eit = 
+              it->elements.begin(); eit != it->elements.end(); eit++)
+          exprs.insert((*eit)->set_expr);
+        IndexSpaceExpression *union_expr = forest->union_index_spaces(exprs);
+        IndexSpaceExpression *expr = eq->set_expr;
+        if (expr == union_expr)
+          non_dominated -= it->set_mask;
+        // Can only dominate if we have enough points
+        else if (expr->get_volume() <= union_expr->get_volume())
         {
-          non_dominated -= overlap;
+          IndexSpaceExpression *diff_expr =
+            forest->subtract_index_spaces(expr, union_expr);
+          if (diff_expr->is_empty())
+            non_dominated -= it->set_mask;
         }
-        else if (expr1->get_volume() <= expr2->get_volume())
-        {
-          IndexSpaceExpression *diff =
-            forest->subtract_index_spaces(expr1, expr2);
-          if (diff->is_empty())
-            non_dominated -= overlap;
-        }
-        if (!non_dominated)
-          return true;
       }
-#ifdef DEBUG_LEGION
-      assert(!!non_dominated);
-#endif
-      return false;
+      // If there are no fields left then we dominated
+      return !non_dominated;
     }
 
     //--------------------------------------------------------------------------
-    bool TraceViewSet::subsumed_by(const TraceViewSet &set,
+    bool TraceViewSet::subsumed_by(const TraceViewSet &set, 
                                    FailedPrecondition *condition) const
     //--------------------------------------------------------------------------
     {
@@ -2047,35 +2046,21 @@ namespace Legion {
            it != conditions.end(); ++it)
         for (FieldMaskSet<EquivalenceSet>::const_iterator eit =
              it->second.begin(); eit != it->second.end(); ++eit)
-      {
-        FieldMask mask = eit->second;
-        if (!set.dominates(it->first, eit->first, mask))
         {
-          if (condition != NULL)
+          FieldMask mask = eit->second;
+          if (!set.dominates(it->first, eit->first, mask))
           {
-            condition->view = it->first;
-            condition->eq = eit->first;
-            condition->mask = mask;
+            if (condition != NULL)
+            {
+              condition->view = it->first;
+              condition->eq = eit->first;
+              condition->mask = mask;
+            }
+            return false;
           }
-          return false;
         }
-      }
 
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool TraceViewSet::has_refinements(void) const
-    //--------------------------------------------------------------------------
-    {
-      for (ViewSet::const_iterator it = conditions.begin();
-           it != conditions.end(); ++it)
-        for (FieldMaskSet<EquivalenceSet>::const_iterator eit =
-             it->second.begin(); eit != it->second.end(); ++eit)
-          if (eit->first->has_refinements(eit->second))
-            return true;
-
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -2436,9 +2421,6 @@ namespace Legion {
         else
           return Replayable(false, "escaping reduction views");
       }
-
-      if (pre.has_refinements() || post.has_refinements())
-        return Replayable(false, "found refined equivalence sets");
 
       if (!pre.subsumed_by(post, &condition))
       {
