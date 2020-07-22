@@ -408,6 +408,20 @@ extern "C" {
       legion_domain_point_t /* point */,
       legion_domain_t /* launch domain */);
 
+    int64_t legion_projection_functor_logical_partition_print_arguments(
+      legion_runtime_t /* runtime */,
+      legion_logical_partition_t /* upper_bound */,
+      legion_domain_point_t /* point */,
+      legion_domain_t /* launch domain */);
+    int64_t legion_projection_functor_logical_partition_print_arguments_1(
+      legion_runtime_t /* point */);
+    int64_t legion_projection_functor_logical_partition_print_arguments_2(
+      legion_logical_partition_t /* point */);
+    int64_t legion_projection_functor_logical_partition_print_arguments_3(
+      legion_domain_point_t /* point */);
+    int64_t legion_projection_functor_logical_partition_print_arguments_4(
+      legion_domain_t /* point */);
+
   /**
    * Interface for a Legion C projection functor (Logical Region
    * upper bound).

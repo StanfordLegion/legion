@@ -6373,6 +6373,64 @@ legion_runtime_replace_default_mapper(
   runtime->replace_default_mapper(mapper, proc);
 }
 
+int64_t legion_projection_functor_logical_partition_print_arguments(
+      legion_runtime_t runtime_,
+      legion_logical_partition_t upper_bound_,
+      legion_domain_point_t point_,
+      legion_domain_t launch_domain_)
+{
+  // legion_runtime_t runtime_ = CObjectWrapper::unwrap(runtime_);
+  // legion_logical_partition_t upper_bound_ = CObjectWrapper::unwrap(upper_bound);
+  // legion_domain_point_t point_ = CObjectWrapper::unwrap(point);
+  // legion_domain_t launch_domain_ = CObjectWrapper::unwrap(launch_domain);
+  printf("legion_projection_functor_logical_partition_print_arguments\n");
+  return 0;
+}
+
+int64_t legion_projection_functor_logical_partition_print_arguments_1(
+      legion_runtime_t runtime_)
+{
+  // legion_runtime_t runtime_ = CObjectWrapper::unwrap(runtime_);
+  // legion_logical_partition_t upper_bound_ = CObjectWrapper::unwrap(upper_bound);
+  // legion_domain_point_t point_ = CObjectWrapper::unwrap(point);
+  // legion_domain_t launch_domain_ = CObjectWrapper::unwrap(launch_domain);
+  printf("legion_projection_functor_logical_partition_print_arguments_1\n");
+  return 0;
+}
+
+int64_t legion_projection_functor_logical_partition_print_arguments_2(
+      legion_logical_partition_t upper_bound_)
+{
+  // legion_runtime_t runtime_ = CObjectWrapper::unwrap(runtime_);
+  // legion_logical_partition_t upper_bound_ = CObjectWrapper::unwrap(upper_bound);
+  // legion_domain_point_t point_ = CObjectWrapper::unwrap(point);
+  // legion_domain_t launch_domain_ = CObjectWrapper::unwrap(launch_domain);
+  printf("legion_projection_functor_logical_partition_print_arguments_2\n");
+  return 0;
+}
+
+int64_t legion_projection_functor_logical_partition_print_arguments_3(
+      legion_domain_point_t point_)
+{
+  // legion_runtime_t runtime_ = CObjectWrapper::unwrap(runtime_);
+  // legion_logical_partition_t upper_bound_ = CObjectWrapper::unwrap(upper_bound);
+  // legion_domain_point_t point_ = CObjectWrapper::unwrap(point);
+  // legion_domain_t launch_domain_ = CObjectWrapper::unwrap(launch_domain);
+  printf("legion_projection_functor_logical_partition_print_arguments_3\n");
+  return 0;
+}
+
+int64_t legion_projection_functor_logical_partition_print_arguments_4(
+      legion_domain_t domain_)
+{
+  // legion_runtime_t runtime_ = CObjectWrapper::unwrap(runtime_);
+  // legion_logical_partition_t upper_bound_ = CObjectWrapper::unwrap(upper_bound);
+  // legion_domain_point_t point_ = CObjectWrapper::unwrap(point);
+  // legion_domain_t launch_domain_ = CObjectWrapper::unwrap(launch_domain);
+  printf("legion_projection_functor_logical_partition_print_arguments_4\n");
+  return 0;
+}
+
 class FunctorWrapper : public ProjectionFunctor {
 public:
   FunctorWrapper(bool exc, bool func, unsigned dep,
