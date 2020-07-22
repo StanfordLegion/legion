@@ -45,7 +45,7 @@ legion_index_space_id_t = pt.Int32_t  # unsigned int
 realm_id_t = pt.Int64_t  # unsigned long long
 
 # Add void type in Types
-legion_runtime_t = pt.StructType({"impl": pt.PointerType(pt.Int64_t)})
+legion_runtime_t = pt.PointerType(pt.Int64_t)
 
 legion_index_partition_t = pt.StructType(
     {
@@ -99,19 +99,51 @@ legion_logical_region_t = pt.StructType(
 
 # Define functions:
 program.add_func_decl(
-    "legion_domain_point_get_point_1d", (legion_domain_point_t,), legion_point_1d_t
+    "legion_domain_point_get_point_1d", (pt.PointerType(legion_domain_point_t),), legion_point_1d_t,
+    attributes=('byval',),
 )
 program.add_func_decl(
-    "legion_domain_point_from_point_1d", (legion_point_1d_t,), legion_domain_point_t
+    "legion_domain_point_from_point_1d", (pt.PointerType(legion_point_1d_t),), legion_domain_point_t,
+    attributes=('byval',),
 )
 program.add_func_decl(
     "legion_logical_partition_get_logical_subregion_by_color_domain_point",
-    (legion_runtime_t, legion_logical_partition_t, legion_domain_point_t,),
+    (legion_runtime_t, pt.PointerType(legion_logical_partition_t), pt.PointerType(legion_domain_point_t),),
     legion_logical_region_t,
+    attributes=(None, 'byval', 'byval',),
+)
+program.add_func_decl(
+    "legion_projection_functor_logical_partition_print_arguments",
+    (legion_runtime_t, pt.PointerType(legion_logical_partition_t), pt.PointerType(legion_domain_point_t), pt.PointerType(legion_domain_t),),
+    pt.Int64_t,
+    attributes=(None, 'byval', 'byval', 'byval',),
+)
+program.add_func_decl(
+    "legion_projection_functor_logical_partition_print_arguments_1",
+    (legion_runtime_t,),
+    pt.Int64_t,
+)
+program.add_func_decl(
+    "legion_projection_functor_logical_partition_print_arguments_2",
+    (pt.PointerType(legion_logical_partition_t),),
+    pt.Int64_t,
+    attributes=('byval',),
+)
+program.add_func_decl(
+    "legion_projection_functor_logical_partition_print_arguments_3",
+    (pt.PointerType(legion_domain_point_t),),
+    pt.Int64_t,
+    attributes=('byval',),
+)
+program.add_func_decl(
+    "legion_projection_functor_logical_partition_print_arguments_4",
+    (pt.PointerType(legion_domain_t),),
+    pt.Int64_t,
+    attributes=('byval',),
 )
 
 # Define variables:
-runtime_ptr = pt.Symbol(legion_runtime_t, "runtime_ptr")
+runtime = pt.Symbol(legion_runtime_t, "runtime")
 parent_ptr = pt.Symbol(pt.PointerType(legion_logical_partition_t), "parent_ptr")
 point_ptr = pt.Symbol(pt.PointerType(legion_domain_point_t), "point_ptr")
 domain_ptr = pt.Symbol(pt.PointerType(legion_domain_t), "domain_ptr")
@@ -126,12 +158,27 @@ point1d_x_plus_1_x = pt.Symbol(pt.ArrayType(coord_t, DIM), "point1d_x_plus_1_x")
 
 program.add_func(
     "proj_functor",
-    (runtime_ptr, parent_ptr, point_ptr, domain_ptr,),
+    (runtime, parent_ptr, point_ptr, domain_ptr,),
     legion_logical_region_t,
     pt.Block(
         [
+            pt.Call(
+                "legion_projection_functor_logical_partition_print_arguments", [pt.Var(runtime), pt.Var(parent_ptr), pt.Var(point_ptr), pt.Var(domain_ptr)]
+            ),
+            pt.Call(
+                "legion_projection_functor_logical_partition_print_arguments_1", [pt.Var(runtime)]
+            ),
+            pt.Call(
+                "legion_projection_functor_logical_partition_print_arguments_2", [pt.Var(parent_ptr)]
+            ),
+            pt.Call(
+                "legion_projection_functor_logical_partition_print_arguments_3", [pt.Var(point_ptr)]
+            ),
+            pt.Call(
+                "legion_projection_functor_logical_partition_print_arguments_4", [pt.Var(domain_ptr)]
+            ),
             pt.DefineVar(
-                point1d, pt.Call("legion_domain_point_get_point_1d", [pt.Deref(pt.Var(point_ptr))])
+                point1d, pt.Call("legion_domain_point_get_point_1d", [pt.Var(point_ptr)])
             ),
             pt.DefineVar(point1d_x, pt.GetElement(pt.Var(point1d), name="x"),),
             pt.DefineVar(x, pt.GetElement(pt.Var(point1d_x), idx=0)),
@@ -148,18 +195,18 @@ program.add_func(
                     pt.Var(point1d_x_plus_1), pt.Var(point1d_x_plus_1_x), name="x"
                 ),
             ),
-            pt.DefineVar(
-                domain_point_x_plus_1,
-                pt.Call(
-                    "legion_domain_point_from_point_1d", [pt.Var(point1d_x_plus_1)]
-                ),
-            ),
+            # pt.DefineVar(
+            #     domain_point_x_plus_1,
+            #     pt.Call(
+            #         "legion_domain_point_from_point_1d", [pt.Var(point1d_x_plus_1)]
+            #     ),
+            # ),
             pt.DefineVar(
                 result,
-                pt.Call(
-                    "legion_logical_partition_get_logical_subregion_by_color_domain_point",
-                    [pt.Var(runtime_ptr), pt.Deref(pt.Var(parent_ptr)), pt.Var(domain_point_x_plus_1)],
-                ),
+                # pt.Call(
+                #     "legion_logical_partition_get_logical_subregion_by_color_domain_point",
+                #     [pt.Var(runtime), pt.Deref(pt.Var(parent_ptr)), pt.Var(domain_point_x_plus_1)],
+                # ),
             ),
             pt.Return(pt.Var(result)),
         ]
