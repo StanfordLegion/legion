@@ -132,7 +132,8 @@
 
 // the following defines are used to communicate which declarations are part
 //  of the "official" public Realm API (as opposed to things that need to be in
-//  the same header files for C++ reasons):
+//  the same header files for C++ reasons) - they also control which symbols
+//  appear in the shared library:
 // REALM_PUBLIC_API - class/method/variable intended for direct use
 //                    in applications
 // REALM_INTERNAL_API_EXTERNAL_LINKAGE - method/variable not intended for
@@ -141,8 +142,8 @@
 // REALM_INTERNAL_API - method/variable that is not part of the public API
 //                    despite being in an otherwise-public class
 
-#define REALM_PUBLIC_API
-#define REALM_INTERNAL_API_EXTERNAL_LINKAGE
-#define REALM_INTERNAL_API
+#define REALM_PUBLIC_API  __attribute__((visibility("default")))
+#define REALM_INTERNAL_API_EXTERNAL_LINKAGE  __attribute__((visibility("default")))
+#define REALM_INTERNAL_API  __attribute__((visibility("hidden")))
 
 #endif
