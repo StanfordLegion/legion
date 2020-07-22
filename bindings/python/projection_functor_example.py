@@ -33,18 +33,18 @@ LEGION_MAX_DIM = _max_dim
 MAX_DOMAIN_DIM = 2 * LEGION_MAX_DIM
 DIM = 1
 
-# Define types:
-legion_region_tree_id_t = pt.Int32_t
-legion_index_partition_id_t = pt.Int32_t
-legion_index_tree_id_t = pt.Int32_t
-legion_type_tag_t = pt.Int32_t
-legion_field_space_id_t = pt.Int32_t
-coord_t = pt.Int64_t
-legion_index_space_id_t = pt.Int32_t
-# is realm an int
-realm_id_t = pt.Int64_t
 
-# how can I define void*
+# Define types:
+legion_region_tree_id_t = pt.Int32_t  # unsigned int
+legion_index_partition_id_t = pt.Int32_t  # unsigned int
+legion_index_tree_id_t = pt.Int32_t  # unsigned int
+legion_type_tag_t = pt.Int32_t  # unsigned int
+legion_field_space_id_t = pt.Int32_t  # unsigned int
+coord_t = pt.Int64_t  # long long
+legion_index_space_id_t = pt.Int32_t  # unsigned int
+realm_id_t = pt.Int64_t  # unsigned long long
+
+# Add void type in Types
 legion_runtime_t = pt.StructType({"impl": pt.PointerType(pt.Int64_t)})
 
 legion_index_partition_t = pt.StructType(
@@ -69,9 +69,17 @@ legion_domain_point_t = pt.StructType(
     {"dim": pt.Int32_t, "point_data": pt.ArrayType(coord_t, LEGION_MAX_DIM)}
 )
 
-legion_domain_t = pt.StructType({"is_id": realm_id_t, "dim": pt.Int32_t, "rect_data": pt.ArrayType(coord_t, MAX_DOMAIN_DIM)})
+legion_domain_t = pt.StructType(
+    {
+        "is_id": realm_id_t,
+        "dim": pt.Int32_t,
+        "rect_data": pt.ArrayType(coord_t, MAX_DOMAIN_DIM),
+    }
+)
 
-legion_point_1d_t = pt.StructType({"x": pt.ArrayType(coord_t, DIM)})
+legion_point_1d_array = pt.ArrayType(coord_t, DIM)
+
+legion_point_1d_t = pt.StructType({"x": legion_point_1d_array})
 
 legion_index_space_t = pt.StructType(
     {
@@ -103,11 +111,12 @@ program.add_func_decl(
 )
 
 # Define variables:
-runtime = pt.Symbol(legion_runtime_t, "runtime")
-parent = pt.Symbol(legion_logical_partition_t, "parent")
-point = pt.Symbol(legion_domain_point_t, "point")
-domain = pt.Symbol(legion_domain_t, "domain")
+runtime_ptr = pt.Symbol(legion_runtime_t, "runtime_ptr")
+parent_ptr = pt.Symbol(pt.PointerType(legion_logical_partition_t), "parent_ptr")
+point_ptr = pt.Symbol(pt.PointerType(legion_domain_point_t), "point_ptr")
+domain_ptr = pt.Symbol(pt.PointerType(legion_domain_t), "domain_ptr")
 point1d = pt.Symbol(legion_point_1d_t, "point1d")
+point1d_x = pt.Symbol(legion_point_1d_array, "point1d_x")
 x = pt.Symbol(coord_t, "x")
 x_plus_1 = pt.Symbol(coord_t, "x_plus_1")
 point1d_x_plus_1 = pt.Symbol(legion_point_1d_t, "point1d_x_plus_1")
@@ -115,21 +124,18 @@ domain_point_x_plus_1 = pt.Symbol(legion_domain_point_t, "domain_point_x_plus_1"
 result = pt.Symbol(legion_logical_region_t, "result")
 point1d_x_plus_1_x = pt.Symbol(pt.ArrayType(coord_t, DIM), "point1d_x_plus_1_x")
 
-
 program.add_func(
     "proj_functor",
-    (runtime, parent, point, domain,),
+    (runtime_ptr, parent_ptr, point_ptr, domain_ptr,),
     legion_logical_region_t,
     pt.Block(
         [
             pt.DefineVar(
-                point1d, pt.Call("legion_domain_point_get_point_1d", [pt.Var(point)])
+                point1d, pt.Call("legion_domain_point_get_point_1d", [pt.Deref(pt.Var(point_ptr))])
             ),
-            pt.DefineVar(
-                x, pt.GetElement(pt.GetElement(pt.Var(point1d), idx=0), idx=0)
-            ),
+            pt.DefineVar(point1d_x, pt.GetElement(pt.Var(point1d), name="x"),),
+            pt.DefineVar(x, pt.GetElement(pt.Var(point1d_x), idx=0)),
             pt.DefineVar(x_plus_1, pt.Add(pt.Var(x), pt.Int64(1))),
-            # Temporary array to change point1d_x_plus_1.x[0]
             pt.DefineVar(point1d_x_plus_1_x),
             pt.Assign(
                 pt.Var(point1d_x_plus_1_x),
@@ -139,7 +145,7 @@ program.add_func(
             pt.Assign(
                 pt.Var(point1d_x_plus_1),
                 pt.SetElement(
-                    pt.Var(point1d_x_plus_1), pt.Var(point1d_x_plus_1_x), idx=0,
+                    pt.Var(point1d_x_plus_1), pt.Var(point1d_x_plus_1_x), name="x"
                 ),
             ),
             pt.DefineVar(
@@ -152,12 +158,13 @@ program.add_func(
                 result,
                 pt.Call(
                     "legion_logical_partition_get_logical_subregion_by_color_domain_point",
-                    [pt.Var(runtime), pt.Var(parent), pt.Var(domain_point_x_plus_1)],
+                    [pt.Var(runtime_ptr), pt.Deref(pt.Var(parent_ptr)), pt.Var(domain_point_x_plus_1)],
                 ),
             ),
             pt.Return(pt.Var(result)),
         ]
     ),
+    attributes=(None, "byval", "byval", "byval"),
 )
 
 
