@@ -83,25 +83,27 @@ namespace Legion {
     public:
       VersionInfo& operator=(const VersionInfo &rhs);
     public:
-      inline bool has_version_info(void) const { return (owner != NULL); }
+      inline bool has_version_info(void) const 
+        { return !equivalence_sets.empty(); }
       inline const FieldMaskSet<RegionNode>& get_nearest_nodes(void) const
         { return nearest_disjoint_complete_nodes; }
-      inline const FieldMaskSet<EquivalenceSet>& get_equivalence_sets(void) 
-        const { return equivalence_sets; }
-      inline VersionManager* get_manager(void) const { return owner; }
+      inline const LegionMap<EquivalenceSet*,
+                    FieldMaskSet<IndexSpaceExpression> >::aligned&
+                      get_equivalence_sets(void) const
+        { return equivalence_sets; }
     public:
       void record_nearest_disjoint_complete_node(RegionNode *node, 
                                                  const FieldMask &mask);
       void pack_version_info(Serializer &rez) const;
       void unpack_version_info(Deserializer &derez, RegionTreeForest *forest);
     public:
-      void record_equivalence_set(VersionManager *owner, 
-                                  EquivalenceSet *set, 
+      void record_equivalence_set(EquivalenceSet *set, 
+                                  IndexSpaceExpression *expr,
                                   const FieldMask &set_mask);
       void clear(void);
     protected:
-      VersionManager *owner;
-      FieldMaskSet<EquivalenceSet> equivalence_sets;
+      LegionMap<EquivalenceSet*,
+                FieldMaskSet<IndexSpaceExpression> >::aligned equivalence_sets;
       // These are the nearest nodes in the disjoint complete
       // tree that we should use for computing our equivalence
       // sets if we do not have them in the cache.
@@ -1482,15 +1484,15 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_TRAVERSAL_TASK_ID;
       public:
         DeferPerformTraversalArgs(PhysicalAnalysis *ana, EquivalenceSet *set,
-         const FieldMask &mask, RtUserEvent done, bool cached_set,
-         bool already_deferred = true);
+                            IndexSpaceExpression *expr, const FieldMask &mask,
+                            RtUserEvent done, bool already_deferred = true);
       public:
         PhysicalAnalysis *const analysis;
         EquivalenceSet *const set;
+        IndexSpaceExpression *const expr;
         FieldMask *const mask;
         const RtUserEvent applied_event;
         const RtUserEvent done_event;
-        const bool cached_set;
         const bool already_deferred;
       };
       struct DeferPerformRemoteArgs : 
@@ -1530,11 +1532,10 @@ namespace Legion {
       };
     public:
       // Local physical analysis
-      PhysicalAnalysis(Runtime *rt, Operation *op, unsigned index, 
-                       const VersionInfo &info, bool on_heap);
+      PhysicalAnalysis(Runtime *rt, Operation *op, unsigned index,bool on_heap);
       // Remote physical analysis
       PhysicalAnalysis(Runtime *rt, AddressSpaceID source, AddressSpaceID prev,
-             Operation *op, unsigned index, VersionManager *man, bool on_heap);
+                       Operation *op, unsigned index, bool on_heap);
       PhysicalAnalysis(const PhysicalAnalysis &rhs);
       virtual ~PhysicalAnalysis(void);
     public:
@@ -1543,23 +1544,23 @@ namespace Legion {
       inline void record_parallel_traversals(void)
         { parallel_traversals = true; } 
     public:
-      void traverse(EquivalenceSet *set, const FieldMask &mask, 
-                    std::set<RtEvent> &deferral_events,
-                    std::set<RtEvent> &applied_events, const bool cached_set,
+      void traverse(EquivalenceSet *set, IndexSpaceExpression *expr,
+                    const FieldMask &mask, std::set<RtEvent> &deferral_events,
+                    std::set<RtEvent> &applied_events,
                     RtEvent precondition = RtEvent::NO_RT_EVENT,
                     const bool already_deferred = false);
       void defer_traversal(RtEvent precondition, EquivalenceSet *set,
-              const FieldMask &mask, std::set<RtEvent> &deferral_events,
-              std::set<RtEvent> &applied_events, const bool cached_set,
+              IndexSpaceExpression *expr, const FieldMask &mask, 
+              std::set<RtEvent> &deferral_events, 
+              std::set<RtEvent> &applied_events,
               RtUserEvent deferral_event = RtUserEvent::NO_RT_USER_EVENT,
               const bool already_deferred = true);
     public:
       virtual void perform_traversal(EquivalenceSet *set,
+                                     IndexSpaceExpression *expr,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
-                                     FieldMask *stale_mask,
-                                     const bool cached_set,
                                      const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
@@ -1580,18 +1581,12 @@ namespace Legion {
       bool report_instances(FieldMaskSet<InstanceView> &instances);
     public:
       // Lock taken by these methods if needed
-      bool update_alt_sets(EquivalenceSet *set, FieldMask &mask);
-      void filter_alt_sets(EquivalenceSet *set, const FieldMask &mask);
-      void record_stale_set(EquivalenceSet *set, const FieldMask &mask);
-      void record_remote(EquivalenceSet *set, const FieldMask &mask,
-                         const AddressSpaceID owner, bool cached_set);
+      void record_remote(EquivalenceSet *set, IndexSpaceExpression *expr,
+                         const FieldMask &mask, const AddressSpaceID owner);
     public:
       // Lock must be held from caller
       void record_instance(InstanceView* view, const FieldMask &mask);
       inline void record_restriction(void) { restricted = true; }
-    protected:
-      // Can only be called once all traversals are done
-      void update_stale_equivalence_sets(std::set<RtEvent> &applied_events);
     public:
       static void handle_remote_instances(Deserializer &derez, Runtime *rt);
       static void handle_deferred_traversal(const void *args);
@@ -1604,16 +1599,12 @@ namespace Legion {
       Runtime *const runtime;
       Operation *const op;
       const unsigned index;
-      VersionManager *const version_manager;
       const bool owns_op;
       const bool on_heap;
     protected:
-      // For updates to the traversal data structures
-      FieldMaskSet<EquivalenceSet> alt_sets;
-      FieldMaskSet<EquivalenceSet> stale_sets;
-    protected:
-      LegionMap<std::pair<AddressSpaceID,bool>,
-                FieldMaskSet<EquivalenceSet> >::aligned remote_sets;
+      std::map<AddressSpaceID,
+        LegionMap<EquivalenceSet*,
+                  FieldMaskSet<IndexSpaceExpression> >::aligned> remote_sets;
       FieldMaskSet<InstanceView> *remote_instances;
       bool restricted;
     private:
@@ -1640,11 +1631,10 @@ namespace Legion {
       ValidInstAnalysis& operator=(const ValidInstAnalysis &rhs);
     public:
       virtual void perform_traversal(EquivalenceSet *set,
+                                     IndexSpaceExpression *expr,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
-                                     FieldMask *stale_mask,
-                                     const bool cached_set,
                                      const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
@@ -1681,11 +1671,10 @@ namespace Legion {
       InvalidInstAnalysis& operator=(const InvalidInstAnalysis &rhs);
     public:
       virtual void perform_traversal(EquivalenceSet *set,
+                                     IndexSpaceExpression *expr,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
-                                     FieldMask *stale_mask,
-                                     const bool cached_set,
                                      const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
@@ -1736,11 +1725,10 @@ namespace Legion {
       void record_uninitialized(const FieldMask &uninit,
                                 std::set<RtEvent> &applied_events);
       virtual void perform_traversal(EquivalenceSet *set,
+                                     IndexSpaceExpression *expr,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
-                                     FieldMask *stale_mask,
-                                     const bool cached_set,
                                      const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
@@ -1801,11 +1789,10 @@ namespace Legion {
       AcquireAnalysis& operator=(const AcquireAnalysis &rhs);
     public:
       virtual void perform_traversal(EquivalenceSet *set,
+                                     IndexSpaceExpression *expr,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
-                                     FieldMask *stale_mask,
-                                     const bool cached_set,
                                      const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
@@ -1840,11 +1827,10 @@ namespace Legion {
       ReleaseAnalysis& operator=(const ReleaseAnalysis &rhs);
     public:
       virtual void perform_traversal(EquivalenceSet *set,
+                                     IndexSpaceExpression *expr,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
-                                     FieldMask *stale_mask,
-                                     const bool cached_set,
                                      const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
@@ -2011,11 +1997,10 @@ namespace Legion {
         { return (output_aggregator != NULL); }
     public:
       virtual void perform_traversal(EquivalenceSet *set,
+                                     IndexSpaceExpression *expr,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
-                                     FieldMask *stale_mask,
-                                     const bool cached_set,
                                      const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
@@ -2065,11 +2050,10 @@ namespace Legion {
       FilterAnalysis& operator=(const FilterAnalysis &rhs);
     public:
       virtual void perform_traversal(EquivalenceSet *set,
+                                     IndexSpaceExpression *expr,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
-                                     FieldMask *stale_mask,
-                                     const bool cached_set,
                                      const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
@@ -2109,6 +2093,7 @@ namespace Legion {
      * It's also possible for the equivalence set to be refined
      * into sub equivalence sets which then subsum it's responsibility.
      */
+#ifdef NEWEQ
     class EquivalenceSet : public DistributedCollectable,
                            public LegionHeapify<EquivalenceSet> {
     public:
@@ -2608,6 +2593,129 @@ namespace Legion {
       unsigned pending_analyses;
     public:
       static const VersionID init_version = 1;
+    };
+#endif // NEWEQ
+
+    class EquivalenceSet : public DistributedCollectable,
+                           public LegionHeapify<EquivalenceSet> {
+    public:
+      EquivalenceSet(Runtime *rt, DistributedID did,
+                     AddressSpaceID owner_space,
+                     AddressSpaceID logical_owner,
+                     IndexSpaceExpression *expr, 
+                     RegionNode *region_node,
+                     bool register_now, bool collective = false);
+      EquivalenceSet(const EquivalenceSet &rhs);
+      virtual ~EquivalenceSet(void);
+    public:
+      EquivalenceSet& operator=(const EquivalenceSet &rhs);
+    public:
+      // Must be called while holding the lock
+      inline bool is_logical_owner(void) const
+        { return (local_space == logical_owner_space); }
+    public:
+      // From distributed collectable
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+    public:
+      void ray_trace_equivalence_sets(RayTracer *target,
+                                      IndexSpaceExpression *expr, 
+                                      FieldMask ray_mask,
+                                      AddressSpaceID source,
+                                      std::set<RtEvent> &ready_events);
+      void remove_update_guard(CopyFillGuard *guard);
+      void record_subset(EquivalenceSet *set, const FieldMask &mask);
+    public:
+      // Analysis methods
+      void initialize_set(const RegionUsage &usage,
+                          const FieldMask &user_mask,
+                          const bool restricted,
+                          const InstanceSet &sources,
+            const std::vector<InstanceView*> &corresponding,
+                          std::set<RtEvent> &applied_events);
+      void find_valid_instances(ValidInstAnalysis &analysis,
+                                FieldMask user_mask,
+                                std::set<RtEvent> &deferral_events,
+                                std::set<RtEvent> &applied_events,
+                                const bool already_deferred = false);
+      void find_invalid_instances(InvalidInstAnalysis &analysis,
+                                FieldMask user_mask,
+                                std::set<RtEvent> &deferral_events,
+                                std::set<RtEvent> &applied_events,
+                                const bool already_deferred = false);
+      void update_set(UpdateAnalysis &analysis, FieldMask user_mask,
+                      std::set<RtEvent> &deferral_events,
+                      std::set<RtEvent> &applied_events,
+                      const bool already_deferred = false);
+      void acquire_restrictions(AcquireAnalysis &analysis, 
+                                FieldMask acquire_mask,
+                                std::set<RtEvent> &deferral_events,
+                                std::set<RtEvent> &applied_events,
+                                const bool already_deferred = false);
+      void release_restrictions(ReleaseAnalysis &analysis,
+                                FieldMask release_mask,
+                                std::set<RtEvent> &deferral_events,
+                                std::set<RtEvent> &applied_events,
+                                const bool already_deferred = false);
+      void issue_across_copies(CopyAcrossAnalysis &analysis,
+                               FieldMask src_mask, 
+                               IndexSpaceExpression *overlap,
+                               std::set<RtEvent> &deferral_events,
+                               std::set<RtEvent> &applied_events);
+      void overwrite_set(OverwriteAnalysis &analysis, FieldMask mask,
+                         std::set<RtEvent> &deferral_events,
+                         std::set<RtEvent> &applied_events,
+                         const bool already_deferred = false);
+      void filter_set(FilterAnalysis &analysis, FieldMask mask,
+                      std::set<RtEvent> &deferral_events,
+                      std::set<RtEvent> &applied_events,
+                      const bool already_deferred = false);
+    protected:
+      void check_for_migration(PhysicalAnalysis &analysis,
+                               std::set<RtEvent> &applied_events);
+      void request_remote_subsets(const FieldMask &request_mask,
+                                  std::set<RtEvent> &applied_events);
+    public:
+      IndexSpaceExpression *const set_expr;
+      RegionNode *const region_node; // can be NULL for intermediate nodes
+    protected:
+      AddressSpaceID logical_owner_space;
+      mutable LocalLock eq_lock;
+    protected:
+      // This is the physical state of the equivalence set
+      LegionMap<LogicalView*,
+        FieldMaskSet<IndexSpaceExpression> >::aligned   valid_instances;
+      std::map<unsigned/*fidx*/,std::vector<std::pair<
+        ReductionView*,IndexSpaceExpression*> > >       reduction_instances;
+      FieldMaskSet<IndexSpaceExpression>                reduction_fields;
+      LegionMap<InstanceView*,
+        FieldMaskSet<IndexSpaceExpression> >::aligned   restricted_instances;
+      FieldMaskSet<IndexSpaceExpression>                restricted_fields;
+    protected:
+      // If we have sub sets then we track those here
+      // If this data structure is not empty, everything above is invalid
+      FieldMaskSet<EquivalenceSet>                      subsets;
+      // Set on the owner node for tracking the remote subset leases
+      LegionMap<AddressSpaceID,FieldMask>::aligned      remote_subsets;
+      // This tracks the most recent copy-fill aggregator for each field
+      FieldMaskSet<CopyFillGuard>                       update_guards;
+      // Track whether we are in a collective state or not
+      FieldMask                                         collective_state;
+    protected:
+      // Uses these for determining when we should do migration
+      // There is an implicit assumption here that equivalence sets
+      // are only used be a small number of nodes that is less than
+      // the samples per migration count, if it ever exceeds this 
+      // then we'll issue a warning
+      static const unsigned SAMPLES_PER_MIGRATION_TEST = 64;
+      // How many total epochs we want to remember
+      static const unsigned MIGRATION_EPOCHS = 2;
+      std::vector<std::pair<AddressSpaceID,unsigned> > 
+        user_samples[MIGRATION_EPOCHS];
+      unsigned migration_index;
+      unsigned sample_count;
     };
 
     /**

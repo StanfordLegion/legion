@@ -2181,6 +2181,7 @@ namespace Legion {
       version_infos.clear();
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     void TraceConditionSet::make_ready(bool postcondition)
     //--------------------------------------------------------------------------
@@ -2259,6 +2260,7 @@ namespace Legion {
             it->first.second, it->second.get_valid_mask());
       }
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     bool TraceConditionSet::require(Operation *op, 

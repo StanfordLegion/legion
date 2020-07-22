@@ -423,6 +423,7 @@ namespace Legion {
         return this->execution_fence_event;
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     template<typename OP>
     void MemoizableOp<OP>::find_equivalence_sets(Runtime *runtime, unsigned idx, 
@@ -445,6 +446,7 @@ namespace Legion {
       else
         eqs = sets;
     }
+#endif
 
     //--------------------------------------------------------------------------
     template<typename OP>

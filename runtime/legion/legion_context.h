@@ -891,10 +891,12 @@ namespace Legion {
                                          std::set<RtEvent> &preconditions);
       virtual void compute_task_tree_coordinates(
           std::vector<std::pair<size_t,DomainPoint> > &coordinates);
+#ifdef NEWEQ
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
                         AddressSpaceID source);
+#endif
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1296,7 +1298,9 @@ namespace Legion {
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
                                bool silence_warnings, bool inlining_enabled);
+#ifdef NEWEQ
       EquivalenceSet* find_or_create_top_equivalence_set(RegionTreeID tree_id); 
+#endif
     public:
       void clone_local_fields(
           std::map<FieldSpace,std::vector<LocalFieldInfo> > &child_local) const;
@@ -1456,10 +1460,12 @@ namespace Legion {
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
     public:
+#ifdef NEWEQ
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle, 
                         IndexSpaceExpression *expr, const FieldMask &mask,
                         AddressSpaceID source);
+#endif
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<unsigned>                dummy_indexes;
@@ -1720,10 +1726,12 @@ namespace Legion {
                                                   LogicalRegion handle);
       virtual void invalidate_region_tree_contexts(void);
     public:
+#ifdef NEWEQ
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
                         AddressSpaceID source);
+#endif
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 
                                             TypeTag type_tag);
@@ -2310,10 +2318,12 @@ namespace Legion {
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
     public:
+#ifdef NEWEQ
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
                         AddressSpaceID source);
+#endif
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                   LogicalRegion parent);
       virtual void record_using_physical_context(LogicalRegion handle);

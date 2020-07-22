@@ -3626,6 +3626,7 @@ namespace Legion {
       return full_inner_context;
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     RtEvent InnerContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle,
@@ -3751,6 +3752,7 @@ namespace Legion {
       else
         return finder->second;
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_parent_logical_context(unsigned index)
@@ -9276,6 +9278,7 @@ namespace Legion {
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef NEWEQ
       DerezCheck z(derez);
       UniqueID context_uid;
       derez.deserialize(context_uid);
@@ -9300,6 +9303,7 @@ namespace Legion {
       const RtEvent done = local_ctx->compute_equivalence_sets(target_manager, 
                                            tree_id, handle, expr, mask, origin);
       Runtime::trigger_event(ready_event, done);
+#endif // NEWEQ
     }
 
     //--------------------------------------------------------------------------
@@ -9739,6 +9743,7 @@ namespace Legion {
       return NULL;
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     RtEvent TopLevelContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle, 
@@ -9771,6 +9776,7 @@ namespace Legion {
       runtime->send_compute_equivalence_sets_request(owner_space, rez);
       return ready_event;
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     InnerContext* TopLevelContext::find_outermost_local_context(
@@ -10706,6 +10712,7 @@ namespace Legion {
       f.impl->set_result(result, result_size, own);
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     RtEvent ReplicateContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle,
@@ -10849,6 +10856,7 @@ namespace Legion {
                                        handle, source, ready);
       return ready;
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     InnerContext* ReplicateContext::find_parent_physical_context(unsigned index,
@@ -16580,6 +16588,7 @@ namespace Legion {
     void ReplicateContext::handle_equivalence_set_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+#ifdef NEWEQ
       RegionTreeID tree_id;
       derez.deserialize(tree_id);
       ReplicateContext *requester;
@@ -16600,6 +16609,7 @@ namespace Legion {
       }
       else
         requester->handle_equivalence_set_response(tree_id, result);
+#endif // NEWEQ
     }
 
     //--------------------------------------------------------------------------
@@ -16607,6 +16617,7 @@ namespace Legion {
                                                          EquivalenceSet *result)
     //--------------------------------------------------------------------------
     {
+#ifdef NEWEQ
       RtUserEvent to_trigger;
       result->add_base_resource_ref(CONTEXT_REF);
       {
@@ -16625,6 +16636,7 @@ namespace Legion {
         pending_tree_requests.erase(finder);
       }
       Runtime::trigger_event(to_trigger);
+#endif // NEWEQ
     }
 
     //--------------------------------------------------------------------------
@@ -16632,6 +16644,7 @@ namespace Legion {
                                                          Runtime *runtime)
     //--------------------------------------------------------------------------
     {
+#ifdef NEWEQ
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
@@ -16645,6 +16658,7 @@ namespace Legion {
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       context->handle_equivalence_set_response(tree_id, set);
+#endif // NEWEQ
     }
 
     //--------------------------------------------------------------------------
@@ -18130,6 +18144,7 @@ namespace Legion {
       return parent_ctx;
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     RtEvent RemoteContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle,
@@ -18171,6 +18186,7 @@ namespace Legion {
       runtime->send_compute_equivalence_sets_request(target, rez);
       return ready_event;
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     InnerContext* RemoteContext::find_parent_physical_context(unsigned index,

@@ -183,18 +183,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(void)
-      : owner(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(const VersionInfo &rhs)
-      : owner(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(rhs.owner == NULL);
       assert(equivalence_sets.empty());
       assert(rhs.equivalence_sets.empty());
 #endif
@@ -211,7 +208,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(rhs.owner == NULL);
       assert(equivalence_sets.empty());
       assert(rhs.equivalence_sets.empty());
 #endif
@@ -259,23 +255,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::record_equivalence_set(VersionManager *own,
-                                             EquivalenceSet *set,
+    void VersionInfo::record_equivalence_set(EquivalenceSet *set,
+                                             IndexSpaceExpression *expr,
                                              const FieldMask &set_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert((owner == NULL) || (owner == own));
-#endif
-      owner = own;
-      equivalence_sets.insert(set, set_mask);
+      equivalence_sets[set].insert(expr, set_mask);
     }
 
     //--------------------------------------------------------------------------
     void VersionInfo::clear(void)
     //--------------------------------------------------------------------------
     {
-      owner = NULL;
       equivalence_sets.clear();
       nearest_disjoint_complete_nodes.clear();
     }
@@ -5670,23 +5661,21 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalAnalysis::PhysicalAnalysis(Runtime *rt, Operation *o, unsigned idx, 
-                                       const VersionInfo &info, bool h)
+    PhysicalAnalysis::PhysicalAnalysis(Runtime *rt, Operation *o, 
+                                       unsigned idx, bool h)
       : previous(rt->address_space), original_source(rt->address_space),
-        runtime(rt), op(o), index(idx), version_manager(info.get_manager()), 
-        owns_op(false), on_heap(h), remote_instances(NULL), restricted(false), 
-        parallel_traversals(false)
+        runtime(rt), op(o), index(idx), owns_op(false), on_heap(h), 
+        remote_instances(NULL), restricted(false), parallel_traversals(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PhysicalAnalysis::PhysicalAnalysis(Runtime *rt, AddressSpaceID source, 
-                                AddressSpaceID prev, Operation *o, unsigned idx,
-                                VersionManager *man, bool h)
+                        AddressSpaceID prev, Operation *o, unsigned idx, bool h)
       : previous(prev), original_source(source), runtime(rt), op(o), index(idx),
-        version_manager(man), owns_op(true), on_heap(h), remote_instances(NULL), 
-        restricted(false), parallel_traversals(false)
+        owns_op(true), on_heap(h), remote_instances(NULL), restricted(false), 
+        parallel_traversals(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -5694,7 +5683,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalAnalysis::PhysicalAnalysis(const PhysicalAnalysis &rhs)
       : previous(0), original_source(0), runtime(NULL), op(NULL), index(0),
-        version_manager(NULL), owns_op(false), on_heap(false)
+        owns_op(false), on_heap(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5713,10 +5702,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalAnalysis::traverse(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
                                     const FieldMask &mask,
                                     std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
-                                    const bool cached_set,
                                     RtEvent precondition/*= NO_EVENT*/,
                                     const bool already_deferred /* = false*/)
     //--------------------------------------------------------------------------
@@ -5726,39 +5715,28 @@ namespace Legion {
         // This has to be the first time through and isn't really
         // a deferral of an the traversal since we haven't even
         // started the traversal yet
-        defer_traversal(precondition, set, mask, deferral_events,applied_events,
-                   cached_set, RtUserEvent::NO_RT_USER_EVENT, already_deferred);
+        defer_traversal(precondition, set, expr, mask, deferral_events,
+            applied_events, RtUserEvent::NO_RT_USER_EVENT, already_deferred);
       }
       else
-      {
-        if (cached_set)
-        {
-          FieldMask stale_mask;
-          perform_traversal(set, mask, deferral_events, applied_events,
-                            &stale_mask, cached_set, already_deferred);
-          if (!!stale_mask)
-            stale_sets.insert(set, stale_mask);
-        }
-        else
-          perform_traversal(set, mask, deferral_events, applied_events,
-                            NULL/*remove*/, cached_set, already_deferred);
-      }
+        perform_traversal(set, expr, mask, deferral_events, applied_events,
+                          already_deferred);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalAnalysis::defer_traversal(RtEvent precondition,
                                            EquivalenceSet *set,
+                                           IndexSpaceExpression *expr,
                                            const FieldMask &mask,
                                            std::set<RtEvent> &deferral_events,
                                            std::set<RtEvent> &applied_events,
-                                           const bool cached_set,
                                            RtUserEvent deferral_event,
                                            const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       // Make sure that we record that this has parallel traversals
-      const DeferPerformTraversalArgs args(this, set, mask, deferral_event, 
-                                          cached_set, already_deferred);
+      const DeferPerformTraversalArgs args(this, set, expr, mask, 
+                                           deferral_event, already_deferred);
       runtime->issue_runtime_meta_task(args, 
           LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
       deferral_events.insert(args.done_event);
@@ -5767,11 +5745,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalAnalysis::perform_traversal(EquivalenceSet *set,
+                                             IndexSpaceExpression *expr,
                                              const FieldMask &mask,
                                              std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
-                                             FieldMask *stale_mask,
-                                             const bool cached_set,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
@@ -5866,12 +5843,15 @@ namespace Legion {
       assert(!remote_sets.empty());
 #endif
       FieldMaskSet<IndexSpaceExpression> remote_exprs; 
-      for (LegionMap<std::pair<AddressSpaceID,bool>,
-                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+      for (std::map<AddressSpaceID,LegionMap<EquivalenceSet*,
+            FieldMaskSet<IndexSpaceExpression> >::aligned>::const_iterator
             rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              rit->second.begin(); it != rit->second.end(); it++)
-          remote_exprs.insert(it->first->set_expr, it->second);
+        for (LegionMap<EquivalenceSet*,FieldMaskSet<IndexSpaceExpression> >::
+              aligned::const_iterator eit = rit->second.begin();
+              eit != rit->second.end(); eit++)
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+            remote_exprs.insert(it->first, it->second);
       FieldMaskSet<IndexSpaceExpression> to_add;
       std::vector<IndexSpaceExpression*> to_remove;
       if (remote_exprs.size() > 1)
@@ -5947,146 +5927,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalAnalysis::update_alt_sets(EquivalenceSet *set, FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      if (parallel_traversals)
-      {
-        // Need the lock in this case
-        AutoLock a_lock(*this);
-        FieldMaskSet<EquivalenceSet>::iterator finder = alt_sets.find(set);
-        // Remove any fields we already traversed
-        if (finder != alt_sets.end())
-        {
-          mask -= finder->second;
-          // If we already traversed it then we don't need to do it again 
-          if (!mask)
-            return true; // early out
-          finder.merge(mask);
-        }
-        else
-          alt_sets.insert(set, mask);
-      }
-      else
-      {
-        // No parallel traversals means we're the only thread
-        FieldMaskSet<EquivalenceSet>::iterator finder = alt_sets.find(set);
-        // Remove any fields we already traversed
-        if (finder != alt_sets.end())
-        {
-          mask -= finder->second;
-          // If we already traversed it then we don't need to do it again 
-          if (!mask)
-            return true; // early out
-          finder.merge(mask);
-        }
-        else
-          alt_sets.insert(set, mask);
-      }
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalAnalysis::filter_alt_sets(EquivalenceSet *set, 
-                                           const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      if (parallel_traversals)
-      {
-        // Need the lock if there are parallel traversals
-        AutoLock a_lock(*this);
-        FieldMaskSet<EquivalenceSet>::iterator finder = alt_sets.find(set);
-        if (finder != alt_sets.end())
-        {
-          finder.filter(mask);
-          if (!finder->second)
-            alt_sets.erase(finder);
-        }
-      }
-      else
-      {
-        // No parallel traversals means no lock needed
-        FieldMaskSet<EquivalenceSet>::iterator finder = alt_sets.find(set);
-        if (finder != alt_sets.end())
-        {
-          finder.filter(mask);
-          if (!finder->second)
-            alt_sets.erase(finder);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalAnalysis::record_stale_set(EquivalenceSet *set,
-                                            const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      if (parallel_traversals)
-      {
-        // Lock needed if we're doing parallel traversals
-        AutoLock a_lock(*this);    
-        stale_sets.insert(set, mask);
-      }
-      else
-        // No lock needed if we're the only one
-        stale_sets.insert(set, mask);
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalAnalysis::record_remote(EquivalenceSet *set, 
+                                         IndexSpaceExpression *expr,
                                          const FieldMask &mask,
-                                         const AddressSpaceID owner,
-                                         const bool cached_set)
+                                         const AddressSpaceID owner)
     //--------------------------------------------------------------------------
     {
-      const std::pair<AddressSpaceID,bool> key(owner, cached_set);
       if (parallel_traversals)
       {
         AutoLock a_lock(*this);
-        remote_sets[key].insert(set, mask);
+        remote_sets[owner][set].insert(expr, mask);
       }
       else
         // No lock needed if we're the only one
-        remote_sets[key].insert(set, mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalAnalysis::update_stale_equivalence_sets(
-                                              std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      // No need for the lock here since we know there are no 
-      // races because there are no more traversals being performed
-#ifdef DEBUG_LEGION
-      assert(!stale_sets.empty());
-#endif
-      // Check to see if we are on the local node for the version manager
-      // or whether we need to send a message to record the stale sets
-      if (original_source != runtime->address_space)
-      {
-        RtUserEvent applied = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize<size_t>(stale_sets.size());
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                stale_sets.begin(); it != stale_sets.end(); it++)
-          {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
-          }
-          rez.serialize(version_manager);
-          rez.serialize(applied);
-        }
-        runtime->send_equivalence_set_stale_update(original_source, rez);
-        applied_events.insert(applied);
-      }
-      else // the local node case
-      {
-        const RtEvent done = version_manager->record_stale_sets(stale_sets);
-        if (done.exists())
-          applied_events.insert(done);
-      }
+        remote_sets[owner][set].insert(expr, mask);
     }
 
     //--------------------------------------------------------------------------
@@ -6120,13 +5974,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalAnalysis::DeferPerformTraversalArgs::DeferPerformTraversalArgs(
-        PhysicalAnalysis *ana, EquivalenceSet *s, const FieldMask &m, 
-        RtUserEvent done, bool cached, bool def)
+        PhysicalAnalysis *ana, EquivalenceSet *s, IndexSpaceExpression *e,
+        const FieldMask &m, RtUserEvent done, bool def)
       : LgTaskArgs<DeferPerformTraversalArgs>(ana->op->get_unique_op_id()),
-        analysis(ana), set(s), mask(new FieldMask(m)), 
+        analysis(ana), set(s), expr(e), mask(new FieldMask(m)), 
         applied_event(Runtime::create_rt_user_event()),
         done_event(done.exists() ? done : Runtime::create_rt_user_event()), 
-        cached_set(cached), already_deferred(def)
+        already_deferred(def)
     //--------------------------------------------------------------------------
     {
       analysis->record_parallel_traversals();
@@ -6143,9 +5997,9 @@ namespace Legion {
       // Get this before doing anything
       const bool on_heap = dargs->analysis->on_heap;
       std::set<RtEvent> deferral_events, applied_events;
-      dargs->analysis->traverse(dargs->set, *(dargs->mask), 
-          deferral_events, applied_events, dargs->cached_set, 
-          RtEvent::NO_RT_EVENT, dargs->already_deferred);
+      dargs->analysis->traverse(dargs->set, dargs->expr, *(dargs->mask), 
+          deferral_events, applied_events, RtEvent::NO_RT_EVENT, 
+          dargs->already_deferred);
       if (!deferral_events.empty())
         Runtime::trigger_event(dargs->done_event,
             Runtime::merge_events(deferral_events));
@@ -8798,6 +8652,7 @@ namespace Legion {
     // Equivalence Set
     /////////////////////////////////////////////////////////////
 
+#ifdef NEWEQ
     // C++ is dumb
     const VersionID EquivalenceSet::init_version;
 
@@ -14493,6 +14348,7 @@ namespace Legion {
         ready.wait();
       set->unpack_state(derez);
     }
+#endif // NEWEQ
 
     /////////////////////////////////////////////////////////////
     // Version Manager 
