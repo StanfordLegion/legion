@@ -18809,9 +18809,9 @@ namespace Legion {
                                        const bool unordered, const bool recurse)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
       if (!handle.exists())
         return;
-      AutoRuntimeCall call(this);
       // Check to see if this is a top-level index space, if not then
       // we shouldn't even be destroying it
       if (!runtime->forest->is_top_level_index_space(handle))
@@ -19471,6 +19471,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (!handle.exists())
+        return;
       // Check to see if this is a top-level logical region, if not then
       // we shouldn't even be destroying it
       if (!runtime->forest->is_top_level_region(handle))
