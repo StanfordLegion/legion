@@ -955,13 +955,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!empty);
 #endif
-      if ((callback_functor != NULL) && !callback_invoked)
-        invoke_callback();
       for (std::set<AddressSpaceID>::const_iterator it = 
             targets.begin(); it != targets.end(); it++)
       {
         if ((*it) == local_space)
           continue;
+        if ((callback_functor != NULL) && !callback_invoked)
+          invoke_callback();
         Serializer rez;
         {
           rez.serialize(did);
