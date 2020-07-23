@@ -166,7 +166,7 @@ namespace Realm {
     //  cause an overshoot that wraps around, we have a problem
     uint64_t limit_overshoot = (limit + ((num_workers - 1) *
 					 (uint64_t)chunk));
-    assert(limit_overshoot > limit);
+    assert(limit_overshoot >= limit);
 
     // the compiler promises all threads will have the same value, so
     //  everybody can just store knowing that either they're first or
