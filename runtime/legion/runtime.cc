@@ -9738,9 +9738,9 @@ namespace Legion {
               runtime->handle_equivalence_set_remote_instances(derez);
               break;
             }
-          case SEND_EQUIVALENCE_SET_STALE_UPDATE:
+          case SEND_EQUIVALENCE_SET_INVALIDATION:
             {
-              runtime->handle_equivalence_set_stale_update(derez);
+              runtime->handle_equivalence_set_invalidation(derez);
               break;
             }
           case SEND_INSTANCE_REQUEST:
@@ -19461,12 +19461,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_stale_update(AddressSpaceID target,
+    void Runtime::send_equivalence_set_invalidation(AddressSpaceID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-          SEND_EQUIVALENCE_SET_STALE_UPDATE, DEFAULT_VIRTUAL_CHANNEL, 
+          SEND_EQUIVALENCE_SET_INVALIDATION, DEFAULT_VIRTUAL_CHANNEL, 
           true/*flush*/, true/*return*/);
     }
 
@@ -21171,6 +21171,7 @@ namespace Legion {
       EquivalenceSet::handle_equivalence_set_response(derez, this, source);
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_subset_request(Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -21191,6 +21192,7 @@ namespace Legion {
     {
       EquivalenceSet::handle_subset_update(derez, this);
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_ray_trace_request(Deserializer &derez,
@@ -21222,12 +21224,14 @@ namespace Legion {
       EquivalenceSet::handle_owner_update(derez, this);
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_remote_refinement(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       EquivalenceSet::handle_remote_refinement(derez, this);
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_remote_request_instances(
@@ -21301,10 +21305,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_stale_update(Deserializer &derez)
+    void Runtime::handle_equivalence_set_invalidation(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_stale_update(derez, this);
+      VersionManager::handle_invalidation(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -27752,11 +27756,13 @@ namespace Legion {
             EquivalenceSet::handle_ray_trace_finish(args);
             break;
           }
+#ifdef NEWEQ
         case LG_DEFER_SUBSET_REQUEST_TASK_ID:
           {
             EquivalenceSet::handle_subset_request(args);
             break;
           }
+#endif
         case LG_DEFER_MAKE_OWNER_TASK_ID:
           {
             EquivalenceSet::handle_make_owner(args);

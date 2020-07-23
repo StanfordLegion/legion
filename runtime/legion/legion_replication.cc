@@ -2370,7 +2370,8 @@ namespace Legion {
           // to be able to free up the resources.
           const TraceInfo trace_info(this);
           for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-            runtime->forest->invalidate_fields(this, idx, version_infos[idx],
+            runtime->forest->invalidate_fields(this, idx, 
+                deletion_requirements[idx], version_infos[idx],
                 PhysicalTraceInfo(trace_info, idx), map_applied_conditions, 
                 is_total_sharding/*collective*/);
         }
@@ -4654,9 +4655,9 @@ namespace Legion {
           context->convert_target_views(mapped_instances, mapped_views); 
           RegionNode *node = runtime->forest->get_node(requirement.region);
           UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
-                                      0/*index*/, version_info,
-                                      requirement, node, mapped_instances,
-                                      mapped_views,trace_info,init_precondition,
+                                      0/*index*/, requirement, node, 
+                                      mapped_instances, mapped_views,
+                                      trace_info, init_precondition,
                                       termination_event, true/*track effects*/,
                                       false/*check initialized*/, record_valid,
                                       false/*skip output*/);
@@ -4689,9 +4690,9 @@ namespace Legion {
         // All the users just need to do their registration
         RegionNode *node = runtime->forest->get_node(requirement.region);
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
-                                      0/*index*/, version_info,
-                                      requirement, node, mapped_instances,
-                                      mapped_views,trace_info,init_precondition,
+                                      0/*index*/, requirement, node, 
+                                      mapped_instances, mapped_views,
+                                      trace_info, init_precondition,
                                       termination_event, true/*track effects*/,
                                       false/*check initialized*/, record_valid,
                                       false/*skip output*/);
@@ -5146,10 +5147,10 @@ namespace Legion {
           termination_event = Runtime::create_ap_user_event(NULL);
         const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 0/*index*/,
-          version_info, requirement, node, attach_instances, attach_views,
-          trace_info, ApEvent::NO_AP_EVENT, mapping ? termination_event : 
-            completion_event, false/*track effects*/, 
-          false/*check initialized*/, true/*record valid*/,true/*skip output*/);
+          requirement, node, attach_instances, attach_views, trace_info, 
+          ApEvent::NO_AP_EVENT, mapping ? termination_event : completion_event, 
+          false/*track effects*/, false/*check initialized*/, 
+          true/*record valid*/, true/*skip output*/);
         analysis->add_reference();
         // Have each operation do its own registration
         // Note this will clean up the analysis allocation above

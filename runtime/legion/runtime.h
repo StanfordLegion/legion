@@ -2796,7 +2796,7 @@ namespace Legion {
                                                Serializer &rez);
       void send_equivalence_set_remote_instances(AddressSpaceID target,
                                                  Serializer &rez);
-      void send_equivalence_set_stale_update(AddressSpaceID target, 
+      void send_equivalence_set_invalidation(AddressSpaceID target, 
                                              Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
@@ -3065,7 +3065,7 @@ namespace Legion {
       void handle_equivalence_set_remote_filters(Deserializer &derez,
                                                  AddressSpaceID source);
       void handle_equivalence_set_remote_instances(Deserializer &derez);
-      void handle_equivalence_set_stale_update(Deserializer &derez); 
+      void handle_equivalence_set_invalidation(Deserializer &derez); 
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
       void handle_external_create_request(Deserializer &derez,

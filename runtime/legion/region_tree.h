@@ -658,6 +658,7 @@ namespace Legion {
                               std::set<RtEvent> &map_applied_events,
                               LogicalView *registration_view = NULL);
       void invalidate_fields(Operation *op, unsigned index,
+                             const RegionRequirement &req,
                              VersionInfo &version_info,
                              const PhysicalTraceInfo &trace_info,
                              std::set<RtEvent> &map_applied_events,

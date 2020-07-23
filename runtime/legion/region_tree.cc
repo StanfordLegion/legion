@@ -2094,6 +2094,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PREMAP_ONLY_CALL);
+#ifdef DEBUG_LEGION
+      assert((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+              (req.handle_type == LEGION_REGION_PROJECTION));
+#endif
       // If we are a NO_ACCESS or there are no fields then we are already done 
       if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
         return;
@@ -2101,13 +2105,14 @@ namespace Legion {
       // are valid for all the different equivalence classes
       const FieldMaskSet<EquivalenceSet> &eq_sets =
         version_info.get_equivalence_sets();
-      ValidInstAnalysis analysis(runtime, op, index, version_info, 
+      IndexSpaceNode *expr_node = get_node(req.region.get_index_space());
+      ValidInstAnalysis analysis(runtime, op, index, expr_node,
                                  IS_REDUCE(req) ? req.redop : 0);
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis.traverse(it->first, it->second, deferral_events,
-                          map_applied_events, true/*original set*/);
+        analysis.traverse(it->first, it->second, deferral_events, 
+                          map_applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent ready;
@@ -2183,7 +2188,7 @@ namespace Legion {
       // Should be recording or must be read-only
       assert(record_valid || IS_READ_ONLY(req));
 #endif
-      analysis = new UpdateAnalysis(runtime, op, index, version_info, req, 
+      analysis = new UpdateAnalysis(runtime, op, index, req, 
                                     region_node, targets, target_views, 
                                     trace_info, precondition, term_event, 
                                     track_effects, check_initialized,
@@ -2198,7 +2203,7 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events, true/*original set*/);
+                           map_applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -2389,12 +2394,13 @@ namespace Legion {
       // Iterate through the equivalence classes and find all the restrictions
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
-      AcquireAnalysis analysis(runtime, op, index, version_info);
+      IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
+      AcquireAnalysis analysis(runtime, op, index, local_expr);
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis.traverse(it->first, it->second, deferral_events,
-                          map_applied_events, true/*original set*/);
+                          map_applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -2411,7 +2417,6 @@ namespace Legion {
       unsigned inst_index = 0;
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
-      IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
       const RtEvent collect_event = trace_info.get_collect_event();
       // Now add users for all the instances
       for (FieldMaskSet<InstanceView>::const_iterator it = 
@@ -2455,12 +2460,13 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
       std::set<RtEvent> deferral_events;
+      IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
       ReleaseAnalysis analysis(runtime, op, index, precondition, 
-                               version_info, trace_info);
+                               local_expr, trace_info);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis.traverse(it->first, it->second, deferral_events,
-                          map_applied_events, true/*original set*/);
+                          map_applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -2482,7 +2488,6 @@ namespace Legion {
       unsigned inst_index = 0;
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
-      IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
       // Make sure we're done applying our updates before we do our registration
       if (updates_done.exists() && !updates_done.has_triggered())
         updates_done.wait();
@@ -2700,9 +2705,9 @@ namespace Legion {
         break;
       }
       CopyAcrossAnalysis *analysis = new CopyAcrossAnalysis(runtime, op, 
-          src_index, dst_index, src_version_info, src_req, dst_req, 
-          dst_targets, target_views, precondition, guard, dst_req.redop,
-          src_indexes, dst_indexes, trace_info, perfect);
+          src_index, dst_index, src_req, dst_req, dst_targets, target_views, 
+          precondition, guard, dst_req.redop, src_indexes, dst_indexes, 
+          trace_info, perfect);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -3164,9 +3169,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
+      RegionNode *region_node = get_node(req.region);
       if (trace_info.recording)
       {
-        RegionNode *region_node = get_node(req.region);
         FieldSpaceNode *fs_node = region_node->column_source;
         trace_info.record_post_fill_view(fill_view,
             fs_node->get_field_mask(req.privilege_fields));
@@ -3174,14 +3179,15 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
-          RegionUsage(req), version_info, fill_view, trace_info, precondition, 
-          RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/);
+          RegionUsage(req), region_node->row_source, fill_view, trace_info, 
+          precondition, RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, 
+          true/*track effects*/);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events, true/*original mask*/);
+        analysis->traverse(it->first, it->second, deferral_events, 
+                           map_applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -3222,7 +3228,7 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-          req, version_info, view, trace_info, precondition, 
+          req, region_node->row_source, view, trace_info, precondition, 
           RtEvent::NO_RT_EVENT, PredEvent::NO_PRED_EVENT, 
           true/*track effects*/, add_restriction);
       analysis->add_reference();
@@ -3230,7 +3236,7 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events, true/*cached set*/);
+                           map_applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -3300,9 +3306,9 @@ namespace Legion {
           map_applied_events.insert(guard_event);
       }
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
-          index, RegionUsage(req), version_info, registration_view, trace_info,
-          ApEvent::NO_AP_EVENT,  guard_event, PredEvent::NO_PRED_EVENT, 
-          false/*track effects*/, restricted);
+          index, RegionUsage(req), region_node->row_source, registration_view, 
+          trace_info, ApEvent::NO_AP_EVENT,  guard_event, 
+          PredEvent::NO_PRED_EVENT, false/*track effects*/, restricted);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
@@ -3310,7 +3316,7 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events, true/*original set*/);
+                           map_applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -3350,7 +3356,8 @@ namespace Legion {
                                                      trace_info,
                                                      runtime->address_space);
       FilterAnalysis *analysis = new FilterAnalysis(runtime, detach_op, index,
-        version_info, local_view,registration_view,true/*remove restriction*/);
+                                  region_node->row_source, local_view, 
+                                  registration_view, true/*remove restriction*/);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
@@ -3358,7 +3365,7 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events, true/*original set*/);
+                           map_applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())     
@@ -3370,17 +3377,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::invalidate_fields(Operation *op, unsigned index,
+                                             const RegionRequirement &req,
                                              VersionInfo &version_info,
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
                                           const bool collective)  
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
       const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
+      IndexSpaceExpression *local_expr = get_node(req.region.get_index_space());
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-          usage, version_info, NULL/*view*/, trace_info, ApEvent::NO_AP_EVENT);
+          usage, local_expr, NULL/*view*/, trace_info, ApEvent::NO_AP_EVENT);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       if (collective)
@@ -3393,7 +3405,7 @@ namespace Legion {
           if (!it->first->is_owner())
             continue;
           analysis->traverse(it->first, it->second, deferral_events,
-                             map_applied_events, true/*cached set*/);
+                             map_applied_events);
         }
       }
       else
@@ -3401,7 +3413,7 @@ namespace Legion {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               eq_sets.begin(); it != eq_sets.end(); it++)
           analysis->traverse(it->first, it->second, deferral_events,
-                             map_applied_events, true/*cached set*/);
+                             map_applied_events);
       }
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
@@ -3411,6 +3423,7 @@ namespace Legion {
         delete analysis;
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     void RegionTreeForest::find_invalid_instances(Operation *op, unsigned index,
                                                   VersionInfo &version_info,
@@ -3484,6 +3497,7 @@ namespace Legion {
           delete analysis;  
       }
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     int RegionTreeForest::physical_convert_mapping(Operation *op,
@@ -17600,27 +17614,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      // Make sure we traverse up the tree if necessary
-      // This not strictly necessary for correctness, but is done
-      // for performance in order to try to help out the analysis 
-      // in the shattering code for equivalence sets that tries to
-      // recognize disjoint partitions. If we ever switch to using
-      // explicit shattering operations then we can remove this code
-      if ((handle != upper_bound) && (!manager.has_versions(mask)))
-      {
-#ifdef DEBUG_LEGION
-        assert(parent != NULL);
-#endif
-        FieldMask up_mask = mask - manager.get_version_mask();
-        if (!!up_mask)
-        {
-          const RtEvent ready = 
-            parent->parent->perform_versioning_analysis(ctx, parent_ctx,
-                                NULL/*no version info*/, upper_bound, mask, op);
-          if (ready.exists() && !ready.has_triggered())
-            ready.wait();
-        }
-      }
       return manager.perform_versioning_analysis(parent_ctx, version_info, 
                                                  this, mask, op);
     }

@@ -87,23 +87,18 @@ namespace Legion {
         { return !equivalence_sets.empty(); }
       inline const FieldMaskSet<RegionNode>& get_nearest_nodes(void) const
         { return nearest_disjoint_complete_nodes; }
-      inline const LegionMap<EquivalenceSet*,
-                    FieldMaskSet<IndexSpaceExpression> >::aligned&
-                      get_equivalence_sets(void) const
-        { return equivalence_sets; }
+      inline const FieldMaskSet<EquivalenceSet>& get_equivalence_sets(void)
+        const { return equivalence_sets; }
     public:
       void record_nearest_disjoint_complete_node(RegionNode *node, 
                                                  const FieldMask &mask);
       void pack_version_info(Serializer &rez) const;
       void unpack_version_info(Deserializer &derez, RegionTreeForest *forest);
     public:
-      void record_equivalence_set(EquivalenceSet *set, 
-                                  IndexSpaceExpression *expr,
-                                  const FieldMask &set_mask);
+      void record_equivalence_set(EquivalenceSet *set, const FieldMask &mask);
       void clear(void);
     protected:
-      LegionMap<EquivalenceSet*,
-                FieldMaskSet<IndexSpaceExpression> >::aligned equivalence_sets;
+      FieldMaskSet<EquivalenceSet> equivalence_sets;
       // These are the nearest nodes in the disjoint complete
       // tree that we should use for computing our equivalence
       // sets if we do not have them in the cache.
@@ -1484,12 +1479,10 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_TRAVERSAL_TASK_ID;
       public:
         DeferPerformTraversalArgs(PhysicalAnalysis *ana, EquivalenceSet *set,
-                            IndexSpaceExpression *expr, const FieldMask &mask,
-                            RtUserEvent done, bool already_deferred = true);
+         const FieldMask &mask, RtUserEvent done, bool already_deferred = true);
       public:
         PhysicalAnalysis *const analysis;
         EquivalenceSet *const set;
-        IndexSpaceExpression *const expr;
         FieldMask *const mask;
         const RtUserEvent applied_event;
         const RtUserEvent done_event;
@@ -1532,10 +1525,12 @@ namespace Legion {
       };
     public:
       // Local physical analysis
-      PhysicalAnalysis(Runtime *rt, Operation *op, unsigned index,bool on_heap);
+      PhysicalAnalysis(Runtime *rt, Operation *op, unsigned index,
+                       IndexSpaceExpression *expr, bool on_heap);
       // Remote physical analysis
       PhysicalAnalysis(Runtime *rt, AddressSpaceID source, AddressSpaceID prev,
-                       Operation *op, unsigned index, bool on_heap);
+                       Operation *op, unsigned index, 
+                       IndexSpaceExpression *expr, bool on_heap);
       PhysicalAnalysis(const PhysicalAnalysis &rhs);
       virtual ~PhysicalAnalysis(void);
     public:
@@ -1544,20 +1539,20 @@ namespace Legion {
       inline void record_parallel_traversals(void)
         { parallel_traversals = true; } 
     public:
-      void traverse(EquivalenceSet *set, IndexSpaceExpression *expr,
-                    const FieldMask &mask, std::set<RtEvent> &deferral_events,
+      void traverse(EquivalenceSet *set, const FieldMask &mask, 
+                    std::set<RtEvent> &deferral_events,
                     std::set<RtEvent> &applied_events,
                     RtEvent precondition = RtEvent::NO_RT_EVENT,
                     const bool already_deferred = false);
       void defer_traversal(RtEvent precondition, EquivalenceSet *set,
-              IndexSpaceExpression *expr, const FieldMask &mask, 
-              std::set<RtEvent> &deferral_events, 
+              const FieldMask &mask, std::set<RtEvent> &deferral_events, 
               std::set<RtEvent> &applied_events,
               RtUserEvent deferral_event = RtUserEvent::NO_RT_USER_EVENT,
               const bool already_deferred = true);
     public:
       virtual void perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
+                                     const bool expr_covers,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
@@ -1581,8 +1576,8 @@ namespace Legion {
       bool report_instances(FieldMaskSet<InstanceView> &instances);
     public:
       // Lock taken by these methods if needed
-      void record_remote(EquivalenceSet *set, IndexSpaceExpression *expr,
-                         const FieldMask &mask, const AddressSpaceID owner);
+      void record_remote(EquivalenceSet *set, const FieldMask &mask, 
+                         const AddressSpaceID owner);
     public:
       // Lock must be held from caller
       void record_instance(InstanceView* view, const FieldMask &mask);
@@ -1597,14 +1592,14 @@ namespace Legion {
       const AddressSpaceID previous;
       const AddressSpaceID original_source;
       Runtime *const runtime;
+      IndexSpaceExpression *const analysis_expr;
       Operation *const op;
       const unsigned index;
       const bool owns_op;
       const bool on_heap;
     protected:
-      std::map<AddressSpaceID,
-        LegionMap<EquivalenceSet*,
-                  FieldMaskSet<IndexSpaceExpression> >::aligned> remote_sets;
+      LegionMap<AddressSpaceID,
+                FieldMaskSet<EquivalenceSet> >::aligned remote_sets; 
       FieldMaskSet<InstanceView> *remote_instances;
       bool restricted;
     private:
@@ -1621,9 +1616,9 @@ namespace Legion {
                               public LegionHeapify<ValidInstAnalysis> {
     public:
       ValidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
-                        const VersionInfo &info, ReductionOpID redop = 0);
+                        IndexSpaceExpression *expr, ReductionOpID redop = 0);
       ValidInstAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                        Operation *op, unsigned index, VersionManager *man,
+                        Operation *op,unsigned index,IndexSpaceExpression *expr,
                         ValidInstAnalysis *target, ReductionOpID redop);
       ValidInstAnalysis(const ValidInstAnalysis &rhs);
       virtual ~ValidInstAnalysis(void);
@@ -1632,6 +1627,7 @@ namespace Legion {
     public:
       virtual void perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
+                                     const bool expr_covers,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
@@ -1659,12 +1655,12 @@ namespace Legion {
                                 public LegionHeapify<ValidInstAnalysis> {
     public:
       InvalidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
-                          const VersionInfo &info,
+                          IndexSpaceExpression *expr,
                           const FieldMaskSet<InstanceView> &valid_instances);
       InvalidInstAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                          Operation *op, unsigned index, VersionManager *man, 
-                          InvalidInstAnalysis *target, 
-                          const FieldMaskSet<InstanceView> &valid_instances);
+                        Operation *op, unsigned index, 
+                        IndexSpaceExpression *expr, InvalidInstAnalysis *target,
+                        const FieldMaskSet<InstanceView> &valid_instances);
       InvalidInstAnalysis(const InvalidInstAnalysis &rhs);
       virtual ~InvalidInstAnalysis(void);
     public:
@@ -1672,6 +1668,7 @@ namespace Legion {
     public:
       virtual void perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
+                                     const bool expr_covers,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
@@ -1698,7 +1695,7 @@ namespace Legion {
                            public LegionHeapify<UpdateAnalysis> {
     public:
       UpdateAnalysis(Runtime *rt, Operation *op, unsigned index,
-                     const VersionInfo &info, const RegionRequirement &req,
+                     const RegionRequirement &req,
                      RegionNode *node, const InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
                      const PhysicalTraceInfo &trace_info,
@@ -1706,7 +1703,7 @@ namespace Legion {
                      const bool track_effects, const bool check_initialized,
                      const bool record_valid, const bool skip_output);
       UpdateAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                     Operation *op, unsigned index, VersionManager *man,
+                     Operation *op, unsigned index,
                      const RegionUsage &usage, RegionNode *node, 
                      InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
@@ -1726,6 +1723,7 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events);
       virtual void perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
+                                     const bool expr_covers,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
@@ -1779,9 +1777,9 @@ namespace Legion {
                             public LegionHeapify<AcquireAnalysis> {
     public: 
       AcquireAnalysis(Runtime *rt, Operation *op, unsigned index,
-                      const VersionInfo &info);
+                      IndexSpaceExpression *expr);
       AcquireAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                      Operation *op, unsigned index, VersionManager *man,
+                      Operation *op, unsigned index, IndexSpaceExpression *expr,
                       AcquireAnalysis *target); 
       AcquireAnalysis(const AcquireAnalysis &rhs);
       virtual ~AcquireAnalysis(void);
@@ -1790,6 +1788,7 @@ namespace Legion {
     public:
       virtual void perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
+                                     const bool expr_covers,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
@@ -1815,10 +1814,10 @@ namespace Legion {
                             public LegionHeapify<ReleaseAnalysis> {
     public:
       ReleaseAnalysis(Runtime *rt, Operation *op, unsigned index,
-                      ApEvent precondition, const VersionInfo &info,
+                      ApEvent precondition, IndexSpaceExpression *expr,
                       const PhysicalTraceInfo &trace_info);
       ReleaseAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                      Operation *op, unsigned index, VersionManager *manager,
+                      Operation *op, unsigned index, IndexSpaceExpression *expr,
                       ApEvent precondition, ReleaseAnalysis *target, 
                       const PhysicalTraceInfo &info);
       ReleaseAnalysis(const ReleaseAnalysis &rhs);
@@ -1828,6 +1827,7 @@ namespace Legion {
     public:
       virtual void perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
+                                     const bool expr_covers,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
@@ -1857,8 +1857,8 @@ namespace Legion {
     class CopyAcrossAnalysis : public PhysicalAnalysis,
                                public LegionHeapify<CopyAcrossAnalysis> {
     public:
-      CopyAcrossAnalysis(Runtime *rt, Operation *op, unsigned src_index,
-                         unsigned dst_index, const VersionInfo &info,
+      CopyAcrossAnalysis(Runtime *rt, Operation *op, 
+                         unsigned src_index, unsigned dst_index,
                          const RegionRequirement &src_req,
                          const RegionRequirement &dst_req,
                          const InstanceSet &target_instances,
@@ -1959,9 +1959,8 @@ namespace Legion {
                               public LegionHeapify<OverwriteAnalysis> {
     public:
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
-                        const RegionUsage &usage,
-                        const VersionInfo &info, LogicalView *view,
-                        const PhysicalTraceInfo &trace_info,
+                        const RegionUsage &usage, IndexSpaceExpression *expr, 
+                        LogicalView *view, const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
                         const RtEvent guard_event = RtEvent::NO_RT_EVENT,
                         const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
@@ -1969,8 +1968,7 @@ namespace Legion {
                         const bool add_restriction = false);
       // Also local but with a full set of views
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
-                        const RegionUsage &usage,
-                        const VersionInfo &info, 
+                        const RegionUsage &usage, IndexSpaceExpression *expr,
                         const std::set<LogicalView*> &views,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
@@ -1979,8 +1977,8 @@ namespace Legion {
                         const bool track_effects = false,
                         const bool add_restriction = false);
       OverwriteAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                        Operation *op, unsigned index, VersionManager *man, 
-                        const RegionUsage &usage, 
+                        Operation *op, unsigned index,
+                        IndexSpaceExpression *expr, const RegionUsage &usage, 
                         const std::set<LogicalView*> &views,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
@@ -1998,6 +1996,7 @@ namespace Legion {
     public:
       virtual void perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
+                                     const bool expr_covers,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
@@ -2037,11 +2036,11 @@ namespace Legion {
                            public LegionHeapify<FilterAnalysis> {
     public:
       FilterAnalysis(Runtime *rt, Operation *op, unsigned index,
-                     const VersionInfo &info, InstanceView *inst_view,
+                     IndexSpaceExpression *expr, InstanceView *inst_view,
                      LogicalView *registration_view,
                      const bool remove_restriction = false);
       FilterAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                     Operation *op, unsigned index, VersionManager *man,
+                     Operation *op, unsigned index, IndexSpaceExpression *expr,
                      InstanceView *inst_view, LogicalView *registration_view,
                      const bool remove_restriction);
       FilterAnalysis(const FilterAnalysis &rhs);
@@ -2051,6 +2050,7 @@ namespace Legion {
     public:
       virtual void perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
+                                     const bool expr_covers,
                                      const FieldMask &mask,
                                      std::set<RtEvent> &deferral_events,
                                      std::set<RtEvent> &applied_events,
@@ -2636,26 +2636,31 @@ namespace Legion {
             const std::vector<InstanceView*> &corresponding,
                           std::set<RtEvent> &applied_events);
       void find_valid_instances(ValidInstAnalysis &analysis,
-                                FieldMask user_mask,
+                                IndexSpaceExpression *expr,
+                                const bool expr_covers, FieldMask user_mask,
                                 std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
       void find_invalid_instances(InvalidInstAnalysis &analysis,
-                                FieldMask user_mask,
+                                IndexSpaceExpression *expr,
+                                const bool expr_covers, FieldMask user_mask,
                                 std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
-      void update_set(UpdateAnalysis &analysis, FieldMask user_mask,
+      void update_set(UpdateAnalysis &analysis, IndexSpaceExpression *expr,
+                      const bool expr_covers, FieldMask user_mask,
                       std::set<RtEvent> &deferral_events,
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
       void acquire_restrictions(AcquireAnalysis &analysis, 
-                                FieldMask acquire_mask,
+                                IndexSpaceExpression *expr,
+                                const bool expr_covers, FieldMask acquire_mask,
                                 std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
       void release_restrictions(ReleaseAnalysis &analysis,
-                                FieldMask release_mask,
+                                IndexSpaceExpression *expr,
+                                const bool expr_covers, FieldMask release_mask,
                                 std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
@@ -2664,11 +2669,15 @@ namespace Legion {
                                IndexSpaceExpression *overlap,
                                std::set<RtEvent> &deferral_events,
                                std::set<RtEvent> &applied_events);
-      void overwrite_set(OverwriteAnalysis &analysis, FieldMask mask,
+      void overwrite_set(OverwriteAnalysis &analysis, 
+                         IndexSpaceExpression *expr, const bool expr_covers,
+                         FieldMask mask,
                          std::set<RtEvent> &deferral_events,
                          std::set<RtEvent> &applied_events,
                          const bool already_deferred = false);
-      void filter_set(FilterAnalysis &analysis, FieldMask mask,
+      void filter_set(FilterAnalysis &analysis, 
+                      IndexSpaceExpression *expr, const bool expr_covers,
+                      FieldMask mask, 
                       std::set<RtEvent> &deferral_events,
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
@@ -2677,6 +2686,26 @@ namespace Legion {
                                std::set<RtEvent> &applied_events);
       void request_remote_subsets(const FieldMask &request_mask,
                                   std::set<RtEvent> &applied_events);
+    public:
+      static void handle_refinement(const void *args);
+      static void handle_remote_references(const void *args);
+      static void handle_ray_trace(const void *args, Runtime *runtime);
+      static void handle_ray_trace_finish(const void *args);
+      static void handle_make_owner(const void *args);
+      static void handle_merge_or_forward(const void *args);
+      static void handle_deferred_response(const void *args, Runtime *runtime);
+      static void handle_deferred_remove_refs(const void *args);
+    public:
+      static void handle_equivalence_set_request(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_equivalence_set_response(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_ray_trace_request(Deserializer &derez, 
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_ray_trace_response(Deserializer &derez, Runtime *rt);
+      static void handle_migration(Deserializer &derez, 
+                                   Runtime *runtime, AddressSpaceID source);
+      static void handle_owner_update(Deserializer &derez, Runtime *rt);
     public:
       IndexSpaceExpression *const set_expr;
       RegionNode *const region_node; // can be NULL for intermediate nodes
@@ -2701,6 +2730,10 @@ namespace Legion {
       LegionMap<AddressSpaceID,FieldMask>::aligned      remote_subsets;
       // This tracks the most recent copy-fill aggregator for each field
       FieldMaskSet<CopyFillGuard>                       update_guards;
+      // Which VersionManager objects on dfferent nodes are
+      // tracking this equivalence set and need to be invalidate
+      LegionMap<AddressSpaceID,FieldMaskSet<VersionManager> >::aligned
+                                                        tracking_managers;
       // Track whether we are in a collective state or not
       FieldMask                                         collective_state;
     protected:
@@ -2766,14 +2799,14 @@ namespace Legion {
       virtual void record_pending_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
       void finalize_equivalence_sets(RtUserEvent done_event);                           
-      RtEvent record_stale_sets(FieldMaskSet<EquivalenceSet> &stale_sets);
+      void invalidate_equivalence_sets(FieldMaskSet<EquivalenceSet> &invalid);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
                                 TreeStateLogger *logger);
     public:
       static void handle_finalize_eq_sets(const void *args);
-      static void handle_stale_update(Deserializer &derez, Runtime *runtime);
+      static void handle_invalidation(Deserializer &derez, Runtime *runtime);
     public:
       const ContextID ctx;
       RegionTreeNode *const node;

@@ -8359,7 +8359,8 @@ namespace Legion {
         // to be able to free up the resources.
         const TraceInfo trace_info(this);
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-          runtime->forest->invalidate_fields(this, idx, version_infos[idx],
+          runtime->forest->invalidate_fields(this, idx, 
+              deletion_requirements[idx], version_infos[idx],
               PhysicalTraceInfo(trace_info, idx), map_applied_conditions);
         // make sure that we don't try to do the deletion calls until
         // after the allocator is ready
