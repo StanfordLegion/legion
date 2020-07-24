@@ -184,6 +184,11 @@ namespace Realm {
 						     size_t alignment,
 						     size_t& inst_offset);
 
+      // attempts to satisfy pending allocations based on reordering releases to
+      //  move the ready ones first - assumes 'release_allocator' has been
+      //  properly maintained
+      bool attempt_release_reordering(std::vector<std::pair<RegionInstanceImpl *, size_t> >& successful_allocs);
+
     public:
       Memory me;
       size_t size;
