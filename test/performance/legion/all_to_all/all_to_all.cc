@@ -207,6 +207,7 @@ struct InitRangesArg
 {
   int64_t size;
   int32_t num_colors;
+  int32_t num_neighbors;
 };
 
 typedef FieldAccessor<WRITE_DISCARD, Rect<1>, 1, coord_t, Realm::AffineAccessor<Rect<1>, 1, coord_t> > RangeAccessor;
@@ -219,20 +220,31 @@ void init_ranges_task(const Task *task,
   InitRangesArg* args = static_cast<InitRangesArg*>(task->args);
   int64_t size = args->size;
   int64_t num_colors = args->num_colors;
+  int64_t num_neighbors = args->num_neighbors;
 
-  int64_t num_chunks = num_colors * num_colors;
+  int64_t num_chunks = num_colors * num_neighbors;
   int64_t subregion_offset = size / num_colors;
-  int64_t chunk_offset = size / num_chunks;
+  int64_t chunk_offset = subregion_offset / num_colors;
 
   RangeAccessor acc(regions[0], FID_X);
 
-  for (int64_t i = 0; i < num_chunks; ++i)
-  {
-    int64_t subregion_idx = i % num_colors;
-    int64_t chunk_idx = i / num_colors;
-    acc[i] = Rect<1>(subregion_idx * subregion_offset + chunk_idx * chunk_offset,
-                     subregion_idx * subregion_offset + (chunk_idx + 1) * chunk_offset - 1);
-  }
+  if (num_colors == num_neighbors)
+    for (int64_t i = 0; i < num_chunks; ++i)
+    {
+      int64_t subregion_idx = i % num_colors;
+      int64_t chunk_idx = i / num_colors;
+      acc[i] = Rect<1>(subregion_idx * subregion_offset + chunk_idx * chunk_offset,
+                       subregion_idx * subregion_offset + (chunk_idx + 1) * chunk_offset - 1);
+    }
+  else
+    for (int64_t i = 0; i < num_chunks; ++i)
+    {
+      int64_t my_idx = i / num_neighbors;
+      int64_t subregion_idx = (i % num_neighbors + my_idx) % num_colors;
+      int64_t chunk_idx = i / num_neighbors;
+      acc[i] = Rect<1>(subregion_idx * subregion_offset + chunk_idx * chunk_offset,
+                       subregion_idx * subregion_offset + (chunk_idx + 1) * chunk_offset - 1);
+    }
 }
 
 void main_task(const Task *task,
@@ -244,6 +256,7 @@ void main_task(const Task *task,
   int64_t size_per_subregion = 100000;
   int32_t num_colors = 2;
   uint32_t num_loops = 2;
+  int32_t num_neighbors = -1;
   {
     const InputArgs &args = Runtime::get_input_args();
     for (int32_t i = 0; i < args.argc; ++i)
@@ -263,8 +276,16 @@ void main_task(const Task *task,
         ++i;
         size_per_subregion = atoi(args.argv[i]);
       }
+      else if (strcmp(args.argv[i], "-n") == 0)
+      {
+        ++i;
+        num_neighbors = atoi(args.argv[i]);
+      }
     }
   }
+
+  if (num_neighbors == -1 || num_neighbors > num_colors)
+    num_neighbors = num_colors;
 
   // Create a data region
   int64_t size = size_per_subregion * num_colors;
@@ -274,19 +295,25 @@ void main_task(const Task *task,
 
   LogicalRegion r;
   {
-    std::vector<size_t> sizes(1, 8);
-    std::vector<FieldID> fids(1, FID_X);
-    FieldSpace fs = runtime->create_field_space(ctx, sizes, fids);
+    //std::vector<size_t> sizes(1, 8);
+    //std::vector<FieldID> fids(1, FID_X);
+    //FieldSpace fs = runtime->create_field_space(ctx, sizes, fids);
+    FieldSpace fs = runtime->create_field_space(ctx);
+    FieldAllocator allocator = runtime->create_field_allocator(ctx, fs);
+    allocator.allocate_field(sizeof(int64_t), FID_X);
     r = runtime->create_logical_region(ctx, is, fs);
   }
 
   // Create a range region
-  IndexSpace ranges_is = runtime->create_index_space(ctx, Rect<1>(0, num_colors * num_colors - 1));
+  IndexSpace ranges_is = runtime->create_index_space(ctx, Rect<1>(0, num_colors * num_neighbors - 1));
   LogicalRegion ranges;
   {
-    std::vector<size_t> sizes(1, sizeof(Rect<1>));
-    std::vector<FieldID> fids(1, FID_X);
-    FieldSpace fs = runtime->create_field_space(ctx, sizes, fids);
+    //std::vector<size_t> sizes(1, sizeof(Rect<1>));
+    //std::vector<FieldID> fids(1, FID_X);
+    //FieldSpace fs = runtime->create_field_space(ctx, sizes, fids);
+    FieldSpace fs = runtime->create_field_space(ctx);
+    FieldAllocator allocator = runtime->create_field_allocator(ctx, fs);
+    allocator.allocate_field(sizeof(Rect<1>), FID_X);
     ranges = runtime->create_logical_region(ctx, ranges_is, fs);
   }
 
@@ -294,6 +321,7 @@ void main_task(const Task *task,
   InitRangesArg arg;
   arg.size = size;
   arg.num_colors = num_colors;
+  arg.num_neighbors = num_neighbors;
 
   TaskLauncher init_ranges(TID_INIT_RANGES, TaskArgument(&arg, sizeof(InitRangesArg)));
   {
@@ -319,7 +347,8 @@ void main_task(const Task *task,
   LogicalPartition q;
   {
     IndexPartition ip = runtime->create_partition_by_image_range(
-      ctx, is, p_ranges, ranges, FID_X, cs, LEGION_DISJOINT_COMPLETE_KIND);
+      ctx, is, p_ranges, ranges, FID_X, cs,
+      num_colors == num_neighbors ? LEGION_DISJOINT_COMPLETE_KIND : LEGION_DISJOINT_KIND);
     q = runtime->get_logical_partition(ctx, r, ip);
   }
 
