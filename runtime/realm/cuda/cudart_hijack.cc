@@ -378,33 +378,68 @@ extern "C" {
     CUdeviceptr dptr = 0;
     void *hptr = 0;
     int ordinal = 0;
-    bool managed = false;
-    CUresult res = cuPointerGetAttribute(&mtype,
-					 CU_POINTER_ATTRIBUTE_MEMORY_TYPE,
-					 (CUdeviceptr)ptr);
-    if(res == CUDA_ERROR_INVALID_VALUE)
-      return cudaErrorInvalidValue;
-    assert(res == CUDA_SUCCESS);
+    // the docs say 'managed' is a bool, but the driver treats it as a
+    //  32-bit integer
+    int managed = 0;
 
-    CHECK_CU( cuPointerGetAttribute(&dptr,
-				    CU_POINTER_ATTRIBUTE_DEVICE_POINTER,
+    CUcontext ctx;
+    {
+      CUresult res = cuPointerGetAttribute(&ctx,
+					   CU_POINTER_ATTRIBUTE_CONTEXT,
+					   (CUdeviceptr)ptr);
+      if(res == CUDA_ERROR_INVALID_VALUE) {
+#if CUDART_VERSION >= 11000
+	// starting with 11.0, cudart returns success for an unknown host pointer
+	attr->type = cudaMemoryTypeUnregistered;
+	attr->device = 0;
+	attr->devicePointer = 0;
+	attr->hostPointer = ptr;
+	return cudaSuccess;
+#else
+	return cudaErrorInvalidValue;
+#endif
+      }
+      assert(res == CUDA_SUCCESS);
+    }
+
+    CHECK_CU( cuPointerGetAttribute(&mtype,
+				    CU_POINTER_ATTRIBUTE_MEMORY_TYPE,
 				    (CUdeviceptr)ptr) );
-    CHECK_CU( cuPointerGetAttribute(&hptr,
-				    CU_POINTER_ATTRIBUTE_HOST_POINTER,
-				    (CUdeviceptr)ptr) );
+
+    // requests for device and host pointers are allowed to fail if they're
+    //  not accessible from device/host respectively
+    {
+      CUresult res = cuPointerGetAttribute(&dptr,
+					   CU_POINTER_ATTRIBUTE_DEVICE_POINTER,
+					   (CUdeviceptr)ptr);
+      if(res == CUDA_ERROR_INVALID_VALUE) {
+	// we'll sanity check the pointers below
+	dptr = 0;
+      } else
+	assert(res == CUDA_SUCCESS);
+    }
+    {
+      CUresult res = cuPointerGetAttribute(&hptr,
+					   CU_POINTER_ATTRIBUTE_HOST_POINTER,
+					   (CUdeviceptr)ptr);
+      if(res == CUDA_ERROR_INVALID_VALUE) {
+	// we'll sanity check the pointers below
+	hptr = 0;
+      } else
+	assert(res == CUDA_SUCCESS);
+    }
+
 #if CUDART_VERSION >= 9200
     CHECK_CU( cuPointerGetAttribute(&ordinal,
 				    CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL,
 				    (CUdeviceptr)ptr) );
 #else
-    CUcontext ctx;
-    CHECK_CU( cuPointerGetAttribute(&ctx,
-				    CU_POINTER_ATTRIBUTE_CONTEXT,
-				    (CUdeviceptr)ptr) );
+    // have to get the device ordinal from the context
     CHECK_CU( cuCtxPushCurrent(ctx) );
     CHECK_CU( cuCtxGetDevice(&ordinal) );
     CHECK_CU( cuCtxPopCurrent(&ctx) );
 #endif
+
     CHECK_CU( cuPointerGetAttribute(&managed,
 				    CU_POINTER_ATTRIBUTE_IS_MANAGED,
 				    (CUdeviceptr)ptr) );
@@ -412,13 +447,13 @@ extern "C" {
     if(managed) {
 #if CUDART_VERSION < 11000
       attr->memoryType = cudaMemoryTypeDevice;
+      attr->isManaged = 1;
 #endif
 #if CUDART_VERSION >= 10000
       attr->type = cudaMemoryTypeManaged;
 #endif
-#if CUDART_VERSION < 11000
-      attr->isManaged = 1;
-#endif
+      // should have both host and device pointers
+      assert((dptr != 0) && (hptr != 0));
     } else {
 #if CUDART_VERSION < 11000
       attr->isManaged = 0;
@@ -431,6 +466,7 @@ extern "C" {
 #if CUDART_VERSION >= 10000
 	attr->type = cudaMemoryTypeHost;
 #endif
+	assert(hptr != 0);
 	break;
       }
       case CU_MEMORYTYPE_DEVICE: {
@@ -440,6 +476,7 @@ extern "C" {
 #if CUDART_VERSION >= 10000
 	attr->type = cudaMemoryTypeDevice;
 #endif
+	assert(dptr != 0);
 	break;
       }
       default:
