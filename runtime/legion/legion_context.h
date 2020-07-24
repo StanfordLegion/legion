@@ -421,7 +421,7 @@ namespace Legion {
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL) = 0;
-      virtual InnerContext* find_top_context(void) = 0;
+      virtual InnerContext* find_top_context(InnerContext *previous = NULL) = 0;
     public:
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
@@ -1139,7 +1139,7 @@ namespace Legion {
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
-      virtual InnerContext* find_top_context(void);
+      virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       void configure_context(MapperManager *mapper, TaskPriority priority);
       virtual void initialize_region_tree_contexts(
@@ -1352,7 +1352,7 @@ namespace Legion {
     public:
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
-      virtual InnerContext* find_top_context(void);
+      virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle, 
@@ -1444,7 +1444,7 @@ namespace Legion {
     public:
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
-      virtual InnerContext* find_top_context(void);
+      virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
@@ -1797,7 +1797,7 @@ namespace Legion {
                                                   LogicalRegion parent);
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
-      virtual InnerContext* find_top_context(void);
+      virtual InnerContext* find_top_context(InnerContext *context = NULL);
     public:
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
@@ -2167,7 +2167,7 @@ namespace Legion {
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
-      virtual InnerContext* find_top_context(void);
+      virtual InnerContext* find_top_context(InnerContext *context = NULL);
     public:
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
