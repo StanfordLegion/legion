@@ -338,7 +338,8 @@ namespace Realm {
     ProfilingRequest& add_request(Processor response_proc, 
 				  Processor::TaskFuncID response_task_id,
 				  const void *payload = 0, size_t payload_size = 0,
-				  int priority = 0);
+				  int priority = 0,
+				  bool report_if_empty = false);
 
     size_t request_count(void) const;
     bool empty(void) const;

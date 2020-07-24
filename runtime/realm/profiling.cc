@@ -110,10 +110,11 @@ namespace Realm {
 						     Processor::TaskFuncID response_task_id,
 						     const void *payload /*= 0*/,
 						     size_t payload_size /*= 0*/,
-						     int priority /*= 0*/)
+						     int priority /*= 0*/,
+						     bool report_if_empty /*= false*/)
   {
     ProfilingRequest *pr = new ProfilingRequest(response_proc, response_task_id,
-						priority);
+						priority, report_if_empty);
 
     if(payload)
       pr->add_user_data(payload, payload_size);
