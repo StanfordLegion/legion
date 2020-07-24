@@ -3710,10 +3710,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* InnerContext::find_top_context(void)
+    InnerContext* InnerContext::find_top_context(InnerContext *previous)
     //--------------------------------------------------------------------------
     {
-      return find_parent_context()->find_top_context();
+      TaskContext *parent = find_parent_context();
+      if (parent != NULL)
+        return parent->find_top_context(this);
+#ifdef DEBUG_LEGION
+      assert(previous != NULL);
+#endif
+      return previous;
     }
 
     //--------------------------------------------------------------------------
@@ -9449,30 +9455,8 @@ namespace Legion {
                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      // We're the top-level task, so we handle the request on the node
-      // that made the region
-      const AddressSpaceID owner_space = 
-        RegionTreeNode::get_owner_space(tree_id, runtime);
-      if (owner_space == runtime->address_space)
-        return InnerContext::compute_equivalence_sets(manager, tree_id, handle,
-                                                      expr, mask, source);
-      // Send off a request to the owner node to handle it
-      RtUserEvent ready_event = Runtime::create_rt_user_event();
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(context_uid);
-        rez.serialize(manager);
-        rez.serialize(tree_id);
-        expr->pack_expression(rez, owner_space);
-        rez.serialize(mask);
-        rez.serialize(handle);
-        rez.serialize(source);
-        rez.serialize(ready_event);
-      }
-      // Send it to the owner space 
-      runtime->send_compute_equivalence_sets_request(owner_space, rez);
-      return ready_event;
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -9487,10 +9471,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* TopLevelContext::find_top_context(void)
+    InnerContext* TopLevelContext::find_top_context(InnerContext *previous)
     //--------------------------------------------------------------------------
     {
-      return this;
+#ifdef DEBUG_LEGION
+      assert(previous != NULL);
+#endif
+      return previous;
     }
 
     /////////////////////////////////////////////////////////////
@@ -9652,12 +9639,15 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    InnerContext* RemoteContext::find_top_context(void)
+    InnerContext* RemoteContext::find_top_context(InnerContext *previous)
     //--------------------------------------------------------------------------
     {
-      if (top_level_context)
-        return this;
-      return find_parent_context()->find_top_context();
+      if (!top_level_context)
+        return find_parent_context()->find_top_context(this);
+ #ifdef DEBUG_LEGION
+      assert(previous != NULL);
+#endif
+      return previous;     
     }
     
     //--------------------------------------------------------------------------
@@ -9689,22 +9679,13 @@ namespace Legion {
                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      const AddressSpaceID owner_space = 
-        RegionTreeNode::get_owner_space(tree_id, runtime);
-      // If we are the top-level context then we handle the request
-      // on the node that made the region
-      if (top_level_context && (owner_space == runtime->address_space))
-        return InnerContext::compute_equivalence_sets(manager, tree_id, handle,
-                                                      expr, mask, source);
-      // Otherwise we fall through and issue the request to the 
-      // the node that actually made the region
 #ifdef DEBUG_LEGION
+      assert(!top_level_context);
       assert(source == runtime->address_space); // should always be local
 #endif
       // Send it to the owner space if we are the top-level context
       // otherwise we send it to the owner of the context
-      const AddressSpaceID target = top_level_context ? owner_space :  
-                        runtime->get_runtime_owner(context_uid);
+      const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
       RtUserEvent ready_event = Runtime::create_rt_user_event();
       // Send off a request to the owner node to handle it
       Serializer rez;
@@ -11612,7 +11593,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* LeafContext::find_top_context(void)
+    InnerContext* LeafContext::find_top_context(InnerContext *previous)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -12943,10 +12924,10 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_top_context(void)
+    InnerContext* InlineContext::find_top_context(InnerContext *previous)
     //--------------------------------------------------------------------------
     {
-      return enclosing->find_top_context();
+      return enclosing->find_top_context(previous);
     }
 
     //--------------------------------------------------------------------------
