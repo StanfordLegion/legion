@@ -18,6 +18,7 @@
 #define REALM_OPENMP_THREADPOOL_H
 
 #include "realm/threads.h"
+#include "realm/logging.h"
 
 namespace Realm {
 
@@ -65,11 +66,17 @@ namespace Realm {
 
   class ThreadPool {
   public:
-    ThreadPool(int _num_workers);
+    ThreadPool(int _num_workers,
+	       const std::string& _name_prefix,
+	       int _numa_node, size_t _stack_size,
+	       CoreReservationSet& crs);
     ~ThreadPool(void);
 
     // associates the calling thread as the master of the threadpool
     void associate_as_master(void);
+
+    // returns the associated thread pool, optionally warning if none exists
+    static ThreadPool *get_associated_pool(bool warn_if_missing);
 
     // entry point for workers - does not return until thread pool is shut down
     void worker_entry(void);
@@ -90,6 +97,7 @@ namespace Realm {
     struct WorkerInfo {
       enum Status {
 	WORKER_MASTER,
+	WORKER_NOT_RUNNING,
 	WORKER_STARTING,
 	WORKER_IDLE,
 	WORKER_CLAIMED,
@@ -110,11 +118,15 @@ namespace Realm {
     };
       
     // returns the WorkerInfo (if any) associated with the caller (which
-    //  can be master or worker)
-    static WorkerInfo *get_worker_info(void);
+    //  can be master or worker) - optionally warns if this thread is not
+    //  associated with a threadpool
+    static WorkerInfo *get_worker_info(bool warn_if_missing);
+
+    // starts worker threads running if they weren't already
+    void start_worker_threads(void);
 
     // asks worker threads to shut down and waits for them to complete
-    void shutdown(void);
+    void stop_worker_threads(void);
 
     void claim_workers(int count, std::set<int>& worker_ids);
 
@@ -127,6 +139,8 @@ namespace Realm {
 
   protected:
     int num_workers;
+    bool workers_running;
+    std::vector<CoreReservation *> core_rsrvs;
     std::vector<Thread *> worker_threads;
     std::vector<WorkerInfo> worker_infos;
   };

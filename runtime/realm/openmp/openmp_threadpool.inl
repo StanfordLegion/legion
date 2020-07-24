@@ -20,6 +20,8 @@
 
 namespace Realm {
 
+  extern Logger log_omp;
+
   namespace ThreadLocal {
     extern REALM_THREAD_LOCAL ThreadPool::WorkerInfo *threadpool_workerinfo;
   };
@@ -28,9 +30,12 @@ namespace Realm {
   //
   // class ThreadPool
 
-  /*static*/ inline ThreadPool::WorkerInfo *ThreadPool::get_worker_info(void)
+  /*static*/ inline ThreadPool::WorkerInfo *ThreadPool::get_worker_info(bool warn_if_missing)
   {
-    return ThreadLocal::threadpool_workerinfo;
+    ThreadPool::WorkerInfo *info = ThreadLocal::threadpool_workerinfo;
+    if(REALM_UNLIKELY(!info && warn_if_missing))
+      log_omp.warning() << "OpenMP runtime call from non-OpenMP-enabled Realm processor!";
+    return info;
   }
 
 }; // namespace Realm

@@ -49,8 +49,6 @@ namespace Realm {
     , numa_node(_numa_node)
     , num_threads(_num_threads)
   {
-    pool = new ThreadPool(num_threads - 1);
-
     // master runs in a user threads if possible
     {
       CoreReservationParameters params;
@@ -63,59 +61,39 @@ namespace Realm {
 
       std::string name = stringbuilder() << "OMP" << numa_node << " proc " << _me << " (master)";
 
-      CoreReservation *rsrv = new CoreReservation(name, crs, params);
-      core_rsrvs.push_back(rsrv);
+      core_rsrv = new CoreReservation(name, crs, params);
 
 #ifdef REALM_USE_USER_THREADS
       if(!_force_kthreads) {
-	UserThreadTaskScheduler *sched = new OpenMPTaskScheduler<UserThreadTaskScheduler>(me, *rsrv, this);
+	UserThreadTaskScheduler *sched = new OpenMPTaskScheduler<UserThreadTaskScheduler>(me, *core_rsrv, this);
 	// no config settings we want to tweak yet
 	set_scheduler(sched);
       } else
 #endif
       {
-	KernelThreadTaskScheduler *sched = new OpenMPTaskScheduler<KernelThreadTaskScheduler>(me, *rsrv, this);
+	KernelThreadTaskScheduler *sched = new OpenMPTaskScheduler<KernelThreadTaskScheduler>(me, *core_rsrv, this);
 	sched->cfg_max_idle_workers = 3; // keep a few idle threads around
 	set_scheduler(sched);
       }
     }
 
-    // slaves run kernel threads because they never context switch
-    for(int i = 1; i < num_threads; i++) {
-      CoreReservationParameters params;
-      params.set_num_cores(1);
-      params.set_numa_domain(numa_node);
-      params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
-      params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
-      params.set_ldst_usage(params.CORE_USAGE_SHARED);
-      params.set_max_stack_size(_stack_size);
+    pool = new ThreadPool(num_threads - 1,
+			  stringbuilder() << "OMP" << numa_node << " proc " << _me,
+			  numa_node, _stack_size, crs);
 
-      std::string name = stringbuilder() << "OMP" << numa_node << " proc " << _me << " (slave " << i << ")";
-
-      CoreReservation *rsrv = new CoreReservation(name, crs, params);
-      core_rsrvs.push_back(rsrv);
-
-      // worker threads will be tracked by the threadpool
-      ThreadLaunchParameters tlp;
-      Thread::create_kernel_thread<ThreadPool, &ThreadPool::worker_entry>(pool,
-									  tlp,
-									  *rsrv);
-    }
+    // eagerly spin up worker threads
+    pool->start_worker_threads();
   }
 
   LocalOpenMPProcessor::~LocalOpenMPProcessor(void)
   {
-    for(std::vector<CoreReservation *>::const_iterator it = core_rsrvs.begin();
-	it != core_rsrvs.end();
-	++it)
-      delete *it;
-    core_rsrvs.clear();
+    delete core_rsrv;
   }
 
   void LocalOpenMPProcessor::shutdown(void)
   {
     log_omp.info() << "shutting down";
-    pool->shutdown();
+    pool->stop_worker_threads();
     delete pool;
 
     LocalTaskProcessor::shutdown();
