@@ -1842,11 +1842,8 @@ namespace Legion {
       RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
-      const RtEvent ready = 
-        region_node->perform_versioning_analysis(ctx.get_id(), context, 
-                                     &version_info, req.parent, user_mask, op);
-      if (ready.exists())
-        ready_events.insert(ready);
+      region_node->perform_versioning_analysis(ctx.get_id(), context, 
+                 &version_info, req.parent, user_mask, op, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -1912,9 +1909,9 @@ namespace Legion {
       // any aliasing of physical instances in the region requirements
       VersionInfo init_version_info;
       // Perform the version analysis and make it ready
-      const RtEvent eq_ready = 
-        top_node->perform_versioning_analysis(ctx.get_id(), context,
-               &init_version_info, req.region, user_mask, context->owner_task);
+      std::set<RtEvent> eq_ready;
+      top_node->perform_versioning_analysis(ctx.get_id(), context, 
+          &init_version_info,req.region,user_mask,context->owner_task,eq_ready);
       // Now get the top-views for all the physical instances
       std::vector<InstanceView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
@@ -1987,8 +1984,12 @@ namespace Legion {
           }
         }
       }
-      if (eq_ready.exists() && !eq_ready.has_triggered())
-        eq_ready.wait();
+      if (!eq_ready.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(eq_ready);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       // Iterate over the equivalence classes and initialize them
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         init_version_info.get_equivalence_sets();
@@ -17605,17 +17606,49 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    RtEvent RegionNode::perform_versioning_analysis(ContextID ctx,
-                                                    InnerContext *parent_ctx,
-                                                    VersionInfo *version_info,
-                                                    LogicalRegion upper_bound,
-                                                    const FieldMask &mask,
-                                                    Operation *op)
+    void RegionNode::perform_versioning_analysis(ContextID ctx,
+                                                 InnerContext *parent_ctx,
+                                                 VersionInfo *version_info,
+                                                 LogicalRegion upper_bound,
+                                                 const FieldMask &mask,
+                                                 Operation *op,
+                                                 std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      return manager.perform_versioning_analysis(parent_ctx, version_info, 
-                                                 this, mask, op);
+      manager.perform_versioning_analysis(parent_ctx, version_info, this, 
+                      row_source, mask, op->get_unique_op_id(), applied);
+    }
+    
+    //--------------------------------------------------------------------------
+    void RegionNode::compute_equivalence_sets(ContextID ctx, 
+                                              EqSetTracker *target,
+                                              IndexSpaceExpression *expr,
+                                              const FieldMask &mask,
+                                              AddressSpaceID source,
+                                              std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      FieldMask parent_traversal;
+      FieldMaskSet<PartitionNode> children_traversal;
+      manager.compute_equivalence_sets(target, mask, source, ready_events,
+                                       children_traversal, parent_traversal);
+      if (!!parent_traversal)
+      {
+#ifdef DEBUG_LEGION
+        assert(parent != NULL);
+#endif
+        parent->compute_equivalence_sets(ctx, target, expr, mask, 
+                                         source, ready_events);
+      }
+      if (!children_traversal.empty())
+      {
+        for (FieldMaskSet<PartitionNode>::const_iterator it = 
+              children_traversal.begin(); it != children_traversal.end(); it++)
+          it->first->compute_equivalence_sets(ctx, target, expr, mask, 
+                                              source, ready_events);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -18841,6 +18874,40 @@ namespace Legion {
                                           is_mutable, false/*local only*/);
       if (ready.exists())
         Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::compute_equivalence_sets(ContextID ctx,
+                                                EqSetTracker *target,
+                                                IndexSpaceExpression *expr,
+                                                const FieldMask &mask,
+                                                AddressSpaceID source,
+                                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      FieldMask parent_traversal, children_traversal;
+      manager.compute_equivalence_sets(target, mask, source, ready_events,
+                                       parent_traversal, children_traversal);
+      if (!!parent_traversal)
+        parent->compute_equivalence_sets(ctx, target, expr, mask,
+                                         source, ready_events);
+      if (!!children_traversal)
+      {
+        std::vector<LegionColor> interfering_children;
+        row_source->find_interfering_children(expr, interfering_children);
+#ifdef DEBUG_LEGION
+        assert(!interfering_children.empty());
+#endif
+        for (std::vector<LegionColor>::const_iterator it = 
+              interfering_children.begin(); it != 
+              interfering_children.end(); it++)
+        {
+          RegionNode *child = get_child(*it);
+          child->compute_equivalence_sets(ctx, target, expr, mask, 
+                                           source, ready_events);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

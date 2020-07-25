@@ -2068,14 +2068,14 @@ namespace Legion {
     };
 
     /**
-     * \class RayTracer
+     * \class EqSetTracker
      * This is an abstract class that provides an interface for
      * recording the equivalence sets that result from ray tracing
      * an equivalence set tree for a given index space expression.
      */
-    class RayTracer {
+    class EqSetTracker {
     public:
-      virtual ~RayTracer(void) { }
+      virtual ~EqSetTracker(void) { }
     public:
       virtual void record_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask) = 0;
@@ -2602,7 +2602,6 @@ namespace Legion {
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space,
                      AddressSpaceID logical_owner,
-                     IndexSpaceExpression *expr, 
                      RegionNode *region_node,
                      bool register_now, bool collective = false);
       EquivalenceSet(const EquivalenceSet &rhs);
@@ -2619,14 +2618,6 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
-    public:
-      void ray_trace_equivalence_sets(RayTracer *target,
-                                      IndexSpaceExpression *expr, 
-                                      FieldMask ray_mask,
-                                      AddressSpaceID source,
-                                      std::set<RtEvent> &ready_events);
-      void remove_update_guard(CopyFillGuard *guard);
-      void record_subset(EquivalenceSet *set, const FieldMask &mask);
     public:
       // Analysis methods
       void initialize_set(const RegionUsage &usage,
@@ -2681,16 +2672,12 @@ namespace Legion {
                       std::set<RtEvent> &deferral_events,
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
+      void remove_update_guard(CopyFillGuard *guard);
     protected:
       void check_for_migration(PhysicalAnalysis &analysis,
                                std::set<RtEvent> &applied_events);
-      void request_remote_subsets(const FieldMask &request_mask,
-                                  std::set<RtEvent> &applied_events);
     public:
-      static void handle_refinement(const void *args);
       static void handle_remote_references(const void *args);
-      static void handle_ray_trace(const void *args, Runtime *runtime);
-      static void handle_ray_trace_finish(const void *args);
       static void handle_make_owner(const void *args);
       static void handle_merge_or_forward(const void *args);
       static void handle_deferred_response(const void *args, Runtime *runtime);
@@ -2700,20 +2687,16 @@ namespace Legion {
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
-      static void handle_ray_trace_request(Deserializer &derez, 
-                            Runtime *runtime, AddressSpaceID source);
-      static void handle_ray_trace_response(Deserializer &derez, Runtime *rt);
       static void handle_migration(Deserializer &derez, 
                                    Runtime *runtime, AddressSpaceID source);
       static void handle_owner_update(Deserializer &derez, Runtime *rt);
     public:
-      IndexSpaceExpression *const set_expr;
-      RegionNode *const region_node; // can be NULL for intermediate nodes
-    protected:
-      AddressSpaceID logical_owner_space;
-      mutable LocalLock eq_lock;
+      RegionNode *const region_node;
+      IndexSpaceNode *const set_expr;
     protected:
       // This is the physical state of the equivalence set
+      mutable LocalLock                                 state_lock;
+      AddressSpaceID                                    logical_owner_space;
       LegionMap<LogicalView*,
         FieldMaskSet<IndexSpaceExpression> >::aligned   valid_instances;
       std::map<unsigned/*fidx*/,std::vector<std::pair<
@@ -2723,19 +2706,15 @@ namespace Legion {
         FieldMaskSet<IndexSpaceExpression> >::aligned   restricted_instances;
       FieldMaskSet<IndexSpaceExpression>                restricted_fields;
     protected:
-      // If we have sub sets then we track those here
-      // If this data structure is not empty, everything above is invalid
-      FieldMaskSet<EquivalenceSet>                      subsets;
-      // Set on the owner node for tracking the remote subset leases
-      LegionMap<AddressSpaceID,FieldMask>::aligned      remote_subsets;
       // This tracks the most recent copy-fill aggregator for each field
       FieldMaskSet<CopyFillGuard>                       update_guards;
-      // Which VersionManager objects on dfferent nodes are
-      // tracking this equivalence set and need to be invalidate
-      LegionMap<AddressSpaceID,FieldMaskSet<VersionManager> >::aligned
-                                                        tracking_managers;
       // Track whether we are in a collective state or not
       FieldMask                                         collective_state;
+    protected:
+      // Which VersionManager objects on dfferent nodes are
+      // tracking this equivalence set and need to be invalidate
+      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >::aligned
+                                                        tracking_managers;
     protected:
       // Uses these for determining when we should do migration
       // There is an implicit assumption here that equivalence sets
@@ -2759,7 +2738,7 @@ namespace Legion {
      * and we need to traverse them, but it's a cached starting
      * point that doesn't involve tracing the entire tree.
      */
-    class VersionManager : public RayTracer, 
+    class VersionManager : public EqSetTracker, 
                            public LegionHeapify<VersionManager> {
     public:
       static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
@@ -2789,17 +2768,33 @@ namespace Legion {
     public:
       void reset(void);
     public:
-      RtEvent perform_versioning_analysis(InnerContext *parent_ctx,
-                                          VersionInfo *version_info,
-                                          RegionNode *region_node,
-                                          const FieldMask &version_mask,
-                                          Operation *op);
+      void perform_versioning_analysis(InnerContext *parent_ctx,
+                                       VersionInfo *version_info,
+                                       RegionNode *region_node,
+                                       IndexSpaceExpression *expr,
+                                       const FieldMask &version_mask,
+                                       UniqueID op_uid,
+                                       std::set<RtEvent> &ready);
       virtual void record_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
       void finalize_equivalence_sets(RtUserEvent done_event);                           
       void invalidate_equivalence_sets(FieldMaskSet<EquivalenceSet> &invalid);
+    public:
+      // Call this one from a region node
+      void compute_equivalence_sets(EqSetTracker *target, FieldMask mask,
+                                    AddressSpaceID source,
+                                    std::set<RtEvent> &ready_events,
+                                    FieldMaskSet<PartitionNode> &children,
+                                    FieldMask &parent_traversal) const;
+      // Call this one from a partition node
+      void compute_equivalence_sets(EqSetTracker *target, 
+                                    const FieldMask &mask,
+                                    AddressSpaceID source,
+                                    std::set<RtEvent> &ready_events,
+                                    FieldMask &parent_traversal, 
+                                    FieldMask &children_traversal) const;
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
@@ -2818,6 +2813,14 @@ namespace Legion {
       FieldMaskSet<EquivalenceSet> pending_equivalence_sets;
       FieldMaskSet<VersionInfo> waiting_infos;
       LegionMap<RtUserEvent,FieldMask>::aligned equivalence_sets_ready;
+    protected:
+      // The fields for which this node has disjoint complete information
+      FieldMask disjoint_complete;
+      // Track which disjoint and complete children we have from this
+      // node for representing the refinement tree. Note we only track
+      // the names of the partitions here for region nodes. For partition
+      // nodes we know all the children are valid for the fields.
+      FieldMaskSet<PartitionNode> disjoint_complete_children;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator; 

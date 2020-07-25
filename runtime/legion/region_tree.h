@@ -2931,6 +2931,8 @@ namespace Legion {
       bool intersects_with(IndexPartNode *other, bool compute = true); 
       bool dominates(IndexSpaceNode *other);
       bool dominates(IndexPartNode *other);
+      void find_interfering_children(IndexSpaceExpression *expr,
+                                     std::vector<LegionColor> &colors);
     public:
       static void handle_disjointness_computation(const void *args, 
                                                   RegionTreeForest *forest);
@@ -3778,12 +3780,19 @@ namespace Legion {
                                          const FieldMask &mask);
 #endif
     public:
-      RtEvent perform_versioning_analysis(ContextID ctx,
-                                          InnerContext *parent_ctx,
-                                          VersionInfo *version_info,
-                                          LogicalRegion upper_bound,
-                                          const FieldMask &version_mask,
-                                          Operation *op);
+      void perform_versioning_analysis(ContextID ctx, 
+                                       InnerContext *parent_ctx,
+                                       VersionInfo *version_info,
+                                       LogicalRegion upper_bound,
+                                       const FieldMask &version_mask,
+                                       Operation *op,
+                                       std::set<RtEvent> &ready_events);
+      void compute_equivalence_sets(ContextID ctx,
+                                    EqSetTracker *target,
+                                    IndexSpaceExpression *expr,
+                                    const FieldMask &mask,
+                                    AddressSpaceID source,
+                                    std::set<RtEvent> &ready_events);
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
@@ -3877,6 +3886,13 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
+    public:
+      void compute_equivalence_sets(ContextID ctx,
+                                    EqSetTracker *target,
+                                    IndexSpaceExpression *expr,
+                                    const FieldMask &mask,
+                                    AddressSpaceID source,
+                                    std::set<RtEvent> &ready_events);
     public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 

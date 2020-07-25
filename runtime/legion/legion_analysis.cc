@@ -3639,6 +3639,7 @@ namespace Legion {
       users.push_back(close_user);
     }
 
+#ifdef NEWEQ
     /////////////////////////////////////////////////////////////
     // KDNode
     /////////////////////////////////////////////////////////////
@@ -3885,6 +3886,7 @@ namespace Legion {
       else // No changes were made
         return false;
     }
+#endif // NEWEQ
 
     /////////////////////////////////////////////////////////////
     // Copy Fill Guard
@@ -14366,9 +14368,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent VersionManager::perform_versioning_analysis(InnerContext *context,
+    void VersionManager::perform_versioning_analysis(InnerContext *context,
                              VersionInfo *version_info, RegionNode *region_node,
-                             const FieldMask &version_mask, Operation *op)
+                             IndexSpaceExpression *expr, 
+                             const FieldMask &version_mask, UniqueID op_uid,
+                             std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14418,12 +14422,11 @@ namespace Legion {
           remaining_mask -= equivalence_sets.get_valid_mask();
           // If we got all our fields then we are done
           if (!remaining_mask)
-            return RtEvent::NO_RT_EVENT;
+            return;
         }
       }
       // Retake the lock in exclusive mode and make sure we don't lose the race
       RtUserEvent compute_event;
-      std::set<RtEvent> wait_on;
       {
         FieldMask waiting_mask;
         AutoLock m_lock(manager_lock);
@@ -14436,7 +14439,7 @@ namespace Legion {
             const FieldMask overlap = remaining_mask & it->second;
             if (!overlap)
               continue;
-            wait_on.insert(it->first);
+            ready_events.insert(it->first);
             waiting_mask |= overlap;
           }
           if (!!waiting_mask)
@@ -14461,8 +14464,8 @@ namespace Legion {
           remaining_mask -= equivalence_sets.get_valid_mask();
           // If we got all our fields here and we're not waiting 
           // on any other computations then we're done
-          if (!remaining_mask && wait_on.empty())
-            return RtEvent::NO_RT_EVENT;
+          if (!remaining_mask && !waiting_mask)
+            return;
         }
         // If we still have remaining fields then we need to
         // do this computation ourselves
@@ -14470,7 +14473,7 @@ namespace Legion {
         {
           compute_event = Runtime::create_rt_user_event();
           equivalence_sets_ready[compute_event] = remaining_mask; 
-          wait_on.insert(compute_event);
+          ready_events.insert(compute_event);
           waiting_mask |= remaining_mask;
         }
 #ifdef DEBUG_LEGION
@@ -14482,21 +14485,18 @@ namespace Legion {
       }
       if (compute_event.exists())
       {
-        IndexSpaceExpression *expr = region_node->row_source; 
         RtEvent ready = context->compute_equivalence_sets(this, region_node, 
                               expr, remaining_mask, runtime->address_space);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
-          LgFinalizeEqSetsArgs args(this, compute_event, 
-                                    op->get_unique_op_id());
+          LgFinalizeEqSetsArgs args(this, compute_event, op_uid); 
           runtime->issue_runtime_meta_task(args, 
                              LG_LATENCY_DEFERRED_PRIORITY, ready);
         }
         else
           finalize_equivalence_sets(compute_event);
       }
-      return Runtime::merge_events(wait_on); 
     }
 
     //--------------------------------------------------------------------------
@@ -14649,6 +14649,127 @@ namespace Legion {
         if (!finder->second)
           equivalence_sets.erase(finder);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::compute_equivalence_sets(EqSetTracker *target,
+                                          FieldMask mask, AddressSpaceID source,
+                                          std::set<RtEvent> &ready_events,
+                                          FieldMaskSet<PartitionNode> &children,
+                                          FieldMask &parent_traversal) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(node->is_region());
+#endif
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+      if (!disjoint_complete)
+      {
+        // If we're not disjoint complete, keep going
+        parent_traversal = mask;
+        return;
+      }
+      parent_traversal = mask - disjoint_complete;
+      if (!!parent_traversal)
+      {
+        mask -= parent_traversal;
+        if (!mask)
+          return;
+      }
+      if (!disjoint_complete_children.empty())
+      {
+        const FieldMask children_overlap = mask & 
+          disjoint_complete_children.get_valid_mask();
+        if (!!children_overlap)
+        {
+          for (FieldMaskSet<PartitionNode>::const_iterator it = 
+                disjoint_complete_children.begin(); it !=
+                disjoint_complete_children.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            children.insert(it->first, overlap);
+            mask -= overlap;
+            if (!mask)
+              return;
+          }
+        }
+      }
+      // If we make it here then we should have equivalence sets for
+      // all these remaining fields
+#ifdef DEBUG_LEGION
+      assert(!equivalence_sets.empty());
+      assert(!(mask - equivalence_sets.get_valid_mask()));
+#endif
+      if (source != runtime->address_space)
+      {
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+        {
+          const FieldMask overlap = mask & it->second;
+          if (!overlap)
+            continue;
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(it->first->did);
+            rez.serialize(overlap);
+            rez.serialize(target);
+            rez.serialize(done);
+          }
+          runtime->send_equivalence_set_ray_trace_response(source, rez);
+          ready_events.insert(done);
+          mask -= overlap;
+          if (!mask)
+            return;
+        }
+      }
+      else
+      {
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+        {
+          const FieldMask overlap = mask & it->second;
+          if (!overlap)
+            continue;
+          target->record_equivalence_set(it->first, overlap);
+          mask -= overlap;
+          if (!mask)
+            return;
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(!mask);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::compute_equivalence_sets(EqSetTracker *target,
+                                            const FieldMask &mask, 
+                                            AddressSpaceID source,
+                                            std::set<RtEvent> &ready_events,
+                                            FieldMask &parent_traversal, 
+                                            FieldMask &children_traversal) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!node->is_region());
+      assert(node->as_partition_node()->row_source->is_disjoint());
+      assert(node->as_partition_node()->is_complete());
+#endif
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+      if (!!disjoint_complete)
+      {
+        children_traversal = disjoint_complete & mask;
+        if (!!children_traversal)
+          parent_traversal = mask - children_traversal;
+        else
+          parent_traversal = mask;
+      }
+      else
+        parent_traversal = mask;
     }
 
     //--------------------------------------------------------------------------

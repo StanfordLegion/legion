@@ -2812,26 +2812,6 @@ namespace Legion {
       // No need for the lock here since we're being cleaned up
       if (!local_field_infos.empty())
         local_field_infos.clear();
-      // Unregister ourselves from any tracking contexts that we might have
-      if (!tree_equivalence_sets.empty())
-      {
-        for (std::map<RegionTreeID,EquivalenceSet*>::const_iterator it = 
-              tree_equivalence_sets.begin(); it != 
-              tree_equivalence_sets.end(); it++)
-          if (it->second->remove_base_resource_ref(CONTEXT_REF))
-            delete it->second;
-        tree_equivalence_sets.clear();
-      }
-      if (!empty_equivalence_sets.empty())
-      {
-        for (std::map<std::pair<RegionTreeID,IndexSpaceExprID>,
-                                EquivalenceSet*>::const_iterator it = 
-              empty_equivalence_sets.begin(); it != 
-              empty_equivalence_sets.end(); it++)
-          if (it->second->remove_base_resource_ref(CONTEXT_REF))
-            delete it->second;
-        empty_equivalence_sets.clear();
-      }
       if (!fill_view_cache.empty())
       {
         for (std::list<FillView*>::const_iterator it = 
@@ -3626,104 +3606,35 @@ namespace Legion {
       return full_inner_context;
     }
 
-#ifdef NEWEQ
     //--------------------------------------------------------------------------
-    RtEvent InnerContext::compute_equivalence_sets(VersionManager *manager,
-                              RegionTreeID tree_id, IndexSpace handle,
-                              IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source)
+    RtEvent InnerContext::compute_equivalence_sets(EqSetTracker *target,
+                                 RegionNode *region, IndexSpaceExpression *expr,
+                                 const FieldMask &mask, AddressSpaceID source,
+                                 RegionTreeID tree_id)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(handle.exists());
-#endif
-      EquivalenceSet *root = NULL;
-      if (expr->is_empty())
+      // We know we are on a node now where the version information
+      // is up to date so we can call into the region tree to actually
+      // compute the equivalence sets for this expression
+      std::set<RtEvent> applied;
+      const ContextID ctx = get_context_id();
+      if (region == NULL)
       {
-        // Special case for empty expression
-        {
-          const std::pair<RegionTreeID,IndexSpaceExprID> 
-            key(tree_id, expr->expr_id);
-          AutoLock tree_lock(tree_set_lock);
-          // Check to see if we already have an empty equivalence set
-          // and if not make it
-          std::map<std::pair<RegionTreeID,IndexSpaceExprID>,
-                   EquivalenceSet*>::const_iterator finder = 
-                     empty_equivalence_sets.find(key);
-          if (finder == empty_equivalence_sets.end())
-          {
-            const AddressSpaceID local_space = runtime->address_space;
-            IndexSpaceNode *node = runtime->forest->get_node(handle);
-            root = new EquivalenceSet(runtime,
-              runtime->get_available_distributed_id(),
-              local_space, local_space, expr, node, true/*register now*/); 
-            empty_equivalence_sets[key] = root;
-            root->add_base_resource_ref(CONTEXT_REF);
-          }
-          else
-            root = finder->second;
-        }
-        // Now that we have the empty equivalence set, either record it
-        // or send it back to the source node for the response
-        if (source != runtime->address_space)
-        {
-          // Not local so we need to send a message
-          RtUserEvent recorded_event = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(root->did);
-            rez.serialize(mask);
-            rez.serialize(manager);
-            rez.serialize(recorded_event);
-          }
-          runtime->send_equivalence_set_ray_trace_response(source, rez);
-          return recorded_event;
-        }
-        else
-          manager->record_equivalence_set(root, mask);
-        return RtEvent::NO_RT_EVENT;
+#ifdef DEBUG_LEGION
+        assert(tree_id > 0);
+#endif
+        RegionNode *root = runtime->forest->get_tree(tree_id);
+        root->compute_equivalence_sets(ctx, target, expr, mask, source,applied);
       }
       else
-      {
-        AutoLock tree_lock(tree_set_lock,1,false/*exclusive*/);
-        std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder = 
-          tree_equivalence_sets.find(tree_id);
-        if (finder != tree_equivalence_sets.end())
-          root = finder->second;
-      }
-      if (root == NULL)
-      {
-        RegionNode *root_node = runtime->forest->get_tree(tree_id);
-        IndexSpaceExpression *root_expr = 
-          root_node->get_index_space_expression();
-        AutoLock tree_lock(tree_set_lock);
-        // See if we lost the race
-        std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder = 
-          tree_equivalence_sets.find(tree_id);
-        if (finder == tree_equivalence_sets.end())
-        {
-          // Didn't loose the race so we have to make the top-level
-          // equivalence set for this region tree
-          const AddressSpaceID local_space = runtime->address_space;
-          root = new EquivalenceSet(runtime, 
-              runtime->get_available_distributed_id(), local_space, local_space,
-              root_expr, root_node->row_source, true/*register now*/); 
-          tree_equivalence_sets[tree_id] = root;
-          root->add_base_resource_ref(CONTEXT_REF);
-        }
-        else
-          root = finder->second;
-      }
-#ifdef DEBUG_LEGION
-      assert(root != NULL);
-#endif
-      RtUserEvent ready = Runtime::create_rt_user_event();
-      root->ray_trace_equivalence_sets(manager, expr, mask,
-                                       handle, source, ready);
-      return ready;
+        region->compute_equivalence_sets(ctx, target, expr,mask,source,applied);
+      if (!applied.empty())
+        return Runtime::merge_events(applied);
+      else
+        return RtEvent::NO_RT_EVENT;
     } 
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     EquivalenceSet* InnerContext::find_or_create_top_equivalence_set(
                                                            RegionTreeID tree_id)
@@ -9284,32 +9195,33 @@ namespace Legion {
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-#ifdef NEWEQ
       DerezCheck z(derez);
       UniqueID context_uid;
       derez.deserialize(context_uid);
       // This should always be coming back to the owner node so there's no
       // need to defer this is at should always be here
       InnerContext *local_ctx = runtime->find_context(context_uid);
-      VersionManager *target_manager;
-      derez.deserialize(target_manager);
-      RegionTreeID tree_id;
-      derez.deserialize(tree_id);
+      EqSetTracker *target;
+      derez.deserialize(target);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      RegionNode *region = NULL;
+      if (handle.exists())
+        region = runtime->forest->get_node(handle);
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       FieldMask mask;
       derez.deserialize(mask);
-      IndexSpace handle;
-      derez.deserialize(handle);
+      RegionTreeID tree_id;
+      derez.deserialize(tree_id);
       AddressSpaceID origin;
       derez.deserialize(origin);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
 
-      const RtEvent done = local_ctx->compute_equivalence_sets(target_manager, 
-                                           tree_id, handle, expr, mask, origin);
+      const RtEvent done = local_ctx->compute_equivalence_sets(target, region, 
+                                                  expr, mask, origin, tree_id);
       Runtime::trigger_event(ready_event, done);
-#endif // NEWEQ
     }
 
     //--------------------------------------------------------------------------
@@ -9749,18 +9661,16 @@ namespace Legion {
       return NULL;
     }
 
-#ifdef NEWEQ
     //--------------------------------------------------------------------------
-    RtEvent TopLevelContext::compute_equivalence_sets(VersionManager *manager,
-                              RegionTreeID tree_id, IndexSpace handle, 
-                              IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source)
+    RtEvent TopLevelContext::compute_equivalence_sets(EqSetTracker *target,
+                              RegionNode *region, IndexSpaceExpression *expr,
+                              const FieldMask &mask, AddressSpaceID source,
+                              RegionTreeID tree_id)
     //--------------------------------------------------------------------------
     {
       assert(false);
       return RtEvent::NO_RT_EVENT;
     }
-#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     InnerContext* TopLevelContext::find_outermost_local_context(
@@ -18134,12 +18044,11 @@ namespace Legion {
       return parent_ctx;
     }
 
-#ifdef NEWEQ
     //--------------------------------------------------------------------------
-    RtEvent RemoteContext::compute_equivalence_sets(VersionManager *manager,
-                              RegionTreeID tree_id, IndexSpace handle,
-                              IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source)
+    RtEvent RemoteContext::compute_equivalence_sets(EqSetTracker *target,
+                              RegionNode *region, IndexSpaceExpression *expr,
+                              const FieldMask &mask, AddressSpaceID source,
+                              RegionTreeID tree_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18148,26 +18057,28 @@ namespace Legion {
 #endif
       // Send it to the owner space if we are the top-level context
       // otherwise we send it to the owner of the context
-      const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
+      const AddressSpaceID dest = runtime->get_runtime_owner(context_uid);
       RtUserEvent ready_event = Runtime::create_rt_user_event();
       // Send off a request to the owner node to handle it
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(context_uid);
-        rez.serialize(manager);
-        rez.serialize(tree_id);
-        expr->pack_expression(rez, target);
+        rez.serialize(target);
+        if (region != NULL)
+          rez.serialize(region->handle);
+        else
+          rez.serialize(LogicalRegion::NO_REGION);
+        expr->pack_expression(rez, dest);
         rez.serialize(mask);
-        rez.serialize(handle);
+        rez.serialize(tree_id);
         rez.serialize(source);
         rez.serialize(ready_event);
       }
       // Send it to the owner space 
-      runtime->send_compute_equivalence_sets_request(target, rez);
+      runtime->send_compute_equivalence_sets_request(dest, rez);
       return ready_event;
     }
-#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     InnerContext* RemoteContext::find_parent_physical_context(unsigned index,
