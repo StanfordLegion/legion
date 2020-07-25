@@ -1859,6 +1859,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfiler::handle_failed_instance_allocation(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      decrement_total_outstanding_requests(LEGION_PROF_INST, 2/*two requests*/);
+#else
+      decrement_total_outstanding_requests(2/*expecting two responses*/);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfiler::add_partition_request(
                                            Realm::ProfilingRequestSet &requests,
                                            Operation *op, DepPartOpKind part_op)

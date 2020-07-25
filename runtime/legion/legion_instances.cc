@@ -3496,6 +3496,10 @@ namespace Legion {
       // If we couldn't make it then we are done
       if (!instance.exists())
       {
+#ifndef LEGION_MALLOC_INSTANCES
+        if (runtime->profiler != NULL)
+          runtime->profiler->handle_failed_instance_allocation();
+#endif
         if (unsat_kind != NULL)
           *unsat_kind = LEGION_MEMORY_CONSTRAINT;
         if (unsat_index != NULL)

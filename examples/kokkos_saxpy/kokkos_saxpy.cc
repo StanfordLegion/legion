@@ -144,11 +144,28 @@ public:
     // only do half the child tasks with kokkos-kernels because we want to
     //  test application-supplied kernels too
     if((task->index_point[0] % 2) == 0) {
-      return KokkosBlas::dot(Kokkos::subview(x, std::make_pair(subspace.lo.x,
-							       subspace.hi.x + 1)),
-			     Kokkos::subview(y, std::make_pair(subspace.lo.x,
-							       subspace.hi.x + 1))
-			     );
+      // the KokkosBlas::dot implementation that returns a float directly
+      //  performs a fence on all execution spaces, which is not permitted by
+      //  default in Legion - see:
+      //     https://github.com/kokkos/kokkos-kernels/issues/757
+      //
+      // instead, use the variant that fills a (managed) view and explicitly
+      //  copy back to a host mirror
+      float result_host;
+      {
+	Kokkos::View<float,
+		     typename execution_space::memory_space> result("result");
+	KokkosBlas::dot(result,
+			Kokkos::subview(x, std::make_pair(subspace.lo.x,
+							  subspace.hi.x + 1)),
+			Kokkos::subview(y, std::make_pair(subspace.lo.x,
+							  subspace.hi.x + 1))
+			);
+	// can't use `kokkos_work_space` here because KokkosBlas::dot didn't
+	Kokkos::deep_copy(execution_space(), result_host, result);
+      }
+      execution_space().fence();
+      return result_host;
     }
 #endif
     Kokkos::RangePolicy<execution_space> range(runtime->get_executing_processor(ctx).kokkos_work_space(),
@@ -174,12 +191,14 @@ void top_level_task(const Task *task,
 {
   size_t num_elements = 32768;
   size_t num_pieces = 4;
+  int mixed_processors = 1;
 
   const InputArgs &command_args = Runtime::get_input_args();
 
   bool ok = Realm::CommandLineParser()
     .add_option_int("-n", num_elements)
     .add_option_int("-p", num_pieces)
+    .add_option_int("-mixed", mixed_processors)
     .parse_command_line(command_args.argc, (const char **)command_args.argv);
 
   if(!ok) {
@@ -237,7 +256,8 @@ void top_level_task(const Task *task,
 
     // prefer CPU variants here so that we try mixing and matching CPU
     //  and GPU tasks when both are available
-    itl.tag |= Legion::Mapping::DefaultMapper::PREFER_CPU_VARIANT;
+    if(mixed_processors)
+      itl.tag |= Legion::Mapping::DefaultMapper::PREFER_CPU_VARIANT;
 
     itl.add_region_requirement(RegionRequirement(lp_dist,
 						 0 /*IDENTITY PROJECTION*/,
