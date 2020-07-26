@@ -2064,6 +2064,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool TraceViewSet::has_refinements(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (ViewSet::const_iterator it = conditions.begin();
+           it != conditions.end(); ++it)
+        for (FieldMaskSet<EquivalenceSet>::const_iterator eit =
+             it->second.begin(); eit != it->second.end(); ++eit)
+          if (eit->first->has_refinements(eit->second))
+            return true;
+
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     bool TraceViewSet::empty(void) const
     //--------------------------------------------------------------------------
     {
@@ -2409,6 +2423,9 @@ namespace Legion {
 
       if (!pre_reductions.empty())
         return Replayable(false, "external reduction views");
+
+      if (pre.has_refinements() || post.has_refinements())
+        return Replayable(false, "found refined equivalence sets");
 
       TraceViewSet::FailedPrecondition condition;
       if (!post_reductions.subsumed_by(consumed_reductions, &condition))

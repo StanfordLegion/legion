@@ -523,6 +523,7 @@ namespace Legion {
                      FieldMask &non_dominated) const;
       bool subsumed_by(const TraceViewSet &set,
                        FailedPrecondition *condition = NULL) const;
+      bool has_refinements(void) const;
       bool empty(void) const;
     public:
       void dump(void) const;
