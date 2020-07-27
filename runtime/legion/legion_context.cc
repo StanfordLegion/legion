@@ -3608,31 +3608,31 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent InnerContext::compute_equivalence_sets(EqSetTracker *target,
-                                 RegionNode *region, IndexSpaceExpression *expr,
-                                 const FieldMask &mask, AddressSpaceID source,
-                                 RegionTreeID tree_id)
+               RegionNode *region, const FieldMask &mask, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // We know we are on a node now where the version information
       // is up to date so we can call into the region tree to actually
       // compute the equivalence sets for this expression
-      std::set<RtEvent> applied;
+      std::set<RtEvent> ready;
       const ContextID ctx = get_context_id();
-      if (region == NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(tree_id > 0);
-#endif
-        RegionNode *root = runtime->forest->get_tree(tree_id);
-        root->compute_equivalence_sets(ctx, target, expr, mask, source,applied);
-      }
-      else
-        region->compute_equivalence_sets(ctx, target, expr,mask,source,applied);
-      if (!applied.empty())
-        return Runtime::merge_events(applied);
+      region->compute_equivalence_sets(ctx, this, target, region->row_source,
+                                       mask, source, ready, false/*down only*/);
+      if (!ready.empty())
+        return Runtime::merge_events(ready);
       else
         return RtEvent::NO_RT_EVENT;
     } 
+
+    //--------------------------------------------------------------------------
+    RtEvent InnerContext::request_shard_version_data(EqSetTracker *tracker,
+                              RegionNode *region, const FieldMask &request_mask)
+    //--------------------------------------------------------------------------
+    {
+      // This should only ever be called in control replicated contexts
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
 
 #ifdef NEWEQ
     //--------------------------------------------------------------------------
@@ -9205,22 +9205,16 @@ namespace Legion {
       derez.deserialize(target);
       LogicalRegion handle;
       derez.deserialize(handle);
-      RegionNode *region = NULL;
-      if (handle.exists())
-        region = runtime->forest->get_node(handle);
-      IndexSpaceExpression *expr = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      RegionNode *region = runtime->forest->get_node(handle);
       FieldMask mask;
       derez.deserialize(mask);
-      RegionTreeID tree_id;
-      derez.deserialize(tree_id);
       AddressSpaceID origin;
       derez.deserialize(origin);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
 
-      const RtEvent done = local_ctx->compute_equivalence_sets(target, region, 
-                                                  expr, mask, origin, tree_id);
+      const RtEvent done = 
+        local_ctx->compute_equivalence_sets(target, region, mask, origin);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -9663,9 +9657,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent TopLevelContext::compute_equivalence_sets(EqSetTracker *target,
-                              RegionNode *region, IndexSpaceExpression *expr,
-                              const FieldMask &mask, AddressSpaceID source,
-                              RegionTreeID tree_id)
+               RegionNode *region, const FieldMask &mask, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -18046,9 +18038,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent RemoteContext::compute_equivalence_sets(EqSetTracker *target,
-                              RegionNode *region, IndexSpaceExpression *expr,
-                              const FieldMask &mask, AddressSpaceID source,
-                              RegionTreeID tree_id)
+               RegionNode *region, const FieldMask &mask, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18065,13 +18055,8 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(context_uid);
         rez.serialize(target);
-        if (region != NULL)
-          rez.serialize(region->handle);
-        else
-          rez.serialize(LogicalRegion::NO_REGION);
-        expr->pack_expression(rez, dest);
+        rez.serialize(region->handle);
         rez.serialize(mask);
-        rez.serialize(tree_id);
         rez.serialize(source);
         rez.serialize(ready_event);
       }

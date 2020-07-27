@@ -332,6 +332,7 @@ namespace Legion {
       LG_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       LG_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
       LG_DEFER_FIELD_INFOS_TASK_ID,
+      LG_DEFER_COMPUTE_EQ_SETS_TASK_ID,
       LG_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_DEFER_CHILD_TASK_ID,
@@ -468,6 +469,7 @@ namespace Legion {
         "Field Space Semantic Request",                           \
         "Field Semantic Request",                                 \
         "Defer Field Infos Request",                              \
+        "Defer Compute Equivalence Sets",                         \
         "Region Semantic Request",                                \
         "Partition Semantic Request",                             \
         "Defer Index Space Child Request",                        \
@@ -1602,6 +1604,7 @@ namespace Legion {
     class MergeCloseOp;
     class PostCloseOp;
     class VirtualCloseOp;
+    class RefinementOp;
     class AcquireOp;
     class ReleaseOp;
     class DynamicCollectiveOp;
@@ -1883,6 +1886,7 @@ namespace Legion {
     friend class Internal::MergeCloseOp;                    \
     friend class Internal::PostCloseOp;                     \
     friend class Internal::VirtualCloseOp;                  \
+    friend class Internal::RefinementOp;                    \
     friend class Internal::AcquireOp;                       \
     friend class Internal::ReleaseOp;                       \
     friend class Internal::PredicateImpl;                   \

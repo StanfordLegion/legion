@@ -21192,7 +21192,6 @@ namespace Legion {
     {
       EquivalenceSet::handle_subset_update(derez, this);
     }
-#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_ray_trace_request(Deserializer &derez,
@@ -21208,6 +21207,7 @@ namespace Legion {
     {
       EquivalenceSet::handle_ray_trace_response(derez, this);
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_migration(Deserializer &derez,
@@ -21304,12 +21304,14 @@ namespace Legion {
       PhysicalAnalysis::handle_remote_instances(derez, this);
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_invalidation(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       VersionManager::handle_invalidation(derez, this);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::handle_instance_request(Deserializer &derez, 
@@ -24895,6 +24897,8 @@ namespace Legion {
           return "Deletion Op";
         case CLOSE_OP_ALLOC:
           return "Close Op";
+        case REFINEMENT_OP_ALLOC:
+          return "Refinement Op";
         case DYNAMIC_COLLECTIVE_OP_ALLOC:
           return "Dynamic Collective Op";
         case FUTURE_PRED_OP_ALLOC:
@@ -27567,6 +27571,11 @@ namespace Legion {
             FieldSpaceNode::handle_defer_infos_request(args);
             break;
           }
+        case LG_DEFER_COMPUTE_EQ_SETS_TASK_ID:
+          {
+            RegionNode::handle_deferred_compute_equivalence_sets(args);
+            break;
+          }
         case LG_REGION_SEMANTIC_INFO_REQ_TASK_ID:
           {
             RegionNode::SemanticRequestArgs *req_args = 
@@ -27736,16 +27745,19 @@ namespace Legion {
             PhysicalTemplate::handle_delete_template(args);
             break;
           }
+#ifdef NEWEQ
         case LG_REFINEMENT_TASK_ID:
           {
             EquivalenceSet::handle_refinement(args);
             break;
           }
+#endif
         case LG_REMOTE_REF_TASK_ID:
           {
             EquivalenceSet::handle_remote_references(args);
             break;
           }
+#ifdef NEWEQ
         case LG_DEFER_RAY_TRACE_TASK_ID:
           {
             EquivalenceSet::handle_ray_trace(args, runtime);
@@ -27756,7 +27768,6 @@ namespace Legion {
             EquivalenceSet::handle_ray_trace_finish(args);
             break;
           }
-#ifdef NEWEQ
         case LG_DEFER_SUBSET_REQUEST_TASK_ID:
           {
             EquivalenceSet::handle_subset_request(args);

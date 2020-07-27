@@ -3572,9 +3572,7 @@ namespace Legion {
       void invalidate_current_state(ContextID ctx, bool users_only);
       void invalidate_deleted_state(ContextID ctx, 
                                     const FieldMask &deleted_mask);
-      bool invalidate_version_state(ContextID ctx);
       void invalidate_logical_states(void);
-      void invalidate_version_managers(void);
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual LegionColor get_color(void) const = 0;
@@ -3679,6 +3677,24 @@ namespace Legion {
         RegionNode *const proxy_this;
         const SemanticTag tag;
         const AddressSpaceID source;
+      };
+      struct DeferComputeEquivalenceSetArgs : 
+        public LgTaskArgs<DeferComputeEquivalenceSetArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_COMPUTE_EQ_SETS_TASK_ID;
+      public:
+        DeferComputeEquivalenceSetArgs(RegionNode *proxy, ContextID x,
+            InnerContext *c, EqSetTracker *t, IndexSpaceExpression *e,
+            const FieldMask &m, AddressSpaceID s);
+      public:
+        RegionNode *const proxy_this;
+        const ContextID ctx;
+        InnerContext *const context;
+        EqSetTracker *const target;
+        IndexSpaceExpression *const expr;
+        FieldMask *const mask;
+        const AddressSpaceID source;
+        const RtUserEvent ready;
       };
       class InvalidFunctor {
       public:
@@ -3788,11 +3804,19 @@ namespace Legion {
                                        Operation *op,
                                        std::set<RtEvent> &ready_events);
       void compute_equivalence_sets(ContextID ctx,
+                                    InnerContext *parent_ctx,
                                     EqSetTracker *target,
                                     IndexSpaceExpression *expr,
                                     const FieldMask &mask,
                                     AddressSpaceID source,
-                                    std::set<RtEvent> &ready_events);
+                                    std::set<RtEvent> &ready_events,
+                                    bool downward_only);
+      static void handle_deferred_compute_equivalence_sets(const void *args);
+      void invalidate_refinement(ContextID ctx,const FieldMask &mask,bool self);
+      void record_refinement(ContextID ctx, EquivalenceSet *set, 
+                             const FieldMask &mask);
+      void propagate_refinement(ContextID ctx, PartitionNode *child,
+                                const FieldMask &mask);
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
@@ -3888,11 +3912,16 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
     public:
       void compute_equivalence_sets(ContextID ctx,
+                                    InnerContext *context,
                                     EqSetTracker *target,
                                     IndexSpaceExpression *expr,
                                     const FieldMask &mask,
                                     AddressSpaceID source,
-                                    std::set<RtEvent> &ready_events);
+                                    std::set<RtEvent> &ready_events,
+                                    bool downward_only);
+      void invalidate_refinement(ContextID ctx, const FieldMask &mask);
+      void propagate_refinement(ContextID ctx, RegionNode *child,
+                                const FieldMask &mask);
     public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 

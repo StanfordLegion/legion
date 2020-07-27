@@ -1846,6 +1846,7 @@ namespace Legion {
                  &version_info, req.parent, user_mask, op, ready_events);
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     void RegionTreeForest::invalidate_versions(RegionTreeContext ctx, 
                                                LogicalRegion handle)
@@ -1882,6 +1883,7 @@ namespace Legion {
           delete it->second;
       }
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
@@ -16682,17 +16684,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeNode::invalidate_version_state(ContextID ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (!current_versions.has_entry(ctx))
-        return false;
-      VersionManager &manager = get_current_version_manager(ctx);
-      manager.reset();
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeNode::invalidate_logical_states(void)
     //--------------------------------------------------------------------------
     {
@@ -16703,17 +16694,6 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::invalidate_version_managers(void)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned ctx = 0; ctx < current_versions.max_entries(); ctx++)
-      {
-        if (current_versions.has_entry(ctx))
-          invalidate_version_state(ctx);
-      }
-    }
-    
     //--------------------------------------------------------------------------
     template<AllocationType ALLOC, bool RECORD, bool HAS_SKIP, bool TRACK_DOM>
     /*static*/ FieldMask RegionTreeNode::perform_dependence_checks(
@@ -17182,7 +17162,6 @@ namespace Legion {
       assert(currently_active);
       currently_active = false;
 #endif
-      invalidate_version_managers();
       if (parent == NULL)
         context->runtime->release_tree_instances(handle.get_tree_id());
       if (!partition_trackers.empty())
@@ -17617,37 +17596,151 @@ namespace Legion {
     {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.perform_versioning_analysis(parent_ctx, version_info, this, 
-                      row_source, mask, op->get_unique_op_id(), applied);
+        row_source, true/*expr covers*/, mask, op->get_unique_op_id(), applied);
     }
     
     //--------------------------------------------------------------------------
     void RegionNode::compute_equivalence_sets(ContextID ctx, 
+                                              InnerContext *context,
                                               EqSetTracker *target,
                                               IndexSpaceExpression *expr,
                                               const FieldMask &mask,
                                               AddressSpaceID source,
-                                              std::set<RtEvent> &ready_events)
+                                              std::set<RtEvent> &ready_events,
+                                              bool downward_only)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      FieldMask parent_traversal;
+      FieldMask parent_traversal, request_traversal;
       FieldMaskSet<PartitionNode> children_traversal;
       manager.compute_equivalence_sets(target, mask, source, ready_events,
-                                       children_traversal, parent_traversal);
+        children_traversal, parent_traversal, request_traversal, downward_only);
+      if (!!request_traversal)
+      {
+#ifdef DEBUG_LEGION
+        assert(downward_only);
+#endif
+        // This case should only occur in control replication contexts
+        // We expected to see valid data here, but it's not because it
+        // exists in a different shard, so we have to ask the context
+        // to move it in for us and then run the traversal
+        const RtEvent ready_event = 
+         context->request_shard_version_data(&manager, this, request_traversal);
+        if (ready_event.exists() && !ready_event.has_triggered())
+        {
+          // Defer this computation until the version manager data is ready
+          DeferComputeEquivalenceSetArgs args(this, ctx, context, target, expr,
+                                              request_traversal, source);
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_DEFERRED_PRIORITY, ready_event);
+          ready_events.insert(args.ready);
+        }
+        else
+          compute_equivalence_sets(ctx, context, target, expr, 
+              request_traversal, source, ready_events, true/*downward only*/);
+      }
       if (!!parent_traversal)
       {
 #ifdef DEBUG_LEGION
         assert(parent != NULL);
+        assert(!downward_only);
 #endif
-        parent->compute_equivalence_sets(ctx, target, expr, mask, 
-                                         source, ready_events);
+        parent->compute_equivalence_sets(ctx, context, target, expr, 
+            parent_traversal, source, ready_events, false/*downward only*/);
       }
       if (!children_traversal.empty())
       {
         for (FieldMaskSet<PartitionNode>::const_iterator it = 
               children_traversal.begin(); it != children_traversal.end(); it++)
-          it->first->compute_equivalence_sets(ctx, target, expr, mask, 
-                                              source, ready_events);
+          it->first->compute_equivalence_sets(ctx, context, target, expr, 
+                it->second, source, ready_events, true/*downward only*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RegionNode::DeferComputeEquivalenceSetArgs::DeferComputeEquivalenceSetArgs(
+            RegionNode *proxy, ContextID x, InnerContext *c, EqSetTracker *t, 
+            IndexSpaceExpression *e, const FieldMask &m, AddressSpaceID s)
+      : LgTaskArgs<DeferComputeEquivalenceSetArgs>(implicit_provenance),
+        proxy_this(proxy), ctx(x), context(c), target(t), expr(e),
+        mask(new FieldMask(m)), source(s),ready(Runtime::create_rt_user_event())
+    //--------------------------------------------------------------------------
+    {
+      expr->add_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RegionNode::handle_deferred_compute_equivalence_sets(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferComputeEquivalenceSetArgs *dargs = 
+        (const DeferComputeEquivalenceSetArgs*)args;
+      std::set<RtEvent> ready_events;
+      dargs->proxy_this->compute_equivalence_sets(dargs->ctx, dargs->context,
+          dargs->target, dargs->expr, *(dargs->mask), dargs->source, 
+          ready_events, true/*downward only*/);
+      if (!ready_events.empty())
+        Runtime::trigger_event(dargs->ready, 
+            Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(dargs->ready);
+      delete dargs->mask;
+      if (dargs->expr->remove_expression_reference())
+        delete dargs->expr;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::invalidate_refinement(ContextID ctx, 
+                                           const FieldMask &mask, bool self)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      FieldMaskSet<RegionTreeNode> to_traverse;
+      manager.invalidate_refinement(mask, self, to_traverse);
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+            to_traverse.begin(); it != to_traverse.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!it->first->is_region());
+#endif
+        it->first->as_partition_node()->invalidate_refinement(ctx, it->second);
+        if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+          delete it->first;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::record_refinement(ContextID ctx, EquivalenceSet *set,
+                                       const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      FieldMask parent_mask;
+      manager.record_refinement(set, mask, parent_mask);
+      if (!!parent_mask)
+      {
+#ifdef DEBUG_LEGION
+        assert(parent != NULL);
+#endif
+        parent->propagate_refinement(ctx, this, parent_mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::propagate_refinement(ContextID ctx, PartitionNode *child,
+                                          const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      FieldMask parent_mask;
+      manager.propagate_refinement(child, mask, parent_mask);
+      if (!!parent_mask)
+      {
+#ifdef DEBUG_LEGION
+        assert(parent != NULL);
+#endif
+        parent->propagate_refinement(ctx, this, parent_mask);
       }
     }
 
@@ -18419,7 +18512,6 @@ namespace Legion {
       currently_active = false;
 #endif
       parent->remove_child(row_source->color);
-      invalidate_version_managers();
       // Remove gc references on all of our child nodes
       // We should not need a lock at this point since nobody else should
       // be modifying these data structures at this point
@@ -18878,21 +18970,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PartitionNode::compute_equivalence_sets(ContextID ctx,
+                                                InnerContext *context,
                                                 EqSetTracker *target,
                                                 IndexSpaceExpression *expr,
                                                 const FieldMask &mask,
                                                 AddressSpaceID source,
-                                                std::set<RtEvent> &ready_events)
+                                                std::set<RtEvent> &ready_events,
+                                                bool downward_only)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      FieldMask parent_traversal, children_traversal;
-      manager.compute_equivalence_sets(target, mask, source, ready_events,
-                                       parent_traversal, children_traversal);
-      if (!!parent_traversal)
-        parent->compute_equivalence_sets(ctx, target, expr, mask,
-                                         source, ready_events);
-      if (!!children_traversal)
+      if (downward_only)
       {
         std::vector<LegionColor> interfering_children;
         row_source->find_interfering_children(expr, interfering_children);
@@ -18904,10 +18992,70 @@ namespace Legion {
               interfering_children.end(); it++)
         {
           RegionNode *child = get_child(*it);
-          child->compute_equivalence_sets(ctx, target, expr, mask, 
-                                           source, ready_events);
+          child->compute_equivalence_sets(ctx, context, target, expr, mask, 
+                              source, ready_events, true/*downward only*/);
         }
       }
+      else
+      {
+        FieldMask parent_traversal, children_traversal;
+        manager.compute_equivalence_sets(target, mask, source, ready_events,
+                                       parent_traversal, children_traversal);
+#ifdef DEBUG_LEGION
+        assert((parent_traversal | children_traversal) == mask);
+#endif
+        if (!!parent_traversal)
+          parent->compute_equivalence_sets(ctx, context, target, expr, 
+              parent_traversal, source, ready_events, false/*downward only*/);
+        if (!!children_traversal)
+        {
+          std::vector<LegionColor> interfering_children;
+          row_source->find_interfering_children(expr, interfering_children);
+#ifdef DEBUG_LEGION
+          assert(!interfering_children.empty());
+#endif
+          for (std::vector<LegionColor>::const_iterator it = 
+                interfering_children.begin(); it != 
+                interfering_children.end(); it++)
+          {
+            RegionNode *child = get_child(*it);
+            child->compute_equivalence_sets(ctx, context, target, expr, 
+               children_traversal, source, ready_events, true/*downward only*/);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::invalidate_refinement(ContextID ctx, 
+                                              const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      FieldMaskSet<RegionTreeNode> to_traverse;
+      manager.invalidate_refinement(mask, true/*delete self*/, to_traverse);
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+            to_traverse.begin(); it != to_traverse.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->first->is_region());
+#endif
+        it->first->as_region_node()->invalidate_refinement(ctx,it->second,true);
+        if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+          delete it->first;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::propagate_refinement(ContextID ctx, RegionNode *child, 
+                                             const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      FieldMask parent_mask;
+      manager.propagate_refinement(child, mask, parent_mask);
+      if (!!parent_mask)
+        parent->propagate_refinement(ctx, this, parent_mask);
     }
 
     //--------------------------------------------------------------------------

@@ -52,6 +52,7 @@ namespace Legion {
         POST_CLOSE_OP_KIND,
         VIRTUAL_CLOSE_OP_KIND,
         RETURN_CLOSE_OP_KIND,
+        REFINEMENT_OP_KIND,
         ACQUIRE_OP_KIND,
         RELEASE_OP_KIND,
         DYNAMIC_COLLECTIVE_OP_KIND,
@@ -87,6 +88,7 @@ namespace Legion {
         "Post Close",               \
         "Virtual Close",            \
         "Return Close",             \
+        "Refinement",               \
         "Acquire",                  \
         "Release",                  \
         "Dynamic Collective",       \
@@ -1938,6 +1940,34 @@ namespace Legion {
     protected:
       std::set<RtEvent> map_applied_conditions;
       unsigned parent_idx;
+    };
+
+    /**
+     * \class RefinementOp
+     * A refinement operation is an internal operation that 
+     * is used to update the equivalence sets being used to
+     * represent logical regions.
+     */
+    class RefinementOp : public InternalOp {
+    public:
+      static const AllocationType alloc_type = REFINEMENT_OP_ALLOC;
+    public:
+      RefinementOp(Runtime *runtime);
+      RefinementOp(const RefinementOp &rhs);
+      virtual ~RefinementOp(void);
+    public:
+      RefinementOp& operator=(const RefinementOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+    protected:
+      FieldMaskSet<RegionNode> to_refine;
+      FieldMaskSet<PartitionNode> make_from;
     };
 
     /**

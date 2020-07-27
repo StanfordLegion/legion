@@ -892,9 +892,9 @@ namespace Legion {
       virtual void compute_task_tree_coordinates(
           std::vector<std::pair<size_t,DomainPoint> > &coordinates);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
-                      RegionNode *region, IndexSpaceExpression *expr,
-                      const FieldMask &mask, AddressSpaceID source,
-                      RegionTreeID tree_id = 0/*needed if region == NULL*/);
+              RegionNode *region, const FieldMask &mask, AddressSpaceID source);
+      virtual RtEvent request_shard_version_data(EqSetTracker *target,
+                      RegionNode *region, const FieldMask &request_mask);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1454,9 +1454,7 @@ namespace Legion {
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
-                      RegionNode *region, IndexSpaceExpression *expr,
-                      const FieldMask &mask, AddressSpaceID source,
-                      RegionTreeID tree_id = 0/*needed if region == NULL*/);
+              RegionNode *region, const FieldMask &mask, AddressSpaceID source);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<unsigned>                dummy_indexes;
@@ -1718,9 +1716,9 @@ namespace Legion {
       virtual void invalidate_region_tree_contexts(void);
     public:
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
-                      RegionNode *region, IndexSpaceExpression *expr,
-                      const FieldMask &mask, AddressSpaceID source,
-                      RegionTreeID tree_id = 0/*needed if region == NULL*/);
+              RegionNode *region, const FieldMask &mask, AddressSpaceID source);
+      virtual RtEvent request_shard_version_data(EqSetTracker *target,
+                      RegionNode *region, const FieldMask &request_mask);
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 
                                             TypeTag type_tag);
@@ -2308,9 +2306,7 @@ namespace Legion {
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
-                      RegionNode *region, IndexSpaceExpression *expr,
-                      const FieldMask &mask, AddressSpaceID source,
-                      RegionTreeID tree_id = 0/*needed if region == NULL*/);
+              RegionNode *region, const FieldMask &mask, AddressSpaceID source);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                   LogicalRegion parent);
       virtual void record_using_physical_context(LogicalRegion handle);

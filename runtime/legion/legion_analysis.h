@@ -2673,6 +2673,8 @@ namespace Legion {
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
       void remove_update_guard(CopyFillGuard *guard);
+      void record_tracker(EqSetTracker *tracker, const FieldMask &mask);
+      void remove_tracker(EqSetTracker *tracker, const FieldMask &mask);
     protected:
       void check_for_migration(PhysicalAnalysis &analysis,
                                std::set<RtEvent> &applied_events);
@@ -2705,16 +2707,15 @@ namespace Legion {
       LegionMap<InstanceView*,
         FieldMaskSet<IndexSpaceExpression> >::aligned   restricted_instances;
       FieldMaskSet<IndexSpaceExpression>                restricted_fields;
-    protected:
       // This tracks the most recent copy-fill aggregator for each field
       FieldMaskSet<CopyFillGuard>                       update_guards;
+    protected:
+      // These next two fields are valid on all nodes
       // Track whether we are in a collective state or not
       FieldMask                                         collective_state;
-    protected:
-      // Which VersionManager objects on dfferent nodes are
-      // tracking this equivalence set and need to be invalidate
-      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >::aligned
-                                                        tracking_managers;
+      // Which VersionManager objects on this node are
+      // tracking this equivalence set and need to be invalidated
+      FieldMaskSet<EqSetTracker>                        tracking_managers;
     protected:
       // Uses these for determining when we should do migration
       // There is an implicit assumption here that equivalence sets
@@ -2755,6 +2756,19 @@ namespace Legion {
         const RtUserEvent compute;
       };
     public:
+      struct WaitingVersionInfo {
+      public:
+        WaitingVersionInfo(VersionInfo *info, const FieldMask &m,
+                           IndexSpaceExpression *e, bool covers)
+          : version_info(info), waiting_mask(m), expr(e), expr_covers(covers) 
+        { }
+      public:
+        VersionInfo *version_info;
+        FieldMask waiting_mask;
+        IndexSpaceExpression *expr;
+        bool expr_covers;
+      };
+    public:
       VersionManager(RegionTreeNode *node, ContextID ctx); 
       VersionManager(const VersionManager &manager);
       virtual ~VersionManager(void);
@@ -2766,12 +2780,11 @@ namespace Legion {
       inline const FieldMask& get_version_mask(void) const
         { return equivalence_sets.get_valid_mask(); }
     public:
-      void reset(void);
-    public:
       void perform_versioning_analysis(InnerContext *parent_ctx,
                                        VersionInfo *version_info,
                                        RegionNode *region_node,
                                        IndexSpaceExpression *expr,
+                                       const bool expr_covers,
                                        const FieldMask &version_mask,
                                        UniqueID op_uid,
                                        std::set<RtEvent> &ready);
@@ -2780,15 +2793,19 @@ namespace Legion {
       virtual void record_pending_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
       void finalize_equivalence_sets(RtUserEvent done_event);                           
-      void invalidate_equivalence_sets(FieldMaskSet<EquivalenceSet> &invalid);
     public:
-      // Call this one from a region node
+      // Call these from region nodes
       void compute_equivalence_sets(EqSetTracker *target, FieldMask mask,
                                     AddressSpaceID source,
                                     std::set<RtEvent> &ready_events,
                                     FieldMaskSet<PartitionNode> &children,
-                                    FieldMask &parent_traversal) const;
-      // Call this one from a partition node
+                                    FieldMask &parent_traversal,
+                                    FieldMask &request_traversal,
+                                    bool downward_only) const;
+      void record_refinement(EquivalenceSet *set, const FieldMask &mask,
+                             FieldMask &parent_mask);
+    public:
+      // Call these from partition nodes
       void compute_equivalence_sets(EqSetTracker *target, 
                                     const FieldMask &mask,
                                     AddressSpaceID source,
@@ -2796,12 +2813,17 @@ namespace Legion {
                                     FieldMask &parent_traversal, 
                                     FieldMask &children_traversal) const;
     public:
+      // Call these from either type of region tree node
+      void propagate_refinement(RegionTreeNode *child, 
+              const FieldMask &child_mask, FieldMask &parent_mask);
+      void invalidate_refinement(const FieldMask &mask, bool invalidate_self,
+              FieldMaskSet<RegionTreeNode> &to_invalidate);
+    public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
                                 TreeStateLogger *logger);
     public:
       static void handle_finalize_eq_sets(const void *args);
-      static void handle_invalidation(Deserializer &derez, Runtime *runtime);
     public:
       const ContextID ctx;
       RegionTreeNode *const node;
@@ -2811,16 +2833,17 @@ namespace Legion {
     protected: 
       FieldMaskSet<EquivalenceSet> equivalence_sets;
       FieldMaskSet<EquivalenceSet> pending_equivalence_sets;
-      FieldMaskSet<VersionInfo> waiting_infos;
+      LegionList<WaitingVersionInfo>::aligned waiting_infos;
       LegionMap<RtUserEvent,FieldMask>::aligned equivalence_sets_ready;
     protected:
       // The fields for which this node has disjoint complete information
       FieldMask disjoint_complete;
       // Track which disjoint and complete children we have from this
-      // node for representing the refinement tree. Note we only track
-      // the names of the partitions here for region nodes. For partition
-      // nodes we know all the children are valid for the fields.
-      FieldMaskSet<PartitionNode> disjoint_complete_children;
+      // node for representing the refinement tree. Note that if this
+      // context is control replicated this set might not be complete
+      // for partition nodes, Some sub-region nodes might only exist
+      // in contexts on remote shards.
+      FieldMaskSet<RegionTreeNode> disjoint_complete_children;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator; 
@@ -3015,27 +3038,6 @@ namespace Legion {
     protected:
       const ContextID ctx;
       const FieldMask &deletion_mask;
-    };
-
-    /**
-     * \class VersioningInvalidator
-     * A class for reseting the versioning managers for 
-     * a deleted region (sub)-tree so that version states
-     * and the things they point to can be cleaned up
-     * by the garbage collector. The better long term
-     * answer is to have individual contexts do this.
-     */
-    class VersioningInvalidator : public NodeTraverser {
-    public:
-      VersioningInvalidator(void);
-      VersioningInvalidator(RegionTreeContext ctx);
-    public:
-      virtual bool visit_only_valid(void) const { return true; }
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    protected:
-      const ContextID ctx;
-      const bool invalidate_all;
     };
 
   }; // namespace Internal 
