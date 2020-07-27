@@ -161,7 +161,7 @@ namespace Realm {
     size_t total_splits;
 
     PieceSplitNode() : low_child(0), high_child(0), total_splits(0) {}
-    ~PieceSplitNode() { delete low_child; delete high_child; }
+    ~PieceSplitNode() { if (low_child) delete low_child; if (high_child) delete high_child; }
 
     template <int N>
     static PieceSplitNode<T> *compute_split(const std::vector<InstanceLayoutPiece<N,T> *>& pieces,
