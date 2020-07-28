@@ -374,6 +374,16 @@ extern "C" {
   }
 
   REALM_PUBLIC_API
+  cudaError_t cudaMallocHost(void **ptr, size_t size)
+  {
+    get_gpu_or_die("cudaMallocHost");
+    CUresult ret = cuMemAllocHost(ptr, size);
+    if (ret == CUDA_SUCCESS) return cudaSuccess;
+    assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
+    return cudaErrorMemoryAllocation;
+  }
+
+  REALM_PUBLIC_API
   cudaError_t cudaHostAlloc(void **ptr, size_t size, unsigned int flags)
   {
     get_gpu_or_die("cudaHostAlloc");
@@ -809,8 +819,14 @@ extern "C" {
     GET_FUNC_ATTR(cacheModeCA, CACHE_MODE_CA);
     GET_FUNC_ATTR(constSizeBytes, CONST_SIZE_BYTES);
     GET_FUNC_ATTR(localSizeBytes, LOCAL_SIZE_BYTES);
+#if CUDA_VERSION >= 9000
+    GET_FUNC_ATTR(maxDynamicSharedSizeBytes, MAX_DYNAMIC_SHARED_SIZE_BYTES);
+#endif
     GET_FUNC_ATTR(maxThreadsPerBlock, MAX_THREADS_PER_BLOCK);
     GET_FUNC_ATTR(numRegs, NUM_REGS);
+#if CUDA_VERSION >= 9000
+    GET_FUNC_ATTR(preferredShmemCarveout, PREFERRED_SHARED_MEMORY_CARVEOUT);
+#endif
     GET_FUNC_ATTR(ptxVersion, PTX_VERSION);
     GET_FUNC_ATTR(sharedSizeBytes, SHARED_SIZE_BYTES);
 #undef GET_FUNC_ATTR
