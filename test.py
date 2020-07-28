@@ -467,6 +467,19 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, ti
         cwd=pennant_dir,
         timelimit=timelimit)
 
+    # HTR
+    # Contact: Mario Di Renzo <direnzo.mario1@gmail.com>
+    htr_dir = os.path.join(tmp_dir, 'htr')
+    cmd(['git', 'clone', '-b', 'Develop', 'git@gitlab.com:mario.direnzo/Prometeo.git', htr_dir])
+    htr_env = dict(list(env.items()) + [
+        ('LEGION_DIR', root_dir),
+        ('LD_LIBRARY_PATH', os.path.join(root_dir, 'bindings', 'regent')),
+        ('HTR_DIR', htr_dir),
+        ('CC', 'gcc'),
+    ])
+    cmd(['python3', os.path.join(htr_dir, 'unitTests', 'testAll.py')], env=htr_env)
+
+
 def run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     build_dir = os.path.join(tmp_dir, 'build')
     args = ['ctest', '-j', str(thread_count), '--output-on-failure']
