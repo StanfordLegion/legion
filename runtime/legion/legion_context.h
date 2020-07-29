@@ -88,7 +88,7 @@ namespace Legion {
       virtual bool attempt_children_complete(void) = 0;
       virtual bool attempt_children_commit(void) = 0;
       virtual void inline_child_task(TaskOp *child) = 0;
-      virtual VariantImpl* select_inline_variant(TaskOp *child) const = 0;
+      virtual VariantImpl* select_inline_variant(TaskOp *child) = 0;
       virtual bool is_leaf_context(void) const;
       virtual bool is_inner_context(void) const;
 #ifdef LEGION_USE_LIBDL
@@ -896,7 +896,7 @@ namespace Legion {
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
-      virtual VariantImpl* select_inline_variant(TaskOp *child) const;
+      virtual VariantImpl* select_inline_variant(TaskOp *child);
       virtual void handle_registration_callback_effects(RtEvent effects);
       virtual void analyze_free_local_fields(FieldSpace handle,
                                   const std::vector<FieldID> &local_to_free,
@@ -2392,7 +2392,7 @@ namespace Legion {
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
-      virtual VariantImpl* select_inline_variant(TaskOp *child) const;
+      virtual VariantImpl* select_inline_variant(TaskOp *child);
       virtual void handle_registration_callback_effects(RtEvent effects);
       virtual bool is_leaf_context(void) const;
     public:
@@ -2778,7 +2778,7 @@ namespace Legion {
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
-      virtual VariantImpl* select_inline_variant(TaskOp *child) const;
+      virtual VariantImpl* select_inline_variant(TaskOp *child);
       virtual void handle_registration_callback_effects(RtEvent effects);
     public:
       // Interface to operations performed by a context
