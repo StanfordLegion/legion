@@ -1861,14 +1861,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::compute_parent_indexes(void)
+    void TaskOp::compute_parent_indexes(TaskContext *alt_context/*= NULL*/)
     //--------------------------------------------------------------------------
     {
       parent_req_indexes.resize(regions.size());
+      TaskContext *use_ctx = (alt_context == NULL) ? parent_ctx : alt_context;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        int parent_index = 
-          parent_ctx->find_parent_region_req(regions[idx]);
+        int parent_index = use_ctx->find_parent_region_req(regions[idx]);
         if (parent_index < 0)
           REPORT_LEGION_ERROR(ERROR_PARENT_TASK_TASK,
                            "Parent task %s (ID %lld) of task %s "
@@ -1876,8 +1876,8 @@ namespace Legion {
                            "requirement for region "
                            "(%x,%x,%x) as a parent of child task's "
                            "region requirement index %d",
-                           parent_ctx->get_task_name(), 
-                           parent_ctx->get_unique_id(),
+                           use_ctx->get_task_name(), 
+                           use_ctx->get_unique_id(),
                            get_task_name(), get_unique_id(),
                            regions[idx].parent.index_space.id,
                            regions[idx].parent.field_space.id, 
