@@ -535,8 +535,6 @@ namespace Legion {
       void clone_requirement(unsigned idx, RegionRequirement &target);
       int find_parent_region_req(const RegionRequirement &req, 
                                  bool check_privilege = true);
-      unsigned find_parent_region(unsigned idx, TaskOp *task);
-      unsigned find_parent_index_region(unsigned idx, TaskOp *task);
       LegionErrorType check_privilege(const IndexSpaceRequirement &req) const;
       LegionErrorType check_privilege(const RegionRequirement &req, 
                                       FieldID &bad_field, int &bad_index, 
