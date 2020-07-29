@@ -36,7 +36,7 @@ namespace Realm {
   // a code implementation that handles LLVM IR - text only right now, but the plan
   //  is to support binary here too
 
-  class LLVMIRImplementation : public CodeImplementation {
+  class REALM_PUBLIC_API LLVMIRImplementation : public CodeImplementation {
   public:
     LLVMIRImplementation(const void *irdata, size_t irlen, const std::string& _entry_symbol);
 

@@ -82,11 +82,12 @@ namespace Realm {
   class IndirectionInfo;
 
   template <int N, typename T = int>
-  class CopyIndirection {
+  class REALM_PUBLIC_API CopyIndirection {
   public:
     class Base {
     public:
       virtual ~Base(void) {}
+      REALM_INTERNAL_API_EXTERNAL_LINKAGE
       virtual IndirectionInfo *create_info(const IndexSpace<N,T>& is) const = 0;
     };
 
@@ -102,6 +103,7 @@ namespace Realm {
       std::vector<IndexSpace<N2,T2> > spaces;
       std::vector<RegionInstance> insts;
 
+      REALM_INTERNAL_API_EXTERNAL_LINKAGE
       virtual IndirectionInfo *create_info(const IndexSpace<N,T>& is) const;
     };
 
@@ -119,6 +121,7 @@ namespace Realm {
       std::vector<IndexSpace<N2,T2> > spaces;
       std::vector<RegionInstance> insts;
 
+      REALM_INTERNAL_API_EXTERNAL_LINKAGE
       virtual IndirectionInfo *create_info(const IndexSpace<N,T>& is) const;
     };
   };
@@ -140,7 +143,7 @@ namespace Realm {
   // application code may directly manipulate the bounding rectangle - this will be common for structured
   //  index spaces
   template <int N, typename T>
-  struct IndexSpace {
+  struct REALM_PUBLIC_API IndexSpace {
     Rect<N,T> bounds;
     SparsityMap<N,T> sparsity;
 
@@ -526,6 +529,7 @@ namespace Realm {
   };
 
   template <int N, typename T>
+  REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const IndexSpace<N,T>& p);
 
   // a type-erased IndexSpace that can be used to avoid template explosion
@@ -533,7 +537,7 @@ namespace Realm {
   //  performance-critical code
   class IndexSpaceGenericImpl;
 
-  class IndexSpaceGeneric {
+  class REALM_PUBLIC_API IndexSpaceGeneric {
   public:
     IndexSpaceGeneric();
     IndexSpaceGeneric(const IndexSpaceGeneric& copy_from);
@@ -645,7 +649,7 @@ namespace Realm {
 
   // an IndexSpaceIterator iterates over the valid points in an IndexSpace, rectangles at a time
   template <int N, typename T>
-  struct IndexSpaceIterator {
+  struct REALM_PUBLIC_API IndexSpaceIterator {
     Rect<N,T> rect;
     IndexSpace<N,T> space;
     Rect<N,T> restriction;

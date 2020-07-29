@@ -74,6 +74,8 @@ variables:
 .release: &release
   DEBUG: "0"
 
+.maxdim4: &maxdim4
+  MAX_DIM: "4"      # test up to 4-D (needed for HTR external test)
 .maxdim5: &maxdim5
   MAX_DIM: "5"      # test up to 5-D (useful because 1-4 have special cases)
 
@@ -684,10 +686,10 @@ gcc49_cxx98_32bit_release_legion:
   variables:
     <<: [*gcc49, *terra38, *release, *cxx98_32bit_normal, *legion]
 # * External tests
-gcc49_cxx11_debug_external:
+gcc49_cxx11_debug_maxdim4_external:
   <<: [*linux_compute, *image, *external_tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *openmp, *hdf5]
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5]
 
 # Linux with Clang 3.8
 # * Basic configurations
@@ -839,10 +841,10 @@ clang38_cxx11_32bit_release_legion:
   variables:
     <<: [*clang38, *terra38, *release, *cxx11_32bit_normal, *legion]
 # * External tests
-clang38_cxx11_debug_external:
+clang38_cxx11_debug_maxdim4_external:
   <<: [*linux_compute, *image_clang, *external_tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx11_normal, *openmp, *hdf5]
+    <<: [*clang38, *terra38, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5]
 
 # # macOS with Clang 3.5
 # macos_clang38_cxx98_debug:

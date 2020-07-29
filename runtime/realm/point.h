@@ -55,7 +55,7 @@ namespace Realm {
 
   // specializations for N <= 4 defined in point.inl
   template <int N, typename T>
-  struct Point {
+  struct REALM_PUBLIC_API Point {
     T x, y, z, w;  T rest[N - 4];
 
     REALM_CUDA_HD
@@ -127,7 +127,7 @@ namespace Realm {
   //  the bounds are INCLUSIVE
 
   template <int N, typename T>
-  struct Rect {
+  struct REALM_PUBLIC_API Rect {
     Point<N,T> lo, hi;
 
     REALM_CUDA_HD
@@ -211,7 +211,7 @@ namespace Realm {
   Rect<N,T>& operator-=(Rect<N,T>& lhs, const Rect<N,T2>& rhs);
 
   template <int M, int N, typename T>
-  struct Matrix {
+  struct REALM_PUBLIC_API Matrix {
     Point<N,T> rows[M];
 
     REALM_CUDA_HD

@@ -244,7 +244,7 @@ namespace Realm {
   class CodeImplementation;
   class CodeProperty;
 
-  class CodeDescriptor {
+  class REALM_PUBLIC_API CodeDescriptor {
   public:
     CodeDescriptor(void);
     explicit CodeDescriptor(const Type& _t);
@@ -402,7 +402,7 @@ namespace Realm {
   // 1) raw function pointers - non-portable
   // 2) DSO references (i.e. name of shared object, name of symbol) - portable
 
-  class FunctionPointerImplementation : public CodeImplementation {
+  class REALM_PUBLIC_API FunctionPointerImplementation : public CodeImplementation {
   public:
     // note that this implementation forgets the actual function prototype - it's
     //  up to the surrounding CodeDescriptor object to remember that
@@ -424,6 +424,7 @@ namespace Realm {
     static CodeImplementation *deserialize_new(S& deserializer);
 
   protected:
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     FunctionPointerImplementation(void);
 
     static Serialization::PolymorphicSerdezSubclass<CodeImplementation, FunctionPointerImplementation> serdez_subclass;
@@ -435,7 +436,7 @@ namespace Realm {
   };
 
 #ifdef REALM_USE_DLFCN
-  class DSOReferenceImplementation : public CodeImplementation {
+  class REALM_PUBLIC_API DSOReferenceImplementation : public CodeImplementation {
   public:
     DSOReferenceImplementation(const std::string& _dso_name,
 			       const std::string& _symbol_name);
@@ -470,7 +471,8 @@ namespace Realm {
 
   // converts DSOReferenceImplementation -> FunctionPointerImplementation and
   //  (if dladdr is available) the reverse
-  class DSOCodeTranslator : public CodeTranslator {
+  // NOTE: this is exported for now due to issue #818
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE DSOCodeTranslator : public CodeTranslator {
   public:
     DSOCodeTranslator(void);
 

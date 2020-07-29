@@ -45,7 +45,7 @@ namespace Realm {
   class LoggerOutputStream;
   struct DelayedMessage;
 
-  class Logger {
+  class REALM_PUBLIC_API Logger {
   public:
     Logger(const std::string& _name);
     ~Logger(void);
@@ -107,13 +107,16 @@ namespace Realm {
     
   protected:
     friend class LoggerMessage;
-    
+
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     void log_msg(LoggingLevel level, const char *msgdata, size_t msglen);
     
     friend class LoggerConfig;
-    
+
+    REALM_INTERNAL_API
     void add_stream(LoggerOutputStream *s, LoggingLevel min_level,
                     bool delete_when_done, bool flush_each_write);
+    REALM_INTERNAL_API
     void configure_done(void);
     
     struct LogStream {
@@ -132,7 +135,7 @@ namespace Realm {
     DelayedMessage **delayed_message_tail;
   };
   
-  class LoggerMessage {
+  class REALM_PUBLIC_API LoggerMessage {
   protected:
     // can only be created by a Logger
     friend class Logger;
@@ -168,7 +171,7 @@ namespace Realm {
     DeferredConstructor<std::ostream> stream;
   };
   
-  class LoggerOutputStream {
+  class REALM_PUBLIC_API LoggerOutputStream {
   public:
     virtual ~LoggerOutputStream() {}
 

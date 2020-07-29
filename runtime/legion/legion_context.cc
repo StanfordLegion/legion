@@ -2036,58 +2036,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned TaskContext::find_parent_region(unsigned index, TaskOp *child)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_PARENT_REGION_CALL);
-      // We can check these without the lock
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (regions[idx].region == child->regions[index].parent)
-          return idx;
-      }
-      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
-           created_requirements.begin(); it != created_requirements.end(); it++)
-      {
-        if (it->second.region == child->regions[index].parent)
-          return it->first;
-      }
-      REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE,
-                          "Parent task %s (ID %lld) of inline task %s "
-                        "(ID %lld) does not have a region "
-                        "requirement for region (%x,%x,%x) "
-                        "as a parent of child task's region "
-                        "requirement index %d", get_task_name(),
-                        get_unique_id(), child->get_task_name(),
-                        child->get_unique_id(), 
-                        child->regions[index].region.index_space.id,
-                        child->regions[index].region.field_space.id, 
-                        child->regions[index].region.tree_id, index)
-      return 0;
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned TaskContext::find_parent_index_region(unsigned index,TaskOp *child)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < owner_task->indexes.size(); idx++)
-      {
-        if ((owner_task->indexes[idx].handle == child->indexes[idx].parent))
-          return idx;
-      }
-      REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE,
-                          "Parent task %s (ID %lld) of inline task %s "
-                            "(ID %lld) does not have an index space "
-                            "requirement for index space %x "
-                            "as a parent of chlid task's index requirement "
-                            "index %d", get_task_name(), get_unique_id(),
-                            child->get_task_name(), child->get_unique_id(),
-                            child->indexes[index].handle.id, index)
-      return 0;
-    }
-
-    //--------------------------------------------------------------------------
     LegionErrorType TaskContext::check_privilege(
                                          const IndexSpaceRequirement &req) const
     //--------------------------------------------------------------------------
@@ -20446,7 +20394,18 @@ namespace Legion {
       // respect to the outermost context
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        unsigned index = enclosing->find_parent_region(idx, child);
+        int index = enclosing->find_parent_region_req(regions[idx]);
+        if (index < 0)
+          REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE,
+                        "Parent task %s (ID %lld) of inline task %s "
+                        "(ID %lld) does not have a region "
+                        "requirement for region (%x,%x,%x) "
+                        "as a parent of child task's region "
+                        "requirement at index %d", enclosing->get_task_name(),
+                        enclosing->get_unique_id(), get_task_name(),
+                        get_unique_id(), regions[idx].region.index_space.id,
+                        regions[idx].region.field_space.id, 
+                        regions[idx].region.tree_id, idx)
         parent_req_indexes[idx] = index;
         if (index < enclosing->regions.size())
         {

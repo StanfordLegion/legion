@@ -293,7 +293,7 @@ namespace Realm {
     };
   };
 
-  class ProfilingRequest {
+  class REALM_PUBLIC_API ProfilingRequest {
   public:
     ProfilingRequest(Processor _response_proc, Processor::TaskFuncID _response_task_id, int _priority = 0, bool _report_if_empty = false);
     ProfilingRequest(const ProfilingRequest& to_copy);
@@ -326,7 +326,7 @@ namespace Realm {
   };
 
   // manages a set of profiling requests attached to a Realm operation
-  class ProfilingRequestSet {
+  class REALM_PUBLIC_API ProfilingRequestSet {
   public:
     ProfilingRequestSet(void);
     ProfilingRequestSet(const ProfilingRequestSet& to_copy);
@@ -355,7 +355,7 @@ namespace Realm {
     std::vector<ProfilingRequest *> requests;
   };
 
-  class ProfilingMeasurementCollection {
+  class REALM_INTERNAL_API ProfilingMeasurementCollection {
   public:
     ProfilingMeasurementCollection(void);
     ~ProfilingMeasurementCollection(void);
@@ -386,7 +386,7 @@ namespace Realm {
     std::map<ProfilingMeasurementID, ByteArray> measurements;
   };
 
-  class ProfilingResponse {
+  class REALM_PUBLIC_API ProfilingResponse {
   public:
     // responses need to be deserialized from the response task's argument data
     ProfilingResponse(const void *_data, size_t _data_size);
@@ -417,8 +417,10 @@ namespace Realm {
     size_t user_data_offset;
     const int *ids;
 
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     bool find_id(int id, int& offset, int& size) const;
   };
+
 }; // namespace Realm
 
 #include "realm/profiling.inl"

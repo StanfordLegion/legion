@@ -120,7 +120,7 @@ namespace Realm {
 
   // specializations for N <= 4
   template <typename T>
-  struct Point<1,T> {
+  struct REALM_PUBLIC_API Point<1,T> {
     T x;
     REALM_CUDA_HD
     Point(void) {}
@@ -171,7 +171,7 @@ namespace Realm {
   };
 
   template <typename T>
-  struct Point<2,T> {
+  struct REALM_PUBLIC_API Point<2,T> {
     T x, y;
     REALM_CUDA_HD
     Point(void) {}
@@ -222,7 +222,7 @@ namespace Realm {
   };
 
   template <typename T>
-  struct Point<3,T> {
+  struct REALM_PUBLIC_API Point<3,T> {
     T x, y, z;
     REALM_CUDA_HD
     Point(void) {}
@@ -274,7 +274,7 @@ namespace Realm {
   };
 
   template <typename T>
-  struct Point<4,T> {
+  struct REALM_PUBLIC_API Point<4,T> {
     T x, y, z, w;
     REALM_CUDA_HD
     Point(void) {} 

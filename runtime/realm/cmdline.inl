@@ -123,18 +123,23 @@ namespace Realm {
   bool convert_integer_cmdline_argument(const std::string& s, T& target);
 
   template <>
+  REALM_INTERNAL_API_EXTERNAL_LINKAGE
   bool convert_integer_cmdline_argument<int>(const std::string& s, int& target);
 
   template <>
+  REALM_INTERNAL_API_EXTERNAL_LINKAGE
   bool convert_integer_cmdline_argument<unsigned int>(const std::string& s, unsigned int& target);
 
   template <>
+  REALM_INTERNAL_API_EXTERNAL_LINKAGE
   bool convert_integer_cmdline_argument<unsigned long>(const std::string& s, unsigned long& target);
 
   template <>
+  REALM_INTERNAL_API_EXTERNAL_LINKAGE
   bool convert_integer_cmdline_argument<long long>(const std::string& s, long long& target);
 
   template <>
+  REALM_INTERNAL_API_EXTERNAL_LINKAGE
   bool convert_integer_cmdline_argument<bool>(const std::string& s, bool& target);
 
   template <typename T>
@@ -200,7 +205,8 @@ namespace Realm {
     , binary(_binary)
     , target(_target)
   {}
-    
+
+  REALM_INTERNAL_API_EXTERNAL_LINKAGE
   bool convert_integer_units_cmdline_argument(const char *s,
 					      char default_unit,
 					      bool binary,

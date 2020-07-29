@@ -32,7 +32,7 @@ namespace Realm {
     class ProfilingRequestSet;
     class CodeDescriptor;
 
-    class Processor {
+    class REALM_PUBLIC_API Processor {
     public:
       typedef ::realm_id_t id_t;
 
@@ -173,7 +173,7 @@ namespace Realm {
     //  (in addition to their own processor-specific task queues)
     // NOTE: processor groups are currently limited to include processors from
     //  only a single node/rank in a distributed setting
-    class ProcessorGroup : public Processor {
+    class REALM_PUBLIC_API ProcessorGroup : public Processor {
     public:
       static ProcessorGroup create_group(const std::vector<Processor>& members);
 

@@ -52,7 +52,7 @@ namespace Realm {
     struct Instruction;
   };
 
-  class RegionInstance {
+  class REALM_PUBLIC_API RegionInstance {
   public:
     typedef ::realm_id_t id_t;
     id_t id;
@@ -71,10 +71,12 @@ namespace Realm {
 
     // gets a compiled piece lookup program for a given field
     template <int N, typename T>
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     const PieceLookup::Instruction *get_lookup_program(FieldID field_id,
 						       unsigned allowed_mask,
 						       uintptr_t& field_offset);
     template <int N, typename T>
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     const PieceLookup::Instruction *get_lookup_program(FieldID field_id,
 						       const Rect<N,T>& subrect,
 						       unsigned allowed_mask,
@@ -216,7 +218,9 @@ namespace Realm {
     IndexSpace<N,int> get_indexspace(void) const;
 
     // used for accessor construction
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     bool increment_accessor_count(void);
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     bool decrement_accessor_count(void);
 
     struct DestroyedField {
@@ -243,6 +247,7 @@ namespace Realm {
 			       const void *reason_data, size_t reason_size) const;
   };
 
+  REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, RegionInstance r);
 		
 }; // namespace Realm
