@@ -480,15 +480,10 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events);
-      void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
-      void invalidate_all_versions(RegionTreeContext ctx);
+      void invalidate_versions(RegionTreeContext ctx, RegionNode *node,
+                               const FieldMask &invalid_mask, bool collective,
+                               std::set<RtEvent> &applied_events);
     public:
-      void initialize_current_context(RegionTreeContext ctx,
-                    const RegionRequirement &req, const bool restricted,
-                    const InstanceSet &sources, ApEvent term_event, 
-                    InnerContext *context, unsigned index,
-                    std::map<PhysicalManager*,InstanceView*> &top_views,
-                    std::set<RtEvent> &applied_events);
       void invalidate_current_context(RegionTreeContext ctx, bool users_only,
                                       LogicalRegion handle);
       bool match_instance_fields(const RegionRequirement &req1,
@@ -3796,12 +3791,15 @@ namespace Legion {
                                          const FieldMask &mask);
 #endif
     public:
+      void initialize_versioning_analysis(ContextID ctx,
+                                          EquivalenceSet *set,
+                                          const FieldMask &mask);
       void perform_versioning_analysis(ContextID ctx, 
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,
                                        LogicalRegion upper_bound,
                                        const FieldMask &version_mask,
-                                       Operation *op,
+                                       Operation *op, unsigned index,
                                        std::set<RtEvent> &ready_events);
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *parent_ctx,

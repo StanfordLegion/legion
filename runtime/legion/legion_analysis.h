@@ -2786,7 +2786,7 @@ namespace Legion {
                                        IndexSpaceExpression *expr,
                                        const bool expr_covers,
                                        const FieldMask &version_mask,
-                                       UniqueID op_uid,
+                                       Operation *op, unsigned index,
                                        std::set<RtEvent> &ready);
       virtual void record_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
@@ -2795,6 +2795,8 @@ namespace Legion {
       void finalize_equivalence_sets(RtUserEvent done_event);                           
     public:
       // Call these from region nodes
+      void initialize_versioning_analysis(EquivalenceSet *set,
+                                          const FieldMask &mask);
       void compute_equivalence_sets(EqSetTracker *target, FieldMask mask,
                                     AddressSpaceID source,
                                     std::set<RtEvent> &ready_events,

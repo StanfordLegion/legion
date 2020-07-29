@@ -1303,12 +1303,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* Operation::find_physical_context(unsigned index,
-                                                   const RegionRequirement &req)
+    InnerContext* Operation::find_version_context(unsigned index)
     //--------------------------------------------------------------------------
     {
-      return parent_ctx->find_parent_physical_context(
-                find_parent_index(index), req.parent);
+      return parent_ctx->find_parent_version_context(find_parent_index(index));
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* Operation::find_physical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      return parent_ctx->find_parent_physical_context(find_parent_index(index));
     }
 
     //--------------------------------------------------------------------------
@@ -1427,7 +1432,7 @@ namespace Legion {
           (req->handle_type != LEGION_PARTITION_PROJECTION &&
            req->region == LogicalRegion::NO_REGION))
         return;
-      InnerContext *context = find_physical_context(idx, *req);
+      InnerContext *context = find_physical_context(idx);
       RegionTreeContext ctx = context->get_context();
       RegionTreeNode *child_node = req->handle_type == 
         LEGION_PARTITION_PROJECTION ?
@@ -8331,25 +8336,14 @@ namespace Legion {
         // Just need to clean out the version managers which will free
         // all the equivalence sets and allow the reference counting to
         // clean everything up
-        bool has_outermost = false;
-        RegionTreeContext outermost_ctx;
-        const RegionTreeContext tree_context = parent_ctx->get_context();
+        const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
+          InnerContext *context = find_version_context(idx);
           const RegionRequirement &req = deletion_requirements[idx];
-          if (returnable_privileges[idx])
-          {
-            if (!has_outermost)
-            {
-              TaskContext *outermost = 
-                parent_ctx->find_outermost_local_context();
-              outermost_ctx = outermost->get_context();
-              has_outermost = true;
-            }
-            runtime->forest->invalidate_versions(outermost_ctx, req.region);
-          }
-          else
-            runtime->forest->invalidate_versions(tree_context, req.region);
+          RegionNode *node = runtime->forest->get_node(req.region);
+          runtime->forest->invalidate_versions(context->get_context(),
+              node, all_ones_mask, false/*collective*/, map_applied_conditions);
         }
       }
       else if (kind == FIELD_DELETION)
@@ -17046,7 +17040,7 @@ namespace Legion {
       const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
       InstanceSet external(1);
       external[0] = external_instance;
-      InnerContext *context = find_physical_context(0/*index*/, requirement);
+      InnerContext *context = find_physical_context(0/*index*/);
       std::vector<InstanceView*> external_views;
       context->convert_target_views(external, external_views);
 #ifdef DEBUG_LEGION
@@ -17617,7 +17611,7 @@ namespace Legion {
                                                   false/*check initialized*/);
         requirement.privilege = LEGION_READ_WRITE;
       }
-      InnerContext *context = find_physical_context(0/*index*/, requirement);
+      InnerContext *context = find_physical_context(0/*index*/);
       std::vector<InstanceView*> external_views;
       context->convert_target_views(references, external_views);
 #ifdef DEBUG_LEGION

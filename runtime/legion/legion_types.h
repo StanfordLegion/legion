@@ -838,7 +838,6 @@ namespace Legion {
       SEND_LOGICAL_PARTITION_SEMANTIC_INFO,
       SEND_REMOTE_CONTEXT_REQUEST,
       SEND_REMOTE_CONTEXT_RESPONSE,
-      SEND_REMOTE_CONTEXT_RELEASE,
       SEND_REMOTE_CONTEXT_FREE,
       SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
@@ -1043,7 +1042,6 @@ namespace Legion {
         "Send Logical Partition Semantic Info",                       \
         "Send Remote Context Request",                                \
         "Send Remote Context Response",                               \
-        "Send Remote Context Release",                                \
         "Send Remote Context Free",                                   \
         "Send Remote Context Physical Request",                       \
         "Send Remote Context Physical Response",                      \

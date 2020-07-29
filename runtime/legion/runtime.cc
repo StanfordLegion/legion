@@ -9604,11 +9604,6 @@ namespace Legion {
               runtime->handle_remote_context_response(derez);
               break;
             }
-          case SEND_REMOTE_CONTEXT_RELEASE:
-            {
-              runtime->handle_remote_context_release(derez);
-              break;
-            }
           case SEND_REMOTE_CONTEXT_FREE:
             {
               runtime->handle_remote_context_free(derez);
@@ -19233,15 +19228,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_remote_context_release(AddressSpaceID target,
-                                              Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_REMOTE_CONTEXT_RELEASE,
-                                     CONTEXT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-    
-    //--------------------------------------------------------------------------
     void Runtime::send_remote_context_free(AddressSpaceID target, 
                                            Serializer &rez)
     //--------------------------------------------------------------------------
@@ -21111,17 +21097,6 @@ namespace Legion {
       register_remote_context(context_uid, context, preconditions);
     }
 
-    //--------------------------------------------------------------------------
-    void Runtime::handle_remote_context_release(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
-      InnerContext *context = find_context(context_uid);
-      context->invalidate_remote_tree_contexts(derez);
-    }
-    
     //--------------------------------------------------------------------------
     void Runtime::handle_remote_context_free(Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -27450,8 +27425,6 @@ namespace Legion {
         case LG_TOP_FINISH_TASK_ID:
           {
             TopFinishArgs *fargs = (TopFinishArgs*)args; 
-            // Do this before deleting remote contexts
-            fargs->ctx->invalidate_region_tree_contexts();
             fargs->ctx->free_remote_contexts();
             if (fargs->ctx->remove_reference())
               delete fargs->ctx;
@@ -27466,7 +27439,6 @@ namespace Legion {
             // Now indicate that we are done with the future
             if (margs->future->remove_base_gc_ref(FUTURE_HANDLE_REF))
               delete margs->future;
-            margs->ctx->invalidate_region_tree_contexts();
             // We can also deactivate the enclosing context 
             if (margs->ctx->remove_reference())
               delete margs->ctx;

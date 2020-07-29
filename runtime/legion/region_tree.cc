@@ -1825,14 +1825,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
-                     unsigned idx, const RegionRequirement &req,
+                     unsigned index, const RegionRequirement &req,
                      VersionInfo &version_info, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
       if (IS_NO_ACCESS(req))
         return;
-      InnerContext *context = op->find_physical_context(idx, req);
+      InnerContext *context = op->find_version_context(index);
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1843,7 +1843,7 @@ namespace Legion {
       FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
       region_node->perform_versioning_analysis(ctx.get_id(), context, 
-                 &version_info, req.parent, user_mask, op, ready_events);
+          &version_info, req.parent, user_mask, op, index, ready_events);
     }
 
 #ifdef NEWEQ
@@ -1884,122 +1884,6 @@ namespace Legion {
       }
     }
 #endif // NEWEQ
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
-                  const RegionRequirement &req, const bool restricted,
-                  const InstanceSet &sources, ApEvent term_event, 
-                  InnerContext *context,unsigned init_index,
-                  std::map<PhysicalManager*,InstanceView*> &top_views,
-                  std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REGION_TREE_INITIALIZE_CONTEXT_CALL);
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-      RegionNode *top_node = get_node(req.region);
-      RegionUsage usage(req);
-      FieldMask user_mask = 
-        top_node->column_source->get_field_mask(req.privilege_fields);
-      // We only support changing the disjoint-complete tree if we are not
-      // virtually mapped and therefore know that our logical analysis can
-      // accurately track which partitions are being included
-      if (IS_WRITE(usage))
-        top_node->initialize_disjoint_complete_tree(ctx.get_id(), user_mask);
-      // Do the normal versioning analysis since this will deal with
-      // any aliasing of physical instances in the region requirements
-      VersionInfo init_version_info;
-      // Perform the version analysis and make it ready
-      std::set<RtEvent> eq_ready;
-      top_node->perform_versioning_analysis(ctx.get_id(), context, 
-          &init_version_info,req.region,user_mask,context->owner_task,eq_ready);
-      // Now get the top-views for all the physical instances
-      std::vector<InstanceView*> corresponding(sources.size());
-      const AddressSpaceID local_space = context->runtime->address_space;
-      const UniqueID context_uid = context->get_unique_id();
-      IndexSpaceExpression *reg_expr = top_node->get_index_space_expression();
-      // Build our set of corresponding views
-      if (IS_REDUCE(req))
-      {
-        for (unsigned idx = 0; idx < sources.size(); idx++)
-        {
-          const InstanceRef &src_ref = sources[idx];
-          PhysicalManager *manager = src_ref.get_instance_manager();
-          const FieldMask &view_mask = src_ref.get_valid_fields();
-#ifdef DEBUG_LEGION
-          assert(!(view_mask - user_mask)); // should be dominated
-#endif
-          // Check to see if the view exists yet or not
-          std::map<PhysicalManager*,InstanceView*>::const_iterator 
-            finder = top_views.find(manager);
-          if (finder == top_views.end())
-          {
-            ReductionView *new_view = 
-              context->create_instance_top_view(manager,
-                  local_space)->as_reduction_view();
-            top_views[manager] = new_view;
-            corresponding[idx] = new_view;
-            // Record the initial user for the instance
-            new_view->add_initial_user(term_event, usage, view_mask,
-                                       reg_expr, context_uid, init_index);
-          }
-          else
-          {
-            corresponding[idx] = finder->second;
-            // Record the initial user for the instance
-            finder->second->add_initial_user(term_event, usage, view_mask,
-                                             reg_expr, context_uid, init_index);
-          }
-        }
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < sources.size(); idx++)
-        {
-          const InstanceRef &src_ref = sources[idx];
-          PhysicalManager *manager = src_ref.get_instance_manager();
-          const FieldMask &view_mask = src_ref.get_valid_fields();
-#ifdef DEBUG_LEGION
-          assert(!(view_mask - user_mask)); // should be dominated
-#endif
-          // Check to see if the view exists yet or not
-          std::map<PhysicalManager*,InstanceView*>::const_iterator 
-            finder = top_views.find(manager);
-          if (finder == top_views.end())
-          {
-            MaterializedView *new_view = 
-             context->create_instance_top_view(manager, 
-                 local_space)->as_materialized_view();
-            top_views[manager] = new_view;
-            corresponding[idx] = new_view;
-            // Record the initial user for the instance
-            new_view->add_initial_user(term_event, usage, view_mask,
-                                       reg_expr, context_uid, init_index);
-          }
-          else
-          {
-            corresponding[idx] = finder->second;
-            // Record the initial user for the instance
-            finder->second->add_initial_user(term_event, usage, view_mask,
-                                             reg_expr, context_uid, init_index);
-          }
-        }
-      }
-      if (!eq_ready.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(eq_ready);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
-      // Iterate over the equivalence classes and initialize them
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        init_version_info.get_equivalence_sets();
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        it->first->initialize_set(usage, it->second, restricted,
-                                  sources, corresponding, applied_events);
-    }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::invalidate_current_context(RegionTreeContext ctx,
@@ -2162,7 +2046,7 @@ namespace Legion {
       // If we are a NO_ACCESS or there are no fields then we are already done 
       if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
         return RtEvent::NO_RT_EVENT;
-      InnerContext *context = op->find_physical_context(index, req);
+      InnerContext *context = op->find_physical_context(index);
 #ifdef DEBUG_LEGION
       RegionTreeContext ctx = context->get_context();
       assert(ctx.exists());
@@ -2546,15 +2430,14 @@ namespace Legion {
       dst_node->column_source->get_field_indexes(dst_req.instance_fields,
                                                  dst_indexes); 
       // Perform the copies/reductions across
-      InnerContext *context = op->find_physical_context(dst_index, dst_req);
+      InnerContext *context = op->find_physical_context(dst_index);
       std::vector<InstanceView*> target_views;
       context->convert_target_views(dst_targets, target_views);
       if (!src_targets.empty())
       {
         // If we already have the targets there's no need to 
         // iterate over the source equivalence sets
-        InnerContext *src_context = 
-          op->find_physical_context(src_index, src_req);
+        InnerContext *src_context = op->find_physical_context(src_index);
         std::vector<InstanceView*> source_views;
         src_context->convert_target_views(src_targets, source_views);
         std::set<ApEvent> copy_preconditions;
@@ -2812,7 +2695,7 @@ namespace Legion {
       std::vector<CopySrcDstField> dst_fields;
       std::set<ApEvent> copy_preconditions;
       // Construct the source and destination field info 
-      InnerContext *context = op->find_physical_context(dst_index, dst_req);
+      InnerContext *context = op->find_physical_context(dst_index);
       std::vector<InstanceView*> target_views;
       context->convert_target_views(dst_targets, target_views);
       FieldSpaceNode *src_field_node = src_node->column_source;
@@ -2945,7 +2828,7 @@ namespace Legion {
       std::vector<CopySrcDstField> dst_fields(dst_req.instance_fields.size());
       std::set<ApEvent> copy_preconditions;
       // Construct the source and destination field info 
-      InnerContext *context = op->find_physical_context(src_index, src_req);
+      InnerContext *context = op->find_physical_context(src_index);
       std::vector<InstanceView*> source_views;
       context->convert_target_views(src_targets, source_views);
       FieldSpaceNode *dst_field_node = dst_node->column_source;
@@ -17585,18 +17468,28 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void RegionNode::initialize_versioning_analysis(ContextID ctx,
+                                                    EquivalenceSet *set,
+                                                    const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      manager.initialize_versioning_analysis(set, mask);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionNode::perform_versioning_analysis(ContextID ctx,
                                                  InnerContext *parent_ctx,
                                                  VersionInfo *version_info,
                                                  LogicalRegion upper_bound,
                                                  const FieldMask &mask,
-                                                 Operation *op,
+                                                 Operation *op, unsigned index,
                                                  std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.perform_versioning_analysis(parent_ctx, version_info, this, 
-        row_source, true/*expr covers*/, mask, op->get_unique_op_id(), applied);
+              row_source, true/*expr covers*/, mask, op, index, applied);
     }
     
     //--------------------------------------------------------------------------

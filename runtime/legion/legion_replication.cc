@@ -2329,33 +2329,22 @@ namespace Legion {
       // otherwise we know we can evenly distribute the work
       if (kind == LOGICAL_REGION_DELETION)
       {
-        // Just need to clean out the version managers which will free
-        // all the equivalence sets and allow the reference counting to
-        // clean everything up
-        if (is_first_local_shard)
+        std::set<RtEvent> preconditions;
+        const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+        const bool collective = repl_ctx->shard_manager->is_total_sharding();
+        // Figure out the versioning context for this requirements
+        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
-          bool has_outermost = false;
-          RegionTreeContext outermost_ctx;
-          const RegionTreeContext tree_context = parent_ctx->get_context();
-          for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-          {
-            const RegionRequirement &req = deletion_requirements[idx];
-            if (returnable_privileges[idx])
-            {
-              if (!has_outermost)
-              {
-                TaskContext *outermost = 
-                  parent_ctx->find_outermost_local_context();
-                outermost_ctx = outermost->get_context();
-                has_outermost = true;
-              }
-              runtime->forest->invalidate_versions(outermost_ctx, req.region);
-            }
-            else
-              runtime->forest->invalidate_versions(tree_context, req.region);
-          }
+          InnerContext *context = find_version_context(idx);
+          const RegionRequirement &req = deletion_requirements[idx];
+          RegionNode *node = runtime->forest->get_node(req.region);
+          runtime->forest->invalidate_versions(context->get_context(),
+              node, all_ones_mask, collective, preconditions);
         }
-        complete_mapping();
+        if (!preconditions.empty())
+          complete_mapping(Runtime::merge_events(preconditions));
+        else
+          complete_mapping();
       }
       else if (kind == FIELD_DELETION)
       {
@@ -4631,7 +4620,7 @@ namespace Legion {
       // First kick off the exchange to get that in flight
       std::vector<InstanceView*> mapped_views;
       {
-        InnerContext *context = find_physical_context(0/*index*/, requirement);
+        InnerContext *context = find_physical_context(0/*index*/);
         context->convert_target_views(mapped_instances, mapped_views);
         if (exchange != NULL)
           exchange->initiate_exchange(mapped_instances, mapped_views);
@@ -4651,7 +4640,7 @@ namespace Legion {
         // Everyone else just needs to do their registration
         if (!is_owner_shard)
         {
-          InnerContext *context = find_physical_context(0/*index*/,requirement);
+          InnerContext *context = find_physical_context(0/*index*/);
           context->convert_target_views(mapped_instances, mapped_views); 
           RegionNode *node = runtime->forest->get_node(requirement.region);
           UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
@@ -5131,7 +5120,7 @@ namespace Legion {
         }
         InstanceSet attach_instances(1);
         attach_instances[0] = external_instance;
-        InnerContext *context = find_physical_context(0/*index*/, requirement);
+        InnerContext *context = find_physical_context(0/*index*/);
         std::vector<InstanceView*> attach_views;
         context->convert_target_views(attach_instances, attach_views);
         exchange->initiate_exchange(attach_instances, attach_views);
@@ -5245,7 +5234,7 @@ namespace Legion {
           // to the memory in case we update the reference state
           did_broadcast->broadcast(external_instance.get_manager()->did);
           const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
-          InnerContext *context = find_physical_context(0/*index*/,requirement);
+          InnerContext *context = find_physical_context(0/*index*/);
           std::vector<InstanceView*> attach_views;
           context->convert_target_views(attach_instances, attach_views);
 #ifdef DEBUG_LEGION
@@ -5436,7 +5425,7 @@ namespace Legion {
         // instances for each shard
         // Only the owner does it in the case where there isn't a
         // sharded view because there is only one instance for all shards
-        InnerContext *context = find_physical_context(0/*index*/, requirement);
+        InnerContext *context = find_physical_context(0/*index*/);
         std::vector<InstanceView*> inst_views;
         context->convert_target_views(references, inst_views);
         detach_event = runtime->forest->detach_external(requirement,
@@ -6832,12 +6821,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::launch(void)
+    void ShardManager::launch(const std::vector<bool> &virtual_mapped)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!local_shards.empty());
       assert(address_spaces == NULL);
+      assert(original_task->regions.size() == virtual_mapped.size());
 #endif
       address_spaces = new ShardMapping();
       address_spaces->add_reference();
@@ -6860,6 +6850,32 @@ namespace Legion {
       // which has as many arrivers as unique shard spaces
       callback_barrier = 
         RtBarrier(Realm::Barrier::create_barrier(shard_groups.size()));
+      // Make initial equivalence sets for each of the mapped regions
+      mapped_equivalence_sets.resize(virtual_mapped.size(), NULL);
+      for (unsigned idx = 0; idx < virtual_mapped.size(); idx++)
+      {
+        if (virtual_mapped[idx])
+          continue;
+        // Make an equivalence set to contain the initial data
+        RegionNode *node = 
+          runtime->forest->get_node(original_task->regions[idx].region);
+        const bool collective = is_total_sharding();
+        EquivalenceSet *result = new EquivalenceSet(runtime,
+            runtime->get_available_distributed_id(), runtime->address_space,
+            runtime->address_space, node, true/*register now*/, collective);
+        // Add a reference to this to keep it alive and thereby all the
+        // remote copies of this alive until it is no longer valid
+        result->add_base_resource_ref(CONTEXT_REF);
+        // Record all the remote nodes we're going to be sending this
+        // equivalence set to so we don't need to page it in
+        // No need for the lock here, nothing happening in parallel
+        for (std::set<AddressSpaceID>::const_iterator it = 
+              unique_shard_spaces.begin(); it != 
+              unique_shard_spaces.end(); it++)
+          if ((*it) != runtime->address_space)
+            result->update_remote_instances(*it);
+        mapped_equivalence_sets[idx] = result;
+      }
       // Now either send the shards to the remote nodes or record them locally
       for (std::map<AddressSpaceID,std::vector<ShardTask*> >::const_iterator 
             it = shard_groups.begin(); it != shard_groups.end(); it++)
@@ -6947,6 +6963,19 @@ namespace Legion {
                 shard_mapping.begin(); it != shard_mapping.end(); it++)
             rez.serialize(*it);
         }
+        rez.serialize<size_t>(mapped_equivalence_sets.size());
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              mapped_equivalence_sets.begin(); it != 
+              mapped_equivalence_sets.end(); it++)
+        {
+          if ((*it) != NULL)
+          {
+            rez.serialize((*it)->did);
+            rez.serialize((*it)->region_node->handle);
+          }
+          else
+            rez.serialize<DistributedID>(0);
+        }
         rez.serialize<size_t>(shards.size());
         for (std::vector<ShardTask*>::const_iterator it = 
               shards.begin(); it != shards.end(); it++)
@@ -7000,6 +7029,25 @@ namespace Legion {
         for (unsigned idx = 0; idx < total_shards; idx++)
           derez.deserialize(shard_mapping[idx]);
       }
+      size_t num_equivalence_sets;
+      derez.deserialize(num_equivalence_sets);
+      mapped_equivalence_sets.resize(num_equivalence_sets);
+      for (unsigned idx = 0; idx < num_equivalence_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        if (did > 0)
+        {
+          LogicalRegion handle;
+          derez.deserialize(handle);
+          RegionNode *region_node = runtime->forest->get_node(handle);
+          mapped_equivalence_sets[idx] = new EquivalenceSet(runtime, did,
+              owner_space, owner_space, region_node, true/*register now*/,
+              is_total_sharding());
+        }
+        else
+          mapped_equivalence_sets[idx] = NULL;
+      }
       size_t num_shards;
       derez.deserialize(num_shards);
       local_shards.resize(num_shards);
@@ -7027,6 +7075,17 @@ namespace Legion {
       ShardManagerLaunchArgs args(task);
       runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
                                        precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* ShardManager::get_initial_equivalence_set(unsigned idx)const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < mapped_equivalence_sets.size());
+      assert(mapped_equivalence_sets[idx] != NULL);
+#endif
+      return mapped_equivalence_sets[idx];
     }
 
     //--------------------------------------------------------------------------

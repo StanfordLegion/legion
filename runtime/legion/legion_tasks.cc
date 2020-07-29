@@ -4186,7 +4186,7 @@ namespace Legion {
       // we just do the launch directly from the shard manager
       if ((shard_manager != NULL) && !is_shard_task())
       {
-        shard_manager->launch();
+        shard_manager->launch(virtual_mapped);
         return;
       }
       // If we haven't computed our virtual mapping information
@@ -4252,6 +4252,7 @@ namespace Legion {
         execution_context->add_reference();
         std::vector<ApUserEvent> unmap_events(regions.size());
         std::vector<RegionRequirement> clone_requirements(regions.size());
+        std::vector<EquivalenceSet*> equivalence_sets(regions.size(), NULL);
         // Make physical regions for each our region requirements
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
@@ -4293,6 +4294,7 @@ namespace Legion {
             physical_instances[idx].update_wait_on_events(ready_events);
             ApEvent precondition = Runtime::merge_events(NULL, ready_events);
             Runtime::trigger_event(NULL, unmap_events[idx], precondition);
+            equivalence_sets[idx] = create_initial_equivalence_set(idx);
           }
           else
           { 
@@ -4306,6 +4308,7 @@ namespace Legion {
             execution_context->add_physical_region(clone_requirements[idx],
                     true/*mapped*/, map_id, tag, unmap_events[idx],
                     false/*virtual mapped*/, physical_instances[idx]);
+            equivalence_sets[idx] = create_initial_equivalence_set(idx);
             // We reset the reference below after we've
             // initialized the local contexts and received
             // back the local instance references
@@ -4313,7 +4316,7 @@ namespace Legion {
         }
         // Initialize any region tree contexts
         execution_context->initialize_region_tree_contexts(clone_requirements,
-                                        unmap_events, map_applied_conditions);
+                      equivalence_sets, unmap_events, map_applied_conditions);
       }
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
@@ -4708,6 +4711,24 @@ namespace Legion {
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);
       return inner_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* SingleTask::create_initial_equivalence_set(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < regions.size());
+#endif
+      // This is the normal equivalence set creation pathway for single tasks
+      RegionNode *node = runtime->forest->get_node(regions[idx].region);
+      EquivalenceSet *result = new EquivalenceSet(runtime,
+          runtime->get_available_distributed_id(), runtime->address_space,
+          runtime->address_space, node, true/*register now*/);
+      // Add a reference to this to keep it alive and thereby all the
+      // remote copies of this alive until it is no longer valid
+      result->add_base_resource_ref(CONTEXT_REF);
+      return result;
     }
 
     /////////////////////////////////////////////////////////////
@@ -5794,9 +5815,11 @@ namespace Legion {
       // Do this before sending the complete message to avoid the
       // race condition in the remote case where the top-level
       // context cleans on the owner node while we still need it
+      std::set<RtEvent> completion_preconditions;
       if (execution_context != NULL)
       {
-        execution_context->invalidate_region_tree_contexts();
+        execution_context->invalidate_region_tree_contexts(
+                                  completion_preconditions);
         if (runtime->legion_spy_enabled)
           execution_context->log_created_requirements();
       }
@@ -5804,7 +5827,6 @@ namespace Legion {
       // returning any created logical state, we can't commit until
       // it is returned or we might prematurely release the references
       // that we hold on the version state objects
-      std::set<RtEvent> completion_preconditions;
       if (!is_remote())
       {
         // Pass back our created and deleted operations
@@ -6732,7 +6754,7 @@ namespace Legion {
           execution_context->log_created_requirements();
         // Invalidate any context that we had so that the child
         // operations can begin committing
-        execution_context->invalidate_region_tree_contexts();
+        execution_context->invalidate_region_tree_contexts(preconditions);
         // Since this point is now complete we know
         // that we can trigger it. Note we don't need to do
         // this if we're a leaf task with no virtual mappings
@@ -7333,7 +7355,8 @@ namespace Legion {
         Runtime::trigger_event(profiling_reported);
       // Invalidate any context that we had so that the child
       // operations can begin committing
-      execution_context->invalidate_region_tree_contexts();
+      std::set<RtEvent> preconditions;
+      execution_context->invalidate_region_tree_contexts(preconditions);
       if (runtime->legion_spy_enabled)
         execution_context->log_created_requirements();
       // Then invoke the method on the shard manager 
@@ -7341,7 +7364,10 @@ namespace Legion {
       // See if we need to trigger that our children are complete
       const bool need_commit = execution_context->attempt_children_commit();
       // Mark that this operation is complete
-      complete_operation();
+      if (!preconditions.empty())
+        complete_operation(Runtime::merge_events(preconditions));
+      else
+        complete_operation();
       if (need_commit)
         trigger_children_committed();
     }
@@ -7504,6 +7530,13 @@ namespace Legion {
       }
       else // No control replication so do the normal thing
         return SingleTask::initialize_inner_execution_context(v);
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* ShardTask::create_initial_equivalence_set(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      return shard_manager->get_initial_equivalence_set(idx);
     }
 
     //--------------------------------------------------------------------------

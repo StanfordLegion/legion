@@ -568,6 +568,7 @@ namespace Legion {
       static void process_remote_profiling_response(Deserializer &derez);
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
+      virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx);
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool>                     virtual_mapped;
@@ -992,6 +993,7 @@ namespace Legion {
       virtual void handle_misspeculation(void);
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
+      virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx);
     public:
       virtual InnerContext* create_implicit_context(void);
     public:

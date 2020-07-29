@@ -14365,8 +14365,8 @@ namespace Legion {
     void VersionManager::perform_versioning_analysis(InnerContext *context,
                              VersionInfo *version_info, RegionNode *region_node,
                              IndexSpaceExpression *expr, const bool expr_covers,
-                             const FieldMask &version_mask, UniqueID op_uid,
-                             std::set<RtEvent> &ready_events)
+                             const FieldMask &version_mask, Operation *op,
+                             unsigned index, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14498,12 +14498,13 @@ namespace Legion {
       {
         // Bounce this computation off the context so that we know
         // that we are on the right node to perform it
+        const unsigned parent_index = op->find_parent_index(index);
         const RtEvent ready = context->compute_equivalence_sets(this, 
-                  region_node, remaining_mask, runtime->address_space);
+            region_node, remaining_mask, parent_index, runtime->address_space);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
-          LgFinalizeEqSetsArgs args(this, compute_event, op_uid); 
+          LgFinalizeEqSetsArgs args(this,compute_event,op->get_unique_op_id()); 
           runtime->issue_runtime_meta_task(args, 
                              LG_LATENCY_DEFERRED_PRIORITY, ready);
         }
@@ -14614,6 +14615,21 @@ namespace Legion {
             Runtime::merge_events(done_preconditions));
       else
         Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::initialize_versioning_analysis(EquivalenceSet *set,
+                                                        const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock here since we know this initialization
+#ifdef DEBUG_LEGION
+      assert(node == set->region_node);
+      assert(disjoint_complete * mask);
+#endif
+      disjoint_complete |= mask;
+      equivalence_sets.insert(set, mask);
+      set->record_tracker(this, mask);
     }
 
     //--------------------------------------------------------------------------

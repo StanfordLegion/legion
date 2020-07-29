@@ -3608,7 +3608,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent InnerContext::compute_equivalence_sets(EqSetTracker *target,
-               RegionNode *region, const FieldMask &mask, AddressSpaceID source)
+                              RegionNode *region, const FieldMask &mask, 
+                              unsigned parent_index, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // We know we are on a node now where the version information
@@ -3692,8 +3693,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* InnerContext::find_parent_physical_context(unsigned index,
-                                                           LogicalRegion parent)
+    InnerContext* InnerContext::find_parent_version_context(unsigned index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3704,8 +3704,8 @@ namespace Legion {
       {
         // See if it is virtual mapped
         if (virtual_mapped[index])
-          return find_parent_context()->find_parent_physical_context(
-                                    parent_req_indexes[index], parent);
+          return find_parent_context()->find_parent_version_context(
+                                            parent_req_indexes[index]);
         else // We mapped a physical instance so we're it
           return this;
       }
@@ -3723,7 +3723,40 @@ namespace Legion {
         if ((finder != returnable_privileges.end()) && !finder->second)
           return this;
       }
-      // All through and return the top context
+      return find_outermost_local_context();
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* InnerContext::find_parent_physical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(regions.size() == virtual_mapped.size());
+      assert(regions.size() == parent_req_indexes.size());
+#endif     
+      if (index < virtual_mapped.size())
+      {
+        // See if it is virtual mapped
+        if (virtual_mapped[index])
+          return find_parent_context()->find_parent_physical_context(
+                                            parent_req_indexes[index]);
+        else // We mapped a physical instance so we're it
+          return this;
+      }
+      else // We created it
+      {
+        // Check to see if this has returnable privileges or not
+        // If they are not returnable, then we can just be the 
+        // context for the handling the meta-data management, 
+        // otherwise if they are returnable then the top-level
+        // context has to provide global guidance about which
+        // node manages the meta-data.
+        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+        std::map<unsigned,bool>::const_iterator finder = 
+          returnable_privileges.find(index);
+        if ((finder != returnable_privileges.end()) && !finder->second)
+          return this;
+      }
       return find_top_context();
     }
 
@@ -5776,6 +5809,33 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletions(this, space, free_now,unordered,allocator);
       add_to_dependence_queue(op, unordered);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion InnerContext::create_logical_region(RegionTreeForest *forest,
+                                                      IndexSpace index_space,
+                                                      FieldSpace field_space,
+                                                      bool task_local)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      RegionTreeID tid = runtime->get_unique_region_tree_id();
+      LogicalRegion region(tid, index_space, field_space);
+#ifdef DEBUG_LEGION
+      log_region.debug("Creating logical region in task %s (ID %lld) with "
+                       "index space %x and field space %x in new tree %d",
+                       get_task_name(), get_unique_id(), 
+                       index_space.id, field_space.id, tid);
+#endif
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_region(index_space.id, field_space.id, tid);
+
+      RegionNode *node = forest->create_logical_region(region);
+      // Register the creation of a top-level region with the context
+      register_region_creation(region, task_local);
+      // Now we need to make the 
+      
+      return region;
     }
 
     //--------------------------------------------------------------------------
@@ -8343,6 +8403,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
+                      const std::vector<EquivalenceSet*> &equivalence_sets,
                       const std::vector<ApUserEvent> &unmap_events,
                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -8371,20 +8432,103 @@ namespace Legion {
       // For all of the physical contexts that were mapped, initialize them
       // with a specified reference to the current instance, otherwise
       // they were a virtual reference and we can ignore it.
+      const UniqueID context_uid = get_unique_id();
       std::map<PhysicalManager*,InstanceView*> top_views;
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      for (unsigned idx1 = 0; idx1 < regions.size(); idx1++)
       {
 #ifdef DEBUG_LEGION
         // this better be true for single tasks
-        assert(regions[idx].handle_type == LEGION_SINGULAR_PROJECTION);
+        assert(regions[idx1].handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         // If this is a NO_ACCESS or had no privilege fields we can skip this
-        if (no_access_regions[idx])
+        if (no_access_regions[idx1])
           continue;
         // Only need to initialize the context if this is
         // not a leaf and it wasn't virtual mapped
-        if (!virtual_mapped[idx])
+        if (!virtual_mapped[idx1])
         {
+          EquivalenceSet *eq_set = equivalence_sets[idx1];
+          const InstanceSet &sources = physical_instances[idx1];
+          const RegionRequirement &req = clone_requirements[idx1];
+          const RegionUsage usage(req);
+#ifdef DEBUG_LEGION
+          assert(!sources.empty());
+          assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
+          assert(eq_set != NULL);
+          assert(eq_set->region_node->handle == req.region);
+#endif
+          RegionNode *region_node = eq_set->region_node;
+          const FieldMask user_mask = 
+            region_node->column_source->get_field_mask(req.privilege_fields);
+          // Find or make views for each of our instances and then 
+          // add initial users for each of them
+          std::vector<InstanceView*> corresponding(sources.size());
+          // Build our set of corresponding views
+          if (IS_REDUCE(req))
+          {
+            for (unsigned idx2 = 0; idx2 < sources.size(); idx2++)
+            {
+              const InstanceRef &src_ref = sources[idx2];
+              PhysicalManager *manager = src_ref.get_instance_manager();
+              const FieldMask &view_mask = src_ref.get_valid_fields();
+#ifdef DEBUG_LEGION
+              assert(!(view_mask - user_mask)); // should be dominated
+#endif
+              // Check to see if the view exists yet or not
+              std::map<PhysicalManager*,InstanceView*>::const_iterator 
+                finder = top_views.find(manager);
+              if (finder == top_views.end())
+              {
+                ReductionView *new_view = create_instance_top_view(manager, 
+                    runtime->address_space)->as_reduction_view();
+                top_views[manager] = new_view;
+                corresponding[idx2] = new_view;
+                // Record the initial user for the instance
+                new_view->add_initial_user(unmap_events[idx1], usage, view_mask,
+                                    region_node->row_source, context_uid, idx1);
+              }
+              else
+              {
+                corresponding[idx2] = finder->second;
+                // Record the initial user for the instance
+                finder->second->add_initial_user(unmap_events[idx1], usage,
+                     view_mask, region_node->row_source, context_uid, idx1);
+              }
+            }
+          }
+          else
+          {
+            for (unsigned idx2 = 0; idx2 < sources.size(); idx2++)
+            {
+              const InstanceRef &src_ref = sources[idx2];
+              PhysicalManager *manager = src_ref.get_instance_manager();
+              const FieldMask &view_mask = src_ref.get_valid_fields();
+#ifdef DEBUG_LEGION
+              assert(!(view_mask - user_mask)); // should be dominated
+#endif
+              // Check to see if the view exists yet or not
+              std::map<PhysicalManager*,InstanceView*>::const_iterator 
+                finder = top_views.find(manager);
+              if (finder == top_views.end())
+              {
+                MaterializedView *new_view = 
+                 create_instance_top_view(manager, 
+                     runtime->address_space)->as_materialized_view();
+                top_views[manager] = new_view;
+                corresponding[idx2] = new_view;
+                // Record the initial user for the instance
+                new_view->add_initial_user(unmap_events[idx1], usage, view_mask,
+                                   region_node->row_source, context_uid, idx1);
+              }
+              else
+              {
+                corresponding[idx2] = finder->second;
+                // Record the initial user for the instance
+                finder->second->add_initial_user(unmap_events[idx1], usage,
+                     view_mask, region_node->row_source, context_uid, idx1);
+              }
+            }
+          }
           // The parent region requirement is restricted if it is
           // simultaneous or it is reduce-only. Simultaneous is 
           // restricted because of normal Legion coherence semantics.
@@ -8392,26 +8536,36 @@ namespace Legion {
           // operations at the end of a context for reduce-only cases
           // right now so by making it restricted things are eagerly
           // flushed out to the parent task's instance.
-          const bool restricted = 
-            IS_SIMULT(regions[idx]) || IS_REDUCE(regions[idx]);
-          runtime->forest->initialize_current_context(tree_context,
-              clone_requirements[idx], restricted, physical_instances[idx],
-              unmap_events[idx], this, idx, top_views, applied_events);
-#ifdef DEBUG_LEGION
-          assert(!physical_instances[idx].empty());
-#endif
+          const bool restricted = IS_SIMULT(usage) || IS_REDUCE(usage);
+          eq_set->initialize_set(usage, user_mask, restricted, sources,
+                                 corresponding, applied_events);
+          // Now initialize our context with this equivalence set
+          initialize_region_tree_context(usage, eq_set, user_mask);
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::invalidate_region_tree_contexts(void)
+    void InnerContext::initialize_region_tree_context(const RegionUsage &usage,
+                                     EquivalenceSet *set, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *region_node = set->region_node;
+      const ContextID ctx = tree_context.get_id();
+      // We only support changing the disjoint-complete tree if we are not
+      // virtually mapped and therefore know that our logical analysis can
+      // accurately track which partitions are being included
+      if (IS_WRITE(usage))
+        region_node->initialize_disjoint_complete_tree(ctx, mask);
+      region_node->initialize_versioning_analysis(ctx, set, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::invalidate_region_tree_contexts(
+                                                     std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INVALIDATE_REGION_TREE_CONTEXTS_CALL);
-      // Send messages to invalidate any remote contexts
-      if (!remote_instances.empty())
-        invalidate_remote_contexts();
       // Invalidate all our region contexts
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -8421,11 +8575,15 @@ namespace Legion {
                                                     false/*users only*/,
                                                     regions[idx].region);
         if (!virtual_mapped[idx])
-          runtime->forest->invalidate_versions(tree_context, 
-                                               regions[idx].region);
+        {
+          RegionNode *node = runtime->forest->get_node(regions[idx].region);
+          const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+          runtime->forest->invalidate_versions(tree_context, node, 
+              all_ones_mask, false/*collective*/, applied);
+        }
       }
       if (!created_requirements.empty())
-        invalidate_created_requirement_contexts();
+        invalidate_created_requirement_contexts(applied, false/*collective*/);
       // Clean up our instance top views
       if (!instance_top_views.empty())
         clear_instance_top_views();
@@ -8434,7 +8592,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::invalidate_created_requirement_contexts(void)
+    void InnerContext::invalidate_created_requirement_contexts(
+                              std::set<RtEvent> &applied, const bool collective)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8443,6 +8602,7 @@ namespace Legion {
       TaskContext *outermost = find_outermost_local_context();
       const bool is_outermost = (outermost == this);
       RegionTreeContext outermost_ctx = outermost->get_context();
+      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
       for (std::map<unsigned,RegionRequirement>::const_iterator it = 
             created_requirements.begin(); it != 
             created_requirements.end(); it++)
@@ -8470,19 +8630,12 @@ namespace Legion {
           // if we had privileges on the whole region in this context
           // it would have merged the created_requirement and we wouldn't
           // have a non returnable privilege requirement in this context
-          runtime->forest->invalidate_versions(tree_context, 
-                                               it->second.region);
+          RegionNode *node = runtime->forest->get_node(it->second.region);
+          runtime->forest->invalidate_versions(tree_context, node,
+              all_ones_mask, collective, applied); 
         }
       }
     }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::invalidate_remote_tree_contexts(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be called on RemoteContext
-      assert(false);
-    } 
 
     //--------------------------------------------------------------------------
     void InnerContext::convert_target_views(const InstanceSet &targets,
@@ -9094,48 +9247,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::invalidate_remote_contexts(void)
-    //--------------------------------------------------------------------------
-    {
-      UniqueID local_uid = get_unique_id();
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(local_uid);
-        // If we have created requirements figure out what invalidations
-        // we have to send to the remote context
-        if (!created_requirements.empty())
-        {
-          std::map<unsigned,LogicalRegion> to_invalidate;
-          for (std::map<unsigned,RegionRequirement>::const_iterator it = 
-                created_requirements.begin(); it !=
-                created_requirements.end(); it++)
-          {
-#ifdef DEBUG_LEGION
-            assert(returnable_privileges.find(it->first) !=
-                    returnable_privileges.end());
-#endif
-            if (!returnable_privileges[it->first])
-              to_invalidate[it->first] = it->second.region;
-          }
-          rez.serialize<size_t>(to_invalidate.size());
-          for (std::map<unsigned,LogicalRegion>::const_iterator it = 
-                to_invalidate.begin(); it != to_invalidate.end(); it++)
-          {
-            // Add the size of the original regions to the index
-            rez.serialize<unsigned>(it->first);
-            rez.serialize(it->second);
-          }
-        }
-        else
-          rez.serialize<size_t>(0);
-      }
-      for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
-            remote_instances.begin(); it != remote_instances.end(); it++)
-        runtime->send_remote_context_release(it->first, rez);
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::clear_instance_top_views(void)
     //--------------------------------------------------------------------------
     {
@@ -9208,13 +9319,19 @@ namespace Legion {
       RegionNode *region = runtime->forest->get_node(handle);
       FieldMask mask;
       derez.deserialize(mask);
+      unsigned parent_index;
+      derez.deserialize(parent_index);
       AddressSpaceID origin;
       derez.deserialize(origin);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
 
-      const RtEvent done = 
-        local_ctx->compute_equivalence_sets(target, region, mask, origin);
+      // Find the proper context to perform this on here based 
+      // on the parent index
+      InnerContext *actual_ctx = 
+        local_ctx->find_parent_version_context(parent_index);
+      const RtEvent done = actual_ctx->compute_equivalence_sets(target, region,
+                                                    mask, parent_index, origin);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -9657,7 +9774,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent TopLevelContext::compute_equivalence_sets(EqSetTracker *target,
-               RegionNode *region, const FieldMask &mask, AddressSpaceID source)
+                                 RegionNode *region, const FieldMask &mask, 
+                                 unsigned parent_index, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -10601,155 +10719,8 @@ namespace Legion {
       f.impl->set_result(result, result_size, own);
     }
 
-#ifdef NEWEQ
     //--------------------------------------------------------------------------
-    RtEvent ReplicateContext::compute_equivalence_sets(VersionManager *manager,
-                              RegionTreeID tree_id, IndexSpace handle,
-                              IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      // This one is very similar to the InnerContext version with the 
-      // exception that we round robin tree ids across shards for the 
-      // contol replication context
-#ifdef DEBUG_LEGION
-      assert(handle.exists());
-#endif
-      EquivalenceSet *root = NULL;
-      if (expr->is_empty())
-      {
-        // Special case for empty expression
-        // In this case we don't need to bother having the
-        // same equivalence set for all shards since it doesn't matter
-        {
-          const std::pair<RegionTreeID,IndexSpaceExprID> 
-            key(tree_id, expr->expr_id);
-          AutoLock tree_lock(tree_set_lock);
-          // Check to see if we already have an empty equivalence set
-          // and if not make it
-          std::map<std::pair<RegionTreeID,IndexSpaceExprID>,
-                   EquivalenceSet*>::const_iterator finder = 
-                     empty_equivalence_sets.find(key);
-          if (finder == empty_equivalence_sets.end())
-          {
-            const AddressSpaceID local_space = runtime->address_space;
-            IndexSpaceNode *node = runtime->forest->get_node(handle);
-            root = new EquivalenceSet(runtime,
-              runtime->get_available_distributed_id(),
-              local_space, local_space, expr, node,
-              true/*register now*/); 
-            empty_equivalence_sets[key] = root;
-            root->add_base_resource_ref(CONTEXT_REF);
-          }
-          else
-            root = finder->second;
-        }
-        // Now that we have the empty equivalence set, either record it
-        // or send it back to the source node for the response
-        if (source != runtime->address_space)
-        {
-          // Not local so we need to send a message
-          RtUserEvent recorded_event = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(root->did);
-            rez.serialize(mask);
-            rez.serialize(manager);
-            rez.serialize(recorded_event);
-          }
-          runtime->send_equivalence_set_ray_trace_response(source, rez);
-          return recorded_event;
-        }
-        else
-          manager->record_equivalence_set(root, mask);
-        return RtEvent::NO_RT_EVENT;
-      }
-      else
-      {
-        AutoLock tree_lock(tree_set_lock,1,false/*exclusive*/);
-        std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder = 
-          tree_equivalence_sets.find(tree_id);
-        if (finder != tree_equivalence_sets.end())
-          root = finder->second;
-      }
-      if (root == NULL)
-      {
-        // We don't have one yet check to see if we need to send a 
-        // request for it yet or not based on which shard should
-        // be owning this tree ID
-        const ShardID tree_shard = tree_id % shard_manager->total_shards;
-        if (tree_shard != owner_shard->shard_id)
-        {
-          RtEvent wait_on;
-          bool send_message = false;
-          {
-            AutoLock tree_lock(tree_set_lock);
-            // First see if we lost the race
-            std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder =
-              tree_equivalence_sets.find(tree_id);
-            if (finder == tree_equivalence_sets.end())
-            {
-              // Don't have it yet, see if we need to send a message
-              std::map<RegionTreeID,RtUserEvent>::const_iterator 
-                request_finder = pending_tree_requests.find(tree_id);
-              if (request_finder == pending_tree_requests.end())
-              {
-                RtUserEvent request_event = Runtime::create_rt_user_event();
-                pending_tree_requests[tree_id] = request_event;
-                wait_on = request_event;
-                send_message = true;
-              }
-              else // Message was already send just wait for it
-                wait_on = request_finder->second;
-            }
-            else // Already have it
-              root = finder->second;
-          }
-          // If we didn't find it already then do our thing
-          if (root == NULL)
-          {
-            if (send_message)
-            {
-              Serializer rez;
-              rez.serialize(shard_manager->repl_id);
-              rez.serialize(tree_shard);
-              rez.serialize(tree_id);
-              rez.serialize(this);
-              rez.serialize(runtime->address_space);
-              shard_manager->send_equivalence_set_request(tree_shard, rez);
-            }
-            if (wait_on.exists() && !wait_on.has_triggered())
-              wait_on.wait();
-            AutoLock tree_lock(tree_set_lock,1,false/*exclusive*/);
-            std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder =
-              tree_equivalence_sets.find(tree_id);
-#ifdef DEBUG_LEGION
-            // It better be here at this point
-            assert(finder != tree_equivalence_sets.end());
-#endif
-            root = finder->second;
-          }
-#ifdef DEBUG_LEGION
-          assert(root != NULL);
-#endif
-        }
-        else
-          root = find_or_create_top_equivalence_set(tree_id);
-      }
-#ifdef DEBUG_LEGION
-      assert(root != NULL);
-#endif
-      RtUserEvent ready = Runtime::create_rt_user_event();
-      root->ray_trace_equivalence_sets(manager, expr, mask, 
-                                       handle, source, ready);
-      return ready;
-    }
-#endif // NEWEQ
-
-    //--------------------------------------------------------------------------
-    InnerContext* ReplicateContext::find_parent_physical_context(unsigned index,
-                                                           LogicalRegion handle)
+    InnerContext* ReplicateContext::find_parent_version_context(unsigned index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10760,8 +10731,8 @@ namespace Legion {
       {
         // See if it is virtual mapped
         if (virtual_mapped[index])
-          return find_parent_context()->find_parent_physical_context(
-                                    parent_req_indexes[index], handle);
+          return find_parent_context()->find_parent_version_context(
+                                            parent_req_indexes[index]);
         else // We mapped a physical instance so we're it
           return this;
       }
@@ -10772,36 +10743,31 @@ namespace Legion {
         // context for the handling the meta-data management, 
         // otherwise we can only support this currently if we are
         // the context for the top-level task
-        // If you change this then also make sure that you 
-        // change invalidate_region_tree_contexts to match
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
         std::map<unsigned,bool>::const_iterator finder = 
           returnable_privileges.find(index);
-        if ((finder == returnable_privileges.end()) || finder->second)
-        {
-          if (owner_task->get_depth() > 0)
-            REPORT_LEGION_FATAL(LEGION_FATAL_CTRL_REPL_RETURN_PRIV,
-                                "Returnable privileges are not currently "
-                                "supported for control replicated tasks "
-                                "that are are not the top-level task such "
-                                "as task %s (UID %lld)",
-                                owner_task->get_task_name(),
-                                owner_task->get_unique_id())
-        }
-        return this;
+        if ((finder != returnable_privileges.end()) && !finder->second)
+          return this;
       }
+      // If we are shard 0 then use the outermost context so that we
+      // have the state somewhere to flow back, otherwise we use our
+      // own context to store the version information so we can release it
+      if (owner_shard->shard_id == 0)
+        return find_outermost_local_context();
+      else
+        return this;
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::invalidate_region_tree_contexts(void)
+    void ReplicateContext::invalidate_region_tree_contexts(
+                                                     std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       // This does mostly the same thing as the InnerContext version
       // but handles created requirements differently since we know
       // that we kept those things in our context
       DETAILED_PROFILER(runtime, INVALIDATE_REGION_TREE_CONTEXTS_CALL);
-      if (!remote_instances.empty())
-        invalidate_remote_contexts();
+      const bool collective = shard_manager->is_total_sharding();
       // Invalidate all our region contexts
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -10811,11 +10777,15 @@ namespace Legion {
                                                     false/*users only*/,
                                                     regions[idx].region);
         if (!virtual_mapped[idx])
-          runtime->forest->invalidate_versions(tree_context, 
-                                               regions[idx].region);
+        {
+          RegionNode *node = runtime->forest->get_node(regions[idx].region);
+          const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+          runtime->forest->invalidate_versions(tree_context, node,
+              all_ones_mask, collective, applied);
+        }
       }
       if (!created_requirements.empty())
-        invalidate_created_requirement_contexts();
+        invalidate_created_requirement_contexts(applied, collective);
       // Cannot clear our instance top view references until we are deleted 
       // as we might still need to help out our other sibling shards
       
@@ -17852,7 +17822,7 @@ namespace Legion {
     RemoteTask::RemoteTask(RemoteContext *own)
       : owner(own), context_index(0)
     //--------------------------------------------------------------------------
-    {
+    { 
     }
 
     //--------------------------------------------------------------------------
@@ -17952,6 +17922,8 @@ namespace Legion {
     RemoteContext::~RemoteContext(void)
     //--------------------------------------------------------------------------
     {
+      // At this point we can free our region tree context
+      runtime->free_region_tree_context(tree_context);
       if (!local_field_infos.empty())
       {
         // If we have any local fields then tell field space that
@@ -18038,7 +18010,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent RemoteContext::compute_equivalence_sets(EqSetTracker *target,
-               RegionNode *region, const FieldMask &mask, AddressSpaceID source)
+                               RegionNode *region, const FieldMask &mask, 
+                               unsigned parent_index, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18057,6 +18030,7 @@ namespace Legion {
         rez.serialize(target);
         rez.serialize(region->handle);
         rez.serialize(mask);
+        rez.serialize(parent_index);
         rez.serialize(source);
         rez.serialize(ready_event);
       }
@@ -18066,8 +18040,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* RemoteContext::find_parent_physical_context(unsigned index,
-                                                           LogicalRegion parent)
+    InnerContext* RemoteContext::find_parent_logical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      // We should never get here
+      assert(false);
+      return this;
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* RemoteContext::find_parent_version_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      // We always return ourselves here because any task mapping on 
+      // remote node will need to store its version info here
+      return this;
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* RemoteContext::find_parent_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18079,7 +18070,7 @@ namespace Legion {
         // See if it is virtual mapped
         if (virtual_mapped[index])
           return find_parent_context()->find_parent_physical_context(
-                                            parent_req_indexes[index], parent);
+                                            parent_req_indexes[index]);
         else // We mapped a physical instance so we're it
           return this;
       }
@@ -18104,8 +18095,6 @@ namespace Legion {
             request = Runtime::create_rt_user_event();
             pending_physical_contexts[index] = request;
             wait_on = request;
-            // Record that someone on the local node is using this context
-            local_physical_contexts.insert(parent);
           }
           else // Already sent it so just get the wait event
             wait_on = pending_finder->second;
@@ -18119,7 +18108,6 @@ namespace Legion {
             rez.serialize(context_uid);
             rez.serialize(index);
             rez.serialize(this);
-            rez.serialize(parent);
             rez.serialize(request);
           }
           const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
@@ -18134,17 +18122,6 @@ namespace Legion {
 #endif
         return physical_contexts[index]; 
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteContext::record_using_physical_context(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(handle.exists());
-#endif
-      AutoLock rem_lock(remote_lock);
-      local_physical_contexts.insert(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -18179,52 +18156,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteContext::invalidate_region_tree_contexts(void)
+    void RemoteContext::invalidate_region_tree_contexts(
+                                                     std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      if (!top_level_context)
-      {
-#ifdef DEBUG_LEGION
-        assert(regions.size() == virtual_mapped.size());
-#endif
-        // Deactivate any region trees that we didn't virtually map
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-          if (!virtual_mapped[idx])
-            runtime->forest->invalidate_versions(tree_context, 
-                                                 regions[idx].region);
-        // Also invalidate any of our local physical context regions
-        for (std::set<LogicalRegion>::const_iterator it = 
-              local_physical_contexts.begin(); it != 
-              local_physical_contexts.end(); it++)
-          runtime->forest->invalidate_versions(tree_context, *it);
-      }
-      else
-        runtime->forest->invalidate_all_versions(tree_context);
-      // Now we can free our region tree context
-      runtime->free_region_tree_context(tree_context);
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteContext::invalidate_remote_tree_contexts(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      size_t num_invalidates;
-      derez.deserialize(num_invalidates);
-      for (unsigned idx = 0; idx < num_invalidates; idx++)
-      {
-        unsigned index;
-        derez.deserialize(index);
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        // Check to see if we actually looked this up
-        std::map<unsigned,InnerContext*>::const_iterator finder = 
-          physical_contexts.find(index);
-        if (finder != physical_contexts.end())
-          runtime->forest->invalidate_versions(finder->second->get_context(),
-                                               handle);
-      }
-      // Then do our normal tree invalidation
-      invalidate_region_tree_contexts();
+      // Should never be called
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -18377,8 +18314,6 @@ namespace Legion {
       derez.deserialize(index);
       RemoteContext *target;
       derez.deserialize(target);
-      LogicalRegion parent;
-      derez.deserialize(parent);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       RtEvent ctx_ready;
@@ -18387,7 +18322,7 @@ namespace Legion {
 
       // Always defer this in case it blocks, we can't block the virtual channel
       RemotePhysicalRequestArgs args(context_uid, target, local, 
-                                     index, source, to_trigger, parent);
+                                     index, source, to_trigger);
       runtime->issue_runtime_meta_task(args, 
           LG_LATENCY_DEFERRED_PRIORITY, ctx_ready);
     }
@@ -18400,7 +18335,7 @@ namespace Legion {
       const RemotePhysicalRequestArgs *rargs = 
         (const RemotePhysicalRequestArgs*)args;
       InnerContext *result = 
-        rargs->local->find_parent_physical_context(rargs->index, rargs->parent);
+        rargs->local->find_parent_physical_context(rargs->index);
       Serializer rez;
       {
         RezCheck z(rez);
@@ -20143,8 +20078,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* LeafContext::find_parent_physical_context(unsigned index,
-                                                           LogicalRegion parent)
+    InnerContext* LeafContext::find_parent_version_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* LeafContext::find_parent_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -20170,6 +20112,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::initialize_region_tree_contexts(
                        const std::vector<RegionRequirement> &clone_requirements,
+                       const std::vector<EquivalenceSet*> &equivalence_sets,
                        const std::vector<ApUserEvent> &unmap_events,
                        std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -20178,7 +20121,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::invalidate_region_tree_contexts(void)
+    void LeafContext::invalidate_region_tree_contexts(
+                                                     std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
@@ -21568,15 +21512,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_parent_physical_context(unsigned index,
-                                                           LogicalRegion parent)
+    InnerContext* InlineContext::find_parent_version_context(unsigned index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(index < parent_req_indexes.size());
 #endif
-      return enclosing->find_parent_physical_context(
-                    parent_req_indexes[index], parent);
+      return enclosing->find_parent_version_context(parent_req_indexes[index]);
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* InlineContext::find_parent_physical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < parent_req_indexes.size());
+#endif
+      return enclosing->find_parent_physical_context(parent_req_indexes[index]);
     }
 
     //--------------------------------------------------------------------------
@@ -21596,6 +21548,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InlineContext::initialize_region_tree_contexts(
                        const std::vector<RegionRequirement> &clone_requirements,
+                       const std::vector<EquivalenceSet*> &equivalence_sets,
                        const std::vector<ApUserEvent> &unmap_events,
                        std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -21604,7 +21557,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::invalidate_region_tree_contexts(void)
+    void InlineContext::invalidate_region_tree_contexts(
+                                                     std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       assert(false);

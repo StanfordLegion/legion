@@ -2076,12 +2076,13 @@ namespace Legion {
       void create_callback_barrier(size_t arrival_count);
       ShardTask* create_shard(ShardID id, Processor target);
       void extract_event_preconditions(const std::deque<InstanceSet> &insts);
-      void launch(void);
+      void launch(const std::vector<bool> &virtual_mapped);
       void distribute_shards(AddressSpaceID target,
                              const std::vector<ShardTask*> &shards);
       void unpack_shards_and_launch(Deserializer &derez);
       void launch_shard(ShardTask *task,
                         RtEvent precondition = RtEvent::NO_RT_EVENT) const;
+      EquivalenceSet* get_initial_equivalence_set(unsigned idx) const;
       void complete_startup_initialization(void) const;
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
@@ -2171,6 +2172,7 @@ namespace Legion {
       // std::vector<Processor>        shard_mapping;
       ShardMapping*                    address_spaces;
       std::vector<ShardTask*>          local_shards;
+      std::vector<EquivalenceSet*>     mapped_equivalence_sets;
     protected:
       // There are four kinds of signals that come back from 
       // the execution of the shards:
