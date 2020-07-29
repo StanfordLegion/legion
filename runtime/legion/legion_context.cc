@@ -9041,7 +9041,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VariantImpl* InnerContext::select_inline_variant(TaskOp *child) const
+    VariantImpl* InnerContext::select_inline_variant(TaskOp *child)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SELECT_INLINE_VARIANT_CALL);
@@ -10111,7 +10111,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VariantImpl* LeafContext::select_inline_variant(TaskOp *child) const
+    VariantImpl* LeafContext::select_inline_variant(TaskOp *child)
     //--------------------------------------------------------------------------
     {
       Mapper::SelectVariantInput input;
@@ -10119,7 +10119,9 @@ namespace Legion {
       input.processor = executing_processor;
       input.chosen_instances.resize(child->regions.size());
       // Compute the parent indexes since we're going to need them
-      child->compute_parent_indexes();
+      // Make sure we use ourselves here so that we know we get the
+      // right indexes when doing computations
+      child->compute_parent_indexes(this);
       // Find the instances for this child
       for (unsigned idx = 0; idx < child->regions.size(); idx++)
       {
@@ -11886,7 +11888,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VariantImpl* InlineContext::select_inline_variant(TaskOp *child) const
+    VariantImpl* InlineContext::select_inline_variant(TaskOp *child)
     //--------------------------------------------------------------------------
     {
       return enclosing->select_inline_variant(child);
