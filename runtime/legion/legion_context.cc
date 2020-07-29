@@ -11762,7 +11762,7 @@ namespace Legion {
                         regions[idx].region.field_space.id, 
                         regions[idx].region.tree_id, idx)
         parent_req_indexes[idx] = index;
-        if (index < enclosing->regions.size())
+        if (((unsigned)index) < enclosing->regions.size())
         {
           child->regions[idx].parent = enclosing->regions[index].parent;
           physical_regions[idx] = enclosing->get_physical_region(index);
