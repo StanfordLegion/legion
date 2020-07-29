@@ -16,6 +16,7 @@
 #ifndef REALM_PYTHON_MODULE_H
 #define REALM_PYTHON_MODULE_H
 
+#include "realm/realm_config.h"
 #include "realm/module.h"
 
 #include <set>
@@ -66,6 +67,9 @@ namespace Realm {
       int cfg_num_python_cpus;
       bool cfg_use_numa;
       size_t cfg_stack_size;
+#ifdef REALM_USE_OPENMP
+      int cfg_pyomp_threads;
+#endif
       std::vector<std::string> cfg_import_modules;
       std::vector<std::string> cfg_init_scripts;
 

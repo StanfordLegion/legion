@@ -363,6 +363,12 @@ namespace Realm {
       interpreter_ready = true;
     }
 
+#ifdef REALM_USE_OPENMP
+    // associate with an OpenMP thread pool if one is available
+    if(pyproc->omp_threadpool != 0)
+      pyproc->omp_threadpool->associate_as_master();
+#endif
+
 #ifdef USE_PYGILSTATE_CALLS
     // our PyThreadState is implicit when using the PyGILState calls
     assert(pythreads.count(Thread::self()) == 0);
@@ -660,6 +666,9 @@ namespace Realm {
   LocalPythonProcessor::LocalPythonProcessor(Processor _me, int _numa_node,
                                              CoreReservationSet& crs,
                                              size_t _stack_size,
+#ifdef REALM_USE_OPENMP
+					     int _omp_workers,
+#endif
 					     const std::vector<std::string>& _import_modules,
 					     const std::vector<std::string>& _init_scripts)
     : ProcessorImpl(_me, Processor::PY_PROC)
@@ -684,6 +693,15 @@ namespace Realm {
 
     core_rsrv = new CoreReservation(name, crs, params);
 
+#ifdef REALM_USE_OPENMP
+    if(_omp_workers > 0) {
+      // create a pool (except for one thread, which is the main task thread)
+      omp_threadpool = new ThreadPool(_omp_workers - 1,
+				      name, -1 /*numa_node*/, _stack_size, crs);
+    } else
+      omp_threadpool = 0;
+#endif
+
     sched = new PythonThreadTaskScheduler(this, *core_rsrv);
     sched->add_task_queue(&task_queue);
   }
@@ -692,6 +710,10 @@ namespace Realm {
   {
     delete core_rsrv;
     delete sched;
+#ifdef REALM_USE_OPENMP
+    if(omp_threadpool != 0)
+      delete omp_threadpool;
+#endif
   }
 
   // starts worker threads and performs any per-processor initialization
@@ -706,6 +728,10 @@ namespace Realm {
     log_py.info() << "shutting down";
 
     sched->shutdown();
+#ifdef REALM_USE_OPENMP
+    if(omp_threadpool != 0)
+      omp_threadpool->stop_worker_threads();
+#endif
     deferred_spawn_cache.flush();
   }
 
@@ -922,6 +948,9 @@ namespace Realm {
       , cfg_num_python_cpus(0)
       , cfg_use_numa(false)
       , cfg_stack_size(2 << 20)
+#ifdef REALM_USE_OPENMP
+      , cfg_pyomp_threads(0)
+#endif
     {
     }
 
@@ -949,6 +978,9 @@ namespace Realm {
 	  .add_option_int_units("-ll:pystack", m->cfg_stack_size, 'm')
 	  .add_option_stringlist("-ll:pyimport", m->cfg_import_modules)
 	  .add_option_stringlist("-ll:pyinit", m->cfg_init_scripts);
+#ifdef REALM_USE_OPENMP
+	cp.add_option_int("-ll:pyomp", m->cfg_pyomp_threads);
+#endif
 
         bool ok = cp.parse_command_line(cmdline);
         if(!ok) {
@@ -1034,6 +1066,9 @@ namespace Realm {
           ProcessorImpl *pi = new LocalPythonProcessor(p, cpu_node,
                                                        runtime->core_reservation_set(),
                                                        cfg_stack_size,
+#ifdef REALM_USE_OPENMP
+						       cfg_pyomp_threads,
+#endif
 						       cfg_import_modules,
 						       cfg_init_scripts);
           runtime->add_processor(pi);

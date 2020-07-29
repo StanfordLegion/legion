@@ -106,7 +106,10 @@ namespace Realm {
 
 #ifdef KOKKOS_ENABLE_CUDA
     std::vector<ProcessorImpl *> kokkos_cuda_procs;
-    
+
+    Mutex cuda_instance_map_mutex;
+    std::map<std::pair<Processor, cudaStream_t>, Kokkos::Cuda *> cuda_instance_map;
+
     class KokkosCudaInitializer : public KokkosInternalTask {
     public:
       virtual void execute_on_processor(Processor p)
@@ -122,6 +125,10 @@ namespace Realm {
 
 	Kokkos::Cuda::impl_initialize(Kokkos::Cuda::SelectDevice(cuda_device_id),
 				      num_instances);
+	{
+	  // some init is deferred until an instance is created
+	  Kokkos::Cuda dummy;
+	}
 	mark_done();
       }
     };
@@ -131,6 +138,14 @@ namespace Realm {
       virtual void execute_on_processor(Processor p)
       {
 	log_kokkos.info() << "doing cuda finalize on proc " << p;
+
+	// delete all the cuda instances from this proc that we've cached
+	for(std::map<std::pair<Processor, cudaStream_t>, Kokkos::Cuda *>::iterator it = cuda_instance_map.begin();
+	    it != cuda_instance_map.end();
+	    ++it)
+	  if(it->first.first == p)
+	    delete it->second;
+
 	Kokkos::Cuda::impl_finalize();
 	mark_done();
       }
@@ -286,7 +301,23 @@ namespace Realm {
     Cuda::GPUProcessor *gpu = checked_cast<Cuda::GPUProcessor *>(impl);
     cudaStream_t stream = gpu->gpu->get_null_task_stream()->get_stream();
     log_kokkos.info() << "handing back stream " << stream;
-    return Kokkos::Cuda(stream);
+    Kokkos::Cuda *inst = 0;
+    {
+      AutoLock<> al(KokkosInterop::cuda_instance_map_mutex);
+      std::pair<Processor, cudaStream_t> key(p, stream);
+      std::map<std::pair<Processor, cudaStream_t>, Kokkos::Cuda *>::iterator it = KokkosInterop::cuda_instance_map.find(key);
+      if(it != KokkosInterop::cuda_instance_map.end()) {
+	inst = it->second;
+      } else {
+	// creating a Kokkos::Cuda instance does some blocking calls, but we're
+	//  not re-entrant here, so enable the scheduler lock
+	Processor::enable_scheduler_lock();
+	inst = new Kokkos::Cuda(stream);
+	Processor::disable_scheduler_lock();
+	KokkosInterop::cuda_instance_map[key] = inst;
+      }
+    }
+    return *inst;
 #else
     // we're oblivious to the application's use of CUDA
     return Kokkos::Cuda();

@@ -32,6 +32,7 @@ namespace Realm {
 
   Logger log_part("part");
   Logger log_uop_timing("uop_timing");
+  REALM_INTERNAL_API_EXTERNAL_LINKAGE
   Logger log_dpops("dpops");
 
   PartitioningOpQueue *deppart_op_queue = 0;

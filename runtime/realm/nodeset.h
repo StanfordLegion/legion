@@ -40,7 +40,7 @@ namespace Realm {
   class NodeSet;
 
   // we do not support mutation of a nodeset, so we're a const_iterator
-  class NodeSetIterator : public std::iterator<std::input_iterator_tag, NodeID> {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeSetIterator : public std::iterator<std::input_iterator_tag, NodeID> {
   public:
     NodeSetIterator();
     NodeSetIterator(const NodeSet& _nodeset);
@@ -60,7 +60,7 @@ namespace Realm {
     short iter_pos; // needed for non-bitmask encodings
   };
 
-  class NodeSetBitmask {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeSetBitmask {
   protected:
     NodeSetBitmask();
 
@@ -106,7 +106,7 @@ namespace Realm {
     static Mutex free_list_mutex;
   };
 
-  class NodeSet {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeSet {
   public:
     NodeSet();
     ~NodeSet();

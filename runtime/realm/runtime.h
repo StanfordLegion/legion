@@ -24,7 +24,7 @@
 
 namespace Realm {
 
-    class Runtime {
+    class REALM_PUBLIC_API Runtime {
     protected:
       void *impl;  // hidden internal implementation - this is NOT a transferrable handle
 

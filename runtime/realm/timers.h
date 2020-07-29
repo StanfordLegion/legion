@@ -17,6 +17,9 @@
 
 #ifndef REALM_TIMERS_H
 #define REALM_TIMERS_H
+
+#include "realm/realm_config.h"
+
 #ifdef DETAILED_TIMING
 #include "realm/network.h"
 #endif
@@ -61,6 +64,7 @@ namespace Realm {
     static void set_zero_time(void);
 
   protected:
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     static long long zero_time;
   };
 

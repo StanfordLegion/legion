@@ -42,7 +42,7 @@ namespace Realm {
   protected:
     int numa_node;
     int num_threads;
-    std::vector<CoreReservation *> core_rsrvs;
+    CoreReservation *core_rsrv;
   public:
     ThreadPool *pool;
   };

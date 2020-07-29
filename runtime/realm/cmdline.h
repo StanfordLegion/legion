@@ -18,6 +18,8 @@
 #ifndef REALM_CMDLINE_H
 #define REALM_CMDLINE_H
 
+#include "realm/realm_config.h"
+
 #include <vector>
 #include <string>
 
@@ -25,7 +27,7 @@ namespace Realm {
 
   class CommandLineOption;
 
-  class CommandLineParser {
+  class REALM_PUBLIC_API CommandLineParser {
   public:
     CommandLineParser(void);
     ~CommandLineParser(void);
@@ -59,7 +61,7 @@ namespace Realm {
     std::vector<CommandLineOption *> options;
   };
 
-  class CommandLineOption {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE CommandLineOption {
   public:
     CommandLineOption(const std::string& _optname, bool _keep);
     virtual ~CommandLineOption(void);
@@ -77,7 +79,7 @@ namespace Realm {
   };
 
   template <typename T>
-  class IntegerCommandLineOption : public CommandLineOption {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE IntegerCommandLineOption : public CommandLineOption {
   public:
     IntegerCommandLineOption(const std::string& _optname, bool _keep, T& _target);
     
@@ -90,7 +92,7 @@ namespace Realm {
   };
 
   template <typename T>
-  class IntegerUnitsCommandLineOption : public CommandLineOption {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE IntegerUnitsCommandLineOption : public CommandLineOption {
   public:
     IntegerUnitsCommandLineOption(const std::string& _optname,
 				  char _default_unit, bool _binary,
@@ -106,7 +108,7 @@ namespace Realm {
     T& target;
   };
 
-  class StringCommandLineOption : public CommandLineOption {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE StringCommandLineOption : public CommandLineOption {
   public:
     StringCommandLineOption(const std::string& _optname, bool _keep, std::string& _target);
     StringCommandLineOption(const std::string& _optname, bool _keep, char *_target, size_t _maxlen);
@@ -121,7 +123,7 @@ namespace Realm {
     size_t target_arrlen;
   };
 
-  class StringListCommandLineOption : public CommandLineOption {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE StringListCommandLineOption : public CommandLineOption {
   public:
     StringListCommandLineOption(const std::string& _optname, bool _keep, std::vector<std::string>& _target);
     
@@ -133,7 +135,7 @@ namespace Realm {
     std::vector<std::string>& target;
   };
 
-  class BooleanCommandLineOption : public CommandLineOption {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE BooleanCommandLineOption : public CommandLineOption {
   public:
     BooleanCommandLineOption(const std::string& _optname, bool _keep, bool& _target);
     
@@ -146,7 +148,7 @@ namespace Realm {
   };
 
   template <typename T>
-  class MethodCommandLineOption : public CommandLineOption {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE MethodCommandLineOption : public CommandLineOption {
   public:
     MethodCommandLineOption(const std::string& _optname, bool _keep, T *_target,
 			     bool (T::*_method)(const std::string&));

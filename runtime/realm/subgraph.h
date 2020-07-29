@@ -31,7 +31,7 @@ namespace Realm {
   // TODO: C equivalent: realm_subgraph_defn_t
   struct SubgraphDefinition;
 
-  class Subgraph {
+  class REALM_PUBLIC_API Subgraph {
   public:
     typedef ::realm_id_t id_t;
 
@@ -68,7 +68,7 @@ namespace Realm {
     // TODO: collective instantiation
   };
 
-  struct SubgraphDefinition {
+  struct REALM_PUBLIC_API SubgraphDefinition {
     SubgraphDefinition();
 
     // operations permitted in a subgraph:

@@ -45,7 +45,7 @@ enum { Kokkos_Unmanaged = 0x01 };
 
 namespace Realm {
 
-  class InstanceLayoutConstraints {
+  class REALM_PUBLIC_API InstanceLayoutConstraints {
   public:
     InstanceLayoutConstraints(void) { }
     InstanceLayoutConstraints(const std::map<FieldID, size_t>& field_sizes,
@@ -123,6 +123,7 @@ namespace Realm {
 							 const InstanceLayoutConstraints& ilc,
                                                          const int dim_order[N]);
 
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     virtual void compile_lookup_program(PieceLookup::CompiledProgram& p) const = 0;
 
     size_t bytes_used;
@@ -139,12 +140,13 @@ namespace Realm {
     std::map<FieldID, FieldLayout> fields;
   };
 
+  REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const InstanceLayoutGeneric& ilg);
 
   // users that wish to handle instances as simple blocks of bits may use
   //  an InstanceLayoutOpaque to just request a contiguous range of bytes with
   //  a specified alignment
-  class InstanceLayoutOpaque : public InstanceLayoutGeneric {
+  class REALM_PUBLIC_API InstanceLayoutOpaque : public InstanceLayoutGeneric {
   public:
     InstanceLayoutOpaque(size_t _bytes_used, size_t _alignment_reqd);
 
@@ -152,7 +154,7 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  class InstanceLayoutPiece {
+  class REALM_PUBLIC_API InstanceLayoutPiece {
   public:
     enum LayoutType {
       InvalidLayoutType,
@@ -181,10 +183,11 @@ namespace Realm {
   };
 
   template <int N, typename T>
+  REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const InstanceLayoutPiece<N,T>& ilp);
 
   template <int N, typename T>
-  class AffineLayoutPiece : public InstanceLayoutPiece<N,T> {
+  class REALM_PUBLIC_API AffineLayoutPiece : public InstanceLayoutPiece<N,T> {
   public:
     AffineLayoutPiece(void);
 
@@ -209,7 +212,7 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  class InstancePieceList {
+  class REALM_PUBLIC_API InstancePieceList {
   public:
     InstancePieceList(void);
     ~InstancePieceList(void);
@@ -228,10 +231,11 @@ namespace Realm {
   };
 
   template <int N, typename T>
+  REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const InstancePieceList<N,T>& ipl);
 
   template <int N, typename T>
-  class InstanceLayout : public InstanceLayoutGeneric {
+  class REALM_PUBLIC_API InstanceLayout : public InstanceLayoutGeneric {
   public:
     InstanceLayout(void);
 
@@ -247,6 +251,7 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
     virtual void compile_lookup_program(PieceLookup::CompiledProgram& p) const;
 
     // computes the offset of the specified field for an element - this
@@ -267,7 +272,7 @@ namespace Realm {
 
   namespace PieceLookup {
 
-    struct Instruction {
+    struct REALM_INTERNAL_API_EXTERNAL_LINKAGE Instruction {
       // all instructions are at least 4 bytes and aligned to 16 bytes, but
       //  the only data common to all is the opcode, which appears in the low
       //  8 bits
@@ -305,7 +310,7 @@ namespace Realm {
     };
 
     template <int N, typename T>
-    struct AffinePiece : public Instruction {
+    struct REALM_INTERNAL_API_EXTERNAL_LINKAGE AffinePiece : public Instruction {
       // data is: { delta[23:0], opcode[7:0] }
       // top 24 bits of data is jump delta
       REALM_CUDA_HD
@@ -320,7 +325,7 @@ namespace Realm {
     };
 
     template <int N, typename T>
-    struct SplitPlane : public Instruction {
+    struct REALM_INTERNAL_API_EXTERNAL_LINKAGE SplitPlane : public Instruction {
       // data is: { delta[15:0], dim[7:0], opcode[7:0] }
       REALM_CUDA_HD
       unsigned delta() const;
@@ -341,7 +346,7 @@ namespace Realm {
 
 
   template <typename FT>
-  class AccessorRefHelper {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE AccessorRefHelper {
   public:
     AccessorRefHelper(RegionInstance _inst, size_t _offset);
 
@@ -362,7 +367,7 @@ namespace Realm {
 
   // a generic accessor that works (slowly) for any instance layout
   template <typename FT, int N, typename T = int>
-  class GenericAccessor {
+  class REALM_PUBLIC_API GenericAccessor {
   public:
     GenericAccessor(void);
 
@@ -412,12 +417,13 @@ namespace Realm {
   };
   
   template <typename FT, int N, typename T>
+  REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const GenericAccessor<FT,N,T>& a);
 
 
   // an instance accessor based on an affine linearization of an index space
   template <typename FT, int N, typename T = int>
-  class AffineAccessor {
+  class REALM_PUBLIC_API AffineAccessor {
   public:
     // NOTE: even when compiling with nvcc, non-default constructors are only
     //  available in host code
@@ -537,6 +543,7 @@ namespace Realm {
   };
 
   template <typename FT, int N, typename T>
+  REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a);
 
   // a multi-affine accessor handles instances with multiple pieces, but only
@@ -545,10 +552,11 @@ namespace Realm {
   class MultiAffineAccessor;
 
   template <typename FT, int N, typename T>
+  REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const MultiAffineAccessor<FT,N,T>& a);
 
   template <typename FT, int N, typename T>
-  class MultiAffineAccessor {
+  class REALM_PUBLIC_API MultiAffineAccessor {
   public:
     // multi-affine accessors may be accessed and copied in CUDA device code
     //  but must be initially constructed on the host

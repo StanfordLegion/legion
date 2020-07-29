@@ -28,7 +28,7 @@ namespace Realm {
 
   typedef ::realm_reduction_op_id_t ReductionOpID;
 
-    class Event {
+    class REALM_PUBLIC_API Event {
     public:
       typedef ::realm_id_t id_t;
 
@@ -100,9 +100,10 @@ namespace Realm {
     // it can be triggered by the user.  This prevents users from
     // triggering arbitrary events without doing something like
     // an unsafe cast.
-    class UserEvent : public Event {
+    class REALM_PUBLIC_API UserEvent : public Event {
     public:
       static UserEvent create_user_event(void);
+
       void trigger(Event wait_on = Event::NO_EVENT,
 		   bool ignore_faults = false) const;
 
@@ -115,7 +116,7 @@ namespace Realm {
     // a Barrier is similar to a UserEvent, except that it has a count of how
     //  many threads (or whatever) need to "trigger" before the actual trigger
     //  occurs
-    class Barrier : public Event {
+    class REALM_PUBLIC_API Barrier : public Event {
     public:
       typedef ::realm_barrier_timestamp_t timestamp_t; // used to avoid race conditions with arrival adjustments
 
@@ -144,7 +145,7 @@ namespace Realm {
 
     // a CompletionQueue funnels the completion of unordered events into a
     //  single stream that can be queried (and waited on) by a single servicer
-    class CompletionQueue {
+    class REALM_PUBLIC_API CompletionQueue {
     public:
       typedef ::realm_id_t id_t;
 

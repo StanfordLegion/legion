@@ -546,8 +546,8 @@ void top_level_task(const void *args, size_t arglen,
       directed_test_memory(config, m, p, "avoid fragmentation failures",
 			   "3 a1 s0 a1 s1 a1 s2 d0 a1 d1 d2 a2 t1 n3 t0 s3 t2 s4");
 
-      directed_test_memory(config, m, p, "deferred instant destroy",
-			   "2 a1 s0 a1 s1 d0 a1 i1 n2 t0 s2");
+      directed_test_memory(config, m, p, "reordered instant destroy",
+			   "2 a1 s0 a1 s1 d0 a1 i1 s2");
 
       directed_test_memory(config, m, p, "rebuild release allocator",
 			   "3 a1 s0 a1 s1 a1 s2 d0 a1 d2 d1 a2 t1 n3 t0 s3 t2 s4");
@@ -563,6 +563,12 @@ void top_level_task(const void *args, size_t arglen,
 			   "  c1 u5"                    // 0123  416.
 			   "  a1"                       // 0123  4167
 			   "  t0 s4 t2 s6 t3 s7"        // 4167
+			   );
+
+      directed_test_memory(config, m, p, "mixing destroys",
+			   "4 a1 s0 a1 s1 a1 s2 a1 s3"  // 0123
+			   "  d2 a1"                    // 0123  0143
+			   "  i0 s4"                    // 4123
 			   );
       
 #ifdef REALM_REORDER_DEFERRED_ALLOCATIONS

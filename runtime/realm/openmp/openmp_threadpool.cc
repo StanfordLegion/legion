@@ -166,7 +166,7 @@ namespace Realm {
     //  cause an overshoot that wraps around, we have a problem
     uint64_t limit_overshoot = (limit + ((num_workers - 1) *
 					 (uint64_t)chunk));
-    assert(limit_overshoot > limit);
+    assert(limit_overshoot >= limit);
 
     // the compiler promises all threads will have the same value, so
     //  everybody can just store knowing that either they're first or
@@ -279,16 +279,34 @@ namespace Realm {
   //
   // class ThreadPool
 
-  ThreadPool::ThreadPool(int _num_workers)
+  ThreadPool::ThreadPool(int _num_workers,
+			 const std::string& _name_prefix,
+			 int _numa_node, size_t _stack_size,
+			 CoreReservationSet& crs)
     : num_workers(_num_workers)
+    , workers_running(false)
   {
+    // create per-worker core reservations
+    CoreReservationParameters params;
+    params.set_num_cores(1);
+    params.set_numa_domain(_numa_node);
+    params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
+    params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
+    params.set_ldst_usage(params.CORE_USAGE_SHARED);
+    params.set_max_stack_size(_stack_size);
+
+    core_rsrvs.resize(num_workers, 0);
+    for(int i = 0; i < num_workers; i++)
+      core_rsrvs[i] = new CoreReservation(stringbuilder() << _name_prefix << " (worker " << (i + 1) << ")",
+					  crs, params);
+
     // these will be filled in as workers show up
     worker_threads.resize(num_workers, 0);
 
     worker_infos.resize(num_workers + 1);
     for(int i = 0; i <= num_workers; i++) {
       WorkerInfo& wi = worker_infos[i];
-      wi.status.store(i ? WorkerInfo::WORKER_STARTING :
+      wi.status.store(i ? WorkerInfo::WORKER_NOT_RUNNING :
 		          WorkerInfo::WORKER_MASTER);
       wi.pool = this;
       wi.thread_id = 0;
@@ -302,7 +320,12 @@ namespace Realm {
   }
   
   ThreadPool::~ThreadPool(void)
-  {}
+  {
+    assert(!workers_running);
+
+    for(int i = 0; i < num_workers; i++)
+      delete core_rsrvs[i];
+  }
 
   // associates the calling thread as the master of the threadpool
   void ThreadPool::associate_as_master(void)
@@ -314,6 +337,13 @@ namespace Realm {
     } else {
       ThreadLocal::threadpool_workerinfo = &worker_infos[0];
     }
+  }
+
+  // returns the associated thread pool, optionally warning if none exists
+  /*static*/ ThreadPool *ThreadPool::get_associated_pool(bool warn_if_missing)
+  {
+    WorkerInfo *info = get_worker_info(warn_if_missing);
+    return (info ? info->pool : 0);
   }
 
   // entry point for workers - does not return until thread pool is shut down
@@ -342,7 +372,7 @@ namespace Realm {
 
     bool worker_shutdown = false;
     while(!worker_shutdown) {
-      switch(wi->status.load()) {
+      switch(wi->status.load_acquire()) {
       case WorkerInfo::WORKER_IDLE:
       case WorkerInfo::WORKER_CLAIMED:
 	{
@@ -373,33 +403,59 @@ namespace Realm {
     }
   }
 
-  // asks worker threads to shut down and waits for them to complete
-  void ThreadPool::shutdown(void)
+  // starts worker threads running if they weren't already
+  void ThreadPool::start_worker_threads(void)
   {
-    // tell all workers to shutdown
-    for(std::vector<WorkerInfo>::iterator it = worker_infos.begin();
-	it != worker_infos.end();
-	++it) {
-      if(it->status.load() == WorkerInfo::WORKER_MASTER) continue;
-      int expval = WorkerInfo::WORKER_IDLE;
-      bool ok = it->status.compare_exchange(expval,
-					    WorkerInfo::WORKER_SHUTDOWN);
-      assert(ok);
+    if(!workers_running) {
+      for(int i = 0; i < num_workers; i++) {
+	assert(worker_threads[i] == 0);
+	worker_infos[i+1].status.store(WorkerInfo::WORKER_STARTING);
+      }
+
+      for(int i = 0; i < num_workers; i++) {
+	// the threads we launch will assign ids themselves
+	ThreadLaunchParameters tlp;
+	Thread::create_kernel_thread<ThreadPool,
+				     &ThreadPool::worker_entry>(this, tlp,
+								*core_rsrvs[i]);
+      }
+
+      workers_running = true;
     }
+  }
 
-    // now join on all threads
-    for(std::vector<Thread *>::const_iterator it = worker_threads.begin();
-	it != worker_threads.end();
-	++it)
-      (*it)->join();
+  // asks worker threads to shut down and waits for them to complete
+  void ThreadPool::stop_worker_threads(void)
+  {
+    if(workers_running) {
+      // tell all workers to shutdown
+      for(int i = 0; i < num_workers; i++) {
+	int expval = WorkerInfo::WORKER_IDLE;
+	bool ok = worker_infos[i+1].status.compare_exchange(expval,
+							    WorkerInfo::WORKER_SHUTDOWN);
+	assert(ok);
+      }
 
-    worker_threads.clear();
+      // now join on all threads
+      for(int i = 0; i < num_workers; i++) {
+	worker_threads[i]->join();
+	delete worker_threads[i];
+	worker_threads[i] = 0;
+      }
+
+      workers_running = false;
+    }
   }
 
   void ThreadPool::claim_workers(int count, std::set<int>& worker_ids)
   {
+    // spin up threads if they're not already
+    if(!workers_running)
+      start_worker_threads();
+
     int remaining = count;
-    for(size_t i = 0; i < worker_infos.size(); i++) {
+    size_t i = 0;
+    while(i < worker_infos.size()) {
       // attempt atomic change from IDLE -> CLAIMED
       int expval = WorkerInfo::WORKER_IDLE;
       if(worker_infos[i].status.compare_exchange(expval,
@@ -409,6 +465,10 @@ namespace Realm {
 	if(remaining == 0)
 	  break;
       }
+      // unless this worker is still starting up, we have to move on to the next
+      //  one and try it
+      if(expval != WorkerInfo::WORKER_STARTING)
+	i++;
     }
 
     log_pool.info() << "claim_workers requested " << count << ", got " << worker_ids.size();
