@@ -615,6 +615,9 @@ namespace Legion {
     public:
       void yield(void);
       void release_task_local_instances(PhysicalInstance return_inst);
+#ifdef LEGION_MALLOC_INSTANCES
+      void release_future_local_instance(PhysicalInstance return_inst);
+#endif
     protected:
       Future predicate_task_false(const TaskLauncher &launcher);
       FutureMap predicate_index_task_false(size_t context_index,
