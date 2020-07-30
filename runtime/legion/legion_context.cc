@@ -2375,13 +2375,16 @@ namespace Legion {
 #endif
       }
 #ifdef LEGION_MALLOC_INSTANCES
-      task_local_instances.resize(1);
+      if (return_inst.exists())
+      {
+        task_local_instances.resize(1);
 #ifdef DEBUG_LEGION
-      assert(task_local_instances.front().first == return_inst);
+        assert(task_local_instances.front().first == return_inst);
 #endif
-#else
+      }
+      else
+#endif
       task_local_instances.clear();
-#endif
     }
 
 #ifdef LEGION_MALLOC_INSTANCES
