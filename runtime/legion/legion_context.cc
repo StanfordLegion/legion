@@ -7067,9 +7067,15 @@ namespace Legion {
         {
           if (it->instance.exists())
           {
+#ifdef LEGION_MALLOC_INSTANCES
+            // Need to keep the context alive until we release the instance
+            it->context->add_reference();
+#endif
             it->context->post_end_task(it->result,it->size,false/*owned*/,NULL);
 #ifdef LEGION_MALLOC_INSTANCES
             it->context->release_future_local_instance(it->instance); 
+            if (it->context->remove_reference())
+              delete it->context;
 #endif
             // Once we've copied the data then we can destroy the instance
             it->instance.destroy();
