@@ -2356,9 +2356,11 @@ namespace Legion {
       // TODO: deal with task layout constraints that require multiple
       // region requirements to be mapped to the same instance
       std::vector<LogicalRegion> target_regions(1, target_region);
-      if (force_new || (req.privilege == LEGION_REDUCE && (kind != COPY_MAPPING))) {
+      if (force_new || 
+          ((req.privilege == LEGION_REDUCE) && (kind != COPY_MAPPING))) {
         if (!runtime->create_physical_instance(ctx, target_memory, 
-              constraints, target_regions, result))
+              constraints, target_regions, result, true/*acquire*/,
+              0/*priority*/, tight_region_bounds, footprint))
           return false;
       } else {
         if (!runtime->find_or_create_physical_instance(ctx, 
