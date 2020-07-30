@@ -2469,6 +2469,26 @@ namespace Legion {
 #endif
     }
 
+#ifdef LEGION_MALLOC_INSTANCES
+    //--------------------------------------------------------------------------
+    void TaskContext::release_future_local_instance(PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      // Get the pointer and free it
+      MemoryManager *manager = 
+        runtime->find_memory_manager(instance.get_location());
+#ifdef DEBUG_LEGION
+      assert(task_local_instances.size() == 1);
+#endif
+      const std::pair<PhysicalInstance,uintptr_t> &inst = 
+        task_local_instances.back();
+#ifdef DEBUG
+      assert(inst.first == instance);
+#endif
+      manager->free_legion_instance(RtEvent::NO_RT_EVENT, inst.second);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     Future TaskContext::predicate_task_false(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -7317,18 +7337,7 @@ namespace Legion {
           {
             it->context->post_end_task(it->result,it->size,false/*owned*/,NULL);
 #ifdef LEGION_MALLOC_INSTANCES
-            // Get the pointer and free it
-            MemoryManager *manager = 
-              runtime->find_memory_manager(it->instance.get_location());      
-#ifdef DEBUG_LEGION
-            assert(task_local_instances.size() == 1);
-#endif
-            const std::pair<PhysicalInstance,uintptr_t> &inst = 
-              task_local_instances.back();
-#ifdef DEBUG
-            assert(inst.first == it->instance);
-#endif
-            manager->free_legion_instance(RtEvent::NO_RT_EVENT, inst.second);
+            it->context->release_future_local_instance(it->instance); 
 #endif
             // Once we've copied the data then we can destroy the instance
             it->instance.destroy();
