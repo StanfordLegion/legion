@@ -28,6 +28,7 @@ TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::IndexSpace<N,T>);
 
 namespace Realm {
 
+  REALM_INTERNAL_API_EXTERNAL_LINKAGE
   extern Logger log_dpops;
 
 

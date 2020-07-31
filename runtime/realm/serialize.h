@@ -283,7 +283,7 @@ namespace Realm {
     class PolymorphicSerdezIntfc;
 
     template <typename T>
-    class PolymorphicSerdezHelper {
+    class REALM_INTERNAL_API_EXTERNAL_LINKAGE PolymorphicSerdezHelper {
     public:
       // not templated because we have to get through a virtual method
       static bool serialize(FixedBufferSerializer& serializer, const T& obj);
