@@ -480,12 +480,9 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events);
-      void invalidate_versions(RegionTreeContext ctx, RegionNode *node,
-                               const FieldMask &invalid_mask, bool collective,
-                               std::set<RtEvent> &applied_events);
     public:
       void invalidate_current_context(RegionTreeContext ctx, bool users_only,
-                                      LogicalRegion handle);
+                                      RegionNode *top_node);
       bool match_instance_fields(const RegionRequirement &req1,
                                  const RegionRequirement &req2,
                                  const InstanceSet &inst1,
@@ -754,10 +751,6 @@ namespace Legion {
       RegionNode*     get_tree(RegionTreeID tid, bool first = true);
       // Request but don't block
       RtEvent request_node(IndexSpace space);
-      // Find a local node if it exists and return it with reference
-      // otherwise return NULL
-      RegionNode*     find_local_node(LogicalRegion handle);
-      PartitionNode*  find_local_node(LogicalPartition handle);
     public:
       bool has_node(IndexSpace space);
       bool has_node(IndexPartition part);
@@ -3810,7 +3803,8 @@ namespace Legion {
                                     std::set<RtEvent> &ready_events,
                                     bool downward_only);
       static void handle_deferred_compute_equivalence_sets(const void *args);
-      void invalidate_refinement(ContextID ctx,const FieldMask &mask,bool self);
+      void invalidate_refinement(ContextID ctx, const FieldMask &mask,
+          bool self, bool collective, std::set<RtEvent> &applied_events);
       void record_refinement(ContextID ctx, EquivalenceSet *set, 
                              const FieldMask &mask);
       void propagate_refinement(ContextID ctx, PartitionNode *child,
@@ -3917,7 +3911,8 @@ namespace Legion {
                                     AddressSpaceID source,
                                     std::set<RtEvent> &ready_events,
                                     bool downward_only);
-      void invalidate_refinement(ContextID ctx, const FieldMask &mask);
+      void invalidate_refinement(ContextID ctx, const FieldMask &mask,
+                  bool collective, std::set<RtEvent> &applied_events);
       void propagate_refinement(ContextID ctx, RegionNode *child,
                                 const FieldMask &mask);
     public:

@@ -79,7 +79,7 @@ namespace Legion {
       virtual ContextID get_context_id(void) const = 0;
       virtual UniqueID get_context_uid(void) const;
       virtual Task* get_task(void); 
-      virtual TaskContext* find_parent_context(void);
+      virtual InnerContext* find_parent_context(void);
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target,
                                        bool replicate = false) = 0;
@@ -1253,10 +1253,12 @@ namespace Legion {
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &applied_events);
       void initialize_region_tree_context(const RegionUsage &usage,
-                        EquivalenceSet *set, const FieldMask &mask);
+          EquivalenceSet *set, const FieldMask &mask, bool created, bool local);
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
-      void invalidate_created_requirement_contexts(std::set<RtEvent> &applied,
-                                                   const bool collective);
+      void invalidate_region_tree_context(LogicalRegion handle, bool collective,
+                                             std::set<RtEvent> &applied_events);
+      void invalidate_local_state_contexts(std::set<RtEvent> &applied_events,
+                                           bool collective);
       virtual void send_back_created_state(AddressSpaceID target);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
@@ -1376,6 +1378,11 @@ namespace Legion {
       std::list<PostTaskArgs>                         post_task_queue;
       CompletionQueue                                 post_task_comp_queue;
     protected:
+      // State for created regions that we need to invalidate or send back
+      mutable LocalLock                               created_state_lock;
+      std::set<RegionNode*>                           created_state_nodes;
+      std::set<RegionNode*>                           local_state_nodes;
+    protected:
       // Traces for this task's execution
       LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC>::tracked traces;
       LegionTrace *current_trace;
@@ -1457,7 +1464,7 @@ namespace Legion {
     public:
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate = false);
-      virtual TaskContext* find_parent_context(void);
+      virtual InnerContext* find_parent_context(void);
     public:
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
@@ -1524,10 +1531,11 @@ namespace Legion {
       struct LRBroadcast {
       public:
         LRBroadcast(void) : tid(0), double_buffer(0) { }
-        LRBroadcast(RegionTreeID t, bool db) :
-          tid(t), double_buffer(db) { }
+        LRBroadcast(RegionTreeID t, DistributedID id, bool db) :
+          tid(t), did(id), double_buffer(db) { }
       public:
         RegionTreeID tid;
+        DistributedID did;
         bool double_buffer;
       };
       struct IntraSpaceDeps {
@@ -2305,7 +2313,7 @@ namespace Legion {
       virtual Task* get_task(void);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
-      virtual TaskContext* find_parent_context(void);
+      virtual InnerContext* find_parent_context(void);
     public:
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
@@ -2336,7 +2344,7 @@ namespace Legion {
       static void defer_physical_response(const void *args);
     protected:
       UniqueID parent_context_uid;
-      TaskContext *parent_ctx;
+      InnerContext *parent_ctx;
       ShardManager *shard_manager; // if we're lucky and one is already here
     protected:
       ApEvent remote_completion_event;

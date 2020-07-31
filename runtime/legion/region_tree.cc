@@ -1846,59 +1846,14 @@ namespace Legion {
           &version_info, req.parent, user_mask, op, index, ready_events);
     }
 
-#ifdef NEWEQ
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::invalidate_versions(RegionTreeContext ctx, 
-                                               LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      // Check to see if this has already been deleted
-      RegionNode *node = find_local_node(handle);
-      if (node == NULL)
-        return;
-      VersioningInvalidator invalidator(ctx);
-      node->visit_node(&invalidator);
-      if (node->remove_base_resource_ref(REGION_TREE_REF))
-        delete node;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::invalidate_all_versions(RegionTreeContext ctx)
-    //--------------------------------------------------------------------------
-    {
-      std::map<RegionTreeID,RegionNode*> trees;
-      {
-        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-        trees = tree_nodes;
-        for (std::map<RegionTreeID,RegionNode*>::const_iterator it = 
-              trees.begin(); it != trees.end(); it++)
-          it->second->add_base_resource_ref(REGION_TREE_REF);
-      }
-      VersioningInvalidator invalidator(ctx); 
-      for (std::map<RegionTreeID,RegionNode*>::const_iterator it = 
-            trees.begin(); it != trees.end(); it++)
-      {
-        it->second->visit_node(&invalidator);
-        if (it->second->remove_base_resource_ref(REGION_TREE_REF))
-          delete it->second;
-      }
-    }
-#endif // NEWEQ
-
     //--------------------------------------------------------------------------
     void RegionTreeForest::invalidate_current_context(RegionTreeContext ctx,
-                                          bool users_only, LogicalRegion handle)
+                                          bool users_only, RegionNode *top_node)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_INVALIDATE_CONTEXT_CALL);
-      // Handle the case where we already deleted the region tree
-      RegionNode *top_node = find_local_node(handle);
-      if (top_node == NULL)
-        return;
       CurrentInvalidator invalidator(ctx.get_id(), users_only);
       top_node->visit_node(&invalidator);
-      if (top_node->remove_base_resource_ref(REGION_TREE_REF))
-        delete top_node;
     }
 
     //--------------------------------------------------------------------------
@@ -5041,32 +4996,6 @@ namespace Legion {
       }
       else
         return wait_finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    RegionNode* RegionTreeForest::find_local_node(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      std::map<LogicalRegion,RegionNode*>::const_iterator finder = 
-        region_nodes.find(handle);
-      if (finder == region_nodes.end())
-        return NULL;
-      finder->second->add_base_resource_ref(REGION_TREE_REF);
-      return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    PartitionNode* RegionTreeForest::find_local_node(LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      std::map<LogicalPartition,PartitionNode*>::const_iterator finder =
-          part_nodes.find(handle);
-      if (finder == part_nodes.end())
-        return NULL;
-      finder->second->add_base_resource_ref(REGION_TREE_REF);
-      return finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -17584,20 +17513,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::invalidate_refinement(ContextID ctx, 
-                                           const FieldMask &mask, bool self)
+    void RegionNode::invalidate_refinement(ContextID ctx, const FieldMask &mask, 
+                  bool self, bool collective, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
-      manager.invalidate_refinement(mask, self, to_traverse);
+      FieldMaskSet<EquivalenceSet> to_invalidate;
+      manager.invalidate_refinement(mask, self, to_traverse, to_invalidate);
+      if (!to_invalidate.empty())
+      {
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              to_invalidate.begin(); it != to_invalidate.end(); it++)
+        {
+          it->first->invalidate_set(it->second, collective, applied_events);
+          if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+            delete it->first;
+        }
+      }
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
 #ifdef DEBUG_LEGION
         assert(!it->first->is_region());
 #endif
-        it->first->as_partition_node()->invalidate_refinement(ctx, it->second);
+        it->first->as_partition_node()->invalidate_refinement(ctx, it->second,
+                                                  collective, applied_events);
         if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
@@ -18921,19 +18862,25 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PartitionNode::invalidate_refinement(ContextID ctx, 
-                                              const FieldMask &mask)
+      const FieldMask &mask, bool collective, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
-      manager.invalidate_refinement(mask, true/*delete self*/, to_traverse);
+      FieldMaskSet<EquivalenceSet> to_invalidate;
+      manager.invalidate_refinement(mask, true/*delete self*/, 
+                                    to_traverse, to_invalidate);
+#ifdef DEBUG_LEGION
+      assert(to_invalidate.empty());
+#endif
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
 #ifdef DEBUG_LEGION
         assert(it->first->is_region());
 #endif
-        it->first->as_region_node()->invalidate_refinement(ctx,it->second,true);
+        it->first->as_region_node()->invalidate_refinement(ctx, it->second,
+            true/*self*/, collective, applied_events);
         if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
           delete it->first;
       }

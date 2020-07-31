@@ -8336,14 +8336,12 @@ namespace Legion {
         // Just need to clean out the version managers which will free
         // all the equivalence sets and allow the reference counting to
         // clean everything up
-        const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
           InnerContext *context = find_version_context(idx);
           const RegionRequirement &req = deletion_requirements[idx];
-          RegionNode *node = runtime->forest->get_node(req.region);
-          runtime->forest->invalidate_versions(context->get_context(),
-              node, all_ones_mask, false/*collective*/, map_applied_conditions);
+          context->invalidate_region_tree_context(req.region, 
+              false/*collective*/, map_applied_conditions);
         }
       }
       else if (kind == FIELD_DELETION)

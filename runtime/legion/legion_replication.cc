@@ -2330,16 +2330,14 @@ namespace Legion {
       if (kind == LOGICAL_REGION_DELETION)
       {
         std::set<RtEvent> preconditions;
-        const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         const bool collective = repl_ctx->shard_manager->is_total_sharding();
         // Figure out the versioning context for this requirements
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
           InnerContext *context = find_version_context(idx);
           const RegionRequirement &req = deletion_requirements[idx];
-          RegionNode *node = runtime->forest->get_node(req.region);
-          runtime->forest->invalidate_versions(context->get_context(),
-              node, all_ones_mask, collective, preconditions);
+          context->invalidate_region_tree_context(req.region, 
+                                         collective, preconditions);
         }
         if (!preconditions.empty())
           complete_mapping(Runtime::merge_events(preconditions));
@@ -6753,6 +6751,9 @@ namespace Legion {
         delete address_spaces;
       if (local_future_result != NULL)
         free(local_future_result);
+#ifdef DEBUG_LEGION
+      assert(created_equivalence_sets.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7086,6 +7087,52 @@ namespace Legion {
       assert(mapped_equivalence_sets[idx] != NULL);
 #endif
       return mapped_equivalence_sets[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* ShardManager::deduplicate_equivalence_set_creation(
+                                     RegionNode *region_node, DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID owner_space = runtime->determine_owner(did);
+      EquivalenceSet *result = NULL;
+      if (local_shards.size() > 1)
+      {
+        AutoLock m_lock(manager_lock);
+        // See if we already have this here or not
+        std::map<DistributedID,std::pair<EquivalenceSet*,size_t> >::iterator
+          finder = created_equivalence_sets.find(did);
+        if (finder != created_equivalence_sets.end())
+        {
+          result = finder->second.first;
+#ifdef DEBUG_LEGION
+          assert(finder->second.second > 0);
+#endif
+          if (--finder->second.second == 0)
+            created_equivalence_sets.erase(finder);
+          return result;
+        }
+        // Didn't find it so make it
+        result = new EquivalenceSet(runtime, did, owner_space, owner_space,
+                      region_node, true/*register now*/, true/*collective*/);
+        // Record it for the shards that come later
+        std::pair<EquivalenceSet*,size_t> &pending = 
+          created_equivalence_sets[did];
+        pending.first = result;
+        pending.second = local_shards.size() - 1;
+      }
+      else // Only one shard here on this node so just make it
+        result = new EquivalenceSet(runtime, did, owner_space, owner_space,
+                      region_node, true/*register now*/, true/*collective*/);
+      // We made it so if we're the owner record all the remote locations
+      // of shards where we know that it also exists
+      if (result->is_owner())
+      {
+        const ShardMapping &mapping = *address_spaces; 
+        for (unsigned idx = 0; idx < mapping.size(); idx++)
+          result->update_remote_instances(mapping[idx]);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------

@@ -2083,6 +2083,8 @@ namespace Legion {
       void launch_shard(ShardTask *task,
                         RtEvent precondition = RtEvent::NO_RT_EVENT) const;
       EquivalenceSet* get_initial_equivalence_set(unsigned idx) const;
+      EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
+                                                           DistributedID did);
       void complete_startup_initialization(void) const;
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
@@ -2216,6 +2218,9 @@ namespace Legion {
 #endif
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
+    protected:
+      std::map<DistributedID,std::pair<EquivalenceSet*,size_t> > 
+                                        created_equivalence_sets;
     protected:
       // A unique set of address spaces on which shards exist 
       std::set<AddressSpaceID> unique_shard_spaces;

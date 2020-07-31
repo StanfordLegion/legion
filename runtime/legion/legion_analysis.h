@@ -2681,6 +2681,8 @@ namespace Legion {
       void remove_update_guard(CopyFillGuard *guard);
       void record_tracker(EqSetTracker *tracker, const FieldMask &mask);
       void remove_tracker(EqSetTracker *tracker, const FieldMask &mask);
+      void invalidate_set(const FieldMask &mask, bool collective,
+                          std::set<RtEvent> &applied_events);
     protected:
       void check_for_migration(PhysicalAnalysis &analysis,
                                std::set<RtEvent> &applied_events);
@@ -2825,7 +2827,8 @@ namespace Legion {
       void propagate_refinement(RegionTreeNode *child, 
               const FieldMask &child_mask, FieldMask &parent_mask);
       void invalidate_refinement(const FieldMask &mask, bool invalidate_self,
-              FieldMaskSet<RegionTreeNode> &to_invalidate);
+                                 FieldMaskSet<RegionTreeNode> &to_traverse,
+                                 FieldMaskSet<EquivalenceSet> &to_invalidate);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,

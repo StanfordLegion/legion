@@ -14815,17 +14815,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::invalidate_refinement(const FieldMask &mask,
-              bool invalidate_self, FieldMaskSet<RegionTreeNode> &to_invalidate)
+    void VersionManager::invalidate_refinement(const FieldMask &mask, bool self,
+                                    FieldMaskSet<RegionTreeNode> &to_traverse,
+                                    FieldMaskSet<EquivalenceSet> &to_invalidate)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);     
  #ifdef DEBUG_LEGION
-      assert(to_invalidate.empty());
+      assert(to_traverse.empty());
       assert(!(mask - disjoint_complete));
 #endif
-      if (invalidate_self)
+      if (self)
+      {
         disjoint_complete -= mask;
+        if (!equivalence_sets.empty() && 
+            !(mask * equivalence_sets.get_valid_mask()))
+        {
+          std::vector<EquivalenceSet*> to_delete;
+          for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          {
+            const FieldMask overlap = it->second & mask;
+            if (!overlap)
+              continue;
+            to_invalidate.insert(it->first, overlap);
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first); // reference flows back
+            else
+              it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<EquivalenceSet*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+              equivalence_sets.erase(*it);
+          }
+          equivalence_sets.tighten_valid_mask();
+        }
+      }
       if (!(mask * disjoint_complete_children.get_valid_mask()))
       {
         std::vector<RegionTreeNode*> to_delete;
@@ -14837,7 +14865,7 @@ namespace Legion {
           if (!overlap)
             continue;
           it.filter(overlap);
-          to_invalidate.insert(it->first, overlap);
+          to_traverse.insert(it->first, overlap);
           if (!it->second)
             to_delete.push_back(it->first); // reference flows back
           else

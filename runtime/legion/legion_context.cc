@@ -105,7 +105,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TaskContext* TaskContext::find_parent_context(void)
+    InnerContext* TaskContext::find_parent_context(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -641,31 +641,6 @@ namespace Legion {
             precondition.wait();
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegion TaskContext::create_logical_region(RegionTreeForest *forest,
-                                                     IndexSpace index_space,
-                                                     FieldSpace field_space,
-                                                     bool task_local)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      RegionTreeID tid = runtime->get_unique_region_tree_id();
-      LogicalRegion region(tid, index_space, field_space);
-#ifdef DEBUG_LEGION
-      log_region.debug("Creating logical region in task %s (ID %lld) with "
-                       "index space %x and field space %x in new tree %d",
-                       get_task_name(), get_unique_id(), 
-                       index_space.id, field_space.id, tid);
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_region(index_space.id, field_space.id, tid);
-
-      forest->create_logical_region(region);
-      // Register the creation of a top-level region with the context
-      register_region_creation(region, task_local);
-      return region;
     }
 
     //--------------------------------------------------------------------------
@@ -2796,6 +2771,8 @@ namespace Legion {
       assert(outstanding_subtasks == 0);
       assert(pending_subtasks == 0);
       assert(pending_frames == 0);
+      assert(created_state_nodes.empty());
+      assert(local_state_nodes.empty());
 #endif
       if (!remote_context)
         runtime->unregister_local_context(context_uid);
@@ -5804,8 +5781,18 @@ namespace Legion {
       RegionNode *node = forest->create_logical_region(region);
       // Register the creation of a top-level region with the context
       register_region_creation(region, task_local);
-      // Now we need to make the 
-      
+      // Now we need to make the root equivalence set and record it
+      EquivalenceSet *set = new EquivalenceSet(runtime,
+          runtime->get_available_distributed_id(), runtime->address_space,
+          runtime->address_space, node, true/*register now*/);
+      // Find the outermost local context to use for this region
+      InnerContext *context = 
+        task_local ? this : find_outermost_local_context(this);
+      // Initialize the region tree context
+      const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
+      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      context->initialize_region_tree_context(usage, set, all_ones_mask, 
+          true/*created*/, task_local); 
       return region;
     }
 
@@ -8506,14 +8493,15 @@ namespace Legion {
           eq_set->initialize_set(usage, user_mask, restricted, sources,
                                  corresponding, applied_events);
           // Now initialize our context with this equivalence set
-          initialize_region_tree_context(usage, eq_set, user_mask);
+          initialize_region_tree_context(usage, eq_set, user_mask, 
+                                         false/*created*/, true/*local*/);
         }
       }
     }
 
     //--------------------------------------------------------------------------
     void InnerContext::initialize_region_tree_context(const RegionUsage &usage,
-                                     EquivalenceSet *set, const FieldMask &mask)
+           EquivalenceSet *set, const FieldMask &mask, bool created, bool local)
     //--------------------------------------------------------------------------
     {
       RegionNode *region_node = set->region_node;
@@ -8524,6 +8512,14 @@ namespace Legion {
       if (IS_WRITE(usage))
         region_node->initialize_disjoint_complete_tree(ctx, mask);
       region_node->initialize_versioning_analysis(ctx, set, mask);
+      if (created)
+      {
+        AutoLock c_lock(created_state_lock);
+        if (local)
+          local_state_nodes.insert(region_node);
+        else
+          created_state_nodes.insert(region_node);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8537,19 +8533,18 @@ namespace Legion {
       {
         if (IS_NO_ACCESS(regions[idx]))
           continue;
+        RegionNode *node = runtime->forest->get_node(regions[idx].region);
         runtime->forest->invalidate_current_context(tree_context,
-                                                    false/*users only*/,
-                                                    regions[idx].region);
+                                       false/*users only*/, node);
         if (!virtual_mapped[idx])
         {
-          RegionNode *node = runtime->forest->get_node(regions[idx].region);
           const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-          runtime->forest->invalidate_versions(tree_context, node, 
-              all_ones_mask, false/*collective*/, applied);
+          node->invalidate_refinement(tree_context.get_id(), all_ones_mask,
+              true/*self*/, false/*collective*/, applied);
         }
       }
-      if (!created_requirements.empty())
-        invalidate_created_requirement_contexts(applied, false/*collective*/);
+      if (!local_state_nodes.empty())
+        invalidate_local_state_contexts(applied, false/*collective*/);
       // Clean up our instance top views
       if (!instance_top_views.empty())
         clear_instance_top_views();
@@ -8558,49 +8553,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::invalidate_created_requirement_contexts(
+    void InnerContext::invalidate_region_tree_context(LogicalRegion handle,
+                             bool collective, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = runtime->forest->get_node(handle);
+      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      node->invalidate_refinement(tree_context.get_id(), all_ones_mask, 
+                                  true/*self*/, collective, applied_events);
+      AutoLock c_lock(created_state_lock);
+      if (!created_state_nodes.empty())
+        created_state_nodes.erase(node);
+      if (!local_state_nodes.empty())
+        local_state_nodes.erase(node);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::invalidate_local_state_contexts(
                               std::set<RtEvent> &applied, const bool collective)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!created_requirements.empty());
+      assert(!local_state_nodes.empty());
 #endif
-      TaskContext *outermost = find_outermost_local_context();
-      const bool is_outermost = (outermost == this);
-      RegionTreeContext outermost_ctx = outermost->get_context();
       const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
-            created_requirements.begin(); it != 
-            created_requirements.end(); it++)
+      for (std::set<RegionNode*>::const_iterator it = 
+            local_state_nodes.begin(); it != local_state_nodes.end(); it++)
       {
-#ifdef DEBUG_LEGION
-        assert(returnable_privileges.find(it->first) !=
-                returnable_privileges.end());
-#endif
-        // See if we're a returnable privilege or not
-        if (returnable_privileges[it->first])
-        {
-          // If we're the outermost context or the requirement was
-          // deleted, then we can invalidate everything
-          // Otherwiswe we only invalidate the users
-          const bool users_only = !is_outermost;
-          runtime->forest->invalidate_current_context(outermost_ctx,
-                                      users_only, it->second.region);
-        }
-        else // Not returning so invalidate the full thing 
-        {
-          runtime->forest->invalidate_current_context(tree_context,
-                            false/*users only*/, it->second.region);
-          // Little tricky here, this is safe to invaliate the whole
-          // tree even if we only had privileges on a field because
-          // if we had privileges on the whole region in this context
-          // it would have merged the created_requirement and we wouldn't
-          // have a non returnable privilege requirement in this context
-          RegionNode *node = runtime->forest->get_node(it->second.region);
-          runtime->forest->invalidate_versions(tree_context, node,
-              all_ones_mask, collective, applied); 
-        }
+        runtime->forest->invalidate_current_context(tree_context,
+                                      false/*users only*/, (*it));
+        // Little tricky here, this is safe to invaliate the whole
+        // tree even if we only had privileges on a field because
+        // if we had privileges on the whole region in this context
+        // it would have merged the created_requirement and we wouldn't
+        // have a non returnable privilege requirement in this context
+        (*it)->invalidate_refinement(tree_context.get_id(), all_ones_mask,
+                                     true/*self*/, collective, applied);
       }
+      local_state_nodes.clear(); 
     }
 
     //--------------------------------------------------------------------------
@@ -9732,7 +9722,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TaskContext* TopLevelContext::find_parent_context(void)
+    InnerContext* TopLevelContext::find_parent_context(void)
     //--------------------------------------------------------------------------
     {
       return NULL;
@@ -9942,6 +9932,7 @@ namespace Legion {
         {
           const LRBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_region_tree(value.tid);
+          runtime->free_distributed_id(value.did);
         }
         else
         {
@@ -10739,19 +10730,18 @@ namespace Legion {
       {
         if (IS_NO_ACCESS(regions[idx]))
           continue;
+        RegionNode *node = runtime->forest->get_node(regions[idx].region);
         runtime->forest->invalidate_current_context(tree_context,
-                                                    false/*users only*/,
-                                                    regions[idx].region);
+                                      false/*users only*/, node);
         if (!virtual_mapped[idx])
         {
-          RegionNode *node = runtime->forest->get_node(regions[idx].region);
           const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-          runtime->forest->invalidate_versions(tree_context, node,
-              all_ones_mask, collective, applied);
+          node->invalidate_refinement(tree_context.get_id(), all_ones_mask,
+              true/*self*/, collective, applied);
         }
       }
-      if (!created_requirements.empty())
-        invalidate_created_requirement_contexts(applied, collective);
+      if (!local_state_nodes.empty())
+        invalidate_local_state_contexts(applied, collective);
       // Cannot clear our instance top view references until we are deleted 
       // as we might still need to help out our other sibling shards
       
@@ -14449,16 +14439,18 @@ namespace Legion {
       bool double_buffer = false;
       std::pair<ValueBroadcast<LRBroadcast>*,bool> &collective = 
         pending_region_trees.front();
+      RegionNode *node = NULL;
+      DistributedID eq_did = 0;
       if (collective.second)
       {
         const LRBroadcast value = collective.first->get_value(false);
         handle.tree_id = value.tid;
+        eq_did = value.did;
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
         // Have to register this before doing the broadcast
-        RegionNode *node = 
-          forest->create_logical_region(handle, false/*notify remote*/,
-                                        creation_barrier, &applied);
+        node = forest->create_logical_region(handle, false/*notify remote*/,
+                                             creation_barrier, &applied);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
@@ -14488,13 +14480,14 @@ namespace Legion {
         }
         const LRBroadcast value = collective.first->get_value(false);
         handle.tree_id = value.tid;
+        eq_did = value.did;
         double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
         std::set<RtEvent> applied;
-        forest->create_logical_region(handle, false/*notify remote*/, 
-                                      creation_barrier, &applied);
+        node = forest->create_logical_region(handle, false/*notify remote*/, 
+                                             creation_barrier, &applied);
         // Signal that we are done our creation
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -14508,6 +14501,21 @@ namespace Legion {
       advance_replicate_barrier(creation_barrier, total_shards);
       // Register the creation of a top-level region with the context
       register_region_creation(handle, task_local);
+      // Now we need to make the root equivalence set and record it
+      // Use the shard manager to deduplicate across the shards on this node
+      EquivalenceSet *set = 
+        shard_manager->deduplicate_equivalence_set_creation(node, eq_did);
+      // If we're shard 0 then we put our data in the outermost enclosing
+      // context for propagation, whereas all other shards will keep it
+      // local so that it doesn't polute the global space
+      const bool use_local = (task_local || (owner_shard->shard_id > 0));
+      InnerContext *context =
+        use_local ? this : find_outermost_local_context(this);
+      // Initialize the region tree context
+      const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
+      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      context->initialize_region_tree_context(usage, set, all_ones_mask, 
+          true/*created*/, use_local);
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
@@ -14526,12 +14534,13 @@ namespace Legion {
         if (owner_shard->shard_id == logical_region_allocator_shard)
         {
           const RegionTreeID tid = runtime->get_unique_region_tree_id();
+          const DistributedID did = runtime->get_available_distributed_id();
           // We're the owner, so make it locally and then broadcast it
           runtime->forest->record_pending_region_tree(tid);
           // Do our arrival on this generation, should be the last one
           ValueBroadcast<LRBroadcast> *collective = 
             new ValueBroadcast<LRBroadcast>(this, COLLECTIVE_LOC_34);
-          collective->broadcast(LRBroadcast(tid, double_next));
+          collective->broadcast(LRBroadcast(tid, did, double_next));
           pending_region_trees.push_back(
               std::pair<ValueBroadcast<LRBroadcast>*,bool>(collective, true));
         }
@@ -17953,7 +17962,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    TaskContext* RemoteContext::find_parent_context(void)
+    InnerContext* RemoteContext::find_parent_context(void)
     //--------------------------------------------------------------------------
     {
       if (top_level_context)
@@ -19246,6 +19255,34 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    LogicalRegion LeafContext::create_logical_region(RegionTreeForest *forest,
+                                                      IndexSpace index_space,
+                                                      FieldSpace field_space,
+                                                      bool task_local)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      RegionTreeID tid = runtime->get_unique_region_tree_id();
+      LogicalRegion region(tid, index_space, field_space);
+#ifdef DEBUG_LEGION
+      log_region.debug("Creating logical region in task %s (ID %lld) with "
+                       "index space %x and field space %x in new tree %d",
+                       get_task_name(), get_unique_id(), 
+                       index_space.id, field_space.id, tid);
+#endif
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_region(index_space.id, field_space.id, tid);
+
+      forest->create_logical_region(region);
+      // Register the creation of a top-level region with the context
+      register_region_creation(region, task_local);
+      // Don't bother making any equivalence sets yet, we'll do that
+      // in the end_task call when we know about only the regions
+      // that have survived the execution of the task
+      return region;
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::destroy_logical_region(LogicalRegion handle,
                                              const bool unordered)
     //--------------------------------------------------------------------------
@@ -20123,6 +20160,30 @@ namespace Legion {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
+      }
+      // If we have any created regions that are flowing out of this task
+      // then handle them now, no need for the lock here
+      if (!created_regions.empty() && !owner_task->is_remote())
+      {
+        // Find the outermost local context to use for these regions
+        InnerContext *parent = find_parent_context();
+        InnerContext *context = parent->find_outermost_local_context(parent);
+        // Initialize the region tree contexts
+        const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
+        const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+        // Note we only handle the ones for which we know that we'll have
+        // an outermost context that we'll be able to find
+        // If we're remote, this will all be flushed back
+        for (std::map<LogicalRegion,unsigned>::const_iterator it = 
+              created_regions.begin(); it != created_regions.end(); it++)
+        {
+          RegionNode *node = runtime->forest->get_node(it->first);
+          EquivalenceSet *set = new EquivalenceSet(runtime,
+            runtime->get_available_distributed_id(), runtime->address_space,
+            runtime->address_space, node, true/*register now*/);
+          context->initialize_region_tree_context(usage, set, all_ones_mask,
+                                            true/*created*/,false/*local*/);
+        }
       }
       if (!task_local_instances.empty())
         release_task_local_instances(deferred_result_instance);
