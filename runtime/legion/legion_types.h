@@ -814,7 +814,7 @@ namespace Legion {
       SEND_REPL_EQ_REQUEST,
       SEND_REPL_EQ_RESPONSE,
       SEND_REPL_INTRA_SPACE_DEP,
-      SEND_REPL_RESOURCE_UPDATE,
+      SEND_REPL_BROADCAST_UPDATE,
       SEND_REPL_TRACE_EVENT_REQUEST,
       SEND_REPL_TRACE_EVENT_RESPONSE,
       SEND_REPL_TRACE_UPDATE,
@@ -1018,7 +1018,7 @@ namespace Legion {
         "Send Replicate Equivalence Set Request",                     \
         "Send Replicate Equivalence Set Response",                    \
         "Send Replicate Intra Space Dependence",                      \
-        "Send Replicate Resource Update",                             \
+        "Send Replicate Broadcast Update",                            \
         "Send Replicate Trace Event Request",                         \
         "Send Replicate Trace Event Response",                        \
         "Send Replicate Trace Update",                                \

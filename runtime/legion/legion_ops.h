@@ -572,8 +572,6 @@ namespace Legion {
                                    GenerationID gen);
     public:
       // Help for finding the contexts for an operation
-      InnerContext* find_logical_context(unsigned index);
-      InnerContext* find_version_context(unsigned index);
       InnerContext* find_physical_context(unsigned index);
     public:
       // Support for operations that compute futures

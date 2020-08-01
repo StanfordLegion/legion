@@ -832,6 +832,8 @@ namespace Legion {
       void clear_logical_users(void);
       void reset(void);
       void clear_deleted_state(const FieldMask &deleted_mask);
+      void merge(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
+      void swap(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
     public:
       RegionTreeNode *const owner;
     public:
@@ -2829,6 +2831,10 @@ namespace Legion {
       void invalidate_refinement(const FieldMask &mask, bool invalidate_self,
                                  FieldMaskSet<RegionTreeNode> &to_traverse,
                                  FieldMaskSet<EquivalenceSet> &to_invalidate);
+      void merge(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
+                 FieldMaskSet<EquivalenceSet> &to_invalidate);
+      void swap(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
+                FieldMaskSet<EquivalenceSet> &to_invalidate);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,

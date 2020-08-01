@@ -2334,9 +2334,8 @@ namespace Legion {
         // Figure out the versioning context for this requirements
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
-          InnerContext *context = find_version_context(idx);
           const RegionRequirement &req = deletion_requirements[idx];
-          context->invalidate_region_tree_context(req.region, 
+          parent_ctx->invalidate_region_tree_context(req.region, 
                                          collective, preconditions);
         }
         if (!preconditions.empty())
@@ -7548,6 +7547,30 @@ namespace Legion {
                              Serializer &rez, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+      broadcast_message(source, rez, RESOURCE_UPDATE_KIND, applied_events); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::broadcast_created_region_contexts(ShardTask *source, 
+                             Serializer &rez, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      broadcast_message(source, rez, CREATED_REGION_UPDATE_KIND,applied_events); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::broadcast_leaf_region_contexts(ShardTask *source, 
+                             Serializer &rez, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      broadcast_message(source, rez, LEAF_REGION_UPDATE_KIND, applied_events); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::broadcast_message(ShardTask *source, Serializer &rez,
+                   BroadcastMessageKind kind, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
       std::vector<AddressSpaceID> shard_spaces;
       {
         AutoLock m_lock(manager_lock);
@@ -7591,10 +7614,11 @@ namespace Legion {
           rez2.serialize(repl_id);
           rez2.serialize<unsigned>(start_idx);
           rez2.serialize<unsigned>(locals[idx]);
+          rez2.serialize(kind);
           rez2.serialize<size_t>(rez.get_used_bytes());
           rez2.serialize(rez.get_buffer(), rez.get_used_bytes());
           rez2.serialize(next_done);
-          runtime->send_control_replicate_resource_update(targets[idx], rez2);
+          runtime->send_control_replicate_broadcast_update(targets[idx], rez2);
           applied_events.insert(next_done);
         }
       }
@@ -7606,17 +7630,38 @@ namespace Legion {
         if ((*it) == source)
           continue;
         Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
-        (*it)->handle_resource_update(derez, applied_events);
+        switch (kind)
+        {
+          case RESOURCE_UPDATE_KIND:
+            {
+              (*it)->handle_resource_update(derez, applied_events);
+              break;
+            }
+          case CREATED_REGION_UPDATE_KIND:
+            {
+              (*it)->handle_created_region_contexts(derez, applied_events);
+              break;
+            }
+          case LEAF_REGION_UPDATE_KIND:
+            {
+              (*it)->handle_leaf_region_contexts(derez, applied_events);
+              break;
+            }
+          default:
+            assert(false);
+        }
       }
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::handle_resource_update(Deserializer &derez)
+    void ShardManager::handle_broadcast(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       unsigned start_idx, local_idx;
       derez.deserialize(start_idx);
       derez.deserialize(local_idx);
+      BroadcastMessageKind kind;
+      derez.deserialize(kind);
       size_t message_size;
       derez.deserialize(message_size);
       const void *message = derez.get_current_pointer();
@@ -7657,10 +7702,11 @@ namespace Legion {
           rez.serialize(repl_id);
           rez.serialize<unsigned>(start_idx);
           rez.serialize<unsigned>(locals[idx]);
+          rez.serialize(kind);
           rez.serialize<size_t>(message_size);
           rez.serialize(message, message_size);
           rez.serialize(next_done);
-          runtime->send_control_replicate_resource_update(targets[idx], rez);
+          runtime->send_control_replicate_broadcast_update(targets[idx], rez);
           remote_handled.insert(next_done);
         } 
       }
@@ -7669,7 +7715,26 @@ namespace Legion {
             local_shards.begin(); it != local_shards.end(); it++)
       {
         Deserializer derez2(message, message_size);
-        (*it)->handle_resource_update(derez2, remote_handled);
+        switch (kind)
+        {
+          case RESOURCE_UPDATE_KIND:
+            {
+              (*it)->handle_resource_update(derez2, remote_handled);
+              break;
+            }
+          case CREATED_REGION_UPDATE_KIND:
+            {
+              (*it)->handle_created_region_contexts(derez2, remote_handled);
+              break;
+            }
+          case LEAF_REGION_UPDATE_KIND:
+            {
+              (*it)->handle_leaf_region_contexts(derez2, remote_handled);
+              break;
+            }
+          default:
+            assert(false);
+        }
       }
       if (!remote_handled.empty())
         Runtime::trigger_event(done_event, 
@@ -8063,14 +8128,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_resource_update(Deserializer &derez,
-                                                         Runtime *runtime)
+    /*static*/ void ShardManager::handle_broadcast_update(Deserializer &derez,
+                                                          Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       ReplicationID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_resource_update(derez);
+      manager->handle_broadcast(derez);
     }
 
     //--------------------------------------------------------------------------

@@ -1686,7 +1686,7 @@ namespace Legion {
       // If this is a NO_ACCESS, then we'll have no dependences so we're done
       if (IS_NO_ACCESS(req))
         return;
-      TaskContext *context = op->find_logical_context(idx);
+      TaskContext *context = op->get_context();
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1746,7 +1746,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
-      TaskContext *context = op->find_logical_context(idx);
+      TaskContext *context = op->get_context();
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1797,7 +1797,7 @@ namespace Legion {
                                       std::vector<LogicalPartition> &partitions)
     //--------------------------------------------------------------------------
     {
-      TaskContext *context = op->find_logical_context(idx);
+      TaskContext *context = op->get_context();
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1832,7 +1832,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
       if (IS_NO_ACCESS(req))
         return;
-      InnerContext *context = op->find_version_context(index);
+      InnerContext *context = op->get_context();
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -16303,6 +16303,52 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeNode::migrate_logical_state(ContextID src, ContextID dst,
+                                               bool merge)
+    //--------------------------------------------------------------------------
+    {
+      LogicalState &src_state = get_logical_state(src);
+      LogicalState &dst_state = get_logical_state(dst);
+      std::set<RegionTreeNode*> to_traverse;
+      if (merge)
+      {
+        // Use the node lock here for serialization
+        AutoLock n_lock(node_lock);
+        dst_state.merge(src_state, to_traverse); 
+      }
+      else
+        dst_state.swap(src_state, to_traverse);
+      for (std::set<RegionTreeNode*>::const_iterator it = 
+            to_traverse.begin(); it != to_traverse.end(); it++)
+        (*it)->migrate_logical_state(src, dst, merge);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::migrate_version_state(ContextID src, ContextID dst,
+                                  std::set<RtEvent> &applied_events, bool merge)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &src_manager = get_current_version_manager(src);
+      VersionManager &dst_manager = get_current_version_manager(dst);
+      std::set<RegionTreeNode*> to_traverse;
+      FieldMaskSet<EquivalenceSet> to_invalidate;
+      if (merge)
+      {
+        // Use the node lock here for serialization
+        AutoLock n_lock(node_lock);
+        dst_manager.merge(src_manager, to_traverse, to_invalidate);
+      }
+      else
+        dst_manager.swap(src_manager, to_traverse, to_invalidate);
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            to_invalidate.begin(); it != to_invalidate.end(); it++)
+        it->first->invalidate_set(it->second, merge, applied_events);
+      for (std::set<RegionTreeNode*>::const_iterator it = 
+            to_traverse.begin(); it != to_traverse.end(); it++)
+        (*it)->migrate_version_state(src, dst, applied_events, merge);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::send_back_logical_state(ContextID ctx, 
                                                  UniqueID context_uid,
                                                  AddressSpaceID target)
@@ -16441,7 +16487,6 @@ namespace Legion {
       UniqueID context_uid;
       derez.deserialize(context_uid);
       InnerContext *context = runtime->find_context(context_uid);
-      InnerContext *outermost = context->find_outermost_local_context(); 
       bool is_region;
       derez.deserialize(is_region);
       RegionTreeNode *node = NULL;
@@ -16457,7 +16502,7 @@ namespace Legion {
         derez.deserialize(handle);
         node = runtime->forest->get_node(handle);
       }
-      node->process_logical_state_return(outermost->get_context().get_id(),
+      node->process_logical_state_return(context->get_context().get_id(),
                                          derez, source);
     } 
 

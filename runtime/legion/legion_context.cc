@@ -3615,66 +3615,6 @@ namespace Legion {
 #endif // NEWEQ
 
     //--------------------------------------------------------------------------
-    InnerContext* InnerContext::find_parent_logical_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      // If this is one of our original region requirements then
-      // we can do the analysis in our original context
-      if (index < regions.size())
-        return this;
-      // Otherwise we need to see if this going to be one of our
-      // region requirements that returns privileges or not. If
-      // it is then we do the analysis in the outermost context
-      // otherwise we do it locally in our own context. We need
-      // to hold the operation lock to look at this data structure.
-      {
-        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-#ifdef DEBUG_LEGION
-        assert(returnable_privileges.find(index) != 
-                returnable_privileges.end());
-#endif
-        if (!returnable_privileges[index])
-          return this;
-      }
-      // Fall through and return the outermost conext
-      return find_outermost_local_context();
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* InnerContext::find_parent_version_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(regions.size() == virtual_mapped.size());
-      assert(regions.size() == parent_req_indexes.size());
-#endif     
-      if (index < virtual_mapped.size())
-      {
-        // See if it is virtual mapped
-        if (virtual_mapped[index])
-          return find_parent_context()->find_parent_version_context(
-                                            parent_req_indexes[index]);
-        else // We mapped a physical instance so we're it
-          return this;
-      }
-      else // We created it
-      {
-        // Check to see if this has returnable privileges or not
-        // If they are not returnable, then we can just be the 
-        // context for the handling the meta-data management, 
-        // otherwise if they are returnable then the top-level
-        // context has to provide global guidance about which
-        // node manages the meta-data.
-        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-        std::map<unsigned,bool>::const_iterator finder = 
-          returnable_privileges.find(index);
-        if ((finder != returnable_privileges.end()) && !finder->second)
-          return this;
-      }
-      return find_outermost_local_context();
-    }
-
-    //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_parent_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
@@ -3706,20 +3646,6 @@ namespace Legion {
           return this;
       }
       return find_top_context();
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* InnerContext::find_outermost_local_context(
-                                                         InnerContext *previous)
-    //--------------------------------------------------------------------------
-    {
-      TaskContext *parent = find_parent_context();
-      if (parent != NULL)
-        return parent->find_outermost_local_context(this);
-#ifdef DEBUG_LEGION
-      assert(previous != NULL);
-#endif
-      return previous;
     }
 
     //--------------------------------------------------------------------------
@@ -5785,14 +5711,11 @@ namespace Legion {
       EquivalenceSet *set = new EquivalenceSet(runtime,
           runtime->get_available_distributed_id(), runtime->address_space,
           runtime->address_space, node, true/*register now*/);
-      // Find the outermost local context to use for this region
-      InnerContext *context = 
-        task_local ? this : find_outermost_local_context(this);
       // Initialize the region tree context
       const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
       const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      context->initialize_region_tree_context(usage, set, all_ones_mask, 
-          true/*created*/, task_local); 
+      initialize_region_tree_context(usage, set, all_ones_mask, 
+                                     true/*created*/, task_local); 
       return region;
     }
 
@@ -8543,6 +8466,13 @@ namespace Legion {
               true/*self*/, false/*collective*/, applied);
         }
       }
+      if (!created_state_nodes.empty())
+      {
+        InnerContext *parent = find_parent_context();
+        parent->receive_created_region_contexts(tree_context,
+            created_state_nodes, applied, false/*collective*/);
+        created_state_nodes.clear();
+      }
       if (!local_state_nodes.empty())
         invalidate_local_state_contexts(applied, false/*collective*/);
       // Clean up our instance top views
@@ -8550,6 +8480,47 @@ namespace Legion {
         clear_instance_top_views();
       // Now we can free our region tree context
       runtime->free_region_tree_context(tree_context);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::receive_created_region_contexts(
+             RegionTreeContext ctx, const std::set<RegionNode*> &created_states,
+             std::set<RtEvent> &applied_events, bool collective)
+    //--------------------------------------------------------------------------
+    {
+      const ContextID src_ctx = ctx.get_id();
+      const ContextID dst_ctx = tree_context.get_id();
+      for (std::set<RegionNode*>::const_iterator it = 
+            created_states.begin(); it != created_states.end(); it++)
+      {
+        (*it)->migrate_logical_state(src_ctx, dst_ctx, collective);
+        (*it)->migrate_version_state(src_ctx, dst_ctx, 
+                                     applied_events, collective);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::receive_leaf_region_contexts(
+                                 const std::vector<LogicalRegion> &leaf_regions,
+                                 std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      // Initialize the region tree contexts
+      const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
+      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      // Note we only handle the ones for which we know that we'll have
+      // an outermost context that we'll be able to find
+      // If we're remote, this will all be flushed back
+      for (std::vector<LogicalRegion>::const_iterator it = 
+            leaf_regions.begin(); it != leaf_regions.end(); it++)
+      {
+        RegionNode *node = runtime->forest->get_node(*it);
+        EquivalenceSet *set = new EquivalenceSet(runtime,
+          runtime->get_available_distributed_id(), runtime->address_space,
+          runtime->address_space, node, true/*register now*/);
+        initialize_region_tree_context(usage, set, all_ones_mask,
+                                       true/*created*/, false/*local*/);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9282,11 +9253,7 @@ namespace Legion {
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
 
-      // Find the proper context to perform this on here based 
-      // on the parent index
-      InnerContext *actual_ctx = 
-        local_ctx->find_parent_version_context(parent_index);
-      const RtEvent done = actual_ctx->compute_equivalence_sets(target, region,
+      const RtEvent done = local_ctx->compute_equivalence_sets(target, region,
                                                     mask, parent_index, origin);
       Runtime::trigger_event(ready_event, done);
     }
@@ -9726,6 +9693,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void TopLevelContext::receive_created_region_contexts(RegionTreeContext ctx,
+                             const std::set<RegionNode*> &created_states,
+                             std::set<RtEvent> &applied_events, bool collective)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void TopLevelContext::receive_leaf_region_contexts(
+                                      const std::vector<LogicalRegion> &regions,
+                                      std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -10677,45 +10662,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* ReplicateContext::find_parent_version_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(regions.size() == virtual_mapped.size());
-      assert(regions.size() == parent_req_indexes.size());
-#endif     
-      if (index < virtual_mapped.size())
-      {
-        // See if it is virtual mapped
-        if (virtual_mapped[index])
-          return find_parent_context()->find_parent_version_context(
-                                            parent_req_indexes[index]);
-        else // We mapped a physical instance so we're it
-          return this;
-      }
-      else // We created it
-      {
-        // Check to see if this has returnable privileges or not
-        // If they are not returnable, then we can just be the 
-        // context for the handling the meta-data management, 
-        // otherwise we can only support this currently if we are
-        // the context for the top-level task
-        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-        std::map<unsigned,bool>::const_iterator finder = 
-          returnable_privileges.find(index);
-        if ((finder != returnable_privileges.end()) && !finder->second)
-          return this;
-      }
-      // If we are shard 0 then use the outermost context so that we
-      // have the state somewhere to flow back, otherwise we use our
-      // own context to store the version information so we can release it
-      if (owner_shard->shard_id == 0)
-        return find_outermost_local_context();
-      else
-        return this;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplicateContext::invalidate_region_tree_contexts(
                                                      std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
@@ -10740,6 +10686,13 @@ namespace Legion {
               true/*self*/, collective, applied);
         }
       }
+      if (!created_state_nodes.empty())
+      {
+        InnerContext *parent = find_parent_context();
+        parent->receive_created_region_contexts(tree_context,
+            created_state_nodes, applied, true/*collective*/);
+        created_state_nodes.clear();
+      }
       if (!local_state_nodes.empty())
         invalidate_local_state_contexts(applied, collective);
       // Cannot clear our instance top view references until we are deleted 
@@ -10747,6 +10700,63 @@ namespace Legion {
       
       // Now we can free our region tree context
       runtime->free_region_tree_context(tree_context);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::receive_created_region_contexts(
+              RegionTreeContext ctx, const std::set<RegionNode*> &created_state,
+              std::set<RtEvent> &applied_events, bool collective)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize<bool>(collective);
+      rez.serialize<size_t>(created_state.size());
+      for (std::set<RegionNode*>::const_iterator it = 
+            created_state.begin(); it != created_state.end(); it++)
+      {
+        rez.serialize((*it)->handle);
+        (*it)->pack_logical_state(ctx.get_id(), rez, false/*invalidate*/);
+        (*it)->pack_version_state(ctx.get_id(), rez, false/*invalidate*/);
+      }
+      shard_manager->broadcast_created_region_contexts(owner_shard, rez,
+                                                       applied_events);
+      receive_replicate_created_region_contexts(ctx, created_state, 
+                                                applied_events, collective);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::receive_leaf_region_contexts(
+                                 const std::vector<LogicalRegion> &leaf_regions,
+                                 std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize<size_t>(leaf_regions.size());
+      for (std::vector<LogicalRegion>::const_iterator it = 
+            leaf_regions.begin(); it != leaf_regions.end(); it++)
+        rez.serialize(*it);
+      shard_manager->broadcast_leaf_region_contexts(owner_shard, rez, 
+                                                    applied_events);
+      receive_replicate_leaf_region_contexts(leaf_regions, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::receive_replicate_created_region_contexts(
+              RegionTreeContext ctx, const std::set<RegionNode*> &created_state,
+              std::set<RtEvent> &applied_events, bool collective)
+    //--------------------------------------------------------------------------
+    {
+      InnerContext::receive_created_region_contexts(ctx, created_state,
+                                                    applied_events, collective);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::receive_replicate_leaf_region_contexts(
+                                 const std::vector<LogicalRegion> &leaf_regions,
+                                 std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      InnerContext::receive_leaf_region_contexts(leaf_regions, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -14505,17 +14515,11 @@ namespace Legion {
       // Use the shard manager to deduplicate across the shards on this node
       EquivalenceSet *set = 
         shard_manager->deduplicate_equivalence_set_creation(node, eq_did);
-      // If we're shard 0 then we put our data in the outermost enclosing
-      // context for propagation, whereas all other shards will keep it
-      // local so that it doesn't polute the global space
-      const bool use_local = (task_local || (owner_shard->shard_id > 0));
-      InnerContext *context =
-        use_local ? this : find_outermost_local_context(this);
       // Initialize the region tree context
       const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
       const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      context->initialize_region_tree_context(usage, set, all_ones_mask, 
-          true/*created*/, use_local);
+      initialize_region_tree_context(usage, set, all_ones_mask, 
+                                     true/*created*/, task_local);
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
@@ -16608,6 +16612,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::handle_created_region_contexts(Deserializer &derez,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      bool collective;
+      derez.deserialize<bool>(collective);
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      std::set<RegionNode*> created_states;
+      const RegionTreeContext ctx = runtime->allocate_region_tree_context();
+      for (unsigned idx = 0; idx < num_regions; idx++)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        RegionNode *node = runtime->forest->get_node(handle);
+        node->unpack_logical_state(ctx.get_id(), derez);
+        node->unpack_version_state(ctx.get_id(), derez);
+      }
+      receive_replicate_created_region_contexts(ctx, created_states,
+                                                applied_events, collective);
+      runtime->free_region_tree_context(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_leaf_region_contexts(Deserializer &derez,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      std::vector<LogicalRegion> leaf_regions(num_regions);
+      for (unsigned idx = 0; idx < num_regions; idx++)
+        derez.deserialize(leaf_regions[idx]);
+      receive_replicate_leaf_region_contexts(leaf_regions, applied_events);
+    }
+    
+    //--------------------------------------------------------------------------
     void ReplicateContext::handle_trace_update(Deserializer &derez, 
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -17939,17 +17980,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* RemoteContext::find_outermost_local_context(
-                                                         InnerContext *previous)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(previous != NULL);
-#endif
-      return previous;
-    }
-    
-    //--------------------------------------------------------------------------
     InnerContext* RemoteContext::find_top_context(InnerContext *previous)
     //--------------------------------------------------------------------------
     {
@@ -18012,24 +18042,6 @@ namespace Legion {
       // Send it to the owner space 
       runtime->send_compute_equivalence_sets_request(dest, rez);
       return ready_event;
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* RemoteContext::find_parent_logical_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      // We should never get here
-      assert(false);
-      return this;
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* RemoteContext::find_parent_version_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      // We always return ourselves here because any task mapping on 
-      // remote node will need to store its version info here
-      return this;
     }
 
     //--------------------------------------------------------------------------
@@ -20075,31 +20087,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* LeafContext::find_parent_logical_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* LeafContext::find_parent_version_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
     InnerContext* LeafContext::find_parent_physical_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* LeafContext::find_outermost_local_context(InnerContext *prev)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -20130,7 +20118,37 @@ namespace Legion {
                                                      std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      // If we have any created regions that are flowing out of this task
+      // then handle them now, no need for the lock here
+      if (!created_regions.empty())
+      {
+        // Find the next inner context to pass these back to
+        InnerContext *parent = find_parent_context();
+        std::vector<LogicalRegion> leaf_regions(created_regions.size());
+        unsigned index = 0;
+        for (std::map<LogicalRegion,unsigned>::const_iterator it = 
+              created_regions.begin(); it != created_regions.end(); it++)
+          leaf_regions[index++] = it->first;
+        parent->receive_leaf_region_contexts(leaf_regions, applied);
+      } 
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::receive_created_region_contexts(RegionTreeContext ctx,
+                             const std::set<RegionNode*> &created_states,
+                             std::set<RtEvent> &applied_events, bool collective)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::receive_leaf_region_contexts(
+                                      const std::vector<LogicalRegion> &regions,
+                                      std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -20160,31 +20178,7 @@ namespace Legion {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
-      }
-      // If we have any created regions that are flowing out of this task
-      // then handle them now, no need for the lock here
-      if (!created_regions.empty() && !owner_task->is_remote())
-      {
-        // Find the outermost local context to use for these regions
-        InnerContext *parent = find_parent_context();
-        InnerContext *context = parent->find_outermost_local_context(parent);
-        // Initialize the region tree contexts
-        const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
-        const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-        // Note we only handle the ones for which we know that we'll have
-        // an outermost context that we'll be able to find
-        // If we're remote, this will all be flushed back
-        for (std::map<LogicalRegion,unsigned>::const_iterator it = 
-              created_regions.begin(); it != created_regions.end(); it++)
-        {
-          RegionNode *node = runtime->forest->get_node(it->first);
-          EquivalenceSet *set = new EquivalenceSet(runtime,
-            runtime->get_available_distributed_id(), runtime->address_space,
-            runtime->address_space, node, true/*register now*/);
-          context->initialize_region_tree_context(usage, set, all_ones_mask,
-                                            true/*created*/,false/*local*/);
-        }
-      }
+      } 
       if (!task_local_instances.empty())
         release_task_local_instances(deferred_result_instance);
       // Unmap any physical regions that we mapped
@@ -21542,26 +21536,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_parent_logical_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(index < parent_req_indexes.size());
-#endif
-      return enclosing->find_parent_logical_context(parent_req_indexes[index]);
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_parent_version_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(index < parent_req_indexes.size());
-#endif
-      return enclosing->find_parent_version_context(parent_req_indexes[index]);
-    }
-
-    //--------------------------------------------------------------------------
     InnerContext* InlineContext::find_parent_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
@@ -21571,13 +21545,6 @@ namespace Legion {
       return enclosing->find_parent_physical_context(parent_req_indexes[index]);
     }
 
-    //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_outermost_local_context(InnerContext *pre)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->find_outermost_local_context(pre);
-    }
-    
     //--------------------------------------------------------------------------
     InnerContext* InlineContext::find_top_context(InnerContext *previous)
     //--------------------------------------------------------------------------
@@ -21599,6 +21566,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InlineContext::invalidate_region_tree_contexts(
                                                      std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::receive_created_region_contexts(RegionTreeContext ctx,
+                             const std::set<RegionNode*> &created_states,
+                             std::set<RtEvent> &applied_events, bool collective)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::receive_leaf_region_contexts(
+                                 const std::vector<LogicalRegion> &leaf_regions,
+                                 std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       assert(false);

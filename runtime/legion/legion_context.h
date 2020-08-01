@@ -464,12 +464,8 @@ namespace Legion {
       virtual MergeCloseOp* get_merge_close_op(void) = 0;
 #endif
     public:
-      virtual InnerContext* find_parent_logical_context(unsigned index) = 0;
-      virtual InnerContext* find_parent_version_context(unsigned index) = 0;
       virtual InnerContext* find_parent_physical_context(unsigned index) = 0;
       // Override by RemoteTask and TopLevelTask
-      virtual InnerContext* find_outermost_local_context(
-                          InnerContext *previous = NULL) = 0;
       virtual InnerContext* find_top_context(InnerContext *previous = NULL) = 0;
     public:
       virtual void initialize_region_tree_contexts(
@@ -479,6 +475,13 @@ namespace Legion {
           std::set<RtEvent> &applied_events) = 0;
       virtual void invalidate_region_tree_contexts(
                                       std::set<RtEvent> &applied) = 0;
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::set<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events,
+                            bool collective) = 0;
+      virtual void receive_leaf_region_contexts(
+                            const std::vector<LogicalRegion> &leaf_regions,
+                            std::set<RtEvent> &applied_events) = 0;
       virtual void send_back_created_state(AddressSpaceID target) = 0;
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
@@ -1237,13 +1240,9 @@ namespace Legion {
       virtual MergeCloseOp* get_merge_close_op(void);
 #endif
     public:
-      virtual InnerContext* find_parent_logical_context(unsigned index);
-      virtual InnerContext* find_parent_version_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
     public:
       // Override by RemoteTask and TopLevelTask
-      virtual InnerContext* find_outermost_local_context(
-                          InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       void configure_context(MapperManager *mapper, TaskPriority priority);
@@ -1255,6 +1254,12 @@ namespace Legion {
       void initialize_region_tree_context(const RegionUsage &usage,
           EquivalenceSet *set, const FieldMask &mask, bool created, bool local);
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::set<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events, bool collective);
+      virtual void receive_leaf_region_contexts(
+                                const std::vector<LogicalRegion> &leaf_regions,
+                                std::set<RtEvent> &applied_events);
       void invalidate_region_tree_context(LogicalRegion handle, bool collective,
                                              std::set<RtEvent> &applied_events);
       void invalidate_local_state_contexts(std::set<RtEvent> &applied_events,
@@ -1470,6 +1475,12 @@ namespace Legion {
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::set<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events, bool collective);
+      virtual void receive_leaf_region_contexts(
+                                const std::vector<LogicalRegion> &leaf_regions,
+                                std::set<RtEvent> &applied_events);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                           RegionNode *region, const FieldMask &mask, 
                           unsigned parent_index, AddressSpaceID source);
@@ -1732,6 +1743,18 @@ namespace Legion {
     public:
       virtual InnerContext* find_parent_version_context(unsigned index);
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::set<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events, bool collective);
+      virtual void receive_leaf_region_contexts(
+                                const std::vector<LogicalRegion> &leaf_regions,
+                                std::set<RtEvent> &applied_events);
+      void receive_replicate_created_region_contexts(RegionTreeContext ctx,
+                          const std::set<RegionNode*> &created_state, 
+                          std::set<RtEvent> &applied_events, bool collective);
+      void receive_replicate_leaf_region_contexts(
+                          const std::vector<LogicalRegion> &leaf_regions,
+                          std::set<RtEvent> &applied_events);
     public:
       virtual RtEvent request_shard_version_data(EqSetTracker *target,
                       RegionNode *region, const FieldMask &request_mask);
@@ -2032,6 +2055,10 @@ namespace Legion {
       static void handle_eq_response(Deserializer &derez, Runtime *rt);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
+      void handle_created_region_contexts(Deserializer &derez,
+                                          std::set<RtEvent> &applied);
+      void handle_leaf_region_contexts(Deserializer &derez,
+                                       std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event,
                                               ShardID remote_shard);
@@ -2315,19 +2342,21 @@ namespace Legion {
                                          std::set<RtEvent> &preconditions);
       virtual InnerContext* find_parent_context(void);
     public:
-      virtual InnerContext* find_outermost_local_context(
-                          InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                           RegionNode *region, const FieldMask &mask, 
                           unsigned parent_index, AddressSpaceID source);
-      virtual InnerContext* find_parent_logical_context(unsigned index);
-      virtual InnerContext* find_parent_version_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::set<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events, bool collective);
+      virtual void receive_leaf_region_contexts(
+                                const std::vector<LogicalRegion> &leaf_regions,
+                                std::set<RtEvent> &applied_events);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
     public:
@@ -2717,11 +2746,7 @@ namespace Legion {
       virtual MergeCloseOp* get_merge_close_op(void);
 #endif
     public:
-      virtual InnerContext* find_parent_logical_context(unsigned index);
-      virtual InnerContext* find_parent_version_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
-      virtual InnerContext* find_outermost_local_context(
-                          InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual void initialize_region_tree_contexts(
@@ -2730,6 +2755,12 @@ namespace Legion {
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::set<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events, bool collective);
+      virtual void receive_leaf_region_contexts(
+                                const std::vector<LogicalRegion> &leaf_regions,
+                                std::set<RtEvent> &applied_events);
       virtual void send_back_created_state(AddressSpaceID target);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
@@ -3128,12 +3159,8 @@ namespace Legion {
       virtual MergeCloseOp* get_merge_close_op(void);
 #endif
     public:
-      virtual InnerContext* find_parent_logical_context(unsigned index);
-      virtual InnerContext* find_parent_version_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       // Override by RemoteTask and TopLevelTask
-      virtual InnerContext* find_outermost_local_context(
-                          InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual void initialize_region_tree_contexts(
@@ -3142,6 +3169,12 @@ namespace Legion {
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::set<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events, bool collective);
+      virtual void receive_leaf_region_contexts(
+                                const std::vector<LogicalRegion> &leaf_regions,
+                                std::set<RtEvent> &applied_events);
       virtual void send_back_created_state(AddressSpaceID target);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,

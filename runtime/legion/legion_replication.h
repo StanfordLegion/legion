@@ -2012,6 +2012,12 @@ namespace Legion {
         ShardManager *manager;
       };
     public:
+      enum BroadcastMessageKind {
+        RESOURCE_UPDATE_KIND,
+        CREATED_REGION_UPDATE_KIND,
+        LEAF_REGION_UPDATE_KIND,
+      };
+    public:
       ShardManager(Runtime *rt, ReplicationID repl_id, 
                    bool control, bool top, size_t total_shards,
                    AddressSpaceID owner_space, SingleTask *original = NULL,
@@ -2109,7 +2115,16 @@ namespace Legion {
     public:
       void broadcast_resource_update(ShardTask *source, Serializer &rez,
                                      std::set<RtEvent> &applied_events);
-      void handle_resource_update(Deserializer &derez);
+    public:
+      void broadcast_created_region_contexts(ShardTask *source, Serializer &rez,
+                                             std::set<RtEvent> &applied_events);
+    public:
+      void broadcast_leaf_region_contexts(ShardTask *source, Serializer &rez,
+                                          std::set<RtEvent> &applied_events);
+    protected:
+      void broadcast_message(ShardTask *source, Serializer &rez,
+                BroadcastMessageKind kind, std::set<RtEvent> &applied_events);
+      void handle_broadcast(Deserializer &derez);
     public:
       void send_trace_event_request(ShardedPhysicalTemplate *physical_template,
                           ShardID shard_source, AddressSpaceID template_source, 
@@ -2139,7 +2154,7 @@ namespace Legion {
       static void handle_eq_request(Deserializer &derez, Runtime *rt);
       static void handle_intra_space_dependence(Deserializer &derez, 
                                                 Runtime *rt);
-      static void handle_resource_update(Deserializer &derez, Runtime *rt);
+      static void handle_broadcast_update(Deserializer &derez, Runtime *rt);
       static void handle_trace_event_request(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID request_source);
       static void handle_trace_event_response(Deserializer &derez);

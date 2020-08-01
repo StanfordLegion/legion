@@ -2678,6 +2678,112 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void LogicalState::merge(LogicalState &src, 
+                             std::set<RegionTreeNode*> &to_traverse)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionList<FieldState>::aligned::iterator fit = 
+            src.field_states.begin(); fit != src.field_states.end(); fit++)
+      {
+        for (FieldMaskSet<RegionTreeNode>::iterator it = 
+              fit->open_children.begin(); it != fit->open_children.end(); it++)
+          to_traverse.insert(it->first);
+        // See if we can add it to any of the existing field states
+        bool merged = false;
+        for (LegionList<FieldState>::aligned::iterator it = 
+              field_states.begin(); it != field_states.end(); it++)
+        {
+          if (!it->overlaps(*fit))
+            continue;
+          it->merge(*fit, owner);
+          merged = true;
+          break;
+        }
+        if (!merged)
+          field_states.push_back(*fit);
+      }
+      src.field_states.clear();
+      curr_epoch_users.splice(curr_epoch_users.end(), src.curr_epoch_users);
+      prev_epoch_users.splice(prev_epoch_users.end(), src.prev_epoch_users);
+      if (!!src.reduction_fields)
+      {
+        reduction_fields |= src.reduction_fields;
+        src.reduction_fields.clear();
+      }
+      if (!src.outstanding_reductions.empty())
+      {
+        for (LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator it =
+              src.outstanding_reductions.begin(); it != 
+              src.outstanding_reductions.end(); it++)
+        {
+          LegionMap<ReductionOpID,FieldMask>::aligned::iterator finder =
+            outstanding_reductions.find(it->first);
+          if (finder == outstanding_reductions.end())
+            outstanding_reductions.insert(*it);
+          else
+            finder->second |= it->second;
+        }
+        src.outstanding_reductions.clear();
+      }
+      if (!!src.disjoint_complete_tree)
+      {
+        disjoint_complete_tree |= src.disjoint_complete_tree;
+        src.disjoint_complete_tree.clear();
+      }
+      if (!src.disjoint_complete_children.empty())
+      {
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+              src.disjoint_complete_children.begin(); it !=
+              src.disjoint_complete_children.end(); it++)
+        {
+          to_traverse.insert(it->first);
+          disjoint_complete_children.insert(it->first, it->second);
+        }
+        src.disjoint_complete_children.clear();
+      }
+#ifdef DEBUG_LEGION
+      src.check_init();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::swap(LogicalState &src,
+                            std::set<RegionTreeNode*> &to_traverse)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      check_init();
+#endif
+      field_states.swap(src.field_states);
+      curr_epoch_users.swap(src.curr_epoch_users);
+      prev_epoch_users.swap(src.prev_epoch_users);
+      if (!!src.reduction_fields)
+      {
+        reduction_fields = src.reduction_fields;
+        src.reduction_fields.clear();
+      }
+      outstanding_reductions.swap(src.outstanding_reductions);
+      if (!!src.disjoint_complete_tree)
+      {
+        disjoint_complete_tree = src.disjoint_complete_tree;
+        src.disjoint_complete_tree.clear();
+      }
+      disjoint_complete_children.swap(src.disjoint_complete_children);
+      for (LegionList<FieldState>::aligned::const_iterator fit = 
+            field_states.begin(); fit != field_states.end(); fit++)
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+              fit->open_children.begin(); it != fit->open_children.end(); it++)
+          to_traverse.insert(it->first);
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+            disjoint_complete_children.begin(); it != 
+            disjoint_complete_children.end(); it++)
+        to_traverse.insert(it->first);
+#ifdef DEBUG_LEGION
+      src.check_init();
+#endif
+    }
+
     /////////////////////////////////////////////////////////////
     // Projection Summary 
     /////////////////////////////////////////////////////////////
@@ -14879,6 +14985,100 @@ namespace Legion {
         }
         disjoint_complete_children.tighten_valid_mask();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::merge(VersionManager &src, 
+                               std::set<RegionTreeNode*> &to_traverse,
+                               FieldMaskSet<EquivalenceSet> &to_invalidate)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!src.disjoint_complete);
+#endif
+      if (!src.equivalence_sets.empty())
+      {
+        for (FieldMaskSet<EquivalenceSet>::iterator it = 
+              src.equivalence_sets.begin(); it != 
+              src.equivalence_sets.end(); it++)
+        {
+          FieldMask overlap = it->second & src.disjoint_complete;
+          if (!overlap)
+            continue;
+          // Figure out whether we've already recorded this equivalence
+          // set and if it so which fields were already valid
+          FieldMaskSet<EquivalenceSet>::iterator finder = 
+            equivalence_sets.find(it->first);
+          if (finder != equivalence_sets.end())
+          {
+            overlap -= finder->second;
+            if (!!overlap)
+            {
+              equivalence_sets.insert(it->first, overlap);
+              to_invalidate.insert(it->first, overlap);
+            }
+            // Remove the duplicate reference
+            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+              assert(false); // should never end up deleting this
+          }
+          else
+          {
+            // Did not have t before so just insert it
+            // Reference flows back
+            equivalence_sets.insert(it->first, overlap);
+            to_invalidate.insert(it->first, overlap);
+          }
+        }
+        src.equivalence_sets.clear();
+      }
+      disjoint_complete |= src.disjoint_complete;
+      src.disjoint_complete.clear();
+      if (!src.disjoint_complete_children.empty())
+      {
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+              src.disjoint_complete_children.begin(); it !=
+              src.disjoint_complete_children.end(); it++)
+        {
+          to_traverse.insert(it->first);
+          disjoint_complete_children.insert(it->first, it->second);
+        }
+        src.disjoint_complete_children.clear();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::swap(VersionManager &src,
+                              std::set<RegionTreeNode*> &to_traverse,
+                              FieldMaskSet<EquivalenceSet> &to_invalidate)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!disjoint_complete);
+      assert(!!src.disjoint_complete);
+      assert(equivalence_sets.empty());
+      assert(disjoint_complete_children.empty());
+#endif
+      disjoint_complete = src.disjoint_complete;
+      src.disjoint_complete.clear();
+      if (!src.equivalence_sets.empty())
+      {
+        for (FieldMaskSet<EquivalenceSet>::iterator it = 
+              src.equivalence_sets.begin(); it != 
+              src.equivalence_sets.end(); it++)
+        {
+          const FieldMask overlap = it->second & disjoint_complete;
+          if (!overlap)
+            continue;
+          equivalence_sets.insert(it->first, overlap);
+          to_invalidate.insert(it->first, overlap);
+        }
+        src.equivalence_sets.clear();
+      }
+      disjoint_complete_children.swap(src.disjoint_complete_children);
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+            disjoint_complete_children.begin(); it != 
+            disjoint_complete_children.end(); it++)
+        to_traverse.insert(it->first);
     }
 
     //--------------------------------------------------------------------------

@@ -3549,6 +3549,13 @@ namespace Legion {
                                    bool force_close_next,
                                    std::set<RtEvent> &applied_events);
     public:
+      void migrate_logical_state(ContextID src, ContextID dst, bool merge);
+      void migrate_version_state(ContextID src, ContextID dst, 
+                                 std::set<RtEvent> &applied, bool merge);
+      void pack_logical_state(ContextID ctx, Serializer &rez, bool invalidate);
+      void pack_version_state(ContextID ctx, Serializer &rez, bool invalidate);
+      void unpack_logical_state(ContextID ctx, Deserializer &derez);
+      void unpack_version_state(ContextID ctx, Deserializer &derez);
       void send_back_logical_state(ContextID ctx, UniqueID context_uid,
                                    AddressSpaceID target);
       void process_logical_state_return(ContextID ctx, Deserializer &derez,

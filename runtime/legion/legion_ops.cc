@@ -1296,20 +1296,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* Operation::find_logical_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      return parent_ctx->find_parent_logical_context(find_parent_index(index));
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* Operation::find_version_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      return parent_ctx->find_parent_version_context(find_parent_index(index));
-    }
-
-    //--------------------------------------------------------------------------
     InnerContext* Operation::find_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
@@ -8338,9 +8324,8 @@ namespace Legion {
         // clean everything up
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
-          InnerContext *context = find_version_context(idx);
           const RegionRequirement &req = deletion_requirements[idx];
-          context->invalidate_region_tree_context(req.region, 
+          parent_ctx->invalidate_region_tree_context(req.region, 
               false/*collective*/, map_applied_conditions);
         }
       }
