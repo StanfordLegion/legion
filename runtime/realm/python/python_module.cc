@@ -810,20 +810,57 @@ namespace Realm {
       assert(0);
     }
 
-    // next, see if we have a Python function to register
-    const PythonSourceImplementation *psi = treg->codedesc->find_impl<PythonSourceImplementation>();
-    if(!psi) {
+    // we'll take either a python function or a cpp function
+    PyObject *python_fnptr = 0;
+    Processor::TaskFuncPtr cpp_fnptr = 0;
+
+    do {
+      // prefer a python function, if it's available
+      {
+	const PythonSourceImplementation *psi = treg->codedesc->find_impl<PythonSourceImplementation>();
+	if(psi) {
+	  python_fnptr = interpreter->find_or_import_function(psi);
+	  assert(python_fnptr != 0);
+	  break;
+	}
+      }
+
+      // take a function pointer, if that's available
+      {
+	const FunctionPointerImplementation *fpi = treg->codedesc->find_impl<FunctionPointerImplementation>();
+	if(fpi) {
+	  cpp_fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
+	  break;
+	}
+      }
+
+      // last try: can we convert something to a function pointer?
+      {
+	const std::vector<CodeTranslator *>& translators = get_runtime()->get_code_translators();
+	bool ok = false;
+	for(std::vector<CodeTranslator *>::const_iterator it = translators.begin();
+	    it != translators.end();
+	    it++)
+	  if((*it)->can_translate<FunctionPointerImplementation>(*(treg->codedesc))) {
+	    FunctionPointerImplementation *fpi = (*it)->translate<FunctionPointerImplementation>(*(treg->codedesc));
+	    if(fpi) {
+	      cpp_fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
+	      ok = true;
+	      break;
+	    }
+	  }
+	if(ok) break;
+      }
+
       log_py.fatal() << "invalid code descriptor for python proc: " << *(treg->codedesc);
       assert(0);
-    }
-
-    PyObject *fnptr = interpreter->find_or_import_function(psi);
-    assert(fnptr != 0);
+    } while(0);
 
     log_py.info() << "task " << treg->func_id << " registered on " << me << ": " << *(treg->codedesc);
 
     TaskTableEntry &tte = task_table[treg->func_id];
-    tte.fnptr = fnptr;
+    tte.python_fnptr = python_fnptr;
+    tte.cpp_fnptr = cpp_fnptr;
     tte.user_data.swap(treg->user_data);
 
     delete treg->codedesc;
@@ -898,40 +935,52 @@ namespace Realm {
 
     const TaskTableEntry& tte = it->second;
 
-    log_py.debug() << "task " << func_id << " executing on " << me << ": " << ((void *)(tte.fnptr));
+    if(tte.python_fnptr != 0) {
+      // task is a python function - wrap arguments in python objects and call
+      log_py.debug() << "task " << func_id << " executing on " << me << ": python function " << ((void *)(tte.python_fnptr));
 
-    PyObject *arg1 = (interpreter->api->PyByteArray_FromStringAndSize)(
+      PyObject *arg1 = (interpreter->api->PyByteArray_FromStringAndSize)(
                                                    (const char *)task_args.base(),
 						   task_args.size());
-    assert(arg1 != 0);
-    PyObject *arg2 = (interpreter->api->PyByteArray_FromStringAndSize)(
+      assert(arg1 != 0);
+      PyObject *arg2 = (interpreter->api->PyByteArray_FromStringAndSize)(
                                                    (const char *)tte.user_data.base(),
 						   tte.user_data.size());
-    assert(arg2 != 0);
-    // TODO: make into a Python realm.Processor object
-    PyObject *arg3 = (interpreter->api->PyLong_FromUnsignedLong)(me.id);
-    assert(arg3 != 0);
+      assert(arg2 != 0);
+      // TODO: make into a Python realm.Processor object
+      PyObject *arg3 = (interpreter->api->PyLong_FromUnsignedLong)(me.id);
+      assert(arg3 != 0);
 
-    PyObject *args = (interpreter->api->PyTuple_New)(3);
-    assert(args != 0);
-    (interpreter->api->PyTuple_SetItem)(args, 0, arg1);
-    (interpreter->api->PyTuple_SetItem)(args, 1, arg2);
-    (interpreter->api->PyTuple_SetItem)(args, 2, arg3);
+      PyObject *args = (interpreter->api->PyTuple_New)(3);
+      assert(args != 0);
+      (interpreter->api->PyTuple_SetItem)(args, 0, arg1);
+      (interpreter->api->PyTuple_SetItem)(args, 1, arg2);
+      (interpreter->api->PyTuple_SetItem)(args, 2, arg3);
 
-    //printf("args = "); (interpreter->api->PyObject_Print)(args, stdout, 0); printf("\n");
+      //printf("args = "); (interpreter->api->PyObject_Print)(args, stdout, 0); printf("\n");
 
-    PyObject *res = (interpreter->api->PyObject_CallObject)(tte.fnptr, args);
+      PyObject *res = (interpreter->api->PyObject_CallObject)(tte.python_fnptr, args);
 
-    (interpreter->api->Py_DecRef)(args);
+      (interpreter->api->Py_DecRef)(args);
 
-    //printf("res = "); PyObject_Print(res, stdout, 0); printf("\n");
-    if(res != 0) {
-      (interpreter->api->Py_DecRef)(res);
+      //printf("res = "); PyObject_Print(res, stdout, 0); printf("\n");
+      if(res != 0) {
+	(interpreter->api->Py_DecRef)(res);
+      } else {
+	log_py.fatal() << "python exception occurred within task:";
+	(interpreter->api->PyErr_PrintEx)(0);
+	(interpreter->api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
+	assert(0);
+      }
     } else {
-      log_py.fatal() << "python exception occurred within task:";
-      (interpreter->api->PyErr_PrintEx)(0);
-      (interpreter->api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
-      assert(0);
+      // no python function - better have a cpp function
+      assert(tte.cpp_fnptr != 0);
+
+      log_py.debug() << "task " << func_id << " executing on " << me << ": cpp function " << ((void *)(tte.cpp_fnptr));
+
+      (tte.cpp_fnptr)(task_args.base(), task_args.size(),
+		      tte.user_data.base(), tte.user_data.size(),
+		      me);
     }
   }
 

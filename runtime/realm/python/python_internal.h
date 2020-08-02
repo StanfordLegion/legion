@@ -199,7 +199,8 @@ namespace Realm {
     PyThreadState *master_thread;
 
     struct TaskTableEntry {
-      PyObject *fnptr;
+      PyObject *python_fnptr;
+      Processor::TaskFuncPtr cpp_fnptr;
       ByteArray user_data;
     };
 

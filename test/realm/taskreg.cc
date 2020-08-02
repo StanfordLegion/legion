@@ -12,6 +12,9 @@
 #include <cstring>
 #include <csignal>
 #include <cmath>
+#ifdef REALM_USE_LIBDL
+#include <dlfcn.h>
+#endif
 
 #include <time.h>
 #include <unistd.h>
@@ -52,6 +55,51 @@ void child_task(const void *args, size_t arglen,
 {
   log_app.print() << "child task on " << p << ": arglen=" << arglen << ", userlen=" << userlen;
 }
+
+#ifdef REALM_USE_LIBDL
+// helper for looking up symbols
+template <typename T>
+void lookup_symbol(const char *name, T& addr)
+{
+  void *res = dlsym(RTLD_DEFAULT, name);
+  if(!res) {
+    log_app.fatal() << "symbol lookup error: cannot find '" << name << "'";
+    abort();
+  }
+  addr = reinterpret_cast<T>(res);
+}
+#endif
+
+#ifdef REALM_USE_PYTHON
+void python_cpp_task(const void *args, size_t arglen,
+		     const void *userdata, size_t userlen, Processor p)
+{
+  log_app.print() << "python cpp task on " << p << ": arglen=" << arglen << ", userlen=" << userlen;
+
+#ifdef REALM_USE_LIBDL
+  // try to talk to the python interpreter - use dlsym to find symbols so we
+  //  don't have a compile-time dependency on python
+  typedef void *PyGILState_STATE;
+  PyGILState_STATE (*PyGILState_Ensure)();
+  void (*PyGILState_Release)(PyGILState_STATE);
+  int (*PyRun_SimpleString)(const char *);
+
+  lookup_symbol("PyGILState_Ensure", PyGILState_Ensure);
+  lookup_symbol("PyGILState_Release", PyGILState_Release);
+  lookup_symbol("PyRun_SimpleString", PyRun_SimpleString);
+
+  PyGILState_STATE state = PyGILState_Ensure();
+
+  int ret = PyRun_SimpleString("print(\"inside python interpreter from cpp task!\")");
+  if(ret != 0) {
+    log_app.fatal() << "PyRun_SimpleString returned " << ret;
+    abort();
+  }
+
+  PyGILState_Release(state);
+#endif
+}
+#endif
 
 void top_level_task(const void *args, size_t arglen, 
 		    const void *userdata, size_t userlen, Processor p)
@@ -192,6 +240,26 @@ void top_level_task(const void *args, size_t arglen,
     Event merged = Event::merge_events(finish_events);
 
     merged.wait();
+  }
+#endif
+
+#ifdef REALM_USE_PYTHON
+  // c++ task on python processor
+  {
+    Machine::ProcessorQuery pq(machine);
+    pq.only_kind(Processor::PY_PROC);
+    for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it) {
+      Processor pp = *it;
+
+      Event e = pp.register_task(func_id,
+				 CodeDescriptor(python_cpp_task),
+				 ProfilingRequestSet(),
+				 &pp, sizeof(pp));
+
+      Event e2 = pp.spawn(func_id, 0, 0, e);
+
+      e2.wait();
+    }
   }
 #endif
 
