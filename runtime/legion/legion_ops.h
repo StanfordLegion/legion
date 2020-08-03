@@ -1922,7 +1922,8 @@ namespace Legion {
       VirtualCloseOp& operator=(const VirtualCloseOp &rhs);
     public:
       void initialize(InnerContext *ctx, unsigned index,
-                      const RegionRequirement &req);
+                      const RegionRequirement &req,
+                      const VersionInfo *targets);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1930,12 +1931,15 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
 #ifdef LEGION_SPY
       virtual void trigger_complete(void);
 #endif
     protected:
+      VersionInfo source_version_info;
+      const VersionInfo *target_version_info;
       std::set<RtEvent> map_applied_conditions;
       unsigned parent_idx;
     };

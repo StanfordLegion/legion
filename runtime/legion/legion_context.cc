@@ -3729,29 +3729,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::send_back_created_state(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      if (created_requirements.empty())
-        return;
-      UniqueID target_context_uid = find_parent_context()->get_context_uid();
-      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
-           created_requirements.begin(); it != created_requirements.end(); it++)
-      {
-        const RegionRequirement &req = it->second;
-#ifdef DEBUG_LEGION
-        assert(returnable_privileges.find(it->first) != 
-                returnable_privileges.end());
-#endif
-        // Skip anything that doesn't have returnable privileges
-        if (!returnable_privileges[it->first])
-          continue;
-        runtime->forest->send_back_logical_state(tree_context, 
-                        target_context_uid, req, target);
-      }
-    } 
-
-    //--------------------------------------------------------------------------
     IndexSpace InnerContext::create_index_space(const Future &future, 
                                                 TypeTag type_tag)
     //--------------------------------------------------------------------------
@@ -5714,8 +5691,12 @@ namespace Legion {
       // Initialize the region tree context
       const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
       const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      initialize_region_tree_context(usage, set, all_ones_mask, 
+      std::set<RtEvent> dummy_effects;
+      initialize_region_tree_context(usage, set, all_ones_mask, dummy_effects,
                                      true/*created*/, task_local); 
+#ifdef DEBUG_LEGION
+      assert(dummy_effects.empty());
+#endif
       return region;
     }
 
@@ -8279,6 +8260,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
+                      const LegionVector<VersionInfo>::aligned &version_infos,
                       const std::vector<EquivalenceSet*> &equivalence_sets,
                       const std::vector<ApUserEvent> &unmap_events,
                       std::set<RtEvent> &applied_events)
@@ -8319,23 +8301,25 @@ namespace Legion {
         // If this is a NO_ACCESS or had no privilege fields we can skip this
         if (no_access_regions[idx1])
           continue;
+        EquivalenceSet *eq_set = equivalence_sets[idx1];
+        const RegionRequirement &req = clone_requirements[idx1];
+        const RegionUsage usage(req);
+#ifdef DEBUG_LEGION
+        assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
+        assert(eq_set != NULL);
+        assert(eq_set->region_node->handle == req.region);
+#endif
+        RegionNode *region_node = eq_set->region_node;
+        const FieldMask user_mask = 
+          region_node->column_source->get_field_mask(req.privilege_fields);
         // Only need to initialize the context if this is
         // not a leaf and it wasn't virtual mapped
         if (!virtual_mapped[idx1])
         {
-          EquivalenceSet *eq_set = equivalence_sets[idx1];
           const InstanceSet &sources = physical_instances[idx1];
-          const RegionRequirement &req = clone_requirements[idx1];
-          const RegionUsage usage(req);
 #ifdef DEBUG_LEGION
           assert(!sources.empty());
-          assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
-          assert(eq_set != NULL);
-          assert(eq_set->region_node->handle == req.region);
 #endif
-          RegionNode *region_node = eq_set->region_node;
-          const FieldMask user_mask = 
-            region_node->column_source->get_field_mask(req.privilege_fields);
           // Find or make views for each of our instances and then 
           // add initial users for each of them
           std::vector<InstanceView*> corresponding(sources.size());
@@ -8415,16 +8399,31 @@ namespace Legion {
           const bool restricted = IS_SIMULT(usage) || IS_REDUCE(usage);
           eq_set->initialize_set(usage, user_mask, restricted, sources,
                                  corresponding, applied_events);
-          // Now initialize our context with this equivalence set
-          initialize_region_tree_context(usage, eq_set, user_mask, 
-                                         false/*created*/, true/*local*/);
         }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(idx1 < version_infos.size());
+#endif
+          // virtual mapping case, just clone all the equivalence sets
+          // into our current one
+          const FieldMaskSet<EquivalenceSet> &eq_sets = 
+            version_infos[idx1].get_equivalence_sets();
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                eq_sets.begin(); it != eq_sets.end(); it++)
+            eq_set->clone_from(it->first, it->second, applied_events);
+        }
+        // Now initialize our context with this equivalence set
+        initialize_region_tree_context(usage, eq_set, user_mask, applied_events,
+                                       false/*created*/, true/*local*/);
       }
     }
 
     //--------------------------------------------------------------------------
     void InnerContext::initialize_region_tree_context(const RegionUsage &usage,
-           EquivalenceSet *set, const FieldMask &mask, bool created, bool local)
+                                    EquivalenceSet *set, const FieldMask &mask,
+                                    std::set<RtEvent> &applied_events,
+                                    bool created, bool local)
     //--------------------------------------------------------------------------
     {
       RegionNode *region_node = set->region_node;
@@ -8434,7 +8433,7 @@ namespace Legion {
       // accurately track which partitions are being included
       if (IS_WRITE(usage))
         region_node->initialize_disjoint_complete_tree(ctx, mask);
-      region_node->initialize_versioning_analysis(ctx, set, mask);
+      region_node->initialize_versioning_analysis(ctx, set,mask,applied_events);
       if (created)
       {
         AutoLock c_lock(created_state_lock);
@@ -8518,7 +8517,7 @@ namespace Legion {
         EquivalenceSet *set = new EquivalenceSet(runtime,
           runtime->get_available_distributed_id(), runtime->address_space,
           runtime->address_space, node, true/*register now*/);
-        initialize_region_tree_context(usage, set, all_ones_mask,
+        initialize_region_tree_context(usage, set, all_ones_mask,applied_events,
                                        true/*created*/, false/*local*/);
       }
     }
@@ -9039,7 +9038,8 @@ namespace Legion {
           // Make a virtual close op to close up the instance
           VirtualCloseOp *close_op = 
             runtime->get_available_virtual_close_op();
-          close_op->initialize(this, idx, regions[idx]);
+          close_op->initialize(this, idx, regions[idx],
+              &(owner_task->get_version_info(idx)));
           add_to_dependence_queue(close_op);
         }
       }
@@ -10709,14 +10709,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Serializer rez;
+      rez.serialize(runtime->address_space);
       rez.serialize<bool>(collective);
       rez.serialize<size_t>(created_state.size());
+      const size_t destination_count = shard_manager->total_shards - 1; 
       for (std::set<RegionNode*>::const_iterator it = 
             created_state.begin(); it != created_state.end(); it++)
       {
         rez.serialize((*it)->handle);
-        (*it)->pack_logical_state(ctx.get_id(), rez, false/*invalidate*/);
-        (*it)->pack_version_state(ctx.get_id(), rez, false/*invalidate*/);
+        (*it)->pack_logical_state(ctx.get_id(), rez, 
+            destination_count, false/*invalidate*/);
+        (*it)->pack_version_state(ctx.get_id(), rez, destination_count, 
+            false/*invalidate*/, true/*collective*/, applied_events);
       }
       shard_manager->broadcast_created_region_contexts(owner_shard, rez,
                                                        applied_events);
@@ -14518,13 +14522,21 @@ namespace Legion {
       // Initialize the region tree context
       const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
       const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      initialize_region_tree_context(usage, set, all_ones_mask, 
+      std::set<RtEvent> applied_events;
+      initialize_region_tree_context(usage, set, all_ones_mask, applied_events,
                                      true/*created*/, task_local);
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_region_trees(double_buffer ? 
           pending_region_trees.size() + 1 : 1, double_next && !double_buffer);
+      // Make sure all our effects are applied
+      if (!applied_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(applied_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       return handle;
     }
 
@@ -16616,6 +16628,8 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+      AddressSpaceID source;
+      derez.deserialize(source);
       bool collective;
       derez.deserialize<bool>(collective);
       size_t num_regions;
@@ -16627,8 +16641,8 @@ namespace Legion {
         LogicalRegion handle;
         derez.deserialize(handle);
         RegionNode *node = runtime->forest->get_node(handle);
-        node->unpack_logical_state(ctx.get_id(), derez);
-        node->unpack_version_state(ctx.get_id(), derez);
+        node->unpack_logical_state(ctx.get_id(), derez, source);
+        node->unpack_version_state(ctx.get_id(), derez, source);
       }
       receive_replicate_created_region_contexts(ctx, created_states,
                                                 applied_events, collective);
@@ -18149,6 +18163,121 @@ namespace Legion {
     {
       // Should never be called
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteContext::receive_created_region_contexts(RegionTreeContext ctx,
+                             const std::set<RegionNode*> &created_state,
+                             std::set<RtEvent> &applied_events, bool collective)
+    //--------------------------------------------------------------------------
+    {
+      const RtUserEvent done_event = Runtime::create_rt_user_event();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(context_uid);
+        rez.serialize<size_t>(created_state.size());
+        for (std::set<RegionNode*>::const_iterator it = 
+              created_state.begin(); it != created_state.end(); it++)
+        {
+          rez.serialize((*it)->handle);
+          (*it)->pack_logical_state(ctx.get_id(), rez, 
+                                    1/*count*/, true/*invalidate*/);
+          (*it)->pack_version_state(ctx.get_id(), rez, 1/*count*/, 
+              true/*invalidate*/, false/*collective*/, applied_events);
+        }
+        rez.serialize(done_event);
+        rez.serialize<bool>(collective);
+      }
+      const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
+      runtime->send_created_region_contexts(target, rez);
+      applied_events.insert(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::handle_created_region_contexts(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      UniqueID ctx_uid;
+      derez.deserialize(ctx_uid);
+      const RegionTreeContext ctx = runtime->allocate_region_tree_context();
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      std::set<RegionNode*> created_state;
+      std::set<RtEvent> applied_events;
+      for (unsigned idx = 0; idx < num_regions; idx++)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        RegionNode *node = runtime->forest->get_node(handle);
+        node->unpack_logical_state(ctx.get_id(), derez, source);
+        node->unpack_version_state(ctx.get_id(), derez, source);
+        created_state.insert(node);
+      }
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      bool collective;
+      derez.deserialize(collective);
+
+      InnerContext *context = runtime->find_context(ctx_uid);
+      context->receive_created_region_contexts(ctx, created_state,
+                                               applied_events, collective);
+      if (!applied_events.empty())
+        Runtime::trigger_event(done_event, 
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done_event);
+      runtime->free_region_tree_context(ctx); 
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteContext::receive_leaf_region_contexts(
+                                 const std::vector<LogicalRegion> &leaf_regions,
+                                 std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      const RtUserEvent done_event = Runtime::create_rt_user_event();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(context_uid);  
+        rez.serialize<size_t>(leaf_regions.size());
+        for (std::vector<LogicalRegion>::const_iterator it =
+              leaf_regions.begin(); it != leaf_regions.end(); it++)
+          rez.serialize(*it);
+        rez.serialize(done_event);
+      }
+      const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
+      runtime->send_leaf_region_contexts(target, rez);
+      applied_events.insert(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::handle_leaf_region_contexts(Runtime *runtime,
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      UniqueID ctx_uid;
+      derez.deserialize(ctx_uid);
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      std::vector<LogicalRegion> leaf_regions(num_regions);
+      for (unsigned idx = 0; idx < num_regions; idx++)
+        derez.deserialize(leaf_regions[idx]);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      std::set<RtEvent> applied_events;
+      InnerContext *context = runtime->find_context(ctx_uid);
+      context->receive_leaf_region_contexts(leaf_regions, applied_events);
+      if (!applied_events.empty())
+        Runtime::trigger_event(done_event, 
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -20105,6 +20234,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::initialize_region_tree_contexts(
                        const std::vector<RegionRequirement> &clone_requirements,
+                       const LegionVector<VersionInfo>::aligned &version_infos,
                        const std::vector<EquivalenceSet*> &equivalence_sets,
                        const std::vector<ApUserEvent> &unmap_events,
                        std::set<RtEvent> &applied_events)
@@ -20146,13 +20276,6 @@ namespace Legion {
     void LeafContext::receive_leaf_region_contexts(
                                       const std::vector<LogicalRegion> &regions,
                                       std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::send_back_created_state(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -21555,6 +21678,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InlineContext::initialize_region_tree_contexts(
                        const std::vector<RegionRequirement> &clone_requirements,
+                       const LegionVector<VersionInfo>::aligned &version_infos,
                        const std::vector<EquivalenceSet*> &equivalence_sets,
                        const std::vector<ApUserEvent> &unmap_events,
                        std::set<RtEvent> &applied_events)
@@ -21584,13 +21708,6 @@ namespace Legion {
     void InlineContext::receive_leaf_region_contexts(
                                  const std::vector<LogicalRegion> &leaf_regions,
                                  std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::send_back_created_state(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       assert(false);

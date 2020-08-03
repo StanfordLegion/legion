@@ -85,24 +85,17 @@ namespace Legion {
     public:
       inline bool has_version_info(void) const 
         { return !equivalence_sets.empty(); }
-      inline const FieldMaskSet<RegionNode>& get_nearest_nodes(void) const
-        { return nearest_disjoint_complete_nodes; }
       inline const FieldMaskSet<EquivalenceSet>& get_equivalence_sets(void)
         const { return equivalence_sets; }
     public:
-      void record_nearest_disjoint_complete_node(RegionNode *node, 
-                                                 const FieldMask &mask);
-      void pack_version_info(Serializer &rez) const;
-      void unpack_version_info(Deserializer &derez, RegionTreeForest *forest);
+      void pack_equivalence_sets(Serializer &rez) const;
+      void unpack_equivalence_sets(Deserializer &derez, Runtime *runtime,
+                                   std::set<RtEvent> &ready_events);
     public:
       void record_equivalence_set(EquivalenceSet *set, const FieldMask &mask);
       void clear(void);
     protected:
       FieldMaskSet<EquivalenceSet> equivalence_sets;
-      // These are the nearest nodes in the disjoint complete
-      // tree that we should use for computing our equivalence
-      // sets if we do not have them in the cache.
-      FieldMaskSet<RegionNode> nearest_disjoint_complete_nodes;
     };
 
     /**
@@ -2680,10 +2673,15 @@ namespace Legion {
                       std::set<RtEvent> &deferral_events,
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
+    public:
       void remove_update_guard(CopyFillGuard *guard);
       void record_tracker(EqSetTracker *tracker, const FieldMask &mask);
       void remove_tracker(EqSetTracker *tracker, const FieldMask &mask);
-      void invalidate_set(const FieldMask &mask, bool collective,
+      void invalidate_trackers(const FieldMask &mask, bool collective,
+                               std::set<RtEvent> &applied_events);
+      void clone_from(EquivalenceSet *src, const FieldMask &src_mask,
+                      std::set<RtEvent> &applied_events);
+      void overwrite_from(EquivalenceSet *src, const FieldMask &src_mask,
                           std::set<RtEvent> &applied_events);
     protected:
       void check_for_migration(PhysicalAnalysis &analysis,
@@ -2806,7 +2804,7 @@ namespace Legion {
     public:
       // Call these from region nodes
       void initialize_versioning_analysis(EquivalenceSet *set,
-                                          const FieldMask &mask);
+              const FieldMask &mask, std::set<RtEvent> &applied_events);
       void compute_equivalence_sets(EqSetTracker *target, FieldMask mask,
                                     AddressSpaceID source,
                                     std::set<RtEvent> &ready_events,
@@ -2815,7 +2813,7 @@ namespace Legion {
                                     FieldMask &request_traversal,
                                     bool downward_only) const;
       void record_refinement(EquivalenceSet *set, const FieldMask &mask,
-                             FieldMask &parent_mask);
+              FieldMask &parent_mask, std::set<RtEvent> &applied_events);
     public:
       // Call these from partition nodes
       void compute_equivalence_sets(EqSetTracker *target, 
@@ -2827,14 +2825,22 @@ namespace Legion {
     public:
       // Call these from either type of region tree node
       void propagate_refinement(RegionTreeNode *child, 
-              const FieldMask &child_mask, FieldMask &parent_mask);
+                                const FieldMask &child_mask, 
+                                FieldMask &parent_mask,
+                                std::set<RtEvent> &applied_events);
       void invalidate_refinement(const FieldMask &mask, bool invalidate_self,
                                  FieldMaskSet<RegionTreeNode> &to_traverse,
-                                 FieldMaskSet<EquivalenceSet> &to_invalidate);
+                                 FieldMaskSet<EquivalenceSet> &to_untrack);
       void merge(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
-                 FieldMaskSet<EquivalenceSet> &to_invalidate);
+                 FieldMaskSet<EquivalenceSet> &to_untrack);
       void swap(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
-                FieldMaskSet<EquivalenceSet> &to_invalidate);
+                FieldMaskSet<EquivalenceSet> &to_untrack);
+      void pack_manager(Serializer &rez, const size_t destination_count,
+                        const bool invalidate, 
+                        std::map<LegionColor,RegionTreeNode*> &to_traverse,
+                        FieldMaskSet<EquivalenceSet> &to_untrack);
+      void unpack_manager(Deserializer &derez, AddressSpaceID source,
+                          std::map<LegionColor,RegionTreeNode*> &to_traverse);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,

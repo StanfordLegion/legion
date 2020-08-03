@@ -84,8 +84,9 @@ namespace Legion {
       TRACE_REF = 26,
       AGGREGATORE_REF = 27,
       FIELD_STATE_REF = 28,
-      REPLICATION_REF = 29,
-      LAST_SOURCE_REF = 30,
+      DISJOINT_COMPLETE_REF = 29,
+      REPLICATION_REF = 30,
+      LAST_SOURCE_REF = 31,
     };
 
     enum ReferenceKind {
@@ -125,6 +126,7 @@ namespace Legion {
       "Index Space Expression Reference",           \
       "Aggregator Reference",                       \
       "Field State Reference",                      \
+      "Disjoint Complete Reference",                \
       "Replication Reference",                      \
     }
 

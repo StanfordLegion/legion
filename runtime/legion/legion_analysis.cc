@@ -215,51 +215,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::record_nearest_disjoint_complete_node(RegionNode *node,
-                                                          const FieldMask &mask)
+    void VersionInfo::pack_equivalence_sets(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      nearest_disjoint_complete_nodes.insert(node, mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionInfo::pack_version_info(Serializer &rez) const
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize<size_t>(nearest_disjoint_complete_nodes.size());
-      for (FieldMaskSet<RegionNode>::const_iterator it = 
-            nearest_disjoint_complete_nodes.begin(); it != 
-            nearest_disjoint_complete_nodes.end(); it++)
+      rez.serialize<size_t>(equivalence_sets.size());
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
       {
-        rez.serialize(it->first->handle);
+        rez.serialize(it->first->did);
         rez.serialize(it->second);
       }
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::unpack_version_info(Deserializer &derez, 
-                                          RegionTreeForest *forest)
+    void VersionInfo::unpack_equivalence_sets(Deserializer &derez, 
+                              Runtime *runtime, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      size_t num_nodes;
-      derez.deserialize(num_nodes);
-      for (unsigned idx = 0; idx < num_nodes; idx++)
+      size_t num_sets;
+      derez.deserialize(num_sets);
+      for (unsigned idx = 0; idx < num_sets; idx++)
       {
-        LogicalRegion handle;
-        derez.deserialize(handle);
+        DistributedID did;
+        derez.deserialize(did);
         FieldMask mask;
         derez.deserialize(mask);
-        RegionNode *node = forest->get_node(handle);
-        nearest_disjoint_complete_nodes.insert(node, mask);
+        RtEvent ready_event;
+        EquivalenceSet *set = 
+          runtime->find_or_request_equivalence_set(did, ready_event);
+        equivalence_sets.insert(set, mask);
+        if (ready_event.exists())
+          ready_events.insert(ready_event);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionInfo::record_equivalence_set(EquivalenceSet *set,
-                                             const FieldMask &set_mask)
-    //--------------------------------------------------------------------------
-    {
-      equivalence_sets.insert(set, set_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -267,7 +254,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       equivalence_sets.clear();
-      nearest_disjoint_complete_nodes.clear();
     }
 
     /////////////////////////////////////////////////////////////
@@ -2643,7 +2629,15 @@ namespace Legion {
       reduction_fields.clear();
       outstanding_reductions.clear();
       disjoint_complete_tree.clear();
-      disjoint_complete_children.clear();
+      if (!disjoint_complete_children.empty())
+      {
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+              disjoint_complete_children.begin(); it !=
+              disjoint_complete_children.end(); it++)
+          if (it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+            delete it->first;
+        disjoint_complete_children.clear();
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -2738,7 +2732,10 @@ namespace Legion {
               src.disjoint_complete_children.end(); it++)
         {
           to_traverse.insert(it->first);
-          disjoint_complete_children.insert(it->first, it->second);
+          // Remove duplicate references if they are already there
+          // Otherwise the reference flows back with the node
+          if (disjoint_complete_children.insert(it->first, it->second))
+            it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
         }
         src.disjoint_complete_children.clear();
       }
@@ -14453,7 +14450,14 @@ namespace Legion {
       {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->first->region_node != node);
+#endif
           it->first->remove_tracker(this, it->second);
+          if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+            delete it->first;
+        }
         equivalence_sets.clear();
       }
     }
@@ -14625,7 +14629,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-      equivalence_sets.insert(set, mask);
+#ifdef DEBUG_LEGION
+      assert(set->region_node != node);
+#endif
+      if (equivalence_sets.insert(set, mask))
+        set->add_base_resource_ref(VERSION_MANAGER_REF);
       set->record_tracker(this, mask);
     }
 
@@ -14663,7 +14671,11 @@ namespace Legion {
             // Once it's valid for any field then it's valid for all of them
             if (it->second * finder->second)
               continue;
-            equivalence_sets.insert(it->first, it->second);
+#ifdef DEBUG_LEGION
+            assert(it->first->region_node != node);
+#endif
+            if (equivalence_sets.insert(it->first, it->second))
+              it->first->add_base_resource_ref(VERSION_MANAGER_REF);
             it->first->record_tracker(this, it->second);
             to_delete.push_back(it->first);
           }
@@ -14725,7 +14737,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::initialize_versioning_analysis(EquivalenceSet *set,
-                                                        const FieldMask &mask)
+                       const FieldMask &mask, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       // No need for the lock here since we know this initialization
@@ -14734,8 +14746,11 @@ namespace Legion {
       assert(disjoint_complete * mask);
 #endif
       disjoint_complete |= mask;
-      equivalence_sets.insert(set, mask);
-      set->record_tracker(this, mask);
+      if (equivalence_sets.insert(set, mask))
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        set->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14857,17 +14872,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::record_refinement(EquivalenceSet *set, 
                                            const FieldMask &mask, 
-                                           FieldMask &parent_mask)
+                                           FieldMask &parent_mask,
+                                           std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
-      assert(node->is_region());
+      assert(set->region_node == node);
       assert((equivalence_sets.find(set) == equivalence_sets.end()) ||
               (equivalence_sets[set] * mask));
 #endif
-      equivalence_sets.insert(set, mask);
-      set->record_tracker(this, mask);
+      if (equivalence_sets.insert(set, mask))
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        set->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+      }
       parent_mask = mask;
       if (!!disjoint_complete)
         parent_mask -= disjoint_complete;
@@ -14903,7 +14922,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::propagate_refinement(RegionTreeNode *child,
-                                  const FieldMask &mask, FieldMask &parent_mask)
+                                              const FieldMask &mask, 
+                                              FieldMask &parent_mask, 
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
@@ -14913,7 +14934,10 @@ namespace Legion {
              (disjoint_complete_children[child] * mask));
 #endif
       if (disjoint_complete_children.insert(child, mask))
-        child->add_base_resource_ref(VERSION_MANAGER_REF);
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        child->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
+      }
       parent_mask = mask;
       if (!!disjoint_complete)
         parent_mask -= disjoint_complete;
@@ -14922,8 +14946,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::invalidate_refinement(const FieldMask &mask, bool self,
-                                    FieldMaskSet<RegionTreeNode> &to_traverse,
-                                    FieldMaskSet<EquivalenceSet> &to_invalidate)
+                                      FieldMaskSet<RegionTreeNode> &to_traverse,
+                                      FieldMaskSet<EquivalenceSet> &to_untrack)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);     
@@ -14941,15 +14965,22 @@ namespace Legion {
           for (FieldMaskSet<EquivalenceSet>::iterator it = 
                 equivalence_sets.begin(); it != equivalence_sets.end(); it++)
           {
+            // Skip any nodes that are not even part of a refinement 
+            if (it->first->region_node != node)
+              continue;
             const FieldMask overlap = it->second & mask;
             if (!overlap)
               continue;
-            to_invalidate.insert(it->first, overlap);
+            to_untrack.insert(it->first, overlap);
             it.filter(overlap);
+            // Add a version manager reference to flow back
+            it->first->add_base_resource_ref(VERSION_MANAGER_REF);
             if (!it->second)
-              to_delete.push_back(it->first); // reference flows back
-            else
-              it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+            {
+              to_delete.push_back(it->first);
+              // Remove the valid reference
+              it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
+            }
           }
           if (!to_delete.empty())
           {
@@ -14972,10 +15003,10 @@ namespace Legion {
             continue;
           it.filter(overlap);
           to_traverse.insert(it->first, overlap);
+          // Add a reference for to_traverse
+          it->first->add_base_resource_ref(VERSION_MANAGER_REF);
           if (!it->second)
-            to_delete.push_back(it->first); // reference flows back
-          else
-            it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+            it->first->remove_base_valid_ref(VERSION_MANAGER_REF);
         }
         if (!to_delete.empty())
         {
@@ -14990,10 +15021,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::merge(VersionManager &src, 
                                std::set<RegionTreeNode*> &to_traverse,
-                               FieldMaskSet<EquivalenceSet> &to_invalidate)
+                               FieldMaskSet<EquivalenceSet> &to_untrack)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(node == src.node);
       assert(!!src.disjoint_complete);
 #endif
       if (!src.equivalence_sets.empty())
@@ -15002,32 +15034,30 @@ namespace Legion {
               src.equivalence_sets.begin(); it != 
               src.equivalence_sets.end(); it++)
         {
-          FieldMask overlap = it->second & src.disjoint_complete;
-          if (!overlap)
+          if (it->first->region_node != node)
+          {
+            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+              delete it->first;
             continue;
-          // Figure out whether we've already recorded this equivalence
-          // set and if it so which fields were already valid
+          }
+#ifdef DEBUG_LEGION
+          assert(!(it->second - src.disjoint_complete));
+#endif
+          to_untrack.insert(it->first, it->second);
+          // Figure out whether we've already recorded this equivalence set
           FieldMaskSet<EquivalenceSet>::iterator finder = 
             equivalence_sets.find(it->first);
           if (finder != equivalence_sets.end())
           {
-            overlap -= finder->second;
-            if (!!overlap)
-            {
-              equivalence_sets.insert(it->first, overlap);
-              to_invalidate.insert(it->first, overlap);
-            }
+            finder.merge(it->second);
             // Remove the duplicate reference
-            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+            if (it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
               assert(false); // should never end up deleting this
           }
           else
-          {
-            // Did not have t before so just insert it
+            // Did not have this before so just insert it
             // Reference flows back
-            equivalence_sets.insert(it->first, overlap);
-            to_invalidate.insert(it->first, overlap);
-          }
+            equivalence_sets.insert(it->first, it->second);
         }
         src.equivalence_sets.clear();
       }
@@ -15040,7 +15070,10 @@ namespace Legion {
               src.disjoint_complete_children.end(); it++)
         {
           to_traverse.insert(it->first);
-          disjoint_complete_children.insert(it->first, it->second);
+          // Remove duplicate references if it is already there
+          // otherwise the references flow to the destination
+          if (!disjoint_complete_children.insert(it->first, it->second))
+            it->first->remove_base_valid_ref(VERSION_MANAGER_REF);
         }
         src.disjoint_complete_children.clear();
       }
@@ -15049,10 +15082,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::swap(VersionManager &src,
                               std::set<RegionTreeNode*> &to_traverse,
-                              FieldMaskSet<EquivalenceSet> &to_invalidate)
+                              FieldMaskSet<EquivalenceSet> &to_untrack)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(src.node == node);
       assert(!disjoint_complete);
       assert(!!src.disjoint_complete);
       assert(equivalence_sets.empty());
@@ -15066,11 +15100,19 @@ namespace Legion {
               src.equivalence_sets.begin(); it != 
               src.equivalence_sets.end(); it++)
         {
-          const FieldMask overlap = it->second & disjoint_complete;
-          if (!overlap)
+          if (it->first->region_node != node)
+          {
+            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+              delete it->first;
             continue;
-          equivalence_sets.insert(it->first, overlap);
-          to_invalidate.insert(it->first, overlap);
+          }
+#ifdef DEBUG_LEGION
+          assert(!(it->second - disjoint_complete));
+#endif
+          // reference flows back
+          if (!equivalence_sets.insert(it->first, it->second))
+            assert(false); // should never already be there
+          to_untrack.insert(it->first, it->second);
         }
         src.equivalence_sets.clear();
       }
@@ -15079,6 +15121,187 @@ namespace Legion {
             disjoint_complete_children.begin(); it != 
             disjoint_complete_children.end(); it++)
         to_traverse.insert(it->first);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::pack_manager(Serializer &rez, 
+                          const size_t destination_count, const bool invalidate,
+                          std::map<LegionColor,RegionTreeNode*> &to_traverse,
+                          FieldMaskSet<EquivalenceSet> &to_untrack)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!disjoint_complete);
+#endif
+      // No need for the lock here, should not be racing with anyone
+      if (!equivalence_sets.empty())
+      {
+        const FieldMask eq_overlap = 
+          equivalence_sets.get_valid_mask() & disjoint_complete;
+        if (eq_overlap == disjoint_complete)
+        {
+          // We're sending all the equivalence sets
+          rez.serialize<size_t>(equivalence_sets.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+            if (invalidate)
+            {
+              it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+              to_untrack.insert(it->first, it->second);
+            }
+            // Add a remote valid reference on these nodes to keep
+            // them live until we can add on remotely. No need for
+            // a mutator since we know that they are already valid 
+            it->first->add_base_valid_ref(REMOTE_DID_REF, 
+                      NULL/*mutator*/, destination_count);
+            it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
+          }
+        }
+        else if (!!eq_overlap)
+        {
+          // Count how many equivalence sets we need to send back
+          std::vector<EquivalenceSet*> to_send;
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          {
+            if (it->first->region_node != node)
+            {
+              if (invalidate && 
+                  it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+                delete it->first;
+            }
+            else
+            {
+              to_send.push_back(it->first);
+              to_untrack.insert(it->first, it->second);
+              it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+              // Add a remote valid reference on these nodes to keep
+              // them live until we can add on remotely. No need for
+              // a mutator since we know that they are already valid 
+              it->first->add_base_valid_ref(REMOTE_DID_REF, 
+                        NULL/*mutator*/, destination_count);
+              it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
+            }
+          }
+          rez.serialize<size_t>(to_send.size());
+          for (std::vector<EquivalenceSet*>::const_iterator it = 
+                to_send.begin(); it != to_send.end(); it++)
+          {
+            rez.serialize((*it)->did);
+            rez.serialize(equivalence_sets[*it]);
+          }
+        }
+        else if (invalidate)
+        {
+          // Invalidate all the equivalence sets since none of them are going
+          rez.serialize<size_t>(0);
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          {
+#ifdef DEBUG_LEGION
+            assert(node != it->first->region_node);
+#endif
+            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+              delete it->first;
+          }
+        }
+      }
+      else
+        rez.serialize<size_t>(0);
+      rez.serialize(disjoint_complete);
+      rez.serialize<size_t>(disjoint_complete_children.size());
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+            disjoint_complete_children.begin(); it !=
+            disjoint_complete_children.end(); it++)
+      {
+        const LegionColor child_color = it->first->get_color();
+        rez.serialize(child_color);
+        rez.serialize(it->second);
+        to_traverse[child_color] = it->first;
+        // Return reference for to_traverse
+        it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+        // Add a remote valid reference on these nodes to keep
+        // them live until we can add on remotely. No need for
+        // a mutator since we know that they are already valid 
+        it->first->add_base_valid_ref(REMOTE_DID_REF, 
+                  NULL/*mutator*/, destination_count);
+        if (invalidate && 
+            it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
+          assert(false); // should never get here
+      }
+      if (invalidate)
+      {
+        disjoint_complete.clear();
+        disjoint_complete_children.clear();
+        equivalence_sets.clear();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::unpack_manager(Deserializer &derez, 
+      AddressSpaceID source, std::map<LegionColor,RegionTreeNode*> &to_traverse)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!disjoint_complete);
+      assert(disjoint_complete_children.empty());
+      assert(equivalence_sets.empty());
+#endif
+      // No need for the lock here, we should not be racing with anyone
+      size_t num_equivalence_sets;
+      derez.deserialize(num_equivalence_sets);
+      std::set<RtEvent> ready_events;
+      for (unsigned idx = 0; idx < num_equivalence_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        FieldMask eq_mask;
+        derez.deserialize(eq_mask);
+        RtEvent ready_event;
+        EquivalenceSet *set = 
+          runtime->find_or_request_equivalence_set(did, ready_event);
+        equivalence_sets.insert(set, eq_mask);
+        if (ready_event.exists())
+          ready_events.insert(ready_event);
+      }
+      derez.deserialize(disjoint_complete);
+      size_t num_children;
+      derez.deserialize(num_children);
+      for (unsigned idx = 0; idx < num_children; idx++)
+      {
+        LegionColor child_color;
+        derez.deserialize(child_color);
+        FieldMask child_mask;
+        derez.deserialize(child_mask);
+        RegionTreeNode *child = node->get_tree_child(child_color);
+        disjoint_complete_children.insert(child, child_mask);
+        LocalReferenceMutator mutator;
+        child->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
+        child->send_remote_valid_decrement(source, NULL, 
+                                           mutator.get_done_event());
+        to_traverse[child_color] = child;
+      }
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      // Update the references on all our equivalence sets
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->first->region_node == node);
+#endif
+        LocalReferenceMutator mutator;
+        it->first->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
+        it->first->send_remote_valid_decrement(source, NULL,
+                                               mutator.get_done_event());
+      }
     }
 
     //--------------------------------------------------------------------------

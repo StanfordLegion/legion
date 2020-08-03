@@ -779,7 +779,8 @@ namespace Legion {
       DISTRIBUTED_UNREGISTER,
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
-      SEND_BACK_LOGICAL_STATE,
+      SEND_CREATED_REGION_CONTEXTS,
+      SEND_LEAF_REGION_CONTEXTS,
       SEND_MATERIALIZED_VIEW,
       SEND_FILL_VIEW,
       SEND_PHI_VIEW,
@@ -983,7 +984,8 @@ namespace Legion {
         "Distributed Unregister",                                     \
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \
-        "Send Back Logical State",                                    \
+        "Send Created Region Contexts",                               \
+        "Send Leaf Region Contexts",                                  \
         "Send Materialized View",                                     \
         "Send Fill View",                                             \
         "Send Phi View",                                              \

@@ -892,7 +892,6 @@ namespace Legion {
       void initialize_point(SliceTask *owner, const DomainPoint &point,
                             const FutureMap &point_arguments,
                             const std::vector<FutureMap> &point_futures);
-      void send_back_created_state(AddressSpaceID target);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:

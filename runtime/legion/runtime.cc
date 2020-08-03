@@ -9277,10 +9277,15 @@ namespace Legion {
               runtime->handle_send_atomic_reservation_response(derez);
               break;
             }
-          case SEND_BACK_LOGICAL_STATE:
+          case SEND_CREATED_REGION_CONTEXTS:
             {
-              runtime->handle_send_back_logical_state(derez, 
+              runtime->handle_created_region_contexts(derez,
                                                       remote_address_space);
+              break;
+            }
+          case SEND_LEAF_REGION_CONTEXTS:
+            {
+              runtime->handle_leaf_region_contexts(derez);
               break;
             }
           case SEND_MATERIALIZED_VIEW:
@@ -18685,12 +18690,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_back_logical_state(AddressSpaceID target,Serializer &rez)
+    void Runtime::send_created_region_contexts(AddressSpaceID target,
+                                               Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // No need to flush, it will get flushed by the remote map return
-      find_messenger(target)->send_message(rez, SEND_BACK_LOGICAL_STATE,
-                                        TASK_VIRTUAL_CHANNEL, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_CREATED_REGION_CONTEXTS,
+                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_leaf_region_contexts(AddressSpaceID target, 
+                                            Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LEAF_REGION_CONTEXTS,
+                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -20576,11 +20590,18 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_logical_state(Deserializer &derez,
+    void Runtime::handle_created_region_contexts(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RegionTreeNode::handle_logical_state_return(this, derez, source); 
+      RemoteContext::handle_created_region_contexts(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_leaf_region_contexts(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_leaf_region_contexts(this, derez);
     }
 
     //--------------------------------------------------------------------------

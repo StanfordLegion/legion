@@ -1678,7 +1678,6 @@ namespace Legion {
                                         const RegionRequirement &req,
                                         const ProjectionInfo &projection_info,
                                         const RegionTreePath &path,
-                                        VersionInfo &version_info,
                                         std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -1712,16 +1711,8 @@ namespace Legion {
       {
         FieldMask unopened_mask = user_mask;
         FieldMask already_closed_mask;
-        FieldMask disjoint_complete_capture_mask = user_mask;
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
-           projection_info, unopened_mask, already_closed_mask, 
-           disjoint_complete_capture_mask, version_info, applied_events);
-        // In the case of virtual mappings we might not find it so record
-        // that we start here at the privilege node since we know we've
-        // computed these when mapping this task
-        if (!!disjoint_complete_capture_mask)
-          version_info.record_nearest_disjoint_complete_node(parent_node, 
-              disjoint_complete_capture_mask);
+           projection_info, unopened_mask, already_closed_mask, applied_events);
       }
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
@@ -1740,7 +1731,6 @@ namespace Legion {
                                                  unsigned idx,
                                                  const RegionRequirement &req,
                                                  const RegionTreePath &path,
-                                                 VersionInfo &version_info,
                                                  std::set<RtEvent> &applied,
                                                  bool invalidate_tree)
     //--------------------------------------------------------------------------
@@ -1768,16 +1758,8 @@ namespace Legion {
 #endif
       // Do the traversal
       FieldMask already_closed_mask;
-      FieldMask disjoint_complete_capture_mask = user_mask;
       parent_node->register_logical_deletion(ctx.get_id(), user, user_mask,
-          path, trace_info, already_closed_mask, disjoint_complete_capture_mask,
-          version_info, applied, invalidate_tree);
-      // In the case of virtual mappings we might not find it so record
-      // that we start here at the privilege node since we know we've
-      // computed these when mapping this task
-      if (!!disjoint_complete_capture_mask)
-        version_info.record_nearest_disjoint_complete_node(parent_node, 
-            disjoint_complete_capture_mask);
+          path, trace_info, already_closed_mask, applied, invalidate_tree);
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
 #ifdef DEBUG_LEGION
@@ -1808,19 +1790,6 @@ namespace Legion {
         region_node->column_source->get_field_mask(req.privilege_fields);
       region_node->find_open_complete_partitions(ctx.get_id(), user_mask, 
                                                  partitions);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::send_back_logical_state(RegionTreeContext ctx,
-                      UniqueID context_uid, const RegionRequirement &req, 
-                      AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-      RegionNode *top_node = get_node(req.region);
-      top_node->send_back_logical_state(ctx.get_id(), context_uid, target);
     }
 
     //--------------------------------------------------------------------------
@@ -14442,8 +14411,6 @@ namespace Legion {
                                            const ProjectionInfo &proj_info,
                                            FieldMask &unopened_field_mask,
                                            FieldMask &already_closed_mask,
-                                           FieldMask &disjoint_complete_capture,
-                                           VersionInfo &version_info,
                                            std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -14581,23 +14548,7 @@ namespace Legion {
           assert(!open_below);
 #endif
         next_child->register_logical_user(ctx, user, path, trace_info,
-           proj_info, unopened_field_mask, already_closed_mask, 
-           disjoint_complete_capture, version_info, applied_events);
-      }
-      // See if we have any disjoint-complete capture fields to do here
-      // We do this here so that we capture this at the lowest level of
-      // the tree where we have an intersection
-      if (!trace_info.already_traced && 
-          !!disjoint_complete_capture && is_region())
-      {
-        const FieldMask overlap = disjoint_complete_capture & 
-          state.disjoint_complete_tree;
-        if (!!overlap)
-        {
-          RegionNode *reg_node = as_region_node();
-          version_info.record_nearest_disjoint_complete_node(reg_node, overlap);
-          disjoint_complete_capture -= overlap;
-        }
+           proj_info, unopened_field_mask, already_closed_mask, applied_events);
       }
     }
 
@@ -16034,8 +15985,6 @@ namespace Legion {
                                            const RegionTreePath &path,
                                            const LogicalTraceInfo &trace_info,
                                            FieldMask &already_closed_mask,
-                                           FieldMask &disjoint_complete_capture,
-                                           VersionInfo &version_info,
                                            std::set<RtEvent> &applied_events,
                                            bool invalidate_tree)
     //--------------------------------------------------------------------------
@@ -16098,8 +16047,7 @@ namespace Legion {
         // Continue the traversal
         // Only continue checking the fields that are open below
         next_child->register_logical_deletion(ctx, user, open_below, path,
-            trace_info, already_closed_mask, disjoint_complete_capture,
-            version_info, applied_events, invalidate_tree);
+            trace_info, already_closed_mask, applied_events, invalidate_tree);
       }
       else
       {
@@ -16131,20 +16079,6 @@ namespace Legion {
           // all the operations for the original field at the same 
           // index are done mapping
           register_local_user(state, user, trace_info);
-        }
-      }
-      // See if we have any disjoint-complete capture fields to do here
-      // We do this here so that we capture this at the lowest level of
-      // the tree where we have an intersection
-      if (!!disjoint_complete_capture && is_region())
-      {
-        const FieldMask overlap = disjoint_complete_capture & 
-          state.disjoint_complete_tree;
-        if (!!overlap)
-        {
-          RegionNode *reg_node = as_region_node();
-          version_info.record_nearest_disjoint_complete_node(reg_node, overlap);
-          disjoint_complete_capture -= overlap;
         }
       }
     }
@@ -16331,103 +16265,109 @@ namespace Legion {
       VersionManager &src_manager = get_current_version_manager(src);
       VersionManager &dst_manager = get_current_version_manager(dst);
       std::set<RegionTreeNode*> to_traverse;
-      FieldMaskSet<EquivalenceSet> to_invalidate;
+      FieldMaskSet<EquivalenceSet> to_untrack;
       if (merge)
       {
         // Use the node lock here for serialization
         AutoLock n_lock(node_lock);
-        dst_manager.merge(src_manager, to_traverse, to_invalidate);
+        dst_manager.merge(src_manager, to_traverse, to_untrack);
       }
       else
-        dst_manager.swap(src_manager, to_traverse, to_invalidate);
+        dst_manager.swap(src_manager, to_traverse, to_untrack);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            to_invalidate.begin(); it != to_invalidate.end(); it++)
-        it->first->invalidate_set(it->second, merge, applied_events);
+            to_untrack.begin(); it != to_untrack.end(); it++)
+        it->first->invalidate_trackers(it->second, merge, applied_events);
       for (std::set<RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
         (*it)->migrate_version_state(src, dst, applied_events, merge);
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::send_back_logical_state(ContextID ctx, 
-                                                 UniqueID context_uid,
-                                                 AddressSpaceID target)
+    void RegionTreeNode::pack_logical_state(ContextID ctx, Serializer &rez,
+                          const size_t destination_count, const bool invalidate)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
-      std::set<RegionTreeNode*> to_traverse;
-      Serializer rez;
+      std::map<LegionColor,RegionTreeNode*> to_traverse;
+      RezCheck z(rez);
+      rez.serialize(state.reduction_fields);
+      rez.serialize<size_t>(state.outstanding_reductions.size());
+      for (LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator it = 
+            state.outstanding_reductions.begin(); it != 
+            state.outstanding_reductions.end(); it++)
       {
-        RezCheck z(rez);
-        rez.serialize(context_uid);
-        if (is_region())
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+      rez.serialize<size_t>(state.field_states.size());
+      for (LegionList<FieldState>::aligned::const_iterator fit = 
+            state.field_states.begin(); fit != 
+            state.field_states.end(); fit++)
+      {
+        rez.serialize(fit->valid_fields());
+        rez.serialize(fit->open_state);
+        rez.serialize(fit->redop);
+        if (fit->open_state >= OPEN_READ_ONLY_PROJ)
         {
-          rez.serialize<bool>(true);
-          rez.serialize(as_region_node()->handle);
+          rez.serialize<size_t>(fit->projections.size());
+          for (std::set<ProjectionSummary>::const_iterator it = 
+                fit->projections.begin(); it != fit->projections.end(); it++)
+            it->pack_summary(rez);
         }
-        else
-        {
-          rez.serialize<bool>(false);
-          rez.serialize(as_partition_node()->handle);
-        }
-        rez.serialize(state.reduction_fields);
-        rez.serialize<size_t>(state.outstanding_reductions.size());
-        for (LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator it = 
-              state.outstanding_reductions.begin(); it != 
-              state.outstanding_reductions.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-        rez.serialize<size_t>(state.field_states.size());
-        for (LegionList<FieldState>::aligned::const_iterator fit = 
-              state.field_states.begin(); fit != 
-              state.field_states.end(); fit++)
-        {
-          rez.serialize(fit->valid_fields());
-          rez.serialize(fit->open_state);
-          rez.serialize(fit->redop);
-          if (fit->open_state >= OPEN_READ_ONLY_PROJ)
-          {
-            rez.serialize<size_t>(fit->projections.size());
-            for (std::set<ProjectionSummary>::const_iterator it = 
-                  fit->projections.begin(); it != fit->projections.end(); it++)
-              it->pack_summary(rez);
-          }
 #ifdef DEBUG_LEGION
-          else
-            assert(fit->projections.empty());
+        else
+          assert(fit->projections.empty());
 #endif
-          rez.serialize<size_t>(fit->open_children.size());
-          for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-                fit->open_children.begin(); it != 
-                fit->open_children.end(); it++)
-          {
-            // Add a remote valid reference on these nodes to keep
-            // them live until we can add on remotely. No need for 
-            // a mutator since we know that they are already valid
-            it->first->add_base_valid_ref(REMOTE_DID_REF); 
-            rez.serialize(it->first->get_color());
-            rez.serialize(it->second);
-            to_traverse.insert(it->first);
-          }
+        rez.serialize<size_t>(fit->open_children.size());
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+              fit->open_children.begin(); it != 
+              fit->open_children.end(); it++)
+        {
+          const LegionColor child_color = it->first->get_color();
+          rez.serialize(child_color);
+          rez.serialize(it->second);
+          // Add a remote valid reference on these nodes to keep
+          // them live until we can add on remotely. No need for
+          // a mutator since we know that they are already valid
+          if (to_traverse.insert(std::make_pair(child_color, it->first)).second)
+            it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/,
+                                          destination_count);
+
+          to_traverse[child_color] = it->first;
         }
       }
-      context->runtime->send_back_logical_state(target, rez);
-      // Now recurse down the tree
-      for (std::set<RegionTreeNode*>::const_iterator it = 
-            to_traverse.begin(); it != to_traverse.end(); it++)
+      rez.serialize(state.disjoint_complete_tree);
+      rez.serialize<size_t>(state.disjoint_complete_children.size());
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+            state.disjoint_complete_children.begin(); it !=
+            state.disjoint_complete_children.end(); it++)
       {
-        (*it)->send_back_logical_state(ctx, context_uid, target);
+        const LegionColor child_color = it->first->get_color();
+        rez.serialize(child_color);
+        rez.serialize(it->second);
+        if (to_traverse.insert(std::make_pair(child_color, it->first)).second)
+          it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/,
+                                        destination_count);
       }
+      // Now recurse down the tree in a deterministic way
+      for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
+            to_traverse.begin(); it != to_traverse.end(); it++)
+        it->second->pack_logical_state(ctx, rez, destination_count, invalidate);
+      // If we were asked to invalidate then do that now
+      if (invalidate)
+        state.reset();
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::process_logical_state_return(ContextID ctx,
+    void RegionTreeNode::unpack_logical_state(ContextID ctx,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
+#ifdef DEBUG_LEGION
+      state.check_init();
+#endif
+      DerezCheck z(derez);
       derez.deserialize(state.reduction_fields);
       size_t num_reductions;
       derez.deserialize(num_reductions);
@@ -16440,6 +16380,8 @@ namespace Legion {
       size_t num_field_states;
       derez.deserialize(num_field_states);
       state.field_states.resize(num_field_states);
+      std::set<RtEvent> applied_events;
+      std::map<LegionColor,RegionTreeNode*> to_traverse;
       for (LegionList<FieldState>::aligned::iterator fit = 
             state.field_states.begin(); fit != state.field_states.end(); fit++)
       {
@@ -16458,53 +16400,90 @@ namespace Legion {
         }
         size_t num_open_children;
         derez.deserialize(num_open_children);
-        std::set<RtEvent> applied_events;
         for (unsigned idx = 0; idx < num_open_children; idx++)
         {
-          LegionColor color;
-          derez.deserialize(color);
-          RegionTreeNode *child = get_tree_child(color);
+          LegionColor child_color;
+          derez.deserialize(child_color);
+          RegionTreeNode *child = get_tree_child(child_color);
           FieldMask mask;
           derez.deserialize(mask);
           fit->add_child(child, mask, applied_events);
+          to_traverse.insert(std::make_pair(child_color, child));
         }
-        // Remove the valid references once all our current referenes are added
-        RtEvent applied;
-        if (!applied_events.empty())
-          applied = Runtime::merge_events(applied_events);
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-              fit->open_children.begin(); it != fit->open_children.end(); it++) 
-          it->first->send_remote_valid_decrement(source, NULL, applied);
+      }
+      derez.deserialize(state.disjoint_complete_tree);
+      size_t num_disjoint_children;
+      derez.deserialize(num_disjoint_children);
+      for (unsigned idx = 0; idx < num_disjoint_children; idx++)
+      {
+        LegionColor child_color;
+        derez.deserialize(child_color);
+        RegionTreeNode *child = get_tree_child(child_color);
+        FieldMask mask;
+        derez.deserialize(mask);  
+        if (state.disjoint_complete_children.insert(child, mask))
+        {
+          WrapperReferenceMutator mutator(applied_events);
+          child->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+        }
+        to_traverse.insert(std::make_pair(child_color, child));
+      }
+      RtEvent applied;
+      if (!applied_events.empty())
+        applied = Runtime::merge_events(applied_events);
+      // Traverse and remove remote references after we are done
+      for (std::map<LegionColor,RegionTreeNode*>::const_iterator it =
+            to_traverse.begin(); it != to_traverse.end(); it++)
+      {
+        it->second->unpack_logical_state(ctx, derez, source);
+        it->second->send_remote_valid_decrement(source, NULL, applied);
       }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void RegionTreeNode::handle_logical_state_return(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    void RegionTreeNode::pack_version_state(ContextID ctx, Serializer &rez,
+                       const size_t destination_count, const bool invalidate,
+                       const bool collective, std::set<RtEvent> &applied_events) 
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
-      InnerContext *context = runtime->find_context(context_uid);
-      bool is_region;
-      derez.deserialize(is_region);
-      RegionTreeNode *node = NULL;
-      if (is_region)
+      VersionManager &manager = get_current_version_manager(ctx);  
+      FieldMaskSet<EquivalenceSet> to_untrack;
+      std::map<LegionColor,RegionTreeNode*> to_traverse;
+      manager.pack_manager(rez, destination_count, invalidate, 
+                           to_traverse, to_untrack);
+      if (!to_untrack.empty())
       {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        node = runtime->forest->get_node(handle);
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              to_untrack.begin(); it != to_untrack.end(); it++)
+        {
+          it->first->invalidate_trackers(it->second, collective,
+                                         applied_events);
+          if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+            delete it->first;
+        }
       }
-      else
+      for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
+            to_traverse.begin(); it != to_traverse.end(); it++)
       {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        node = runtime->forest->get_node(handle);
+        it->second->pack_version_state(ctx, rez, destination_count, 
+                            invalidate, collective, applied_events);
+        if (it->second->remove_base_resource_ref(VERSION_MANAGER_REF))
+          delete it->second;
       }
-      node->process_logical_state_return(context->get_context().get_id(),
-                                         derez, source);
-    } 
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::unpack_version_state(ContextID ctx, 
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      std::map<LegionColor,RegionTreeNode*> to_traverse;
+      manager.unpack_manager(derez, source, to_traverse);
+      for (std::map<LegionColor,RegionTreeNode*>::const_iterator it =
+            to_traverse.begin(); it != to_traverse.end(); it++)
+        it->second->unpack_version_state(ctx, derez, source);
+    }
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::initialize_current_state(ContextID ctx)
@@ -17443,12 +17422,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::initialize_versioning_analysis(ContextID ctx,
-                                                    EquivalenceSet *set,
-                                                    const FieldMask &mask)
+                                              EquivalenceSet *set,
+                                              const FieldMask &mask,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      manager.initialize_versioning_analysis(set, mask);
+      manager.initialize_versioning_analysis(set, mask, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -17564,14 +17544,14 @@ namespace Legion {
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
-      FieldMaskSet<EquivalenceSet> to_invalidate;
-      manager.invalidate_refinement(mask, self, to_traverse, to_invalidate);
-      if (!to_invalidate.empty())
+      FieldMaskSet<EquivalenceSet> to_untrack;
+      manager.invalidate_refinement(mask, self, to_traverse, to_untrack);
+      if (!to_untrack.empty())
       {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              to_invalidate.begin(); it != to_invalidate.end(); it++)
+              to_untrack.begin(); it != to_untrack.end(); it++)
         {
-          it->first->invalidate_set(it->second, collective, applied_events);
+          it->first->invalidate_trackers(it->second, collective,applied_events);
           if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
             delete it->first;
         }
@@ -17591,35 +17571,35 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::record_refinement(ContextID ctx, EquivalenceSet *set,
-                                       const FieldMask &mask)
+                       const FieldMask &mask, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
-      manager.record_refinement(set, mask, parent_mask);
+      manager.record_refinement(set, mask, parent_mask, applied_events);
       if (!!parent_mask)
       {
 #ifdef DEBUG_LEGION
         assert(parent != NULL);
 #endif
-        parent->propagate_refinement(ctx, this, parent_mask);
+        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
       }
     }
 
     //--------------------------------------------------------------------------
     void RegionNode::propagate_refinement(ContextID ctx, PartitionNode *child,
-                                          const FieldMask &mask)
+                       const FieldMask &mask, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
-      manager.propagate_refinement(child, mask, parent_mask);
+      manager.propagate_refinement(child, mask, parent_mask, applied_events);
       if (!!parent_mask)
       {
 #ifdef DEBUG_LEGION
         assert(parent != NULL);
 #endif
-        parent->propagate_refinement(ctx, this, parent_mask);
+        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
       }
     }
 
@@ -18912,11 +18892,11 @@ namespace Legion {
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
-      FieldMaskSet<EquivalenceSet> to_invalidate;
+      FieldMaskSet<EquivalenceSet> to_untrack;
       manager.invalidate_refinement(mask, true/*delete self*/, 
-                                    to_traverse, to_invalidate);
+                                    to_traverse, to_untrack);
 #ifdef DEBUG_LEGION
-      assert(to_invalidate.empty());
+      assert(to_untrack.empty());
 #endif
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
@@ -18933,14 +18913,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PartitionNode::propagate_refinement(ContextID ctx, RegionNode *child, 
-                                             const FieldMask &mask)
+                       const FieldMask &mask, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
-      manager.propagate_refinement(child, mask, parent_mask);
+      manager.propagate_refinement(child, mask, parent_mask, applied_events);
       if (!!parent_mask)
-        parent->propagate_refinement(ctx, this, parent_mask);
+        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
     }
 
     //--------------------------------------------------------------------------

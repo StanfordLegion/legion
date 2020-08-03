@@ -2233,7 +2233,11 @@ namespace Legion {
         for (unsigned idx = 0; idx < target_processors.size(); idx++)
           rez.serialize(target_processors[idx]);
         for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
           rez.serialize<bool>(virtual_mapped[idx]);
+          if (virtual_mapped[idx])
+            version_infos[idx].pack_equivalence_sets(rez);
+        }
         rez.serialize(deferred_complete_mapping);
         deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         rez.serialize<size_t>(physical_instances.size());
@@ -2311,11 +2315,15 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_target_processors; idx++)
           derez.deserialize(target_processors[idx]);
         virtual_mapped.resize(regions.size());
+        version_infos.resize(regions.size());
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           bool result;
           derez.deserialize(result);
           virtual_mapped[idx] = result;
+          if (result)
+            version_infos[idx].unpack_equivalence_sets(derez, runtime, 
+                                                       ready_events);
         }
         derez.deserialize(deferred_complete_mapping);
         complete_mapping(deferred_complete_mapping);
@@ -3685,9 +3693,10 @@ namespace Legion {
                             "Invalid mapper output from invocation of '%s' on "
                             "mapper %s. Mapper selected a virtual mapping for "
                             "region %d of replicated copy %d of task %s "
-                            "(UID %lld). Virtual mappings are not permitted "
-                            "for replicated tasks.", "map_replicate_task",
-                            mapper->get_mapper_name(), region_idx, shard_idx,
+                            "(UID %lld). Virtual mappings are not currently "
+                            "permitted for replicated tasks.", 
+                            "map_replicate_task", mapper->get_mapper_name(),
+                            region_idx, shard_idx,
                             get_task_name(), get_unique_id())
             // For each of the shard instances
             for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
@@ -4267,9 +4276,8 @@ namespace Legion {
             execution_context->add_physical_region(clone_requirements[idx],
                 false/*mapped*/, map_id, tag, unmap_events[idx],
                 virtual_mapped[idx], physical_instances[idx]);
-            // Don't switch coherence modes since we virtually
-            // mapped it which means we will map in the parent's
-            // context
+            if (virtual_mapped[idx])
+              equivalence_sets[idx] = create_initial_equivalence_set(idx);
           }
           else if (do_inner_task_optimization)
           {
@@ -4316,7 +4324,7 @@ namespace Legion {
         }
         // Initialize any region tree contexts
         execution_context->initialize_region_tree_contexts(clone_requirements,
-                      equivalence_sets, unmap_events, map_applied_conditions);
+         version_infos, equivalence_sets, unmap_events, map_applied_conditions);
       }
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
@@ -5489,7 +5497,6 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      projection_info,
                                                      privilege_paths[idx],
-                                                     version_infos[idx],
                                                      map_applied_conditions);
     }
 
@@ -6009,14 +6016,6 @@ namespace Legion {
       rez.serialize(predicate_false_size);
       if (predicate_false_size > 0)
         rez.serialize(predicate_false_result, predicate_false_size);
-      if (!is_origin_mapped())
-      {
-#ifdef DEBUG_LEGION
-        assert(version_infos.size() == regions.size());
-#endif
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].pack_version_info(rez);
-      }
       // Mark that we sent this task remotely
       sent_remotely = true;
       // If this task is remote, then deactivate it, otherwise
@@ -6076,12 +6075,6 @@ namespace Legion {
 #endif
         predicate_false_result = malloc(predicate_false_size);
         derez.deserialize(predicate_false_result, predicate_false_size);
-      }
-      if (!is_origin_mapped())
-      {
-        version_infos.resize(regions.size());
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].unpack_version_info(derez, runtime->forest);
       }
       // Figure out what our parent context is
       RtEvent ctx_ready;
@@ -6188,10 +6181,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PACK_REMOTE_COMPLETE_CALL);
-      AddressSpaceID target = runtime->find_address_space(orig_proc);
-      if ((execution_context != NULL) &&
-          execution_context->has_created_requirements())
-        execution_context->send_back_created_state(target); 
       // Send back the pointer to the task instance, then serialize
       // everything else that needs to be sent back
       rez.serialize(orig_task);
@@ -7006,14 +6995,6 @@ namespace Legion {
       else // Make a new termination event for this point
         point_termination = Runtime::create_ap_user_event(NULL);
     }
-
-    //--------------------------------------------------------------------------
-    void PointTask::send_back_created_state(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      if (execution_context->has_created_requirements())
-        execution_context->send_back_created_state(target);
-    } 
 
     //--------------------------------------------------------------------------
     void PointTask::replay_analysis(void)
@@ -8242,7 +8223,6 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      projection_info,
                                                      privilege_paths[idx],
-                                                     version_infos[idx],
                                                      map_applied_conditions);
       }
     }
@@ -10308,8 +10288,6 @@ namespace Legion {
           assert(map_applied_conditions.empty());
 #endif
         }
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-          get_version_info(idx).pack_version_info(rez);
         if (point_arguments.impl != NULL)
           point_arguments.impl->pack_future_map(rez);
         else
@@ -10418,9 +10396,6 @@ namespace Legion {
 #endif
         remote_trace_info = 
           TraceInfo::unpack_remote_trace_info(derez, this, runtime);
-        version_infos.resize(regions.size());
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].unpack_version_info(derez, runtime->forest);
         WrapperReferenceMutator mutator(ready_events);
         {
           FutureMapImpl *impl = FutureMapImpl::unpack_future_map(runtime,
@@ -10941,11 +10916,6 @@ namespace Legion {
                                          RtEvent applied_condition)
     //--------------------------------------------------------------------------
     {
-      // Send back any created state that our point tasks made
-      AddressSpaceID target = runtime->find_address_space(orig_proc);
-      for (std::vector<PointTask*>::const_iterator it = points.begin();
-            it != points.end(); it++)
-        (*it)->send_back_created_state(target);
       rez.serialize(index_owner);
       RezCheck z(rez);
       rez.serialize<size_t>(points.size());

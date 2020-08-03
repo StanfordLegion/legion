@@ -458,23 +458,16 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        const ProjectionInfo &projection_info,
                                        const RegionTreePath &path,
-                                       VersionInfo &version_info,
                                        std::set<RtEvent> &applied_events);
       void perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      const RegionRequirement &req,
                                      const RegionTreePath &path,
-                                     VersionInfo &version_info,
                                      std::set<RtEvent> &applied_events,
                                      bool invalidate_tree);
       // Used by dependent partition operations
       void find_open_complete_partitions(Operation *op, unsigned idx,
                                          const RegionRequirement &req,
                                      std::vector<LogicalPartition> &partitions);
-      // For privileges flowing back across node boundaries
-      void send_back_logical_state(RegionTreeContext context,
-                                   UniqueID context_uid,
-                                   const RegionRequirement &req,
-                                   AddressSpaceID target);
     public:
       void perform_versioning_analysis(Operation *op, unsigned idx,
                                        const RegionRequirement &req,
@@ -3464,8 +3457,6 @@ namespace Legion {
                                  const ProjectionInfo &projection_info,
                                  FieldMask &unopened_field_mask,
                                  FieldMask &already_closed_mask,
-                                 FieldMask &disjoint_complete_capture_mask,
-                                 VersionInfo &version_info,
                                  std::set<RtEvent> &applied_events);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
@@ -3537,8 +3528,6 @@ namespace Legion {
                                      const RegionTreePath &path,
                                      const LogicalTraceInfo &trace_info,
                                      FieldMask &already_closed_mask,
-                                     FieldMask &disjoint_complete_capture,
-                                     VersionInfo &version_info,
                                      std::set<RtEvent> &applied_events,
                                      bool invalidate_tree);
       void siphon_logical_deletion(LogicalCloser &closer,
@@ -3552,16 +3541,15 @@ namespace Legion {
       void migrate_logical_state(ContextID src, ContextID dst, bool merge);
       void migrate_version_state(ContextID src, ContextID dst, 
                                  std::set<RtEvent> &applied, bool merge);
-      void pack_logical_state(ContextID ctx, Serializer &rez, bool invalidate);
-      void pack_version_state(ContextID ctx, Serializer &rez, bool invalidate);
-      void unpack_logical_state(ContextID ctx, Deserializer &derez);
-      void unpack_version_state(ContextID ctx, Deserializer &derez);
-      void send_back_logical_state(ContextID ctx, UniqueID context_uid,
-                                   AddressSpaceID target);
-      void process_logical_state_return(ContextID ctx, Deserializer &derez,
-                                        AddressSpaceID source);
-      static void handle_logical_state_return(Runtime *runtime,
-                              Deserializer &derez, AddressSpaceID source); 
+      void pack_logical_state(ContextID ctx, Serializer &rez, 
+          const size_t destination_count, const bool invalidate);
+      void unpack_logical_state(ContextID ctx, Deserializer &derez,
+                                AddressSpaceID source);
+      void pack_version_state(ContextID ctx, Serializer &rez, 
+          const size_t destination_count, const bool invalidate,
+          const bool collective, std::set<RtEvent> &applied_events);
+      void unpack_version_state(ContextID ctx, Deserializer &derez, 
+                                AddressSpaceID source);
     public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool users_only);
@@ -3791,9 +3779,8 @@ namespace Legion {
                                          const FieldMask &mask);
 #endif
     public:
-      void initialize_versioning_analysis(ContextID ctx,
-                                          EquivalenceSet *set,
-                                          const FieldMask &mask);
+      void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
+                    const FieldMask &mask, std::set<RtEvent> &applied_events);
       void perform_versioning_analysis(ContextID ctx, 
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,
@@ -3813,9 +3800,10 @@ namespace Legion {
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,
           bool self, bool collective, std::set<RtEvent> &applied_events);
       void record_refinement(ContextID ctx, EquivalenceSet *set, 
-                             const FieldMask &mask);
+          const FieldMask &mask, std::set<RtEvent> &applied_events);
       void propagate_refinement(ContextID ctx, PartitionNode *child,
-                                const FieldMask &mask);
+                                const FieldMask &mask,
+                                std::set<RtEvent> &applied_events);
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
@@ -3921,7 +3909,8 @@ namespace Legion {
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,
                   bool collective, std::set<RtEvent> &applied_events);
       void propagate_refinement(ContextID ctx, RegionNode *child,
-                                const FieldMask &mask);
+                                const FieldMask &mask,
+                                std::set<RtEvent> &applied_events);
     public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 
