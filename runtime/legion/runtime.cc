@@ -4646,6 +4646,8 @@ namespace Legion {
             created = true;
           }
         }
+        else if (footprint != NULL)
+          *footprint = result.get_instance_size();
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
       }
@@ -4738,6 +4740,8 @@ namespace Legion {
             created = true;
           }
         }
+        else if (footprint != NULL)
+          *footprint = result.get_instance_size();
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
       }
