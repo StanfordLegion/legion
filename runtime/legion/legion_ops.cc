@@ -8019,6 +8019,11 @@ namespace Legion {
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields.insert(fid);
+      // Free up the indexes for these fields since we know that they
+      // will be deleted at a finite time in the future
+      const std::vector<FieldID> field_vec(1,fid);
+      runtime->forest->free_field_indexes(handle, field_vec,
+          Runtime::protect_event(completion_event));
       // Hold a reference to the allocator to keep it alive until
       // we are done performing the field deletion
       allocator = impl;
@@ -8042,6 +8047,11 @@ namespace Legion {
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields = to_free; 
+      // Free up the indexes for these fields since we know that they
+      // will be deleted at a finite time in the future
+      const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
+      runtime->forest->free_field_indexes(handle, field_vec,
+          Runtime::protect_event(completion_event));
       // Hold a reference to the allocator to keep it alive until
       // we are done performing the field deletion
       allocator = impl;

@@ -1122,6 +1122,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::free_field_indexes(FieldSpace handle,
+                                        const std::vector<FieldID> &to_free,
+                                        RtEvent freed_event)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *node = get_node(handle);
+      node->free_field_indexes(to_free, freed_event);
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionTreeForest::allocate_local_fields(FieldSpace handle,
                                       const std::vector<FieldID> &fields,
                                       const std::vector<size_t> &sizes,
@@ -11126,7 +11136,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != field_infos.end());
 #endif
-      free_index(finder->second.idx, RtEvent::NO_RT_EVENT);
       // Remove it from the field map
       field_infos.erase(finder);
     }
@@ -11164,9 +11173,40 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != field_infos.end());
 #endif
-        free_index(finder->second.idx, RtEvent::NO_RT_EVENT);
         // Remove it from the fields map
         field_infos.erase(finder);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::free_field_indexes(const std::vector<FieldID> &to_free,
+                                            RtEvent freed_event)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+      if ((allocation_state != FIELD_ALLOC_EXCLUSIVE) &&
+          (allocation_state != FIELD_ALLOC_COLLECTIVE))
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize<size_t>(to_free.size());
+          for (unsigned idx = 0; idx < to_free.size(); idx++)
+            rez.serialize(to_free[idx]);
+          rez.serialize(freed_event);
+        }
+        context->runtime->send_field_free_indexes(owner_space, rez);
+        return;
+      }
+      for (std::vector<FieldID>::const_iterator it = 
+            to_free.begin(); it != to_free.end(); it++)
+      {
+        std::map<FieldID,FieldInfo>::iterator finder = field_infos.find(*it);
+#ifdef DEBUG_LEGION
+        assert(finder != field_infos.end());
+#endif
+        free_index(finder->second.idx, freed_event);
       }
     }
 
@@ -11921,6 +11961,25 @@ namespace Legion {
         else
           Runtime::trigger_event(done_event);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_field_free_indexes(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      FieldSpace handle;
+      derez.deserialize(handle);
+      size_t num_fields;
+      derez.deserialize(num_fields);
+      std::vector<FieldID> fields(num_fields);
+      for (unsigned idx = 0; idx < num_fields; idx++)
+        derez.deserialize(fields[idx]);
+      RtEvent freed_event;
+      derez.deserialize(freed_event);
+      FieldSpaceNode *node = forest->get_node(handle);
+      node->free_field_indexes(fields, freed_event);
     }
 
     //--------------------------------------------------------------------------

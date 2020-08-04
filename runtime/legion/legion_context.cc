@@ -10736,6 +10736,9 @@ namespace Legion {
       if (allocator->ready_event.exists() && 
           !allocator->ready_event.has_triggered())
         allocator->ready_event.wait();
+      // Free the indexes first and immediately
+      std::vector<FieldID> to_free(1,fid);
+      runtime->forest->free_field_indexes(space, to_free, RtEvent::NO_RT_EVENT);
       // We can free this field immediately
       std::set<RtEvent> preconditions;
       runtime->forest->free_field(space, fid, preconditions);
@@ -10785,9 +10788,11 @@ namespace Legion {
       if (allocator->ready_event.exists() && 
           !allocator->ready_event.has_triggered())
         allocator->ready_event.wait();
+      // Free the indexes first and immediately
+      const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
+      runtime->forest->free_field_indexes(space,field_vec,RtEvent::NO_RT_EVENT);
       // We can free these fields immediately
       std::set<RtEvent> preconditions;
-      const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
       runtime->forest->free_fields(space, field_vec, preconditions);
       if (!preconditions.empty())
       {
