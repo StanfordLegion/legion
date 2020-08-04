@@ -28,12 +28,12 @@
 #include "legion/legion_replication.h"
 #include "legion/mapper_manager.h"
 #include "legion/garbage_collection.h"
+#include "legion/range_allocator.h"
 #include "mappers/default_mapper.h"
 #include "mappers/test_mapper.h"
 #include "mappers/replay_mapper.h"
 #include "mappers/debug_mapper.h"
 #include "realm/cmdline.h"
-#include "realm/mem_impl.h"
 
 #include <unistd.h> // sleep for warnings
 
@@ -5159,7 +5159,7 @@ namespace Legion {
 
       if (eager_pool_size > 0)
       {
-        using Allocator = Realm::BasicRangeAllocator<size_t, size_t>;
+        using Allocator = BasicRangeAllocator<size_t, size_t>;
 
         Realm::AffineAccessor<char,1,coord_t> accessor(eager_pool_instance,
                                                        0/*field id*/);
@@ -5186,7 +5186,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       eager_pool_instance.destroy();
-      delete reinterpret_cast<Realm::BasicRangeAllocator<size_t, size_t>*>(
+      delete reinterpret_cast<BasicRangeAllocator<size_t, size_t>*>(
           eager_allocator);
     }
 
@@ -8154,7 +8154,7 @@ namespace Legion {
                PhysicalInstance &instance, Realm::InstanceLayoutGeneric *layout)
     //--------------------------------------------------------------------------
     {
-      using Allocator = Realm::BasicRangeAllocator<size_t, size_t>;
+      using Allocator = BasicRangeAllocator<size_t, size_t>;
       RtEvent wait_on(RtEvent::NO_EVENT);
       instance = PhysicalInstance::NO_INST;
       if (eager_allocator == NULL) return wait_on;
@@ -8196,7 +8196,7 @@ namespace Legion {
                                        PhysicalInstance instance, RtEvent defer)
     //--------------------------------------------------------------------------
     {
-      using Allocator = Realm::BasicRangeAllocator<size_t, size_t>;
+      using Allocator = BasicRangeAllocator<size_t, size_t>;
 
       if (defer.exists() && !defer.has_triggered())
       {
