@@ -5118,7 +5118,8 @@ namespace Legion {
       : memory(m), owner_space(m.address_space()), 
         is_owner(m.address_space() == rt->address_space),
         capacity(m.capacity()), remaining_capacity(capacity), runtime(rt),
-        eager_pool(0), eager_allocator(NULL), next_allocation_id(0)
+        eager_pool_instance(PhysicalInstance::NO_INST), eager_pool(0),
+        eager_allocator(NULL), next_allocation_id(0)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_USE_CUDA
@@ -5139,6 +5140,8 @@ namespace Legion {
         local_gpu = finder.first();
       }
 #endif
+      if (!is_owner) return;
+
       // Allocate eager pool
       coord_t eager_pool_size = capacity * runtime->eager_alloc_percentage / 100;
       log_eager.info("create an eager pool of size %lld on memory %llx",
@@ -5185,7 +5188,8 @@ namespace Legion {
     MemoryManager::~MemoryManager(void)
     //--------------------------------------------------------------------------
     {
-      eager_pool_instance.destroy();
+      if (eager_pool_instance.exists())
+        eager_pool_instance.destroy();
       delete reinterpret_cast<BasicRangeAllocator<size_t, size_t>*>(
           eager_allocator);
     }
