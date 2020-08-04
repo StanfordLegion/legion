@@ -5159,7 +5159,7 @@ namespace Legion {
 
       if (eager_pool_size > 0)
       {
-        using Allocator = BasicRangeAllocator<size_t, size_t>;
+        typedef BasicRangeAllocator<size_t, size_t> Allocator;
 
         Realm::AffineAccessor<char,1,coord_t> accessor(eager_pool_instance,
                                                        0/*field id*/);
@@ -8154,7 +8154,7 @@ namespace Legion {
                PhysicalInstance &instance, Realm::InstanceLayoutGeneric *layout)
     //--------------------------------------------------------------------------
     {
-      using Allocator = BasicRangeAllocator<size_t, size_t>;
+      typedef BasicRangeAllocator<size_t, size_t> Allocator;
       RtEvent wait_on(RtEvent::NO_EVENT);
       instance = PhysicalInstance::NO_INST;
       if (eager_allocator == NULL) return wait_on;
@@ -8196,7 +8196,7 @@ namespace Legion {
                                        PhysicalInstance instance, RtEvent defer)
     //--------------------------------------------------------------------------
     {
-      using Allocator = BasicRangeAllocator<size_t, size_t>;
+      typedef BasicRangeAllocator<size_t, size_t> Allocator;
 
       if (defer.exists() && !defer.has_triggered())
       {
