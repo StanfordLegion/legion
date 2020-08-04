@@ -312,7 +312,7 @@ namespace Realm {
   bool deserialize(S& deserializer, CodeDescriptor& cd);
 
   // this is the interface that actual CodeImplementations must follow
-  class CodeImplementation {
+  class REALM_PUBLIC_API CodeImplementation {
   protected:
     // not directly constructed
     CodeImplementation(void);

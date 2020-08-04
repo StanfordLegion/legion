@@ -24,7 +24,7 @@
 
 namespace Realm {
 
-  class Mutex {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE Mutex {
   public:
     Mutex(void);
     ~Mutex(void);

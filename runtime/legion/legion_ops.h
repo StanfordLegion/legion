@@ -1657,11 +1657,13 @@ namespace Legion {
                                            const bool unordered);
       void initialize_field_deletion(InnerContext *ctx, FieldSpace handle,
                                      FieldID fid, const bool unordered,
-                                     FieldAllocatorImpl *allocator);
+                                     FieldAllocatorImpl *allocator,
+                                     const bool non_owner_shard);
       void initialize_field_deletions(InnerContext *ctx, FieldSpace handle,
                                       const std::set<FieldID> &to_free,
                                       const bool unordered,
-                                      FieldAllocatorImpl *allocator);
+                                      FieldAllocatorImpl *allocator,
+                                      const bool non_owner_shard);
       void initialize_logical_region_deletion(InnerContext *ctx, 
                                               LogicalRegion handle,
                                               const bool unordered);

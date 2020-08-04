@@ -8078,8 +8078,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_field_deletion(InnerContext *ctx, 
-                                  FieldSpace handle, FieldID fid, 
-                                  const bool unordered,FieldAllocatorImpl *impl)
+                                               FieldSpace handle, FieldID fid, 
+                                               const bool unordered,
+                                               FieldAllocatorImpl *impl,
+                                               const bool non_owner_shard)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8094,6 +8096,16 @@ namespace Legion {
       // we are done performing the field deletion
       allocator = impl;
       allocator->add_reference();
+      // Wait for the allocator to be ready before doing this
+      // next part if we have to
+      if (allocator->ready_event.exists() && 
+          !allocator->ready_event.has_triggered())
+        allocator->ready_event.wait();
+      // Free up the indexes for these fields since we know that they
+      // will be deleted at a finite time in the future
+      const std::vector<FieldID> field_vec(1,fid);
+      runtime->forest->free_field_indexes(handle, field_vec,
+          Runtime::protect_event(completion_event), non_owner_shard);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -8102,7 +8114,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_field_deletions(InnerContext *ctx,
                             FieldSpace handle, const std::set<FieldID> &to_free,
-                            const bool unordered, FieldAllocatorImpl *impl)
+                            const bool unordered, FieldAllocatorImpl *impl,
+                            const bool non_owner_shard)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8117,6 +8130,16 @@ namespace Legion {
       // we are done performing the field deletion
       allocator = impl;
       allocator->add_reference();
+      // Wait for the allocator to be ready before doing this
+      // next part if we have to
+      if (allocator->ready_event.exists() && 
+          !allocator->ready_event.has_triggered())
+        allocator->ready_event.wait();
+      // Free up the indexes for these fields since we know that they
+      // will be deleted at a finite time in the future
+      const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
+      runtime->forest->free_field_indexes(handle, field_vec,
+          Runtime::protect_event(completion_event), non_owner_shard);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);

@@ -88,7 +88,7 @@ namespace Realm {
 
   // instance layouts are templated on the type of the IndexSpace used to
   //  index them, but they all inherit from a generic version
-  class InstanceLayoutGeneric {
+  class REALM_PUBLIC_API InstanceLayoutGeneric {
   protected:
     // cannot be created directly
     InstanceLayoutGeneric(void);
