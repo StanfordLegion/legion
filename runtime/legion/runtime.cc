@@ -5144,8 +5144,8 @@ namespace Legion {
 
       // Allocate eager pool
       coord_t eager_pool_size = capacity * runtime->eager_alloc_percentage / 100;
-      log_eager.info("create an eager pool of size %lld on memory %llx",
-          eager_pool_size, memory.id);
+      log_eager.info("create an eager pool of size %lld on memory " IDFMT,
+                     eager_pool_size, memory.id);
       const DomainT<1,coord_t> bounds(Rect<1>(0, Point<1>(eager_pool_size - 1)));
       const std::vector<size_t> field_sizes(1,sizeof(char));
       Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
@@ -8183,7 +8183,8 @@ namespace Legion {
           assert(eager_instances.find(instance) == eager_instances.end());
 #endif
           eager_instances[instance] = std::make_pair(ptr, allocation_id);
-          log_eager.debug("allocate instance %llx (%p+%lu, %lu) on memory %llx",
+          log_eager.debug("allocate instance " IDFMT
+                          " (%p+%zd, %zd) on memory " IDFMT,
                           instance.id,
                           reinterpret_cast<void*>(eager_pool),
                           offset,
@@ -8204,9 +8205,9 @@ namespace Legion {
 
       if (defer.exists() && !defer.has_triggered())
       {
-        log_eager.debug(
-            "defer deallocation of instance %llx on memory %llx: wait for %llx",
-            instance.id, memory.id, defer.id);
+        log_eager.debug("defer deallocation of instance " IDFMT
+                        " on memory " IDFMT ": wait for " IDFMT,
+                        instance.id, memory.id, defer.id);
         FreeEagerInstanceArgs args(this, instance);
         runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, defer);
       }
@@ -8222,9 +8223,8 @@ namespace Legion {
           Allocator *alloc = reinterpret_cast<Allocator*>(eager_allocator);
           alloc->deallocate(finder->second.second);
           eager_instances.erase(finder);
-          log_eager.debug("deallocate instance %llx on memory %llx",
-                          instance.id,
-                          memory.id);
+          log_eager.debug("deallocate instance " IDFMT " on memory " IDFMT,
+                          instance.id, memory.id);
         }
         instance.destroy();
       }
