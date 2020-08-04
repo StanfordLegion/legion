@@ -8162,7 +8162,6 @@ namespace Legion {
       {
         AutoLock lock(manager_lock);
         size_t allocation_id = next_allocation_id++;
-        uintptr_t ptr = -1U;
 
         size_t offset = 0;
         size_t size = layout->bytes_used;
