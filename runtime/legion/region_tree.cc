@@ -11187,6 +11187,9 @@ namespace Legion {
       if ((allocation_state != FIELD_ALLOC_EXCLUSIVE) &&
           (allocation_state != FIELD_ALLOC_COLLECTIVE))
       {
+#ifdef DEBUG_LEGION
+        assert(!is_owner());
+#endif
         Serializer rez;
         {
           RezCheck z(rez);
@@ -11206,7 +11209,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != field_infos.end());
 #endif
-        free_index(finder->second.idx, freed_event);
+        // Skip freeing any local field indexes here
+        if (!finder->second.local)
+          free_index(finder->second.idx, freed_event);
       }
     }
 

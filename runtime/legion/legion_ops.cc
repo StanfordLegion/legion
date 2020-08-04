@@ -8019,15 +8019,20 @@ namespace Legion {
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields.insert(fid);
+      // Hold a reference to the allocator to keep it alive until
+      // we are done performing the field deletion
+      allocator = impl;
+      allocator->add_reference();
+      // Wait for the allocator to be ready before doing this
+      // next part if we have to
+      if (allocator->ready_event.exists() && 
+          !allocator->ready_event.has_triggered())
+        allocator->ready_event.wait();
       // Free up the indexes for these fields since we know that they
       // will be deleted at a finite time in the future
       const std::vector<FieldID> field_vec(1,fid);
       runtime->forest->free_field_indexes(handle, field_vec,
           Runtime::protect_event(completion_event));
-      // Hold a reference to the allocator to keep it alive until
-      // we are done performing the field deletion
-      allocator = impl;
-      allocator->add_reference();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -8047,15 +8052,20 @@ namespace Legion {
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields = to_free; 
+      // Hold a reference to the allocator to keep it alive until
+      // we are done performing the field deletion
+      allocator = impl;
+      allocator->add_reference();
+      // Wait for the allocator to be ready before doing this
+      // next part if we have to
+      if (allocator->ready_event.exists() && 
+          !allocator->ready_event.has_triggered())
+        allocator->ready_event.wait();
       // Free up the indexes for these fields since we know that they
       // will be deleted at a finite time in the future
       const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
       runtime->forest->free_field_indexes(handle, field_vec,
           Runtime::protect_event(completion_event));
-      // Hold a reference to the allocator to keep it alive until
-      // we are done performing the field deletion
-      allocator = impl;
-      allocator->add_reference();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
