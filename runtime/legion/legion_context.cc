@@ -3148,7 +3148,7 @@ namespace Legion {
           FieldAllocatorImpl *allocator = 
             create_field_allocator(it->first, true/*unordered*/);
           op->initialize_field_deletions(this, it->first, it->second, 
-                                         true/*unordered*/, allocator);
+             true/*unordered*/, allocator, false/*non owner shard*/);
           op->set_execution_precondition(precondition);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
@@ -5816,7 +5816,8 @@ namespace Legion {
       }
       // Launch off the deletion operation
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_deletion(this, space, fid, unordered, allocator);
+      op->initialize_field_deletion(this, space, fid, unordered, allocator,
+                                    false/*non owner shard*/);
       add_to_dependence_queue(op, unordered);
     } 
 
@@ -5862,7 +5863,8 @@ namespace Legion {
       if (free_now.empty())
         return;
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_deletions(this, space, free_now,unordered,allocator);
+      op->initialize_field_deletions(this, space, free_now, unordered, 
+                                     allocator, false/*non owner shard*/);
       add_to_dependence_queue(op, unordered);
     }
 
@@ -14295,7 +14297,8 @@ namespace Legion {
         }
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
-      op->initialize_field_deletion(this, space, fid, unordered, allocator);
+      op->initialize_field_deletion(this, space, fid, unordered, allocator,
+                                    (owner_shard->shard_id != 0));
       op->initialize_replication(this, deletion_ready_barrier,
           deletion_mapping_barrier, deletion_execution_barrier, 
           shard_manager->is_total_sharding(),
@@ -14558,8 +14561,8 @@ namespace Legion {
       if (free_now.empty())
         return;
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
-      op->initialize_field_deletions(this, space, free_now, 
-                                     unordered, allocator);
+      op->initialize_field_deletions(this, space, free_now, unordered, 
+                                     allocator, (owner_shard->shard_id != 0));
       op->initialize_replication(this, deletion_ready_barrier,
           deletion_mapping_barrier, deletion_execution_barrier, 
           shard_manager->is_total_sharding(),
@@ -17221,7 +17224,7 @@ namespace Legion {
           FieldAllocatorImpl *allocator = 
             create_field_allocator(it->first, true/*unordered*/);
           op->initialize_field_deletions(this, it->first, it->second, 
-                                         true/*unordered*/, allocator);
+              true/*unordered*/, allocator, (owner_shard->shard_id != 0));
           op->initialize_replication(this, ready_barrier, mapped_barrier, 
               execution_barrier, shard_manager->is_total_sharding(),
               shard_manager->is_first_local_shard(owner_shard));
@@ -19313,6 +19316,9 @@ namespace Legion {
       if (allocator->ready_event.exists() && 
           !allocator->ready_event.has_triggered())
         allocator->ready_event.wait();
+      // Free the indexes first and immediately
+      std::vector<FieldID> to_free(1,fid);
+      runtime->forest->free_field_indexes(space, to_free, RtEvent::NO_RT_EVENT);
       // We can free this field immediately
       std::set<RtEvent> preconditions;
       runtime->forest->free_field(space, fid, preconditions);
@@ -19362,9 +19368,11 @@ namespace Legion {
       if (allocator->ready_event.exists() && 
           !allocator->ready_event.has_triggered())
         allocator->ready_event.wait();
+      // Free the indexes first and immediately
+      const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
+      runtime->forest->free_field_indexes(space,field_vec,RtEvent::NO_RT_EVENT);
       // We can free these fields immediately
       std::set<RtEvent> preconditions;
-      const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
       runtime->forest->free_fields(space, field_vec, preconditions);
       if (!preconditions.empty())
       {

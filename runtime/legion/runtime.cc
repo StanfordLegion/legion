@@ -5798,6 +5798,8 @@ namespace Legion {
             created = true;
           }
         }
+        else if (footprint != NULL)
+          *footprint = result.get_instance_size();
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
       }
@@ -5890,6 +5892,8 @@ namespace Legion {
             created = true;
           }
         }
+        else if (footprint != NULL)
+          *footprint = result.get_instance_size();
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
       }
@@ -9245,6 +9249,11 @@ namespace Legion {
           case SEND_FIELD_FREE:
             {
               runtime->handle_field_free(derez, remote_address_space);
+              break;
+            }
+          case SEND_FIELD_FREE_INDEXES:
+            {
+              runtime->handle_field_free_indexes(derez);
               break;
             }
           case SEND_FIELD_SPACE_LAYOUT_INVALIDATION:
@@ -18519,6 +18528,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_field_free_indexes(AddressSpaceID target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_FIELD_FREE_INDEXES,
+                            FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_field_space_layout_invalidation(AddressSpaceID target,
                                                        Serializer &rez)
     //--------------------------------------------------------------------------
@@ -20462,6 +20479,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode::handle_field_free(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_free_indexes(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_field_free_indexes(forest, derez);
     }
 
     //--------------------------------------------------------------------------

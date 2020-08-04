@@ -390,6 +390,9 @@ namespace Legion {
                        const std::vector<FieldID> &to_free,
                        std::set<RtEvent> &applied,
                        bool sharded_non_owner = false);
+      void free_field_indexes(FieldSpace handle,
+                       const std::vector<FieldID> &to_free, 
+                       RtEvent freed, bool sharded_non_owner = false);
     public:
       bool allocate_local_fields(FieldSpace handle, 
                                  const std::vector<FieldID> &resulting_fields,
@@ -3237,6 +3240,9 @@ namespace Legion {
       void free_fields(const std::vector<FieldID> &to_free,
                        AddressSpaceID source, std::set<RtEvent> &applied,
                        bool sharded_non_owner = false);
+      void free_field_indexes(const std::vector<FieldID> &to_free,
+                              RtEvent freed_event,
+                              bool sharded_non_owner = false); 
     public:
       bool allocate_local_fields(const std::vector<FieldID> &fields,
                                  const std::vector<size_t> &sizes,
@@ -3337,6 +3343,8 @@ namespace Legion {
                                        Deserializer &derez);
       static void handle_field_free(RegionTreeForest *forest,
                                     Deserializer &derez, AddressSpaceID source);
+      static void handle_field_free_indexes(RegionTreeForest *forest,
+                                            Deserializer &derez);
       static void handle_layout_invalidation(RegionTreeForest *forest,
                                              Deserializer &derez,
                                              AddressSpaceID source);

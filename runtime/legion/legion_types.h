@@ -749,6 +749,7 @@ namespace Legion {
       SEND_FIELD_ALLOC_REQUEST,
       SEND_FIELD_SIZE_UPDATE,
       SEND_FIELD_FREE,
+      SEND_FIELD_FREE_INDEXES,
       SEND_FIELD_SPACE_LAYOUT_INVALIDATION,
       SEND_LOCAL_FIELD_ALLOC_REQUEST,
       SEND_LOCAL_FIELD_ALLOC_RESPONSE,
@@ -954,6 +955,7 @@ namespace Legion {
         "Send Field Alloc Request",                                   \
         "Send Field Size Update",                                     \
         "Send Field Free",                                            \
+        "Send Field Free Indexes",                                    \
         "Send Field Space Layout Invalidation",                       \
         "Send Local Field Alloc Request",                             \
         "Send Local Field Alloc Response",                            \
