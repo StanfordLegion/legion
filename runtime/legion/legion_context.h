@@ -486,6 +486,7 @@ namespace Legion {
                                                    Legion::Runtime *&runtime);
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                         Realm::InstanceLayoutGeneric *layout);
+      virtual void destroy_task_local_instance(PhysicalInstance instance);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                     PhysicalInstance inst, FutureFunctor *callback_functor) = 0;
       virtual void post_end_task(const void *res, size_t res_size, 
@@ -613,9 +614,7 @@ namespace Legion {
     public:
       void yield(void);
       void release_task_local_instances(PhysicalInstance return_inst);
-#ifdef LEGION_MALLOC_INSTANCES
       void release_future_local_instance(PhysicalInstance return_inst);
-#endif
     protected:
       Future predicate_task_false(const TaskLauncher &launcher);
       FutureMap predicate_index_task_false(size_t context_index,
@@ -682,7 +681,7 @@ namespace Legion {
 #ifdef LEGION_MALLOC_INSTANCES
       std::vector<std::pair<PhysicalInstance,uintptr_t> > task_local_instances;
 #else
-      std::vector<PhysicalInstance> task_local_instances;
+      std::set<PhysicalInstance> task_local_instances;
 #endif
     protected:
       RtEvent pending_done;

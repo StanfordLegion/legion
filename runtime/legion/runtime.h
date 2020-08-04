@@ -983,6 +983,18 @@ namespace Legion {
         std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
         // For tracking external instances and whether they can be used
       };
+    public:
+      struct FreeEagerInstanceArgs : public LgTaskArgs<FreeEagerInstanceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FREE_EAGER_INSTANCE_TASK_ID;
+      public:
+        FreeEagerInstanceArgs(MemoryManager *m, PhysicalInstance i)
+          : LgTaskArgs<FreeEagerInstanceArgs>(implicit_provenance),
+            manager(m), inst(i) { }
+      public:
+        MemoryManager *const manager;
+        const PhysicalInstance inst;
+      };
 #ifdef LEGION_MALLOC_INSTANCES
     public:
       struct MallocInstanceArgs : public LgTaskArgs<MallocInstanceArgs> {
@@ -1155,6 +1167,11 @@ namespace Legion {
       RtEvent detach_external_instance(PhysicalManager *manager);
     public:
       bool is_visible_memory(Memory other);
+    public:
+      RtEvent create_eager_instance(PhysicalInstance &instance,
+                                    Realm::InstanceLayoutGeneric *layout);
+      void free_eager_instance(PhysicalInstance instance, RtEvent defer);
+      static void handle_free_eager_instance(const void *args);
 #ifdef LEGION_MALLOC_INSTANCES
     public:
       uintptr_t allocate_legion_instance(size_t footprint, 
@@ -1179,6 +1196,17 @@ namespace Legion {
       size_t remaining_capacity;
       // The runtime we are associate with
       Runtime *const runtime;
+    public:
+      // Realm instance backin the eager pool
+      // Must be allocated at the start-up time
+      PhysicalInstance eager_pool_instance;
+      uintptr_t eager_pool;
+      // Allocator object for eager allocations
+      void *eager_allocator;
+      // Allocation counter
+      size_t next_allocation_id;
+      // Map each eager instance to its allocation id
+      std::map<PhysicalInstance,std::pair<uintptr_t,size_t> > eager_instances;
     protected:
       // Lock for controlling access to the data
       // structures in this memory manager
@@ -1913,6 +1941,7 @@ namespace Legion {
             initial_tasks_to_schedule(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE),
             initial_meta_task_vector_width(
                 LEGION_DEFAULT_META_TASK_VECTOR_WIDTH),
+            eager_alloc_percentage(LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE),
             max_message_size(LEGION_DEFAULT_MAX_MESSAGE_SIZE),
             gc_epoch_size(LEGION_DEFAULT_GC_EPOCH_SIZE),
             max_control_replication_contexts(
@@ -1962,6 +1991,7 @@ namespace Legion {
         unsigned initial_task_window_hysteresis;
         unsigned initial_tasks_to_schedule;
         unsigned initial_meta_task_vector_width;
+        unsigned eager_alloc_percentage;
         unsigned max_message_size;
         unsigned gc_epoch_size;
         unsigned max_control_replication_contexts;
@@ -2109,6 +2139,7 @@ namespace Legion {
       const unsigned initial_task_window_hysteresis;
       const unsigned initial_tasks_to_schedule;
       const unsigned initial_meta_task_vector_width;
+      const unsigned eager_alloc_percentage;
       const unsigned max_message_size;
       const unsigned gc_epoch_size;
       const unsigned max_control_replication_contexts;

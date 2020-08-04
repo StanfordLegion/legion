@@ -2904,6 +2904,8 @@ namespace Legion {
       inline T* ptr(const Rect<DIM,COORD_T> &r, size_t strides[DIM]) const;
       __CUDA_HD__
       inline T& operator[](const Point<DIM,COORD_T> &p) const;
+    public:
+      void destroy();
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
@@ -8672,6 +8674,7 @@ namespace Legion {
       friend class DeferredBuffer;
       Realm::RegionInstance create_task_local_instance(Memory memory,
                                 Realm::InstanceLayoutGeneric *layout);
+      void destroy_task_local_instance(Realm::RegionInstance instance);
     public:
       // This method is hidden down here and not publicly documented because
       // users shouldn't really need it for anything, however there are some

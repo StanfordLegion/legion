@@ -6512,6 +6512,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::destroy_task_local_instance(Realm::RegionInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      if (Internal::implicit_context == NULL)
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "It is illegal to request the destruction of DeferredBuffer, "
+            "Deferred Value, or DeferredReduction objects outside of "
+            "Legion tasks.")
+      return
+         Internal::implicit_context->destroy_task_local_instance(instance);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background,
                                   bool default_mapper)
     //--------------------------------------------------------------------------

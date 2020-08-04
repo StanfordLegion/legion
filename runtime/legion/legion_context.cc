@@ -2278,8 +2278,8 @@ namespace Legion {
                                           memory, ptr, layout, no_requests));
       task_local_instances.push_back(std::make_pair(instance, ptr));
 #else
-      const RtEvent wait_on(Realm::RegionInstance::create_instance(instance, 
-                                              memory, layout, no_requests));
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      const RtEvent wait_on(manager->create_eager_instance(instance, layout));
       if (!instance.exists())
       {
         const char *mem_names[] = {
@@ -2288,15 +2288,34 @@ namespace Legion {
 #undef MEM_NAMES
         };
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-            "Failed to allocate DeferredBuffer/Value/Reductionin task %s "
+            "Failed to allocate DeferredBuffer/Value/Reduction in task %s "
             "(UID %lld) because %s memory " IDFMT " is full.", get_task_name(),
             get_unique_id(), mem_names[memory.kind()], memory.id) 
       }
-      task_local_instances.push_back(instance);
+      task_local_instances.insert(instance);
 #endif
       if (wait_on.exists() && !wait_on.has_triggered())
         wait_on.wait();
       return instance;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::destroy_task_local_instance(PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_MALLOC_INSTANCES
+      // TODO: We don't eagerly destroy local instances when they are malloc'ed
+#else
+      std::set<PhysicalInstance>::iterator finder =
+        task_local_instances.find(instance);
+#ifdef DEBUG_LEGION
+      assert(finder != task_local_instances.end());
+#endif
+      task_local_instances.erase(finder);
+      MemoryManager *manager = runtime->find_memory_manager(
+          instance.get_location());
+      manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2444,22 +2463,15 @@ namespace Legion {
     void TaskContext::release_task_local_instances(PhysicalInstance return_inst)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_MALLOC_INSTANCES
       for (unsigned idx = 0; idx < task_local_instances.size(); idx++)
       {
-#ifdef LEGION_MALLOC_INSTANCES
         std::pair<PhysicalInstance,uintptr_t> inst = task_local_instances[idx];
         if (inst.first == return_inst)
           task_local_instances.front() = inst; // save this for clean up
         else
           inst.first.destroy(Processor::get_current_finish_event());
-#else
-        PhysicalInstance inst = task_local_instances[idx];
-        // Don't delete the return inst for now, the cleanup code will do that
-        if (inst != return_inst)
-          inst.destroy(Processor::get_current_finish_event());
-#endif
       }
-#ifdef LEGION_MALLOC_INSTANCES
       if (return_inst.exists())
       {
         task_local_instances.resize(1);
@@ -2468,11 +2480,26 @@ namespace Legion {
 #endif
       }
       else
-#endif
+        task_local_instances.clear();
+#else
+      for (std::set<PhysicalInstance>::iterator it =
+           task_local_instances.begin(); it !=
+           task_local_instances.end(); ++it)
+      {
+        PhysicalInstance inst = *it;
+        // Don't delete the return inst for now, the cleanup code will do that
+        if (inst != return_inst)
+        {
+          MemoryManager *manager =
+            runtime->find_memory_manager(inst.get_location());
+          manager->free_eager_instance(
+              inst, RtEvent(Processor::get_current_finish_event()));
+        }
+      }
       task_local_instances.clear();
+#endif
     }
 
-#ifdef LEGION_MALLOC_INSTANCES
     //--------------------------------------------------------------------------
     void TaskContext::release_future_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
@@ -2480,6 +2507,7 @@ namespace Legion {
       // Get the pointer and free it
       MemoryManager *manager = 
         runtime->find_memory_manager(instance.get_location());
+#ifdef LEGION_MALLOC_INSTANCES
 #ifdef DEBUG_LEGION
       assert(task_local_instances.size() == 1);
 #endif
@@ -2489,8 +2517,10 @@ namespace Legion {
       assert(inst.first == instance);
 #endif
       manager->free_legion_instance(RtEvent::NO_RT_EVENT, inst.second);
-    }
+#else
+      manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
 #endif
+    }
 
     //--------------------------------------------------------------------------
     Future TaskContext::predicate_task_false(const TaskLauncher &launcher)
@@ -7338,18 +7368,12 @@ namespace Legion {
         {
           if (it->instance.exists())
           {
-#ifdef LEGION_MALLOC_INSTANCES
             // Need to keep the context alive until we release the instance
             it->context->add_reference();
-#endif
             it->context->post_end_task(it->result,it->size,false/*owned*/,NULL);
-#ifdef LEGION_MALLOC_INSTANCES
-            it->context->release_future_local_instance(it->instance); 
+            it->context->release_future_local_instance(it->instance);
             if (it->context->remove_reference())
               delete it->context;
-#endif
-            // Once we've copied the data then we can destroy the instance
-            it->instance.destroy();
           }
           else if (it->functor != NULL)
             it->context->post_end_task(NULL, 0, it->owned, it->functor);

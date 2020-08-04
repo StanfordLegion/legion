@@ -313,6 +313,16 @@
 #define LEGION_DEFAULT_META_TASK_VECTOR_WIDTH  (DEFAULT_META_TASK_VECTOR_WIDTH)
 #endif
 #endif
+// Percentage of memory to reserve for eager allocations
+#ifndef DEFAULT_EAGER_ALLOC_PERCENTAGE // For backwards compatibility
+#ifndef LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE
+#define LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE 1
+#endif
+#else
+#ifndef LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE
+#define LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE (DEFAULT_EAGER_ALLOC_PERCENTAGE)
+#endif
+#endif
 // Default number of replay tasks to run in parallel
 #ifndef DEFAULT_MAX_REPLAY_PARALLELISM // For backwards compatibility
 #ifndef LEGION_DEFAULT_MAX_REPLAY_PARALLELISM

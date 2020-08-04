@@ -33,6 +33,7 @@
 #include "mappers/replay_mapper.h"
 #include "mappers/debug_mapper.h"
 #include "realm/cmdline.h"
+#include "realm/mem_impl.h"
 
 #include <unistd.h> // sleep for warnings
 
@@ -64,6 +65,7 @@ namespace Legion {
     Realm::Logger log_garbage("legion_gc");
     Realm::Logger log_shutdown("shutdown");
     Realm::Logger log_tracing("tracing");
+    Realm::Logger log_eager("eager");
     namespace LegionSpy {
       Realm::Logger log_spy("legion_spy");
     };
@@ -5115,7 +5117,8 @@ namespace Legion {
     MemoryManager::MemoryManager(Memory m, Runtime *rt)
       : memory(m), owner_space(m.address_space()), 
         is_owner(m.address_space() == rt->address_space),
-        capacity(m.capacity()), remaining_capacity(capacity), runtime(rt)
+        capacity(m.capacity()), remaining_capacity(capacity), runtime(rt),
+        eager_pool(0), eager_allocator(NULL), next_allocation_id(0)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_USE_CUDA
@@ -5136,6 +5139,36 @@ namespace Legion {
         local_gpu = finder.first();
       }
 #endif
+      // Allocate eager pool
+      coord_t eager_pool_size = capacity * runtime->eager_alloc_percentage / 100;
+      log_eager.info("create an eager pool of size %lld on memory %llx",
+          eager_pool_size, memory.id);
+      const DomainT<1,coord_t> bounds(Rect<1>(0, Point<1>(eager_pool_size - 1)));
+      const std::vector<size_t> field_sizes(1,sizeof(char));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[] = {0};
+      Realm::InstanceLayoutGeneric *layout =
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds,
+                                                             constraints,
+                                                             dim_order);
+      Realm::ProfilingRequestSet no_requests;
+      Realm::RegionInstance::create_instance(eager_pool_instance,
+                                             memory,
+                                             layout,
+                                             no_requests);
+
+      if (eager_pool_size > 0)
+      {
+        using Allocator = Realm::BasicRangeAllocator<size_t, size_t>;
+
+        Realm::AffineAccessor<char,1,coord_t> accessor(eager_pool_instance,
+                                                       0/*field id*/);
+        eager_pool = reinterpret_cast<uintptr_t>(accessor.ptr(0));
+
+        eager_allocator = new Allocator();
+        Allocator *alloc = reinterpret_cast<Allocator*>(eager_allocator);
+        alloc->add_range(0, eager_pool_size - 1);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5152,6 +5185,9 @@ namespace Legion {
     MemoryManager::~MemoryManager(void)
     //--------------------------------------------------------------------------
     {
+      eager_pool_instance.destroy();
+      delete reinterpret_cast<Realm::BasicRangeAllocator<size_t, size_t>*>(
+          eager_allocator);
     }
 
     //--------------------------------------------------------------------------
@@ -8111,6 +8147,92 @@ namespace Legion {
               it != vis_mems.end(); it++)
           visible_memories.insert(*it);
       return (visible_memories.find(other) != visible_memories.end());
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MemoryManager::create_eager_instance(
+               PhysicalInstance &instance, Realm::InstanceLayoutGeneric *layout)
+    //--------------------------------------------------------------------------
+    {
+      using Allocator = Realm::BasicRangeAllocator<size_t, size_t>;
+      RtEvent wait_on(RtEvent::NO_EVENT);
+      instance = PhysicalInstance::NO_INST;
+      if (eager_allocator == NULL) return wait_on;
+
+      {
+        AutoLock lock(manager_lock);
+        size_t allocation_id = next_allocation_id++;
+        uintptr_t ptr = -1U;
+
+        size_t offset = 0;
+        size_t size = layout->bytes_used;
+        Allocator *alloc = reinterpret_cast<Allocator*>(eager_allocator);
+        bool allocated = alloc->allocate(
+            allocation_id, size, layout->alignment_reqd, offset);
+
+        if (allocated)
+        {
+          uintptr_t ptr = eager_pool + offset;
+          Realm::ProfilingRequestSet no_requests;
+          wait_on = RtEvent(Realm::RegionInstance::create_external(
+                instance, memory, ptr, layout, no_requests));
+#ifdef DEBUG_LEGION
+          assert(eager_instances.find(instance) == eager_instances.end());
+#endif
+          eager_instances[instance] = std::make_pair(ptr, allocation_id);
+          log_eager.debug("allocate instance %llx (%p+%lu, %lu) on memory %llx",
+                          instance.id,
+                          reinterpret_cast<void*>(eager_pool),
+                          offset,
+                          size,
+                          memory.id);
+        }
+      }
+
+      return wait_on;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::free_eager_instance(
+                                       PhysicalInstance instance, RtEvent defer)
+    //--------------------------------------------------------------------------
+    {
+      using Allocator = Realm::BasicRangeAllocator<size_t, size_t>;
+
+      if (defer.exists() && !defer.has_triggered())
+      {
+        log_eager.debug(
+            "defer deallocation of instance %llx on memory %llx: wait for %llx",
+            instance.id, memory.id, defer.id);
+        FreeEagerInstanceArgs args(this, instance);
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, defer);
+      }
+      else
+      {
+        {
+          AutoLock lock(manager_lock);
+          std::map<PhysicalInstance,std::pair<uintptr_t,size_t> >::iterator
+            finder = eager_instances.find(instance);
+#ifdef DEBUG_LEGION
+          assert(finder != eager_instances.end());
+#endif
+          Allocator *alloc = reinterpret_cast<Allocator*>(eager_allocator);
+          alloc->deallocate(finder->second.second);
+          eager_instances.erase(finder);
+          log_eager.debug("deallocate instance %llx on memory %llx",
+                          instance.id,
+                          memory.id);
+        }
+        instance.destroy();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MemoryManager::handle_free_eager_instance(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const FreeEagerInstanceArgs *fargs = (const FreeEagerInstanceArgs*)args;
+      fargs->manager->free_eager_instance(fargs->inst, RtEvent::NO_RT_EVENT);
     }
 
 #ifdef LEGION_MALLOC_INSTANCES
@@ -12943,6 +13065,7 @@ namespace Legion {
         initial_task_window_hysteresis(config.initial_task_window_hysteresis),
         initial_tasks_to_schedule(config.initial_tasks_to_schedule),
         initial_meta_task_vector_width(config.initial_meta_task_vector_width),
+        eager_alloc_percentage(config.eager_alloc_percentage),
         max_message_size(config.max_message_size),
         gc_epoch_size(config.gc_epoch_size),
         max_control_replication_contexts(
@@ -13152,6 +13275,7 @@ namespace Legion {
         initial_task_window_hysteresis(rhs.initial_task_window_hysteresis),
         initial_tasks_to_schedule(rhs.initial_tasks_to_schedule),
         initial_meta_task_vector_width(rhs.initial_meta_task_vector_width),
+        eager_alloc_percentage(rhs.eager_alloc_percentage),
         max_message_size(rhs.max_message_size),
         gc_epoch_size(rhs.gc_epoch_size), 
         max_control_replication_contexts(rhs.max_control_replication_contexts),
@@ -25633,6 +25757,8 @@ namespace Legion {
                         config.initial_tasks_to_schedule, !filter)
         .add_option_int("-lg:vector", 
                         config.initial_meta_task_vector_width, !filter)
+        .add_option_int("-lg:eager_alloc_percentage",
+                        config.eager_alloc_percentage, !filter)
         .add_option_int("-lg:message",config.max_message_size, !filter)
         .add_option_int("-lg:epoch", config.gc_epoch_size, !filter)
         .add_option_int("-lg:local", config.max_local_fields, !filter)
@@ -27846,6 +27972,11 @@ namespace Legion {
         case LG_DEFER_RELEASE_ACQUIRED_TASK_ID:
           {
             Operation::handle_deferred_release(args);
+            break;
+          }
+        case LG_FREE_EAGER_INSTANCE_TASK_ID:
+          {
+            MemoryManager::handle_free_eager_instance(args);
             break;
           }
 #ifdef LEGION_MALLOC_INSTANCES
