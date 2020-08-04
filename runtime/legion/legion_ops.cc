@@ -8845,6 +8845,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MergeCloseOp::record_refinements(const FieldMask &refinements)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!refinement_mask);
+      assert(!!refinements);
+      assert(!(refinements - close_mask));
+      assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+      refinement_mask = refinements;
+    }
+
+    //--------------------------------------------------------------------------
     void MergeCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
@@ -8857,6 +8870,7 @@ namespace Legion {
     {
       deactivate_close();
       close_mask.clear();
+      refinement_mask.clear();
       runtime->free_merge_close_op(this);
     }
 
@@ -8889,6 +8903,37 @@ namespace Legion {
       assert(idx == 0);
 #endif
       return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void MergeCloseOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!!refinement_mask)
+      {
+#ifdef DEBUG_LEGION
+        assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        std::set<RtEvent> map_applied_conditions;
+        const ContextID ctx = parent_ctx->get_context().get_id();
+        RegionNode *region_node = runtime->forest->get_node(requirement.region);
+        region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
+                                  false/*collective*/, map_applied_conditions);
+        // Make a new equivalence set and record it at this node
+        const AddressSpaceID local_space = runtime->address_space;
+        EquivalenceSet *set = new EquivalenceSet(runtime,
+            runtime->get_available_distributed_id(),
+            local_space, local_space, region_node, true/*register now*/);
+        region_node->record_refinement(ctx, set, refinement_mask,
+                                       map_applied_conditions);
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
+      }
+      else
+        complete_mapping();
+      complete_execution();
     }
 
 #ifdef LEGION_SPY
@@ -9480,6 +9525,156 @@ namespace Legion {
       complete_operation();
     }
 #endif
+
+    /////////////////////////////////////////////////////////////
+    // Refinment Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RefinementOp::RefinementOp(Runtime *runtime)
+      : InternalOp(runtime)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementOp::RefinementOp(const RefinementOp &rhs)
+      : InternalOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementOp::~RefinementOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementOp& RefinementOp::operator=(const RefinementOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_internal();
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_internal();
+      to_refine.clear();
+      make_from.clear();
+      runtime->free_refinement_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RefinementOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[REFINEMENT_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RefinementOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return REFINEMENT_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    const FieldMask& RefinementOp::get_internal_mask(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(to_refine.get_valid_mask() == make_from.get_valid_mask());
+#endif
+      return to_refine.get_valid_mask();
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::initialize(Operation *op, unsigned index,
+                                  const LogicalTraceInfo &trace_info,
+                                  FieldMaskSet<RegionNode> &refinements,
+                                  FieldMaskSet<PartitionNode> &to_make)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(to_refine.empty());
+      assert(make_from.empty());
+      assert(!refinements.empty());
+      assert(!to_make.empty());
+      assert(refinements.get_valid_mask() == to_make.get_valid_mask());
+#endif
+      initialize_internal(op, index, trace_info);
+      to_refine.swap(refinements);
+      make_from.swap(to_make);
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> map_applied_conditions;
+      // First go through and invalidate the current refinements for
+      // the regions that we are updating
+      const ContextID ctx = parent_ctx->get_context().get_id();
+      for (FieldMaskSet<RegionNode>::const_iterator it = 
+            to_refine.begin(); it != to_refine.end(); it++)
+        it->first->invalidate_refinement(ctx, it->second, false/*self*/,
+                            false/*collective*/, map_applied_conditions);
+      // Now we can make new equivalence sets for each of the subregions
+      // in the partitions that we should be making refinements from
+      const AddressSpaceID local_space = runtime->address_space;
+      for (FieldMaskSet<PartitionNode>::const_iterator it = 
+            make_from.begin(); it != make_from.end(); it++)
+      {
+        IndexPartNode *index_part = it->first->row_source;
+        // Iterate over each child and make an equivalence set  
+        if (index_part->total_children == index_part->max_linearized_color)
+        {
+          for (LegionColor color = 0; 
+                color < index_part->total_children; color++)
+          {
+            RegionNode *child = it->first->get_child(color);
+            EquivalenceSet *set = new EquivalenceSet(runtime,
+                runtime->get_available_distributed_id(),
+                local_space, local_space, child, true/*register now*/);
+            child->record_refinement(ctx,set,it->second,map_applied_conditions);
+          }
+        }
+        else
+        {
+          ColorSpaceIterator *itr = 
+            index_part->color_space->create_color_space_iterator();
+          while (itr->is_valid())
+          {
+            const LegionColor color = itr->yield_color();
+            RegionNode *child = it->first->get_child(color);
+            EquivalenceSet *set = new EquivalenceSet(runtime,
+                runtime->get_available_distributed_id(),
+                local_space, local_space, child, true/*register now*/);
+            child->record_refinement(ctx,set,it->second,map_applied_conditions);
+          }
+          delete itr;
+        }
+      }
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
+      complete_execution();
+    }
 
     /////////////////////////////////////////////////////////////
     // External Acquire

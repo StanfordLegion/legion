@@ -13344,6 +13344,13 @@ namespace Legion {
         delete (*it);
       }
       available_virtual_close_ops.clear();
+      for (std::deque<RefinementOp*>::const_iterator it =
+            available_refinement_ops.begin(); it !=
+            available_refinement_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_refinement_ops.clear();
       for (std::deque<DynamicCollectiveOp*>::const_iterator it = 
             available_dynamic_collective_ops.begin(); it !=
             available_dynamic_collective_ops.end(); it++)
@@ -23310,6 +23317,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RefinementOp* Runtime::get_available_refinement_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(refinement_op_lock, available_refinement_ops);
+    }
+
+    //--------------------------------------------------------------------------
     DynamicCollectiveOp* Runtime::get_available_dynamic_collective_op(void)
     //--------------------------------------------------------------------------
     {
@@ -23776,6 +23790,14 @@ namespace Legion {
     {
       AutoLock v_lock(virtual_close_op_lock);
       release_operation<false>(available_virtual_close_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_refinement_op(RefinementOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(refinement_op_lock);
+      release_operation<false>(available_refinement_ops, op);
     }
 
     //--------------------------------------------------------------------------

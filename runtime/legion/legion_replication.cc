@@ -1082,8 +1082,31 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
 #endif
-      // Arrive on our barrier with the precondition
-      Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+#if 0
+      if (!!refinement_mask)
+      {
+#ifdef DEBUG_LEGION
+        assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        std::set<RtEvent> map_applied_conditions;
+        const ContextID ctx = parent_ctx->get_context().get_id();
+        RegionNode *region_node = runtime->forest->get_node(requirement.region);
+        region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
+          repl_ctx->shard_manager->is_total_sharding(), map_applied_conditions);
+        // Make a new equivalence set and record it at this node
+        const AddressSpaceID local_space = runtime->address_space;
+        
+
+
+      }
+      else // Arrive on our barrier
+#endif
+        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
       // Then complete the mapping once the barrier has triggered
       complete_mapping(mapped_barrier);
       complete_execution();
@@ -6658,6 +6681,11 @@ namespace Legion {
                 CollectiveCheckReduction::REDOP,
                 &CollectiveCheckReduction::IDENTITY, 
                 sizeof(CollectiveCheckReduction::IDENTITY)));
+        logical_check_barrier =
+          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+                CollectiveCheckReduction::REDOP,
+                &CollectiveCheckReduction::IDENTITY, 
+                sizeof(CollectiveCheckReduction::IDENTITY)));
         close_check_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards,
                 CloseCheckReduction::REDOP,
@@ -6718,6 +6746,7 @@ namespace Legion {
           callback_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
           collective_check_barrier.destroy_barrier();
+          logical_check_barrier.destroy_barrier();
           close_check_barrier.destroy_barrier();
 #endif
         }
@@ -6946,6 +6975,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
           assert(collective_check_barrier.exists());
           rez.serialize(collective_check_barrier);
+          assert(logical_check_barrier.exists());
+          rez.serialize(logical_check_barrier);
           assert(close_check_barrier.exists());
           rez.serialize(close_check_barrier);
 #endif
@@ -7013,6 +7044,7 @@ namespace Legion {
         derez.deserialize(callback_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
         derez.deserialize(collective_check_barrier);
+        derez.deserialize(logical_check_barrier);
         derez.deserialize(close_check_barrier);
 #endif
         shard_mapping.resize(total_shards);

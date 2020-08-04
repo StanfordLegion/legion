@@ -9766,9 +9766,8 @@ namespace Legion {
         index_partition_allocator_shard(0), field_space_allocator_shard(0), 
         field_allocator_shard(0), logical_region_allocator_shard(0), 
         dynamic_id_allocator_shard(0), next_available_collective_index(0), 
-        trace_recording_collective_id(0), summary_collective_id(0), 
-        next_physical_template_index(0), next_replicate_bar_index(0), 
-        next_trace_bar_index(0), next_summary_bar_index(0), 
+        next_logical_collective_index(1), next_physical_template_index(0), 
+        next_replicate_bar_index(0), next_logical_bar_index(0), 
         unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
     //--------------------------------------------------------------------------
     {
@@ -9791,7 +9790,10 @@ namespace Legion {
       inorder_barrier = manager->get_inorder_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
+      logical_check_barrier = manager->get_logical_check_barrier();
       close_check_barrier = manager->get_close_check_barrier();
+      collective_guard_reentrant = false;
+      logical_guard_reentrant = false;
 #endif
       // Configure our collective settings
       shard_collective_radix = runtime->legion_collective_radix;
@@ -16013,11 +16015,6 @@ namespace Legion {
         ReplTraceCompleteOp *complete_op = 
           runtime->get_available_repl_trace_op();
         complete_op->initialize_complete(this, has_blocking_call);
-        // Make a summary collective ID here if we don't have one in case
-        // we need to regenerate the summary barrier during the dependence
-        // analysis stage of the pipeline
-        if (current_trace->has_physical_trace() && (summary_collective_id == 0))
-          summary_collective_id = get_next_collective_index(COLLECTIVE_LOC_98);
         add_to_dependence_queue(complete_op);
       }
       else
@@ -16026,12 +16023,6 @@ namespace Legion {
         ReplTraceCaptureOp *capture_op = 
           runtime->get_available_repl_capture_op();
         capture_op->initialize_capture(this, has_blocking_call, deprecated);
-        // Make a trace collective ID here if we don't have one in case
-        // we need to regenerate the trace barrier during the dependence
-        // analysis stage of the pipeline
-        if (trace_recording_collective_id == 0)
-          trace_recording_collective_id = 
-            get_next_collective_index(COLLECTIVE_LOC_99);
         // Mark that the current trace is now fixed
         current_trace->fix_trace();
         add_to_dependence_queue(capture_op);
@@ -17436,25 +17427,62 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CollectiveID ReplicateContext::get_next_collective_index(
-                                                    CollectiveIndexLocation loc)
+                                      CollectiveIndexLocation loc, bool logical)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION_COLLECTIVES
-      CollectiveCheckReduction::RHS location = loc;
-      Runtime::phase_barrier_arrive(collective_check_barrier, 1/*count*/,
-                            RtEvent::NO_RT_EVENT, &location, sizeof(location));
-      collective_check_barrier.wait();
-      CollectiveCheckReduction::RHS actual_location;
-      bool ready = Runtime::get_barrier_result(collective_check_barrier,
-                                   &actual_location, sizeof(actual_location));
-      assert(ready);
-      assert(location == actual_location);
-      advance_replicate_barrier(collective_check_barrier, total_shards);
-#endif
       // No need for a lock, should only be coming from the creation
       // of operations directly from the application and therefore
       // should be deterministic
-      return next_available_collective_index++;
+      // Count by 2s to avoid conflicts with the collectives from the 
+      // logical depedence analysis stage of the pipeline
+      if (logical)
+      {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        if (!logical_guard_reentrant)
+        {
+          CollectiveCheckReduction::RHS location = loc;
+          Runtime::phase_barrier_arrive(logical_check_barrier, 1/*count*/,
+                             RtEvent::NO_RT_EVENT, &location, sizeof(location));
+          logical_check_barrier.wait();
+          CollectiveCheckReduction::RHS actual_location;
+          bool ready = Runtime::get_barrier_result(logical_check_barrier,
+                                     &actual_location, sizeof(actual_location));
+          assert(ready);
+          assert(location == actual_location);
+          // Guard against coming back in here when advancing the barrier
+          logical_guard_reentrant = true;
+          advance_logical_barrier(logical_check_barrier, total_shards);
+          logical_guard_reentrant = false;
+        }
+#endif
+        const CollectiveID result = next_logical_collective_index;
+        next_logical_collective_index += 2;
+        return result;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        if (!collective_guard_reentrant)
+        {
+          CollectiveCheckReduction::RHS location = loc;
+          Runtime::phase_barrier_arrive(collective_check_barrier, 1/*count*/,
+                             RtEvent::NO_RT_EVENT, &location, sizeof(location));
+          collective_check_barrier.wait();
+          CollectiveCheckReduction::RHS actual_location;
+          bool ready = Runtime::get_barrier_result(collective_check_barrier,
+                                     &actual_location, sizeof(actual_location));
+          assert(ready);
+          assert(location == actual_location);
+          // Guard against coming back in here when advancing the barrier
+          collective_guard_reentrant = true;
+          advance_replicate_barrier(collective_check_barrier, total_shards);
+          collective_guard_reentrant = false;
+        }
+#endif
+        const CollectiveID result = next_available_collective_index;
+        next_available_collective_index += 2; 
+        return result;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -17734,34 +17762,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const RtBarrier result = trace_recording_barrier;
-      Runtime::advance_barrier(trace_recording_barrier);
-      if (trace_recording_barrier.exists())
-        return result;
-      // If it doesn't exist then we have to make a new one
-      // We can't make a collective ID here because we're in the dependence
-      // analysis stage of the pipeline
-#ifdef DEBUG_LEGION
-      // There better be one of these here
-      assert(trace_recording_collective_id > 0);
-#endif
-      ValueBroadcast<RtBarrier> 
-        collective(trace_recording_collective_id, this, next_trace_bar_index);
-      if (owner_shard->shard_id == next_trace_bar_index++)
-      {
-        trace_recording_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        collective.broadcast(trace_recording_barrier);
-      }
-      else
-        trace_recording_barrier = collective.get_value();
-      // Check to see if we need to reset th next_trace_bar_index
-      if (next_trace_bar_index == total_shards)
-        next_trace_bar_index = 0;
-      // Set this back to zero so we can re-initialize it in the application
-      // at some point in the future. This is safe as long as we know there
-      // are more barrier generations than possible oustanding replays which
-      // should always be true
-      trace_recording_collective_id = 0;
+      advance_logical_barrier(trace_recording_barrier, total_shards);
       return result;
     }
 
@@ -17770,34 +17771,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const RtBarrier result = summary_fence_barrier;
-      Runtime::advance_barrier(summary_fence_barrier);
-      if (summary_fence_barrier.exists())
-        return result;
-      // If it doesn't exist then we have to make a new one
-      // We can't make a collective ID here because we're in the dependence
-      // analysis stage of the pipeline
-#ifdef DEBUG_LEGION
-      // There better be one of these here
-      assert(summary_collective_id > 0);
-#endif
-      ValueBroadcast<RtBarrier> 
-        collective(summary_collective_id, this, next_summary_bar_index);
-      if (owner_shard->shard_id == next_summary_bar_index++)
-      {
-        summary_fence_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        collective.broadcast(summary_fence_barrier);
-      }
-      else
-        summary_fence_barrier = collective.get_value();
-      // Check to see if we need to reset th next_summary_bar_index
-      if (next_summary_bar_index == total_shards)
-        next_summary_bar_index = 0;
-      // Set this back to zero so we can re-initialize it in the application
-      // at some point in the future. This is safe as long as we know there
-      // are more barrier generations than possible oustanding replays which
-      // should always be true
-      summary_collective_id = 0;
+      advance_logical_barrier(summary_fence_barrier, total_shards);
       return result;
     }
 
@@ -17845,6 +17819,30 @@ namespace Legion {
       // Check to see if we need to reset the next_replicate_bar_index
       if (next_replicate_bar_index == total_shards)
         next_replicate_bar_index = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::create_new_logical_barrier(RtBarrier &bar, 
+                                                      size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!bar.exists());
+      assert(next_logical_bar_index < total_shards);
+#endif
+      const CollectiveID cid =
+        get_next_collective_index(COLLECTIVE_LOC_18, true/*logical*/);
+      ValueBroadcast<RtBarrier> collective(cid, this, next_logical_bar_index);
+      if (owner_shard->shard_id == next_logical_bar_index++)
+      {
+        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
+        collective.broadcast(bar);
+      }
+      else
+        bar = collective.get_value();
+      // Check to see if we need to reset the next_replicate_bar_index
+      if (next_logical_bar_index == total_shards)
+        next_logical_bar_index = 0;
     }
 
     /////////////////////////////////////////////////////////////

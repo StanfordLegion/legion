@@ -3787,6 +3787,7 @@ namespace Legion {
                                          const FieldMask &mask);
 #endif
     public:
+      // Support for refinements and versioning
       void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
                     const FieldMask &mask, std::set<RtEvent> &applied_events);
       void perform_versioning_analysis(ContextID ctx, 

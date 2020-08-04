@@ -3310,6 +3310,7 @@ namespace Legion {
       MergeCloseOp*         get_available_merge_close_op(void);
       PostCloseOp*          get_available_post_close_op(void);
       VirtualCloseOp*       get_available_virtual_close_op(void);
+      RefinementOp*         get_available_refinement_op(void);
       DynamicCollectiveOp*  get_available_dynamic_collective_op(void);
       FuturePredOp*         get_available_future_pred_op(void);
       NotPredOp*            get_available_not_pred_op(void);
@@ -3372,6 +3373,7 @@ namespace Legion {
       void free_merge_close_op(MergeCloseOp *op); 
       void free_post_close_op(PostCloseOp *op);
       void free_virtual_close_op(VirtualCloseOp *op);
+      void free_refinement_op(RefinementOp *op);
       void free_dynamic_collective_op(DynamicCollectiveOp *op);
       void free_future_predicate_op(FuturePredOp *op);
       void free_not_predicate_op(NotPredOp *op);
@@ -3765,6 +3767,7 @@ namespace Legion {
       mutable LocalLock merge_close_op_lock;
       mutable LocalLock post_close_op_lock;
       mutable LocalLock virtual_close_op_lock;
+      mutable LocalLock refinement_op_lock;
       mutable LocalLock dynamic_collective_op_lock;
       mutable LocalLock future_pred_op_lock;
       mutable LocalLock not_pred_op_lock;
@@ -3801,6 +3804,7 @@ namespace Legion {
       std::deque<MergeCloseOp*>         available_merge_close_ops;
       std::deque<PostCloseOp*>          available_post_close_ops;
       std::deque<VirtualCloseOp*>       available_virtual_close_ops;
+      std::deque<RefinementOp*>         available_refinement_ops;
       std::deque<DynamicCollectiveOp*>  available_dynamic_collective_ops;
       std::deque<FuturePredOp*>         available_future_pred_ops;
       std::deque<NotPredOp*>            available_not_pred_ops;

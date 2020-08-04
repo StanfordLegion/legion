@@ -1825,6 +1825,7 @@ namespace Legion {
       void initialize(InnerContext *ctx, const RegionRequirement &req,
                       const LogicalTraceInfo &trace_info, int close_idx,
                       const FieldMask &close_mask, Operation *create_op);
+      void record_refinements(const FieldMask &refinement_mask);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1833,6 +1834,7 @@ namespace Legion {
       virtual const FieldMask& get_internal_mask(void) const;
     public:
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_mapping(void);
 #ifdef LEGION_SPY
       virtual void trigger_complete(void);
 #endif
@@ -1840,6 +1842,7 @@ namespace Legion {
       unsigned parent_req_index; 
     protected:
       FieldMask close_mask;
+      FieldMask refinement_mask;
     };
 
     /**
@@ -1962,15 +1965,22 @@ namespace Legion {
     public:
       RefinementOp& operator=(const RefinementOp &rhs);
     public:
+      void initialize(Operation *creator, unsigned idx, 
+                      const LogicalTraceInfo &trace_info,
+                      FieldMaskSet<RegionNode> &to_refine,
+                      FieldMaskSet<PartitionNode> &to_make);
+    public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual const FieldMask& get_internal_mask(void) const;
     public:
-      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
     protected:
+      // Upper bound regions that we are refining and need invalidations
       FieldMaskSet<RegionNode> to_refine;
+      // New partitions from which to make refinements
       FieldMaskSet<PartitionNode> make_from;
     };
 

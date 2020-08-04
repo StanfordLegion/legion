@@ -2064,6 +2064,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
       inline RtBarrier get_collective_check_barrier(void) const
         { return collective_check_barrier; }
+      inline RtBarrier get_logical_check_barrier(void) const
+        { return logical_check_barrier; }
       inline RtBarrier get_close_check_barrier(void) const
         { return close_check_barrier; }
 #endif
@@ -2229,6 +2231,7 @@ namespace Legion {
       RtBarrier callback_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
       RtBarrier collective_check_barrier;
+      RtBarrier logical_check_barrier;
       RtBarrier close_check_barrier;
 #endif
     protected:

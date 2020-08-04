@@ -2077,7 +2077,8 @@ namespace Legion {
           ApBarrier partition_ready = ApBarrier::NO_AP_BARRIER);
     public:
       // Collective methods
-      CollectiveID get_next_collective_index(CollectiveIndexLocation loc);
+      CollectiveID get_next_collective_index(CollectiveIndexLocation loc,
+                                             bool logical = false);
       void register_collective(ShardCollective *collective);
       ShardCollective* find_or_buffer_collective(Deserializer &derez);
       void unregister_collective(ShardCollective *collective);
@@ -2112,12 +2113,20 @@ namespace Legion {
           if (!bar.exists())
             create_new_replicate_barrier(bar, arrivals);
         }
+      inline void advance_logical_barrier(RtBarrier &bar, size_t arrivals)
+        {
+          Runtime::advance_barrier(bar);
+          if (!bar.exists())
+            create_new_logical_barrier(bar, arrivals);
+        }
     protected:
       // These can only be called inside the task for this context
       // since they assume that all the shards are aligned and doing
       // the same calls for the same operations in the same order
       void create_new_replicate_barrier(RtBarrier &bar, size_t arrivals);
       void create_new_replicate_barrier(ApBarrier &bar, size_t arrivals);
+      // This one can only be called inside the logical dependence analysis
+      void create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
     public:
       static void hash_future(Murmur3Hasher &hasher, const Future &future);
       static void hash_future_map(Murmur3Hasher &hasher, const FutureMap &map);
@@ -2189,7 +2198,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtBarrier collective_check_barrier;
+      RtBarrier logical_check_barrier;
       RtBarrier close_check_barrier;
+      bool collective_guard_reentrant;
+      bool logical_guard_reentrant;
 #endif
     protected:
       // local barriers to this context for handling returned
@@ -2206,15 +2218,14 @@ namespace Legion {
     protected:
       mutable LocalLock replication_lock;
       CollectiveID next_available_collective_index;
+      // We also need to create collectives in the logical dependence
+      // analysis stage of the pipeline. We'll have those count on the
+      // odd numbers of the collective IDs whereas the ones from the 
+      // application task will be the even numbers.
+      CollectiveID next_logical_collective_index;
       std::map<CollectiveID,ShardCollective*> collectives;
       std::map<CollectiveID,std::vector<
                 std::pair<void*,size_t> > > pending_collective_updates;
-      // Use this for creating new summary barriers in the dependence
-      // analsyis stage of the pipeline. Our use of this variable is only
-      // safe as long as we know we have more generations of phase barriers
-      // than we can have outstanding replays, which is usually very true
-      volatile CollectiveID trace_recording_collective_id;
-      volatile CollectiveID summary_collective_id;
     protected:
       // Pending allocations of various resources
       std::deque<std::pair<ValueBroadcast<ISBroadcast>*,bool> > 
@@ -2256,8 +2267,7 @@ namespace Legion {
       std::map<std::pair<unsigned,unsigned>,RtUserEvent> pending_clone_barriers;
     protected:
       unsigned next_replicate_bar_index;
-      unsigned next_trace_bar_index;
-      unsigned next_summary_bar_index;
+      unsigned next_logical_bar_index;
     protected:
       static const unsigned MIN_UNORDERED_OPS_EPOCH = 32;
       static const unsigned MAX_UNORDERED_OPS_EPOCH = 32768;
