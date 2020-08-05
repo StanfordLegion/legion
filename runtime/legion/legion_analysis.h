@@ -847,7 +847,14 @@ namespace Legion {
       // tree is for this region tree. On region nodes there should be at
       // most one child in this data structure. On partition nodes there
       // can be any number of children with different field masks.
+      // Note that this might also be empty for partition nodes where
+      // we have issued projections
       FieldMaskSet<RegionTreeNode> disjoint_complete_children;
+      // Track the names of children which have "complete writes" open
+      // below. If we've written all our open children below then we
+      // ourselves are written and we should propagate this information
+      // up the tree to see if we want to change refinements
+      FieldMaskSet<RegionTreeNode> written_disjoint_complete_children;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
@@ -897,7 +904,7 @@ namespace Legion {
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
-      void update_state(LogicalState &state);
+      void update_state(LogicalState &state, bool check_refinements);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
     protected:

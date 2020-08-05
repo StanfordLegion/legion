@@ -1955,7 +1955,7 @@ namespace Legion {
      * is used to update the equivalence sets being used to
      * represent logical regions.
      */
-    class RefinementOp : public InternalOp {
+    class RefinementOp : public InternalOp, public LegionHeapify<RefinementOp> {
     public:
       static const AllocationType alloc_type = REFINEMENT_OP_ALLOC;
     public:
@@ -1967,8 +1967,11 @@ namespace Legion {
     public:
       void initialize(Operation *creator, unsigned idx, 
                       const LogicalTraceInfo &trace_info,
-                      FieldMaskSet<RegionNode> &to_refine,
-                      FieldMaskSet<PartitionNode> &to_make);
+                      RegionNode *to_refine);
+      void record_refinement(PartitionNode *node, const FieldMask &mask);
+#ifdef DEBUG_LEGION
+      void verify_refinement_mask(const FieldMask &refinement_mask);
+#endif
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1978,8 +1981,11 @@ namespace Legion {
     public:
       virtual void trigger_mapping(void);
     protected:
-      // Upper bound regions that we are refining and need invalidations
-      FieldMaskSet<RegionNode> to_refine;
+      void activate_refinement(void);
+      void deactivate_refinement(void);
+    protected:
+      // Upper bound node where this refinement is occuring
+      RegionNode *to_refine;
       // New partitions from which to make refinements
       FieldMaskSet<PartitionNode> make_from;
     };

@@ -458,8 +458,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node) = 0;
+      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
+                                              RegionTreeNode *node) = 0;
 #else
       virtual MergeCloseOp* get_merge_close_op(void) = 0;
+      virtual RefinementOp* get_refinement_op(void) = 0;
 #endif
     public:
       virtual InnerContext* find_parent_physical_context(unsigned index) = 0;
@@ -1234,8 +1237,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node);
+      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
+                                               RegionTreeNode *node);
 #else
       virtual MergeCloseOp* get_merge_close_op(void);
+      virtual RefinementOp* get_refinement_op(void);
 #endif
     public:
       virtual InnerContext* find_parent_physical_context(unsigned index);
@@ -2032,8 +2038,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node);
+      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
+                                              RegionTreeNode *node);
 #else
       virtual MergeCloseOp* get_merge_close_op(void);
+      virtual RefinementOp* get_refinement_op(void);
 #endif
     public:
       virtual void pack_remote_context(Serializer &rez, 
@@ -2159,6 +2168,9 @@ namespace Legion {
       // These barriers are used to identify when close operations are mapped
       std::vector<RtBarrier>  close_mapped_barriers;
       unsigned                next_close_mapped_bar_index;
+      // These barriers are used to identify when refinement ops are mapped
+      std::vector<RtBarrier>  refinement_mapped_barriers;
+      unsigned                next_refinement_mapped_bar_index; 
       // These barriers are for signaling when indirect copies are done
       std::vector<ApBarrier>  indirection_barriers;
       unsigned                next_indirection_bar_index;
@@ -2200,6 +2212,7 @@ namespace Legion {
       RtBarrier collective_check_barrier;
       RtBarrier logical_check_barrier;
       RtBarrier close_check_barrier;
+      RtBarrier refinement_check_barrier;
       bool collective_guard_reentrant;
       bool logical_guard_reentrant;
 #endif
@@ -2755,8 +2768,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node);
+      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
+                                              RegionTreeNode *node);
 #else
       virtual MergeCloseOp* get_merge_close_op(void);
+      virtual RefinementOp* get_refinement_op(void);
 #endif
     public:
       virtual InnerContext* find_parent_physical_context(unsigned index);
@@ -3168,8 +3184,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node);
+      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
+                                              RegionTreeNode *node);
 #else
       virtual MergeCloseOp* get_merge_close_op(void);
+      virtual RefinementOp* get_refinement_op(void);
 #endif
     public:
       virtual InnerContext* find_parent_physical_context(unsigned index);

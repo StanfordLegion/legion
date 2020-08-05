@@ -8162,6 +8162,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    RefinementOp* InnerContext::get_refinement_op(const LogicalUser &user,
+                                                  RegionTreeNode *node)
+#else
+    RefinementOp* InnerContext::get_refinement_op(void)
+#endif
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_available_refinement_op();
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::record_dynamic_collective_contribution(
                                           DynamicCollective dc, const Future &f) 
     //--------------------------------------------------------------------------
@@ -9761,14 +9773,15 @@ namespace Legion {
       : InnerContext(rt, owner, d, full, reqs, parent_indexes, virt_mapped, 
           ctx_uid, exec_fence), owner_shard(owner), shard_manager(manager),
         total_shards(shard_manager->total_shards),
-        next_close_mapped_bar_index(0), next_indirection_bar_index(0),
-        next_future_map_bar_index(0), index_space_allocator_shard(0), 
-        index_partition_allocator_shard(0), field_space_allocator_shard(0), 
-        field_allocator_shard(0), logical_region_allocator_shard(0), 
-        dynamic_id_allocator_shard(0), next_available_collective_index(0), 
-        next_logical_collective_index(1), next_physical_template_index(0), 
-        next_replicate_bar_index(0), next_logical_bar_index(0), 
-        unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
+        next_close_mapped_bar_index(0), next_refinement_mapped_bar_index(0),
+        next_indirection_bar_index(0), next_future_map_bar_index(0), 
+        index_space_allocator_shard(0), index_partition_allocator_shard(0), 
+        field_space_allocator_shard(0), field_allocator_shard(0), 
+        logical_region_allocator_shard(0), dynamic_id_allocator_shard(0), 
+        next_available_collective_index(0), next_logical_collective_index(1), 
+        next_physical_template_index(0), next_replicate_bar_index(0), 
+        next_logical_bar_index(0), unordered_ops_counter(0), 
+        unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
     //--------------------------------------------------------------------------
     {
       // Get our allocation barriers
@@ -9792,6 +9805,7 @@ namespace Legion {
       collective_check_barrier = manager->get_collective_check_barrier();
       logical_check_barrier = manager->get_logical_check_barrier();
       close_check_barrier = manager->get_close_check_barrier();
+      refinement_check_barrier = manager->get_refinement_check_barrier();
       collective_guard_reentrant = false;
       logical_guard_reentrant = false;
 #endif
@@ -9822,6 +9836,12 @@ namespace Legion {
             idx < close_mapped_barriers.size(); idx += total_shards)
       {
         Realm::Barrier bar = close_mapped_barriers[idx];
+        bar.destroy_barrier();
+      }
+      for (unsigned idx = owner_shard->shard_id; 
+            idx < refinement_mapped_barriers.size(); idx += total_shards)
+      {
+        Realm::Barrier bar = refinement_mapped_barriers[idx];
         bar.destroy_barrier();
       }
       for (unsigned idx = owner_shard->shard_id;
@@ -16267,11 +16287,45 @@ namespace Legion {
                                       &actual_barrier, sizeof(actual_barrier));
       assert(ready);
       assert(actual_barrier == barrier);
-      advance_replicate_barrier(close_check_barrier, total_shards);
+      advance_logical_barrier(close_check_barrier, total_shards);
 #endif
       result->set_repl_close_info(mapped_bar);
       // Advance the phase for the next time through
-      advance_replicate_barrier(mapped_bar, total_shards);
+      advance_logical_barrier(mapped_bar, total_shards);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    RefinementOp* ReplicateContext::get_refinement_op(const LogicalUser &user,
+                                                      RegionTreeNode *node)
+#else
+    RefinementOp* ReplicateContext::get_refinement_op(void)
+#endif
+    //--------------------------------------------------------------------------
+    {
+      ReplRefinementOp *result = runtime->get_available_repl_refinement_op();
+      // Get the mapped barrier for the refinement operation
+      const unsigned refinement_index = next_refinement_mapped_bar_index++;
+      if (next_refinement_mapped_bar_index == refinement_mapped_barriers.size())
+        next_refinement_mapped_bar_index = 0;
+      RtBarrier &mapped_bar = refinement_mapped_barriers[refinement_index];
+#ifdef DEBUG_LEGION_COLLECTIVES
+      CloseCheckReduction::RHS barrier(user, mapped_bar, 
+                                       node, false/*read only*/);
+      Runtime::phase_barrier_arrive(refinement_check_barrier, 1/*count*/,
+                              RtEvent::NO_RT_EVENT, &barrier, sizeof(barrier));
+      refinement_check_barrier.wait();
+      CloseCheckReduction::RHS actual_barrier;
+      bool ready = Runtime::get_barrier_result(refinement_check_barrier,
+                                      &actual_barrier, sizeof(actual_barrier));
+      assert(ready);
+      assert(actual_barrier == barrier);
+      advance_logical_barrier(refinement_check_barrier, total_shards);
+#endif
+      result->set_repl_refinement_info(mapped_bar);
+      // Advance the phase for the next time through
+      advance_logical_barrier(mapped_bar, total_shards);
       return result;
     }
 
@@ -16396,6 +16450,9 @@ namespace Legion {
       BarrierExchangeCollective<RtBarrier> mapped_collective(this,
           num_barriers, close_mapped_barriers, COLLECTIVE_LOC_50);
       mapped_collective.exchange_barriers_async();
+      BarrierExchangeCollective<RtBarrier> refinement_collective(this,
+          num_barriers, refinement_mapped_barriers, COLLECTIVE_LOC_19);
+      refinement_collective.exchange_barriers_async();
       BarrierExchangeCollective<ApBarrier> indirect_collective(this,
           num_barriers, indirection_barriers, COLLECTIVE_LOC_79);
       indirect_collective.exchange_barriers_async();
@@ -16404,6 +16461,7 @@ namespace Legion {
       future_map_collective.exchange_barriers_async();
       // Wait for everything to be done
       mapped_collective.wait_for_barrier_exchange();
+      refinement_collective.wait_for_barrier_exchange();
       indirect_collective.wait_for_barrier_exchange();
       future_map_collective.wait_for_barrier_exchange();
     }
@@ -20222,6 +20280,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    RefinementOp* LeafContext::get_refinement_op(const LogicalUser &user,
+                                                 RegionTreeNode *node)
+#else
+    RefinementOp* LeafContext::get_refinement_op(void)
+#endif
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     InnerContext* LeafContext::find_parent_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
@@ -21661,6 +21732,22 @@ namespace Legion {
       return enclosing->get_merge_close_op(user, node);
 #else
       return enclosing->get_merge_close_op();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION_COLLECTIVES
+    RefinementOp* InlineContext::get_refinement_op(const LogicalUser &user,
+                                                   RegionTreeNode *node)
+#else
+    RefinementOp* InlineContext::get_refinement_op(void)
+#endif
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION_COLLECTIVES
+      return enclosing->get_refinement_op(user, node);
+#else
+      return enclosing->get_refinement_op();
 #endif
     }
 

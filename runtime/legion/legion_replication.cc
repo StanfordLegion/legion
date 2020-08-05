@@ -1113,6 +1113,82 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl Refinement Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplRefinementOp::ReplRefinementOp(Runtime *rt)
+      : RefinementOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplRefinementOp::ReplRefinementOp(const ReplRefinementOp&rhs)
+      : RefinementOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplRefinementOp::~ReplRefinementOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplRefinementOp& ReplRefinementOp::operator=(const ReplRefinementOp&rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_refinement();
+      mapped_barrier = RtBarrier::NO_RT_BARRIER;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_refinement();
+      runtime->free_repl_refinement_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::set_repl_refinement_info(RtBarrier mapped)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!mapped_barrier.exists());
+#endif
+      mapped_barrier = mapped;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapped_barrier.exists());
+      assert(mapping_tracker != NULL);
+#endif
+      // All we have to do is add our map precondition to the tracker
+      // so we know we are mapping in order with respect to other
+      // repl close operations that use the same close index
+      mapping_tracker->add_mapping_dependence(
+          mapped_barrier.get_previous_phase());
+    }
+
+    /////////////////////////////////////////////////////////////
     // Repl Fill Op 
     /////////////////////////////////////////////////////////////
 
@@ -6691,6 +6767,11 @@ namespace Legion {
                 CloseCheckReduction::REDOP,
                 &CloseCheckReduction::IDENTITY,
                 sizeof(CloseCheckReduction::IDENTITY)));
+        refinement_check_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+                CloseCheckReduction::REDOP,
+                &CloseCheckReduction::IDENTITY,
+                sizeof(CloseCheckReduction::IDENTITY)));
 #endif
       }
 #ifdef DEBUG_LEGION
@@ -6748,6 +6829,7 @@ namespace Legion {
           collective_check_barrier.destroy_barrier();
           logical_check_barrier.destroy_barrier();
           close_check_barrier.destroy_barrier();
+          refinement_check_barrier.destroy_barrier();
 #endif
         }
         // Send messages to all the remote spaces to remove the manager
@@ -6979,6 +7061,8 @@ namespace Legion {
           rez.serialize(logical_check_barrier);
           assert(close_check_barrier.exists());
           rez.serialize(close_check_barrier);
+          assert(refinement_check_barrier.exists());
+          rez.serialize(refinement_check_barrier);
 #endif
           for (std::vector<Processor>::const_iterator it = 
                 shard_mapping.begin(); it != shard_mapping.end(); it++)
@@ -7046,6 +7130,7 @@ namespace Legion {
         derez.deserialize(collective_check_barrier);
         derez.deserialize(logical_check_barrier);
         derez.deserialize(close_check_barrier);
+        derez.deserialize(refinement_check_barrier);
 #endif
         shard_mapping.resize(total_shards);
         for (unsigned idx = 0; idx < total_shards; idx++)

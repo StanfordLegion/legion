@@ -13512,6 +13512,13 @@ namespace Legion {
         delete (*it);
       }
       available_repl_merge_close_ops.clear();
+      for (std::deque<ReplRefinementOp*>::const_iterator it =
+            available_repl_refinement_ops.begin(); it !=
+            available_repl_refinement_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_refinement_ops.clear();
       for (std::deque<ReplFillOp*>::const_iterator it = 
             available_repl_fill_ops.begin(); it !=
             available_repl_fill_ops.end(); it++)
@@ -23514,6 +23521,13 @@ namespace Legion {
     {
       return get_available(merge_close_op_lock, available_repl_merge_close_ops);
     }
+    
+    //--------------------------------------------------------------------------
+    ReplRefinementOp* Runtime::get_available_repl_refinement_op(void)
+    //-------------------------------------------------------------------------- 
+    {
+      return get_available(refinement_op_lock, available_repl_refinement_ops);
+    }
 
     //--------------------------------------------------------------------------
     ReplFillOp* Runtime::get_available_repl_fill_op(void)
@@ -23998,6 +24012,14 @@ namespace Legion {
     {
       AutoLock m_lock(merge_close_op_lock);
       release_operation<false>(available_repl_merge_close_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_refinement_op(ReplRefinementOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(refinement_op_lock);
+      release_operation<false>(available_repl_refinement_ops, op);
     }
 
     //--------------------------------------------------------------------------

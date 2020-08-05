@@ -9565,17 +9565,31 @@ namespace Legion {
     void RefinementOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_refinement();
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::activate_refinement(void)
+    //--------------------------------------------------------------------------
+    {
       activate_internal();
+      to_refine = NULL;
     }
 
     //--------------------------------------------------------------------------
     void RefinementOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_internal();
-      to_refine.clear();
-      make_from.clear();
+      deactivate_refinement(); 
       runtime->free_refinement_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::deactivate_refinement(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_internal();
+      make_from.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -9596,30 +9610,38 @@ namespace Legion {
     const FieldMask& RefinementOp::get_internal_mask(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(to_refine.get_valid_mask() == make_from.get_valid_mask());
-#endif
-      return to_refine.get_valid_mask();
+      return make_from.get_valid_mask();
     }
 
     //--------------------------------------------------------------------------
     void RefinementOp::initialize(Operation *op, unsigned index,
                                   const LogicalTraceInfo &trace_info,
-                                  FieldMaskSet<RegionNode> &refinements,
-                                  FieldMaskSet<PartitionNode> &to_make)
+                                  RegionNode *root)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(to_refine.empty());
-      assert(make_from.empty());
-      assert(!refinements.empty());
-      assert(!to_make.empty());
-      assert(refinements.get_valid_mask() == to_make.get_valid_mask());
+      assert(to_refine == NULL);
 #endif
       initialize_internal(op, index, trace_info);
-      to_refine.swap(refinements);
-      make_from.swap(to_make);
+      to_refine = root;
     }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::record_refinement(PartitionNode *node, 
+                                         const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      make_from.insert(node, mask);
+    }
+
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    void RefinementOp::verify_refinement_mask(const FieldMask &refinement_mask)
+    //--------------------------------------------------------------------------
+    {
+      assert(make_from.get_valid_mask() == refinement_mask);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void RefinementOp::trigger_mapping(void)
@@ -9629,10 +9651,8 @@ namespace Legion {
       // First go through and invalidate the current refinements for
       // the regions that we are updating
       const ContextID ctx = parent_ctx->get_context().get_id();
-      for (FieldMaskSet<RegionNode>::const_iterator it = 
-            to_refine.begin(); it != to_refine.end(); it++)
-        it->first->invalidate_refinement(ctx, it->second, false/*self*/,
-                            false/*collective*/, map_applied_conditions);
+      to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
+            false/*self*/, false/*collective*/, map_applied_conditions);
       // Now we can make new equivalence sets for each of the subregions
       // in the partitions that we should be making refinements from
       const AddressSpaceID local_space = runtime->address_space;

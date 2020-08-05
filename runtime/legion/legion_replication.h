@@ -1170,6 +1170,29 @@ namespace Legion {
     };
 
     /**
+     * \class ReplRefinementOp
+     * A refinement operatoin that is aware that it is being
+     * executed ina  control replication context.
+     */
+    class ReplRefinementOp : public RefinementOp {
+    public:
+      ReplRefinementOp(Runtime *runtime);
+      ReplRefinementOp(const ReplRefinementOp &rhs);
+      virtual ~ReplRefinementOp(void);
+    public:
+      ReplRefinementOp& operator=(const ReplRefinementOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      void set_repl_refinement_info(RtBarrier mapped_barrier);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void); 
+    protected:
+      RtBarrier mapped_barrier;
+    };
+
+    /**
      * \class ReplFillOp
      * A copy operation that is aware that it is being
      * executed in a control replication context.
@@ -2068,6 +2091,8 @@ namespace Legion {
         { return logical_check_barrier; }
       inline RtBarrier get_close_check_barrier(void) const
         { return close_check_barrier; }
+      inline RtBarrier get_refinement_check_barrier(void) const
+        { return refinement_check_barrier; }
 #endif
     public:
       inline ShardMapping& get_mapping(void) const
@@ -2233,6 +2258,7 @@ namespace Legion {
       RtBarrier collective_check_barrier;
       RtBarrier logical_check_barrier;
       RtBarrier close_check_barrier;
+      RtBarrier refinement_check_barrier;
 #endif
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;

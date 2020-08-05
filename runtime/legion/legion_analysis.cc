@@ -3683,7 +3683,7 @@ namespace Legion {
       else
         req = RegionRequirement(root_node->as_partition_node()->handle, 0,
             LEGION_READ_WRITE, LEGION_EXCLUSIVE, trace_info.req.parent);
-      TaskContext *ctx = creator->get_context();
+      InnerContext *ctx = creator->get_context();
 #ifdef DEBUG_LEGION_COLLECTIVES
       close_op = ctx->get_merge_close_op(user, root_node);
 #else
@@ -3694,8 +3694,8 @@ namespace Legion {
       root_node->column_source->get_field_set(close_mask,
                                              trace_info.req.privilege_fields,
                                              req.privilege_fields);
-      close_op->initialize(creator->get_context(), req, trace_info, 
-                           trace_info.req_idx, close_mask, creator);
+      close_op->initialize(ctx, req, trace_info, trace_info.req_idx, 
+                           close_mask, creator);
     }
 
     //--------------------------------------------------------------------------
@@ -3726,7 +3726,7 @@ namespace Legion {
     // be found in region_tree.cc to make sure that templates are instantiated
 
     //--------------------------------------------------------------------------
-    void LogicalCloser::update_state(LogicalState &state)
+    void LogicalCloser::update_state(LogicalState &state,bool check_refinements)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3734,6 +3734,44 @@ namespace Legion {
 #endif
       root_node->filter_prev_epoch_users(state, close_mask);
       root_node->filter_curr_epoch_users(state, close_mask);
+      if (check_refinements && !!state.disjoint_complete_tree)
+      {
+        const FieldMask refinement_mask = 
+          close_mask & state.disjoint_complete_tree; 
+        if (!!refinement_mask)
+        {
+          // Record that this close op should make a new equivalence
+          // set at this region and invalidate all the ones below
+          close_op->record_refinements(refinement_mask);
+#ifdef DEBUG_LEGION
+          assert(state.owner->is_region());
+#endif
+          // We're closing to a region, so invalidate all the children
+          std::vector<RegionTreeNode*> to_delete;
+          for (FieldMaskSet<RegionTreeNode>::iterator it = 
+                state.disjoint_complete_children.begin(); it !=
+                state.disjoint_complete_children.end(); it++)
+          {
+            const FieldMask overlap = refinement_mask & it->second;
+            if (!overlap)
+              continue;
+            it->first->invalidate_disjoint_complete_tree(ctx, overlap, true);
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<RegionTreeNode*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              state.disjoint_complete_children.erase(*it);
+              if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+                delete (*it);
+            }
+          }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14964,40 +15002,39 @@ namespace Legion {
       assert(!(mask - disjoint_complete));
 #endif
       if (self)
-      {
         disjoint_complete -= mask;
-        if (!equivalence_sets.empty() && 
-            !(mask * equivalence_sets.get_valid_mask()))
+      // Always invalidate any equivalence sets that we might have
+      if (!equivalence_sets.empty() && 
+          !(mask * equivalence_sets.get_valid_mask()))
+      {
+        std::vector<EquivalenceSet*> to_delete;
+        for (FieldMaskSet<EquivalenceSet>::iterator it = 
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
         {
-          std::vector<EquivalenceSet*> to_delete;
-          for (FieldMaskSet<EquivalenceSet>::iterator it = 
-                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          // Skip any nodes that are not even part of a refinement 
+          if (it->first->region_node != node)
+            continue;
+          const FieldMask overlap = it->second & mask;
+          if (!overlap)
+            continue;
+          to_untrack.insert(it->first, overlap);
+          it.filter(overlap);
+          // Add a version manager reference to flow back
+          it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+          if (!it->second)
           {
-            // Skip any nodes that are not even part of a refinement 
-            if (it->first->region_node != node)
-              continue;
-            const FieldMask overlap = it->second & mask;
-            if (!overlap)
-              continue;
-            to_untrack.insert(it->first, overlap);
-            it.filter(overlap);
-            // Add a version manager reference to flow back
-            it->first->add_base_resource_ref(VERSION_MANAGER_REF);
-            if (!it->second)
-            {
-              to_delete.push_back(it->first);
-              // Remove the valid reference
-              it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
-            }
+            to_delete.push_back(it->first);
+            // Remove the valid reference
+            it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
           }
-          if (!to_delete.empty())
-          {
-            for (std::vector<EquivalenceSet*>::const_iterator it =
-                  to_delete.begin(); it != to_delete.end(); it++)
-              equivalence_sets.erase(*it);
-          }
-          equivalence_sets.tighten_valid_mask();
         }
+        if (!to_delete.empty())
+        {
+          for (std::vector<EquivalenceSet*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+            equivalence_sets.erase(*it);
+        }
+        equivalence_sets.tighten_valid_mask();
       }
       if (!(mask * disjoint_complete_children.get_valid_mask()))
       {

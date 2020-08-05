@@ -3338,6 +3338,7 @@ namespace Legion {
       ReplIndividualTask*   get_available_repl_individual_task(void);
       ReplIndexTask*        get_available_repl_index_task(void);
       ReplMergeCloseOp*     get_available_repl_merge_close_op(void);
+      ReplRefinementOp*     get_available_repl_refinement_op(void);
       ReplFillOp*           get_available_repl_fill_op(void);
       ReplIndexFillOp*      get_available_repl_index_fill_op(void);
       ReplCopyOp*           get_available_repl_copy_op(void);
@@ -3401,6 +3402,7 @@ namespace Legion {
       void free_repl_individual_task(ReplIndividualTask *task);
       void free_repl_index_task(ReplIndexTask *task);
       void free_repl_merge_close_op(ReplMergeCloseOp *op);
+      void free_repl_refinement_op(ReplRefinementOp *op);
       void free_repl_fill_op(ReplFillOp *op);
       void free_repl_index_fill_op(ReplIndexFillOp *op);
       void free_repl_copy_op(ReplCopyOp *op);
@@ -3832,6 +3834,7 @@ namespace Legion {
       std::deque<ReplIndividualTask*>   available_repl_individual_tasks;
       std::deque<ReplIndexTask*>        available_repl_index_tasks;
       std::deque<ReplMergeCloseOp*>     available_repl_merge_close_ops;
+      std::deque<ReplRefinementOp*>     available_repl_refinement_ops;
       std::deque<ReplFillOp*>           available_repl_fill_ops;
       std::deque<ReplIndexFillOp*>      available_repl_index_fill_ops;
       std::deque<ReplCopyOp*>           available_repl_copy_ops;

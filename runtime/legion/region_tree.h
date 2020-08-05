@@ -3465,6 +3465,7 @@ namespace Legion {
                                  const ProjectionInfo &projection_info,
                                  FieldMask &unopened_field_mask,
                                  FieldMask &already_closed_mask,
+                                 FieldMask &written_disjoint_complete,
                                  std::set<RtEvent> &applied_events);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
@@ -3530,6 +3531,9 @@ namespace Legion {
       void register_logical_dependences(ContextID ctx, Operation *op,
                                         const FieldMask &field_mask,
                                         bool dominate);
+      void invalidate_disjoint_complete_tree(ContextID ctx, 
+                                        const FieldMask &invalidate_mask,
+                                        const bool invalidate_self);
       void register_logical_deletion(ContextID ctx,
                                      const LogicalUser &user,
                                      const FieldMask &check_mask,
@@ -3788,6 +3792,10 @@ namespace Legion {
 #endif
     public:
       // Support for refinements and versioning
+      void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
+                                         const FieldMask &refinement_mask,
+                                         FieldMask &refined_partition,
+                                         std::set<RtEvent> &applied_events);
       void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
                     const FieldMask &mask, std::set<RtEvent> &applied_events);
       void perform_versioning_analysis(ContextID ctx, 
@@ -3907,6 +3915,9 @@ namespace Legion {
       static void handle_semantic_info(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
     public:
+      void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
+                                         const FieldMask &refinement_mask,
+                                         std::set<RtEvent> &applied_events);
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *context,
                                     EqSetTracker *target,

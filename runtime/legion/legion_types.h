@@ -1448,7 +1448,7 @@ namespace Legion {
       COLLECTIVE_LOC_16 = 16,
       COLLECTIVE_LOC_17 = 17, 
       COLLECTIVE_LOC_18 = 18, 
-      //COLLECTIVE_LOC_19 = 19,
+      COLLECTIVE_LOC_19 = 19,
       //COLLECTIVE_LOC_20 = 20,
       //COLLECTIVE_LOC_21 = 21, 
       //COLLECTIVE_LOC_22 = 22, 
@@ -1826,6 +1826,7 @@ namespace Legion {
     class ReplIndividualTask;
     class ReplIndexTask;
     class ReplMergeCloseOp;
+    class ReplRefinementOp;
     class ReplFillOp;
     class ReplIndexFillOp;
     class ReplCopyOp;
