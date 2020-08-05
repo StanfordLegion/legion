@@ -433,7 +433,7 @@ extern "C" {
 	attr->type = cudaMemoryTypeUnregistered;
 	attr->device = 0;
 	attr->devicePointer = 0;
-	attr->hostPointer = ptr;
+	attr->hostPointer = const_cast<void *>(ptr);
 	return cudaSuccess;
 #else
 	return cudaErrorInvalidValue;
