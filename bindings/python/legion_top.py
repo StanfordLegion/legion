@@ -120,6 +120,16 @@ def run_repl():
         pass
 
 
+def remove_all_aliases(to_delete):
+    aliases = []
+    for name, module in sys.modules.items():
+        if module is to_delete:
+            aliases.append(name)
+
+    for name in aliases:
+        del sys.modules[name]
+
+
 def run_cmd(cmd, run_name=None):
     import imp
     module = imp.new_module(run_name)
@@ -144,9 +154,8 @@ def run_cmd(cmd, run_name=None):
     c.legion_future_destroy(future)
     # Make sure our module gets deleted to clean up any references
     # to variables the user might have made
-    if old_module is None:
-        del sys.modules[run_name]
-    else:
+    remove_all_aliases(module)
+    if old_module is not None:
         sys.modules[run_name] = old_module
     del module
 
@@ -187,9 +196,8 @@ def run_path(filename, run_name=None):
     c.legion_future_destroy(future)
     # Make sure our module gets deleted to clean up any references
     # to variables the user might have made
-    if old_module is None:
-        del sys.modules[run_name]
-    else:
+    remove_all_aliases(module)
+    if old_module is not None:
         sys.modules[run_name] = old_module
     del module
 
