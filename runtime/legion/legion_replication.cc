@@ -1066,13 +1066,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
-      assert(mapping_tracker != NULL);
 #endif
-      // All we have to do is add our map precondition to the tracker
-      // so we know we are mapping in order with respect to other
-      // repl close operations that use the same close index
-      mapping_tracker->add_mapping_dependence(
-          mapped_barrier.get_previous_phase());
+
     }
 
     //--------------------------------------------------------------------------
@@ -1179,13 +1174,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
-      assert(mapping_tracker != NULL);
 #endif
-      // All we have to do is add our map precondition to the tracker
-      // so we know we are mapping in order with respect to other
-      // repl close operations that use the same close index
-      mapping_tracker->add_mapping_dependence(
-          mapped_barrier.get_previous_phase());
     }
 
     /////////////////////////////////////////////////////////////

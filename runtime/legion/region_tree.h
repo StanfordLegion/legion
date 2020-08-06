@@ -3466,6 +3466,7 @@ namespace Legion {
                                  FieldMask &unopened_field_mask,
                                  FieldMask &already_closed_mask,
                                  FieldMask &written_disjoint_complete,
+                                 FieldMaskSet<RefinementOp> &refinements,
                                  std::set<RtEvent> &applied_events);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
@@ -3519,6 +3520,8 @@ namespace Legion {
                                   FieldStateDeque &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
+      void filter_written_disjoint_complete_children(LogicalState &state,
+                                                     const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
                                       const RegionUsage usage,
                                       const FieldMask &uninitialized,
@@ -3528,9 +3531,11 @@ namespace Legion {
       void clear_logical_reduction_fields(LogicalState &state,
                                           const FieldMask &cleared_mask);
       void sanity_check_logical_state(LogicalState &state);
-      void register_logical_dependences(ContextID ctx, Operation *op,
-                                        const FieldMask &field_mask,
-                                        bool dominate);
+      void perform_tree_dominance_analysis(ContextID ctx,
+                                           const LogicalUser &user,
+                                           const FieldMask &field_mask,
+                                           Operation *skip_op = NULL,
+                                           GenerationID skip_gen = 0);
       void invalidate_disjoint_complete_tree(ContextID ctx, 
                                         const FieldMask &invalidate_mask,
                                         const bool invalidate_self);

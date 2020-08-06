@@ -2084,131 +2084,6 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // LogicalPathRegistrar
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    LogicalPathRegistrar::LogicalPathRegistrar(ContextID c, Operation *o,
-                                       const FieldMask &m, RegionTreePath &p)
-      : PathTraverser(p), ctx(c), field_mask(m), op(o)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalPathRegistrar::LogicalPathRegistrar(const LogicalPathRegistrar&rhs)
-      : PathTraverser(rhs.path), ctx(0), field_mask(FieldMask()), op(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalPathRegistrar::~LogicalPathRegistrar(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalPathRegistrar& LogicalPathRegistrar::operator=(
-                                                const LogicalPathRegistrar &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LogicalPathRegistrar::visit_region(RegionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      node->register_logical_dependences(ctx, op, field_mask,false/*dominate*/);
-      if (!has_child)
-      {
-        // If we're at the bottom, fan out and do all the children
-        LogicalRegistrar registrar(ctx, op, field_mask, false);
-        return node->visit_node(&registrar);
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LogicalPathRegistrar::visit_partition(PartitionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      node->register_logical_dependences(ctx, op, field_mask,false/*dominate*/);
-      if (!has_child)
-      {
-        // If we're at the bottom, fan out and do all the children
-        LogicalRegistrar registrar(ctx, op, field_mask, false);
-        return node->visit_node(&registrar);
-      }
-      return true;
-    }
-
-
-    /////////////////////////////////////////////////////////////
-    // LogicalRegistrar
-    /////////////////////////////////////////////////////////////
-    
-    //--------------------------------------------------------------------------
-    LogicalRegistrar::LogicalRegistrar(ContextID c, Operation *o,
-                                       const FieldMask &m, bool dom)
-      : ctx(c), field_mask(m), op(o), dominate(dom)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegistrar::LogicalRegistrar(const LogicalRegistrar &rhs)
-      : ctx(0), field_mask(FieldMask()), op(NULL), dominate(rhs.dominate)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegistrar::~LogicalRegistrar(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegistrar& LogicalRegistrar::operator=(const LogicalRegistrar &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LogicalRegistrar::visit_only_valid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LogicalRegistrar::visit_region(RegionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      node->register_logical_dependences(ctx, op, field_mask, dominate);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LogicalRegistrar::visit_partition(PartitionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      node->register_logical_dependences(ctx, op, field_mask, dominate);
-      return true;
-    }
-
-    /////////////////////////////////////////////////////////////
     // CurrentInitializer 
     /////////////////////////////////////////////////////////////
 
@@ -2599,6 +2474,7 @@ namespace Legion {
       assert(!reduction_fields);
       assert(!disjoint_complete_tree);
       assert(disjoint_complete_children.empty());
+      assert(written_disjoint_complete_children.empty());
 #endif
     }
 
@@ -2646,6 +2522,7 @@ namespace Legion {
             delete it->first;
         disjoint_complete_children.clear();
       }
+      written_disjoint_complete_children.clear(); 
     } 
 
     //--------------------------------------------------------------------------
@@ -2747,6 +2624,13 @@ namespace Legion {
         }
         src.disjoint_complete_children.clear();
       }
+      if (!src.written_disjoint_complete_children.empty())
+      {
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+              src.written_disjoint_complete_children.begin(); it !=
+              src.written_disjoint_complete_children.end(); it++)
+          written_disjoint_complete_children.insert(it->first, it->second);
+      }
 #ifdef DEBUG_LEGION
       src.check_init();
 #endif
@@ -2775,6 +2659,8 @@ namespace Legion {
         src.disjoint_complete_tree.clear();
       }
       disjoint_complete_children.swap(src.disjoint_complete_children);
+      written_disjoint_complete_children.swap(
+                              src.written_disjoint_complete_children);
       for (LegionList<FieldState>::aligned::const_iterator fit = 
             field_states.begin(); fit != field_states.end(); fit++)
         for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
@@ -3666,7 +3552,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LogicalCloser::initialize_close_operations(LogicalState &state, 
                                              Operation *creator,
-                                             const LogicalTraceInfo &trace_info)
+                                             const LogicalTraceInfo &trace_info,
+                                             const bool check_for_refinements)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3683,58 +3570,20 @@ namespace Legion {
       else
         req = RegionRequirement(root_node->as_partition_node()->handle, 0,
             LEGION_READ_WRITE, LEGION_EXCLUSIVE, trace_info.req.parent);
-      InnerContext *ctx = creator->get_context();
+      InnerContext *context = creator->get_context();
 #ifdef DEBUG_LEGION_COLLECTIVES
-      close_op = ctx->get_merge_close_op(user, root_node);
+      close_op = context->get_merge_close_op(user, root_node);
 #else
-      close_op = ctx->get_merge_close_op();
+      close_op = context->get_merge_close_op();
 #endif
       merge_close_gen = close_op->get_generation();
       req.privilege_fields.clear();
       root_node->column_source->get_field_set(close_mask,
                                              trace_info.req.privilege_fields,
                                              req.privilege_fields);
-      close_op->initialize(ctx, req, trace_info, trace_info.req_idx, 
+      close_op->initialize(context, req, trace_info, trace_info.req_idx, 
                            close_mask, creator);
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalCloser::perform_dependence_analysis(const LogicalUser &current,
-                                                    const FieldMask &open_below,
-              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
-              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers)
-    //--------------------------------------------------------------------------
-    {
-      // We also need to do dependence analysis against all the other operations
-      // that this operation recorded dependences on above in the tree so we
-      // don't run too early.
-      LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &above_users = 
-                                              current.op->get_logical_records();
-      const LogicalUser merge_close_user(close_op, 0/*idx*/, RegionUsage(
-            LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0/*redop*/), close_mask);
-      register_dependences(close_op, merge_close_user, current, 
-          open_below, closed_users, above_users, cusers, pusers);
-      // Now we can remove our references on our local users
-      for (LegionList<LogicalUser>::aligned::const_iterator it = 
-            closed_users.begin(); it != closed_users.end(); it++)
-      {
-        it->op->remove_mapping_reference(it->gen);
-      }
-    }
-
-    // If you are looking for LogicalCloser::register_dependences it can 
-    // be found in region_tree.cc to make sure that templates are instantiated
-
-    //--------------------------------------------------------------------------
-    void LogicalCloser::update_state(LogicalState &state,bool check_refinements)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(state.owner == root_node);
-#endif
-      root_node->filter_prev_epoch_users(state, close_mask);
-      root_node->filter_curr_epoch_users(state, close_mask);
-      if (check_refinements && !!state.disjoint_complete_tree)
+      if (check_for_refinements && !!state.disjoint_complete_tree)
       {
         const FieldMask refinement_mask = 
           close_mask & state.disjoint_complete_tree; 
@@ -3772,6 +3621,45 @@ namespace Legion {
           }
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::perform_dependence_analysis(const LogicalUser &current,
+                                                    const FieldMask &open_below,
+              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
+              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers)
+    //--------------------------------------------------------------------------
+    {
+      // We also need to do dependence analysis against all the other operations
+      // that this operation recorded dependences on above in the tree so we
+      // don't run too early.
+      LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &above_users = 
+                                              current.op->get_logical_records();
+      const LogicalUser merge_close_user(close_op, 0/*idx*/, RegionUsage(
+            LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0/*redop*/), close_mask);
+      register_dependences(close_op, merge_close_user, current, 
+          open_below, closed_users, above_users, cusers, pusers);
+      // Now we can remove our references on our local users
+      for (LegionList<LogicalUser>::aligned::const_iterator it = 
+            closed_users.begin(); it != closed_users.end(); it++)
+      {
+        it->op->remove_mapping_reference(it->gen);
+      }
+    }
+
+    // If you are looking for LogicalCloser::register_dependences it can 
+    // be found in region_tree.cc to make sure that templates are instantiated
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::update_state(LogicalState &state)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(state.owner == root_node);
+#endif
+      root_node->filter_prev_epoch_users(state, close_mask);
+      root_node->filter_curr_epoch_users(state, close_mask);
+      root_node->filter_written_disjoint_complete_children(state, close_mask); 
     }
 
     //--------------------------------------------------------------------------

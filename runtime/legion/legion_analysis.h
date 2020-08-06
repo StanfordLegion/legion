@@ -899,12 +899,13 @@ namespace Legion {
 #endif
       void initialize_close_operations(LogicalState &state, 
                                        Operation *creator,
-                                       const LogicalTraceInfo &trace_info);
+                                       const LogicalTraceInfo &trace_info,
+                                       const bool check_for_refinements);
       void perform_dependence_analysis(const LogicalUser &current,
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
-      void update_state(LogicalState &state, bool check_refinements);
+      void update_state(LogicalState &state);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
     protected:
@@ -2960,55 +2961,6 @@ namespace Legion {
       virtual bool visit_partition(PartitionNode *node) = 0;
     public:
       const bool force_instantiation;
-    };
-
-    /**
-     * \class LogicalPathRegistrar
-     * A class that registers dependences for an operation
-     * against all other operation with an overlapping
-     * field mask along a given path
-     */
-    class LogicalPathRegistrar : public PathTraverser {
-    public:
-      LogicalPathRegistrar(ContextID ctx, Operation *op,
-            const FieldMask &field_mask, RegionTreePath &path);
-      LogicalPathRegistrar(const LogicalPathRegistrar &rhs);
-      virtual ~LogicalPathRegistrar(void);
-    public:
-      LogicalPathRegistrar& operator=(const LogicalPathRegistrar &rhs);
-    public:
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    public:
-      const ContextID ctx;
-      const FieldMask field_mask;
-      Operation *const op;
-    };
-
-    /**
-     * \class LogicalRegistrar
-     * A class that registers dependences for an operation
-     * against all other operations with an overlapping
-     * field mask.
-     */
-    class LogicalRegistrar : public NodeTraverser {
-    public:
-      LogicalRegistrar(ContextID ctx, Operation *op,
-                       const FieldMask &field_mask,
-                       bool dom);
-      LogicalRegistrar(const LogicalRegistrar &rhs);
-      ~LogicalRegistrar(void);
-    public:
-      LogicalRegistrar& operator=(const LogicalRegistrar &rhs);
-    public:
-      virtual bool visit_only_valid(void) const;
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    public:
-      const ContextID ctx;
-      const FieldMask field_mask;
-      Operation *const op;
-      const bool dominate;
     };
 
     /**

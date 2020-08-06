@@ -1723,9 +1723,23 @@ namespace Legion {
         FieldMask unopened_mask = user_mask;
         FieldMask already_closed_mask;
         FieldMask written_disjoint_complete;
+        FieldMaskSet<RefinementOp> refinements;
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
-                            projection_info, unopened_mask, already_closed_mask,
-                            written_disjoint_complete, applied_events);
+                        projection_info, unopened_mask, already_closed_mask,
+                        written_disjoint_complete, refinements, applied_events);
+        // Finish the dependence analysis for any refinement operations
+        if (!refinements.empty())
+        {
+          for (FieldMaskSet<RefinementOp>::const_iterator it =
+                refinements.begin(); it != refinements.end(); it++)
+          {
+            const GenerationID refinement_gen = op->get_generation();
+            it->first->end_dependence_analysis();
+            // Record that our operation depends on this refinement
+            op->register_region_dependence(idx, it->first, refinement_gen,
+              0/*index*/, LEGION_TRUE_DEPENDENCE,false/*validates*/,it->second);
+          }
+        }
 #ifdef DEBUG_LEGION
         assert(!written_disjoint_complete); // should never flow out here
 #endif
@@ -14490,14 +14504,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::register_logical_user(ContextID ctx, 
-                                           const LogicalUser &user,
-                                           const RegionTreePath &path,
-                                           const LogicalTraceInfo &trace_info,
-                                           const ProjectionInfo &proj_info,
-                                           FieldMask &unopened_field_mask,
-                                           FieldMask &already_closed_mask,
-                                           FieldMask &written_disjoint_complete,
-                                           std::set<RtEvent> &applied_events)
+                                        const LogicalUser &user,
+                                        const RegionTreePath &path,
+                                        const LogicalTraceInfo &trace_info,
+                                        const ProjectionInfo &proj_info,
+                                        FieldMask &unopened_field_mask,
+                                        FieldMask &already_closed_mask,
+                                        FieldMask &written_disjoint_complete,
+                                        FieldMaskSet<RefinementOp> &refinements,
+                                        std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -14538,7 +14553,9 @@ namespace Legion {
         if (closer.has_close_operations(already_closed_mask))
         {
           // Generate the close operations         
-          closer.initialize_close_operations(state, user.op, trace_info);
+          // Also check to see if we have any refinements for the close operation
+          closer.initialize_close_operations(state, user.op, trace_info,
+             (arrived && IS_WRITE(user.usage) && !proj_info.is_projecting()));
           // Perform dependence analysis for all the close operations
           closer.perform_dependence_analysis(user, open_below,
                                              state.curr_epoch_users,
@@ -14555,8 +14572,7 @@ namespace Legion {
           // This is the "up" case of equivalence set refinement
           // where we coarsen the refinement to a higher level
           // in the region tree
-          closer.update_state(state, 
-              arrived && IS_WRITE(user.usage) && !proj_info.is_projecting());
+          closer.update_state(state);
           // Now we can add the close operations to the current epoch
           closer.register_close_operations(state.curr_epoch_users);
         }
@@ -14664,128 +14680,166 @@ namespace Legion {
         FieldMask child_disjoint_complete;
         next_child->register_logical_user(ctx, user, path, trace_info,
            proj_info, unopened_field_mask, already_closed_mask, 
-           child_disjoint_complete, applied_events);
-        if (IS_WRITE(user.usage))
+           child_disjoint_complete, refinements, applied_events);
+        if (!refinements.empty() &&
+            (!state.curr_epoch_users.empty() || 
+             !state.prev_epoch_users.empty()))
         {
-          if (!!child_disjoint_complete)
+          // perform dependence analysis for any refinements done
+          // below for users at this level
+          Operation *skip_op = user.op;
+          const GenerationID skip_gen = skip_op->get_generation();
+          for (FieldMaskSet<RefinementOp>::const_iterator it = 
+                refinements.begin(); it != refinements.end(); it++)
           {
-            if (is_region())
+            const LogicalUser refinement_user(it->first, 0/*index*/,
+                RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), it->second);
+            perform_dependence_checks<CURR_LOGICAL_ALLOC,
+              false/*record*/, true/*has skip*/, false/*track dominance*/>(
+                  refinement_user, state.curr_epoch_users, it->second,
+                  it->second, false/*validates*/, skip_op, skip_gen);
+            perform_dependence_checks<PREV_LOGICAL_ALLOC,
+              false/*record*/, true/*has skip*/, false/*track dominance*/>(
+                  refinement_user, state.prev_epoch_users, it->second,
+                  it->second, false/*validates*/, skip_op, skip_gen);
+          }
+        }
+        // Everything in this block of code is for computing any
+        // refinements that need to be performed because we wrote
+        // to a disjoint complete sub-tree
+        if (!!child_disjoint_complete)
+        {
+#ifdef DEBUG_LEGION
+          assert(IS_WRITE(user.usage));
+#endif
+          if (is_region())
+          {
+            // Check to see which of these fields should trigger
+            // a refinement and which should flow back up the tree
+            if (!!state.disjoint_complete_tree)
             {
-              // Check to see which of these fields should trigger
-              // a refinement and which should flow back up the tree
-              if (!!state.disjoint_complete_tree)
+              const FieldMask refinement_mask = child_disjoint_complete &
+                state.disjoint_complete_tree;
+              if (!!refinement_mask)
               {
-                const FieldMask refinement_mask = child_disjoint_complete &
-                  state.disjoint_complete_tree;
-                if (!!refinement_mask)
-                {
-                  RegionNode *region_node = as_region_node();
-                  // This is both the "across" and the "down" case of
-                  // equivalence set refinement where we make a change
-                  // in the equivalence set refinement to a new tree
-                  // or further refine the equivalence sets into smaller
-                  // equivalence sets going down the region tree.
-                  child_disjoint_complete -= refinement_mask;
-                  // Create a refinement operation
-                  TaskContext *context = user.op->get_context();
+                RegionNode *region_node = as_region_node();
+                // This is both the "across" and the "down" case of
+                // equivalence set refinement where we make a change
+                // in the equivalence set refinement to a new tree
+                // or further refine the equivalence sets into smaller
+                // equivalence sets going down the region tree.
+                child_disjoint_complete -= refinement_mask;
+                // Create a refinement operation
+                TaskContext *context = user.op->get_context();
 #ifdef DEBUG_LEGION_COLLECTIVES
-                  RefinementOp *refinement_op = 
-                    context->get_refinement_op(user, this);
+                RefinementOp *refinement_op = 
+                  context->get_refinement_op(user, this);
 #else
-                  RefinementOp *refinement_op = context->get_refinement_op();
+                RefinementOp *refinement_op = context->get_refinement_op();
 #endif
-                  refinement_op->initialize(user.op, user.idx, 
-                                            trace_info, region_node);
-                  // Invalidate the old disjoint complete tree
-                  invalidate_disjoint_complete_tree(ctx, refinement_mask, 
-                                                    false/*self*/);
+                refinement_op->initialize(user.op, user.idx, 
+                                          trace_info, region_node);
+                // Invalidate the old disjoint complete tree
+                invalidate_disjoint_complete_tree(ctx, refinement_mask, 
+                                                  false/*self*/);
 #ifdef DEBUG_LEGION
-                  assert(!(refinement_mask - state.disjoint_complete_tree));
-                  assert(state.disjoint_complete_children.get_valid_mask() *
-                          refinement_mask);
+                assert(!(refinement_mask - state.disjoint_complete_tree));
+                assert(state.disjoint_complete_children.get_valid_mask() *
+                        refinement_mask);
 #endif
-                  // Record the new disjoint complete tree
-                  if (state.disjoint_complete_children.insert(next_child,
-                        refinement_mask))
-                  {
-                    WrapperReferenceMutator mutator(applied_events);
-                    next_child->add_base_valid_ref(DISJOINT_COMPLETE_REF, 
-                                                   &mutator);
-                  }
-                  // Update the refinement tree for the full subtree
-                  PartitionNode *part_child = next_child->as_partition_node();
-                  part_child->update_disjoint_complete_tree(ctx, refinement_op,
-                                               refinement_mask, applied_events);
-#ifdef DEBUG_LEGION
-                  // Sanity check that we recorded refinements for
-                  // all the fields in the refinement mask
-                  refinement_op->verify_refinement_mask(refinement_mask);
-#endif
-                  // Perform the dependence analysis for all open sub-trees
-                  // to make sure we record dependences on any operations
-                  // we need to before performing this refinement
-
-                  // Register the refinement as an operation here
-
+                // Record the new disjoint complete tree
+                if (state.disjoint_complete_children.insert(next_child,
+                      refinement_mask))
+                {
+                  WrapperReferenceMutator mutator(applied_events);
+                  next_child->add_base_valid_ref(DISJOINT_COMPLETE_REF, 
+                                                 &mutator);
                 }
-              }
-              if (!!child_disjoint_complete)
-              {
+                // Update the refinement tree for the full subtree
+                PartitionNode *part_child = next_child->as_partition_node();
+                part_child->update_disjoint_complete_tree(ctx, refinement_op,
+                                             refinement_mask, applied_events);
 #ifdef DEBUG_LEGION
-                // There should be at most one written disjoint
-                // complete tree at a time for a region
-                assert(child_disjoint_complete * 
-                    state.written_disjoint_complete_children.get_valid_mask());
+                // Sanity check that we recorded refinements for
+                // all the fields in the refinement mask
+                refinement_op->verify_refinement_mask(refinement_mask);
 #endif
-                state.written_disjoint_complete_children.insert(next_child, 
-                                                  child_disjoint_complete);
-                written_disjoint_complete = child_disjoint_complete;
+                // Perform the dependence analysis for all open sub-trees
+                // to make sure we record dependences on any operations
+                // we need to before performing this refinement
+                const LogicalUser refinement_user(refinement_op, 0/*index*/,
+                  RegionUsage(READ_WRITE,EXCLUSIVE,0/*redop*/),refinement_mask);
+                // Start the dependence analysis here, the initial caller of
+                // register_logical_user will be the function that finishes
+                // it for each of the reginement operations
+                refinement_op->begin_dependence_analysis();
+                // Trigger this here so it happens in a determinsitic order
+                // for control replication. It has to happen after we've got
+                // the list of refinements to make from updating the 
+                // disjoint-complete tree
+                refinement_op->trigger_dependence_analysis();
+                perform_tree_dominance_analysis(ctx, refinement_user, 
+                    refinement_mask, user.op/*skip op*/, user.gen);
+                // Register the refinement as an operation here
+                register_local_user(state, refinement_user, trace_info); 
+#ifdef DEBUG_LEGION
+                assert(refinement_mask * refinements.get_valid_mask()); 
+#endif
+                // Record this for going up the tree to catch dependences
+                // on anything above us
+                refinements.insert(refinement_op, refinement_mask);
               }
             }
-            else
+            if (!!child_disjoint_complete)
             {
-              IndexPartNode *part_node = as_partition_node()->row_source;
-              // If we're not a disjoint complete partition then
-              // we can just ignore this child being complete
-              if (part_node->is_disjoint() && part_node->is_complete())
+#ifdef DEBUG_LEGION
+              // There should be at most one written disjoint
+              // complete tree at a time for a region
+              assert(child_disjoint_complete * 
+                  state.written_disjoint_complete_children.get_valid_mask());
+#endif
+              state.written_disjoint_complete_children.insert(next_child, 
+                                                child_disjoint_complete);
+              written_disjoint_complete = child_disjoint_complete;
+            }
+          }
+          else
+          {
+            IndexPartNode *part_node = as_partition_node()->row_source;
+            // If we're not a disjoint complete partition then
+            // we can just ignore this child being complete
+            if (part_node->is_disjoint() && part_node->is_complete())
+            {
+              // Filter off any fields for which we are already
+              // disjoint and complete
+              if (!!state.disjoint_complete_tree)
+                child_disjoint_complete -= state.disjoint_complete_tree;
+              if (!!child_disjoint_complete)
               {
-                // Filter off any fields for which we are already
-                // disjoint and complete
-                if (!!state.disjoint_complete_tree)
-                  child_disjoint_complete -= state.disjoint_complete_tree;
-                if (!!child_disjoint_complete)
+                // Record it and then see if our whole partition
+                // is now complete for any children
+                state.written_disjoint_complete_children.insert(next_child,
+                                                  child_disjoint_complete);
+                if (state.written_disjoint_complete_children.size() ==
+                    part_node->get_num_children())
                 {
-                  // Record it and then see if our whole partition
-                  // is now complete for any children
-                  state.written_disjoint_complete_children.insert(next_child,
-                                                    child_disjoint_complete);
-                  if (state.written_disjoint_complete_children.size() ==
-                      part_node->get_num_children())
+                  // See which fields are complete for all subregions
+                  for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+                        state.written_disjoint_complete_children.begin();it !=
+                        state.written_disjoint_complete_children.end(); it++)
                   {
-                    // See which fields are complete for all subregions
-                    for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-                          state.written_disjoint_complete_children.begin();it !=
-                          state.written_disjoint_complete_children.end(); it++)
-                    {
-                      child_disjoint_complete &= it->second;
-                      if (!child_disjoint_complete)
-                        break;
-                    }
-                    // this mask is the one that flows back up the tree
-                    if (!!child_disjoint_complete)
-                      written_disjoint_complete = child_disjoint_complete;
+                    child_disjoint_complete &= it->second;
+                    if (!child_disjoint_complete)
+                      break;
                   }
+                  // this mask is the one that flows back up the tree
+                  if (!!child_disjoint_complete)
+                    written_disjoint_complete = child_disjoint_complete;
                 }
               }
             }
           }
         }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        else
-          assert(!child_disjoint_complete);
-#endif
-#endif
       }
     }
 
@@ -14898,6 +14952,8 @@ namespace Legion {
       // We can also clear any outstanding reduction fields
       if (!(state.reduction_fields * closing_mask))
         clear_logical_reduction_fields(state, closing_mask);
+      // Clear out any written disjoint complete children too
+      filter_written_disjoint_complete_children(state, closing_mask);
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
 #endif
@@ -16021,6 +16077,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeNode::filter_written_disjoint_complete_children(
+                                     LogicalState &state, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      if (state.written_disjoint_complete_children.empty())
+        return;
+      const FieldMask &summary_mask = 
+        state.written_disjoint_complete_children.get_valid_mask();
+      if (mask * summary_mask)
+        return;
+      if (!(summary_mask - mask))
+      {
+        state.written_disjoint_complete_children.clear();
+        return;
+      }
+      std::vector<RegionTreeNode*> to_delete;
+      for (FieldMaskSet<RegionTreeNode>::iterator it =
+            state.written_disjoint_complete_children.begin(); it !=
+            state.written_disjoint_complete_children.end(); it++)
+      {
+        it.filter(mask);
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      for (std::vector<RegionTreeNode*>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+        state.written_disjoint_complete_children.erase(*it);
+      state.written_disjoint_complete_children.tighten_valid_mask();
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::report_uninitialized_usage(Operation *op, unsigned idx,
          const RegionUsage usage, const FieldMask &uninit, RtUserEvent reported)
     //--------------------------------------------------------------------------
@@ -16142,77 +16229,71 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::register_logical_dependences(ContextID ctx, 
-                      Operation *op, const FieldMask &field_mask, bool dominate)
+    void RegionTreeNode::perform_tree_dominance_analysis(ContextID ctx, 
+                                      const LogicalUser &user, 
+                                      const FieldMask &field_mask,
+                                      Operation *skip_op, GenerationID skip_gen)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
-      for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::iterator 
-            it = state.curr_epoch_users.begin(); it != 
-            state.curr_epoch_users.end(); /*nothing*/)
+      if (skip_op != NULL)
       {
-        if (!(it->field_mask * field_mask))
+        const FieldMask dominator_mask = 
+          perform_dependence_checks<CURR_LOGICAL_ALLOC,
+            false/*record*/, true/*has skip*/, true/*track dom*/>(
+                user, state.curr_epoch_users, field_mask, 
+                field_mask, false/*validates*/, skip_op, skip_gen);
+        const FieldMask non_dominated_mask = field_mask - dominator_mask;
+        if (!!non_dominated_mask)
+          perform_dependence_checks<PREV_LOGICAL_ALLOC,
+            false/*record*/, true/*has skip*/, false/*track dom*/>(
+                user, state.prev_epoch_users, field_mask, 
+                field_mask, false/*validates*/, skip_op, skip_gen);
+        if (!!dominator_mask)
         {
-#ifdef LEGION_SPY
-          LegionSpy::log_mapping_dependence(
-              op->get_context()->get_unique_id(),
-              it->uid, it->idx, op->get_unique_op_id(),
-              0/*idx*/, TRUE_DEPENDENCE);
-#endif
-          // Do this after the logging since we 
-          // are going to update the iterator
-          if (op->register_dependence(it->op, it->gen))
-          {
-#ifndef LEGION_SPY
-            // Prune it from the list
-            it = state.curr_epoch_users.erase(it);
-#else
-            it++;
-#endif
-          }
-          else if (dominate)
-            it = state.curr_epoch_users.erase(it);
-          else
-            it++;
+          filter_prev_epoch_users(state, dominator_mask);
+          filter_curr_epoch_users(state, dominator_mask);
         }
-        else if (dominate)
-          it = state.curr_epoch_users.erase(it);
-        else
-          it++;
       }
-      for (LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned::iterator 
-            it = state.prev_epoch_users.begin(); it != 
-            state.prev_epoch_users.end(); /*nothing*/)
+      else
       {
-        if (!(it->field_mask * field_mask))
+        const FieldMask dominator_mask = 
+          perform_dependence_checks<CURR_LOGICAL_ALLOC,
+            false/*record*/, false/*has skip*/, true/*track dom*/>(
+                user, state.curr_epoch_users, field_mask, 
+                field_mask, false/*validates*/, skip_op, skip_gen);
+        const FieldMask non_dominated_mask = field_mask - dominator_mask;
+        if (!!non_dominated_mask)
+          perform_dependence_checks<PREV_LOGICAL_ALLOC,
+            false/*record*/, false/*has skip*/, false/*track dom*/>(
+                user, state.prev_epoch_users, field_mask, 
+                field_mask, false/*validates*/, skip_op, skip_gen);
+        if (!!dominator_mask)
         {
-#ifdef LEGION_SPY
-          LegionSpy::log_mapping_dependence(
-              op->get_context()->get_unique_id(),
-              it->uid, it->idx, op->get_unique_op_id(), 0/*idx*/, 
-              TRUE_DEPENDENCE);
-#endif
-          // Do this after the logging since we are going
-          // to update the iterator
-          if (op->register_dependence(it->op, it->gen))
-          {
-#ifndef LEGION_SPY
-            // Prune it from the list
-            it = state.prev_epoch_users.erase(it);
-#else
-            it++;
-#endif
-          }
-          else if (dominate)
-            it = state.prev_epoch_users.erase(it);
-          else
-            it++;
+          filter_prev_epoch_users(state, dominator_mask);
+          filter_curr_epoch_users(state, dominator_mask);
         }
-        else if (dominate)
-          it = state.prev_epoch_users.erase(it);
-        else
-          it++;
       }
+      // Now figure out which open sub-trees need to be traversed
+      FieldMaskSet<RegionTreeNode> to_traverse;
+      for (LegionList<FieldState>::aligned::const_iterator fit = 
+            state.field_states.begin(); fit != state.field_states.end(); fit++)
+      {
+        if (fit->open_children.get_valid_mask() * field_mask)
+          continue;
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+              fit->open_children.begin(); it != fit->open_children.end(); it++)
+        {
+          const FieldMask overlap = field_mask & it->second;
+          if (!overlap)
+            continue;
+          to_traverse.insert(it->first, overlap);
+        }
+      }
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+            to_traverse.begin(); it != to_traverse.end(); it++)
+        it->first->perform_tree_dominance_analysis(ctx, user, it->second,
+                                                   skip_op, skip_gen);
     } 
 
     //--------------------------------------------------------------------------
@@ -16287,7 +16368,8 @@ namespace Legion {
           {
             // Generate the close operations         
             // We need to record the version numbers for this node as well
-            closer.initialize_close_operations(state, user.op, trace_info);
+            closer.initialize_close_operations(state, user.op, trace_info,
+                                               false/*check for refinements*/);
             // Perform dependence analysis for all the close operations
             closer.perform_dependence_analysis(user, open_below,
                                                state.curr_epoch_users,
@@ -16299,7 +16381,7 @@ namespace Legion {
 
             // Update the dirty_below and partial close fields
             // and filter the current and previous epochs
-            closer.update_state(state, false/*check refinements*/);
+            closer.update_state(state);
             // Now we can add the close operations to the current epoch
             closer.register_close_operations(state.curr_epoch_users);
           }
@@ -16329,13 +16411,7 @@ namespace Legion {
       {
         // Register dependences on any users in the sub-tree
         if (!!check_mask)
-        {
-          // Don't dominate so later deletions with overlapping region
-          // requirements can catch the same dependences
-          LogicalRegistrar registrar(ctx, user.op, 
-                                     check_mask, false/*dominate*/);
-          visit_node(&registrar);
-        }
+          perform_tree_dominance_analysis(ctx, user, check_mask);
         // If we're doing a full deletion of this region tree then we just
         // want to delete everything from this level on down as no one
         // else is going to be using it in the future. Ohterwise we register
@@ -16625,6 +16701,20 @@ namespace Legion {
           it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/,
                                         destination_count);
       }
+      rez.serialize<size_t>(state.written_disjoint_complete_children.size());
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+            state.written_disjoint_complete_children.begin(); it !=
+            state.written_disjoint_complete_children.end(); it++)
+      {
+        const LegionColor child_color = it->first->get_color();
+        rez.serialize(child_color);
+        rez.serialize(it->second);
+#ifdef DEBUG_LEGION
+        // All the children here should be open from the field states
+        // which means we should be able to find it in to_traverse
+        assert(to_traverse.find(child_color) != to_traverse.end());
+#endif
+      }
       // Now recurse down the tree in a deterministic way
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
@@ -16703,6 +16793,21 @@ namespace Legion {
           child->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
         }
         to_traverse.insert(std::make_pair(child_color, child));
+      }
+      size_t num_written_disjoint_complete_children;
+      derez.deserialize(num_written_disjoint_complete_children);
+      for (unsigned idx = 0; 
+            idx < num_written_disjoint_complete_children; idx++)
+      {
+        LegionColor child_color;
+        derez.deserialize(child_color);
+        RegionTreeNode *child = get_tree_child(child_color);
+        FieldMask mask;
+        derez.deserialize(mask);
+        state.written_disjoint_complete_children.insert(child, mask);
+#ifdef DEBUG_LEGION
+        assert(to_traverse.find(child_color) != to_traverse.end());
+#endif
       }
       RtEvent applied;
       if (!applied_events.empty())
@@ -16980,6 +17085,8 @@ namespace Legion {
     {
       // Mark that we are starting our dependence analysis
       close_op->begin_dependence_analysis();
+      // Do any other work for the dependence analysis
+      close_op->trigger_dependence_analysis();
       // First tell the operation to register dependences on any children
       // Register dependences on any interfering children
       // We know that only field non-interference is interesting here
@@ -17029,7 +17136,7 @@ namespace Legion {
       // Before we kick off this operation, add a mapping
       // reference to it since we know we are going to put it
       // in the state of the logical region tree
-      close_op->add_mapping_reference(close_op->get_generation());
+      close_op->add_mapping_reference(close_op->get_generation()); 
       // Mark that we are done, this puts the close op in the pipeline!
       // This is why we cache the GenerationID when making the op
       close_op->end_dependence_analysis();
