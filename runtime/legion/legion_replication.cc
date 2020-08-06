@@ -7655,14 +7655,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::broadcast_leaf_region_contexts(ShardTask *source, 
-                             Serializer &rez, std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      broadcast_message(source, rez, LEAF_REGION_UPDATE_KIND, applied_events); 
-    }
-
-    //--------------------------------------------------------------------------
     void ShardManager::broadcast_message(ShardTask *source, Serializer &rez,
                    BroadcastMessageKind kind, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -7736,11 +7728,6 @@ namespace Legion {
           case CREATED_REGION_UPDATE_KIND:
             {
               (*it)->handle_created_region_contexts(derez, applied_events);
-              break;
-            }
-          case LEAF_REGION_UPDATE_KIND:
-            {
-              (*it)->handle_leaf_region_contexts(derez, applied_events);
               break;
             }
           default:
@@ -7821,11 +7808,6 @@ namespace Legion {
           case CREATED_REGION_UPDATE_KIND:
             {
               (*it)->handle_created_region_contexts(derez2, remote_handled);
-              break;
-            }
-          case LEAF_REGION_UPDATE_KIND:
-            {
-              (*it)->handle_leaf_region_contexts(derez2, remote_handled);
               break;
             }
           default:

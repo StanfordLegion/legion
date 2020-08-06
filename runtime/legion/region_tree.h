@@ -3467,7 +3467,8 @@ namespace Legion {
                                  FieldMask &already_closed_mask,
                                  FieldMask &written_disjoint_complete,
                                  FieldMaskSet<RefinementOp> &refinements,
-                                 std::set<RtEvent> &applied_events);
+                                 std::set<RtEvent> &applied_events,
+                                 const bool check_unversioned);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
                                const LogicalTraceInfo &trace_info);

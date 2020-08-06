@@ -9292,11 +9292,6 @@ namespace Legion {
                                                       remote_address_space);
               break;
             }
-          case SEND_LEAF_REGION_CONTEXTS:
-            {
-              runtime->handle_leaf_region_contexts(derez);
-              break;
-            }
           case SEND_MATERIALIZED_VIEW:
             {
               runtime->handle_send_materialized_view(derez, 
@@ -18730,15 +18725,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_leaf_region_contexts(AddressSpaceID target, 
-                                            Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_LEAF_REGION_CONTEXTS,
-                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_atomic_reservation_request(AddressSpaceID target,
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
@@ -20633,13 +20619,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RemoteContext::handle_created_region_contexts(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_leaf_region_contexts(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      RemoteContext::handle_leaf_region_contexts(this, derez);
     }
 
     //--------------------------------------------------------------------------

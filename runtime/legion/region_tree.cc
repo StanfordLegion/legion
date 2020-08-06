@@ -1725,8 +1725,8 @@ namespace Legion {
         FieldMask written_disjoint_complete;
         FieldMaskSet<RefinementOp> refinements;
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
-                        projection_info, unopened_mask, already_closed_mask,
-                        written_disjoint_complete, refinements, applied_events);
+                  projection_info, unopened_mask, already_closed_mask,
+                  written_disjoint_complete, refinements, applied_events, true);
         // Finish the dependence analysis for any refinement operations
         if (!refinements.empty())
         {
@@ -14512,7 +14512,8 @@ namespace Legion {
                                         FieldMask &already_closed_mask,
                                         FieldMask &written_disjoint_complete,
                                         FieldMaskSet<RefinementOp> &refinements,
-                                        std::set<RtEvent> &applied_events)
+                                        std::set<RtEvent> &applied_events,
+                                        const bool check_unversioned)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -14523,7 +14524,17 @@ namespace Legion {
 #endif
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
-      FieldMask open_below;
+      FieldMask open_below, unversioned;
+      if (check_unversioned)
+      {
+        unversioned = user.field_mask - state.disjoint_complete_tree;
+        // We'll make this look like it has been versioned for now
+        // and if we don't get a refinement to it, then we'll issue
+        // a close operation at the end to initialize the equivalence
+        // set at the root of the tree
+        if (!!unversioned)
+          state.disjoint_complete_tree |= unversioned;
+      }
       RegionTreeNode *next_child = NULL;
       if (!arrived)
         next_child = get_tree_child(path.get_child(depth));
@@ -14680,7 +14691,7 @@ namespace Legion {
         FieldMask child_disjoint_complete;
         next_child->register_logical_user(ctx, user, path, trace_info,
            proj_info, unopened_field_mask, already_closed_mask, 
-           child_disjoint_complete, refinements, applied_events);
+           child_disjoint_complete, refinements, applied_events, false);
         if (!refinements.empty() &&
             (!state.curr_epoch_users.empty() || 
              !state.prev_epoch_users.empty()))
@@ -14838,6 +14849,51 @@ namespace Legion {
                 }
               }
             }
+          }
+        }
+      }
+      // Check to see if we have any unversioned fields we need to initialize
+      if (check_unversioned && !!unversioned)
+      {
+        // See if we made refinements for any of these fields, if so
+        // they will make the initial batch of equivalence sets
+        if (!refinements.empty())
+          unversioned -= refinements.get_valid_mask();
+        if (!!unversioned)
+        {
+          // If we have unversioned fields and no refinements were
+          // made for them, then we make a close op (which doesn't actually
+          // close anything) to create the first equivalence set for these
+          // fields here at the root of the tree
+          InnerContext *context = user.op->get_context();
+#ifdef DEBUG_LEGION_COLLECTIVES
+          MergeCloseOp *initializer = context->get_merge_close_op(user, this);
+#else
+          MergeCloseOp *initializer = context->get_merge_close_op();
+#endif
+#ifdef DEBUG_LEGION
+          assert(is_region());
+#endif
+          RegionNode *region_node = as_region_node();
+          RegionRequirement req(region_node->handle, LEGION_READ_WRITE,
+              LEGION_EXCLUSIVE, region_node->handle);
+          region_node->column_source->get_field_set(unversioned,
+              trace_info.req.privilege_fields, req.privilege_fields);
+          initializer->initialize(context, req, trace_info, trace_info.req_idx,
+                                  unversioned, user.op);
+          initializer->record_refinements(unversioned);
+          // These fields are unversioned so there is nothing for 
+          // this close operation to depend on
+          const GenerationID initializer_gen = initializer->get_generation();
+          initializer->execute_dependence_analysis();
+          // Make sure our operation has a dependence on this initializer
+          if (!user.op->register_region_dependence(user.idx, initializer,
+                initializer_gen, 0/*target index*/, LEGION_TRUE_DEPENDENCE,
+                false/*validates*/, unversioned))
+          {
+            const LogicalUser init_user(initializer, initializer_gen, 0/*idx*/,
+                                        RegionUsage(req), unversioned);
+            register_local_user(state, init_user, trace_info);
           }
         }
       }
@@ -16224,6 +16280,32 @@ namespace Legion {
               assert(are_children_disjoint(c1, c2));
             }
           }
+        }
+      }
+      // Disjoint complete fields should always dominate any
+      // disjoint complete children we have
+      assert(state.disjoint_complete_children.empty() ||
+          !(state.disjoint_complete_children.get_valid_mask() - 
+            state.disjoint_complete_tree));
+      if (is_region())
+      {
+        // for region nodes, there should only be one 
+        // disjoint complete child for each field at a time
+        FieldMask disjoint_complete_previous;
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+              state.disjoint_complete_children.begin(); it !=
+              state.disjoint_complete_children.end(); it++)
+        {
+          assert(disjoint_complete_previous * it->second);
+          disjoint_complete_previous |= it->second;
+        }
+        FieldMask written_previous;
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+              state.written_disjoint_complete_children.begin(); it !=
+              state.written_disjoint_complete_children.end(); it++)
+        {
+          assert(written_previous * it->second);
+          written_previous |= it->second;
         }
       }
     }

@@ -7716,23 +7716,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_leaf_region_contexts(Deserializer &derez,
-                                                std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      repl_ctx->handle_leaf_region_contexts(derez, applied);
-    }
-
-    //--------------------------------------------------------------------------
     void ShardTask::handle_trace_update(Deserializer &derez, 
                                         AddressSpaceID source)
     //--------------------------------------------------------------------------

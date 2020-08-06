@@ -2715,8 +2715,9 @@ namespace Legion {
       // This is the physical state of the equivalence set
       mutable LocalLock                                 state_lock;
       AddressSpaceID                                    logical_owner_space;
+      FieldMaskSet<LogicalView>                         total_valid_instances;
       LegionMap<LogicalView*,
-        FieldMaskSet<IndexSpaceExpression> >::aligned   valid_instances;
+        FieldMaskSet<IndexSpaceExpression> >::aligned   partial_valid_instances;
       std::map<unsigned/*fidx*/,std::vector<std::pair<
         ReductionView*,IndexSpaceExpression*> > >       reduction_instances;
       FieldMaskSet<IndexSpaceExpression>                reduction_fields;

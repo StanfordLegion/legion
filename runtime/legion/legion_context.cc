@@ -2771,8 +2771,6 @@ namespace Legion {
       assert(outstanding_subtasks == 0);
       assert(pending_subtasks == 0);
       assert(pending_frames == 0);
-      assert(created_state_nodes.empty());
-      assert(local_state_nodes.empty());
 #endif
       if (!remote_context)
         runtime->unregister_local_context(context_uid);
@@ -5683,22 +5681,9 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_region(index_space.id, field_space.id, tid);
 
-      RegionNode *node = forest->create_logical_region(region);
+      forest->create_logical_region(region);
       // Register the creation of a top-level region with the context
       register_region_creation(region, task_local);
-      // Now we need to make the root equivalence set and record it
-      EquivalenceSet *set = new EquivalenceSet(runtime,
-          runtime->get_available_distributed_id(), runtime->address_space,
-          runtime->address_space, node, true/*register now*/);
-      // Initialize the region tree context
-      const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
-      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      std::set<RtEvent> dummy_effects;
-      initialize_region_tree_context(usage, set, all_ones_mask, dummy_effects,
-                                     true/*created*/, task_local); 
-#ifdef DEBUG_LEGION
-      assert(dummy_effects.empty());
-#endif
       return region;
     }
 
@@ -8306,6 +8291,7 @@ namespace Legion {
       // they were a virtual reference and we can ignore it.
       const UniqueID context_uid = get_unique_id();
       std::map<PhysicalManager*,InstanceView*> top_views;
+      const ContextID ctx = tree_context.get_id();
       for (unsigned idx1 = 0; idx1 < regions.size(); idx1++)
       {
 #ifdef DEBUG_LEGION
@@ -8427,34 +8413,10 @@ namespace Legion {
                 eq_sets.begin(); it != eq_sets.end(); it++)
             eq_set->clone_from(it->first, it->second, applied_events);
         }
-        // Now initialize our context with this equivalence set
-        initialize_region_tree_context(usage, eq_set, user_mask, applied_events,
-                                       false/*created*/, true/*local*/);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::initialize_region_tree_context(const RegionUsage &usage,
-                                    EquivalenceSet *set, const FieldMask &mask,
-                                    std::set<RtEvent> &applied_events,
-                                    bool created, bool local)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode *region_node = set->region_node;
-      const ContextID ctx = tree_context.get_id();
-      // We only support changing the disjoint-complete tree if we are not
-      // virtually mapped and therefore know that our logical analysis can
-      // accurately track which partitions are being included
-      if (IS_WRITE(usage))
-        region_node->initialize_disjoint_complete_tree(ctx, mask);
-      region_node->initialize_versioning_analysis(ctx, set,mask,applied_events);
-      if (created)
-      {
-        AutoLock c_lock(created_state_lock);
-        if (local)
-          local_state_nodes.insert(region_node);
-        else
-          created_state_nodes.insert(region_node);
+        // Now initialize our logical and physical contexts
+        region_node->initialize_disjoint_complete_tree(ctx, user_mask);
+        region_node->initialize_versioning_analysis(ctx, eq_set,
+                                                    user_mask, applied_events);
       }
     }
 
@@ -8465,6 +8427,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INVALIDATE_REGION_TREE_CONTEXTS_CALL);
       // Invalidate all our region contexts
+      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (IS_NO_ACCESS(regions[idx]))
@@ -8472,22 +8435,13 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(regions[idx].region);
         runtime->forest->invalidate_current_context(tree_context,
                                        false/*users only*/, node);
-        if (!virtual_mapped[idx])
-        {
-          const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-          node->invalidate_refinement(tree_context.get_id(), all_ones_mask,
-              true/*self*/, false/*collective*/, applied);
-        }
+        // State is copied out by the virtual close ops if this is a
+        // virtual mapped region so we invalidate like normal now
+        node->invalidate_refinement(tree_context.get_id(), all_ones_mask,
+            true/*self*/, false/*collective*/, applied);
       }
-      if (!created_state_nodes.empty())
-      {
-        InnerContext *parent = find_parent_context();
-        parent->receive_created_region_contexts(tree_context,
-            created_state_nodes, applied, false/*collective*/);
-        created_state_nodes.clear();
-      }
-      if (!local_state_nodes.empty())
-        invalidate_local_state_contexts(applied, false/*collective*/);
+      if (!created_requirements.empty())
+        invalidate_created_requirement_contexts(applied, false/*collective*/);
       // Clean up our instance top views
       if (!instance_top_views.empty())
         clear_instance_top_views();
@@ -8496,14 +8450,74 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::invalidate_created_requirement_contexts(
+                       std::set<RtEvent> &applied_events, const bool collective)
+    //--------------------------------------------------------------------------
+    {
+      std::set<LogicalRegion> invalidated_regions, return_regions;
+      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+            created_requirements.begin(); it != 
+            created_requirements.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(returnable_privileges.find(it->first) !=
+                returnable_privileges.end());
+#endif
+        // See if we're a returnable privilege or not
+        if (returnable_privileges[it->first])
+        {
+#ifdef DEBUG_LEGION
+          assert(invalidated_regions.find(it->second.region) == 
+                  invalidated_regions.end());
+#endif
+          return_regions.insert(it->second.region);
+        }
+        else // Not returning so invalidate the full thing 
+        {
+#ifdef DEBUG_LEGION
+          assert(return_regions.find(it->second.region) == 
+                  return_regions.end());
+#endif
+          if (invalidated_regions.find(it->second.region) ==
+              invalidated_regions.end())
+          {
+            // Little tricky here, this is safe to invaliate the whole
+            // tree even if we only had privileges on a field because
+            // if we had privileges on the whole region in this context
+            // it would have merged the created_requirement and we wouldn't
+            // have a non returnable privilege requirement in this context
+            RegionNode *node = runtime->forest->get_node(it->second.region);
+            runtime->forest->invalidate_current_context(tree_context,
+                                          false/*users only*/, node);
+            node->invalidate_refinement(tree_context.get_id(), all_ones_mask,
+                                    true/*self*/, collective, applied_events);
+            invalidated_regions.insert(it->second.region);
+          }
+        }
+      }
+      if (!return_regions.empty())
+      {
+        std::vector<RegionNode*> created_states(return_regions.size());
+        unsigned index = 0;
+        for (std::set<LogicalRegion>::const_iterator it = 
+              return_regions.begin(); it != return_regions.end(); it++)
+          created_states[index++] = runtime->forest->get_node(*it);
+        InnerContext *parent_ctx = find_parent_context();   
+        parent_ctx->receive_created_region_contexts(tree_context,
+            created_states, applied_events, collective);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::receive_created_region_contexts(
-             RegionTreeContext ctx, const std::set<RegionNode*> &created_states,
-             std::set<RtEvent> &applied_events, bool collective)
+          RegionTreeContext ctx, const std::vector<RegionNode*> &created_states,
+          std::set<RtEvent> &applied_events, bool collective)
     //--------------------------------------------------------------------------
     {
       const ContextID src_ctx = ctx.get_id();
       const ContextID dst_ctx = tree_context.get_id();
-      for (std::set<RegionNode*>::const_iterator it = 
+      for (std::vector<RegionNode*>::const_iterator it = 
             created_states.begin(); it != created_states.end(); it++)
       {
         (*it)->migrate_logical_state(src_ctx, dst_ctx, collective);
@@ -8513,68 +8527,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::receive_leaf_region_contexts(
-                                 const std::vector<LogicalRegion> &leaf_regions,
-                                 std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      // Initialize the region tree contexts
-      const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
-      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      // Note we only handle the ones for which we know that we'll have
-      // an outermost context that we'll be able to find
-      // If we're remote, this will all be flushed back
-      for (std::vector<LogicalRegion>::const_iterator it = 
-            leaf_regions.begin(); it != leaf_regions.end(); it++)
-      {
-        RegionNode *node = runtime->forest->get_node(*it);
-        EquivalenceSet *set = new EquivalenceSet(runtime,
-          runtime->get_available_distributed_id(), runtime->address_space,
-          runtime->address_space, node, true/*register now*/);
-        initialize_region_tree_context(usage, set, all_ones_mask,applied_events,
-                                       true/*created*/, false/*local*/);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::invalidate_region_tree_context(LogicalRegion handle,
                              bool collective, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       RegionNode *node = runtime->forest->get_node(handle);
+      runtime->forest->invalidate_current_context(tree_context,
+                                          false/*users only*/, node);
       const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
       node->invalidate_refinement(tree_context.get_id(), all_ones_mask, 
                                   true/*self*/, collective, applied_events);
-      AutoLock c_lock(created_state_lock);
-      if (!created_state_nodes.empty())
-        created_state_nodes.erase(node);
-      if (!local_state_nodes.empty())
-        local_state_nodes.erase(node);
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::invalidate_local_state_contexts(
-                              std::set<RtEvent> &applied, const bool collective)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!local_state_nodes.empty());
-#endif
-      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      for (std::set<RegionNode*>::const_iterator it = 
-            local_state_nodes.begin(); it != local_state_nodes.end(); it++)
-      {
-        runtime->forest->invalidate_current_context(tree_context,
-                                      false/*users only*/, (*it));
-        // Little tricky here, this is safe to invaliate the whole
-        // tree even if we only had privileges on a field because
-        // if we had privileges on the whole region in this context
-        // it would have merged the created_requirement and we wouldn't
-        // have a non returnable privilege requirement in this context
-        (*it)->invalidate_refinement(tree_context.get_id(), all_ones_mask,
-                                     true/*self*/, collective, applied);
-      }
-      local_state_nodes.clear(); 
     }
 
     //--------------------------------------------------------------------------
@@ -9711,17 +9673,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TopLevelContext::receive_created_region_contexts(RegionTreeContext ctx,
-                             const std::set<RegionNode*> &created_states,
+                             const std::vector<RegionNode*> &created_states,
                              std::set<RtEvent> &applied_events, bool collective)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void TopLevelContext::receive_leaf_region_contexts(
-                                      const std::vector<LogicalRegion> &regions,
-                                      std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -10710,15 +10663,9 @@ namespace Legion {
               true/*self*/, collective, applied);
         }
       }
-      if (!created_state_nodes.empty())
-      {
-        InnerContext *parent = find_parent_context();
-        parent->receive_created_region_contexts(tree_context,
-            created_state_nodes, applied, true/*collective*/);
-        created_state_nodes.clear();
-      }
-      if (!local_state_nodes.empty())
-        invalidate_local_state_contexts(applied, collective);
+      if (!created_requirements.empty())
+        invalidate_created_requirement_contexts(applied,
+                    shard_manager->is_total_sharding());
       // Cannot clear our instance top view references until we are deleted 
       // as we might still need to help out our other sibling shards
       
@@ -10728,8 +10675,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::receive_created_region_contexts(
-              RegionTreeContext ctx, const std::set<RegionNode*> &created_state,
-              std::set<RtEvent> &applied_events, bool collective)
+           RegionTreeContext ctx, const std::vector<RegionNode*> &created_state,
+           std::set<RtEvent> &applied_events, bool collective)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -10737,7 +10684,7 @@ namespace Legion {
       rez.serialize<bool>(collective);
       rez.serialize<size_t>(created_state.size());
       const size_t destination_count = shard_manager->total_shards - 1; 
-      for (std::set<RegionNode*>::const_iterator it = 
+      for (std::vector<RegionNode*>::const_iterator it = 
             created_state.begin(); it != created_state.end(); it++)
       {
         rez.serialize((*it)->handle);
@@ -10753,38 +10700,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::receive_leaf_region_contexts(
-                                 const std::vector<LogicalRegion> &leaf_regions,
-                                 std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      rez.serialize<size_t>(leaf_regions.size());
-      for (std::vector<LogicalRegion>::const_iterator it = 
-            leaf_regions.begin(); it != leaf_regions.end(); it++)
-        rez.serialize(*it);
-      shard_manager->broadcast_leaf_region_contexts(owner_shard, rez, 
-                                                    applied_events);
-      receive_replicate_leaf_region_contexts(leaf_regions, applied_events);
-    }
-
-    //--------------------------------------------------------------------------
     void ReplicateContext::receive_replicate_created_region_contexts(
-              RegionTreeContext ctx, const std::set<RegionNode*> &created_state,
-              std::set<RtEvent> &applied_events, bool collective)
+           RegionTreeContext ctx, const std::vector<RegionNode*> &created_state,
+           std::set<RtEvent> &applied_events, bool collective)
     //--------------------------------------------------------------------------
     {
       InnerContext::receive_created_region_contexts(ctx, created_state,
                                                     applied_events, collective);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::receive_replicate_leaf_region_contexts(
-                                 const std::vector<LogicalRegion> &leaf_regions,
-                                 std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      InnerContext::receive_leaf_region_contexts(leaf_regions, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -14478,7 +14400,6 @@ namespace Legion {
       bool double_buffer = false;
       std::pair<ValueBroadcast<LRBroadcast>*,bool> &collective = 
         pending_region_trees.front();
-      RegionNode *node = NULL;
       DistributedID eq_did = 0;
       if (collective.second)
       {
@@ -14488,8 +14409,8 @@ namespace Legion {
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
         // Have to register this before doing the broadcast
-        node = forest->create_logical_region(handle, false/*notify remote*/,
-                                             creation_barrier, &applied);
+        RegionNode *node = forest->create_logical_region(handle, 
+            false/*notify remote*/, creation_barrier, &applied);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
@@ -14525,8 +14446,8 @@ namespace Legion {
         assert(handle.exists());
 #endif
         std::set<RtEvent> applied;
-        node = forest->create_logical_region(handle, false/*notify remote*/, 
-                                             creation_barrier, &applied);
+        forest->create_logical_region(handle, false/*notify remote*/, 
+                                      creation_barrier, &applied);
         // Signal that we are done our creation
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -14540,28 +14461,11 @@ namespace Legion {
       advance_replicate_barrier(creation_barrier, total_shards);
       // Register the creation of a top-level region with the context
       register_region_creation(handle, task_local);
-      // Now we need to make the root equivalence set and record it
-      // Use the shard manager to deduplicate across the shards on this node
-      EquivalenceSet *set = 
-        shard_manager->deduplicate_equivalence_set_creation(node, eq_did);
-      // Initialize the region tree context
-      const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
-      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      std::set<RtEvent> applied_events;
-      initialize_region_tree_context(usage, set, all_ones_mask, applied_events,
-                                     true/*created*/, task_local);
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_region_trees(double_buffer ? 
           pending_region_trees.size() + 1 : 1, double_next && !double_buffer);
-      // Make sure all our effects are applied
-      if (!applied_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(applied_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
       return handle;
     }
 
@@ -16686,7 +16590,7 @@ namespace Legion {
       derez.deserialize<bool>(collective);
       size_t num_regions;
       derez.deserialize(num_regions);
-      std::set<RegionNode*> created_states;
+      std::vector<RegionNode*> created_states(num_regions);
       const RegionTreeContext ctx = runtime->allocate_region_tree_context();
       for (unsigned idx = 0; idx < num_regions; idx++)
       {
@@ -16695,25 +16599,13 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(handle);
         node->unpack_logical_state(ctx.get_id(), derez, source);
         node->unpack_version_state(ctx.get_id(), derez, source);
+        created_states[idx] = node;
       }
       receive_replicate_created_region_contexts(ctx, created_states,
                                                 applied_events, collective);
       runtime->free_region_tree_context(ctx);
     }
 
-    //--------------------------------------------------------------------------
-    void ReplicateContext::handle_leaf_region_contexts(Deserializer &derez,
-                                              std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      size_t num_regions;
-      derez.deserialize(num_regions);
-      std::vector<LogicalRegion> leaf_regions(num_regions);
-      for (unsigned idx = 0; idx < num_regions; idx++)
-        derez.deserialize(leaf_regions[idx]);
-      receive_replicate_leaf_region_contexts(leaf_regions, applied_events);
-    }
-    
     //--------------------------------------------------------------------------
     void ReplicateContext::handle_trace_update(Deserializer &derez, 
                                                AddressSpaceID source)
@@ -18226,7 +18118,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteContext::receive_created_region_contexts(RegionTreeContext ctx,
-                             const std::set<RegionNode*> &created_state,
+                             const std::vector<RegionNode*> &created_state,
                              std::set<RtEvent> &applied_events, bool collective)
     //--------------------------------------------------------------------------
     {
@@ -18236,7 +18128,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(context_uid);
         rez.serialize<size_t>(created_state.size());
-        for (std::set<RegionNode*>::const_iterator it = 
+        for (std::vector<RegionNode*>::const_iterator it = 
               created_state.begin(); it != created_state.end(); it++)
         {
           rez.serialize((*it)->handle);
@@ -18264,7 +18156,7 @@ namespace Legion {
       const RegionTreeContext ctx = runtime->allocate_region_tree_context();
       size_t num_regions;
       derez.deserialize(num_regions);
-      std::set<RegionNode*> created_state;
+      std::vector<RegionNode*> created_state(num_regions);
       std::set<RtEvent> applied_events;
       for (unsigned idx = 0; idx < num_regions; idx++)
       {
@@ -18273,7 +18165,7 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(handle);
         node->unpack_logical_state(ctx.get_id(), derez, source);
         node->unpack_version_state(ctx.get_id(), derez, source);
-        created_state.insert(node);
+        created_state[idx] = node;
       }
       RtUserEvent done_event;
       derez.deserialize(done_event);
@@ -18289,54 +18181,6 @@ namespace Legion {
       else
         Runtime::trigger_event(done_event);
       runtime->free_region_tree_context(ctx); 
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteContext::receive_leaf_region_contexts(
-                                 const std::vector<LogicalRegion> &leaf_regions,
-                                 std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      const RtUserEvent done_event = Runtime::create_rt_user_event();
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(context_uid);  
-        rez.serialize<size_t>(leaf_regions.size());
-        for (std::vector<LogicalRegion>::const_iterator it =
-              leaf_regions.begin(); it != leaf_regions.end(); it++)
-          rez.serialize(*it);
-        rez.serialize(done_event);
-      }
-      const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
-      runtime->send_leaf_region_contexts(target, rez);
-      applied_events.insert(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RemoteContext::handle_leaf_region_contexts(Runtime *runtime,
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      UniqueID ctx_uid;
-      derez.deserialize(ctx_uid);
-      size_t num_regions;
-      derez.deserialize(num_regions);
-      std::vector<LogicalRegion> leaf_regions(num_regions);
-      for (unsigned idx = 0; idx < num_regions; idx++)
-        derez.deserialize(leaf_regions[idx]);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-
-      std::set<RtEvent> applied_events;
-      InnerContext *context = runtime->find_context(ctx_uid);
-      context->receive_leaf_region_contexts(leaf_regions, applied_events);
-      if (!applied_events.empty())
-        Runtime::trigger_event(done_event, 
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -20325,34 +20169,13 @@ namespace Legion {
                                                      std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      // If we have any created regions that are flowing out of this task
-      // then handle them now, no need for the lock here
-      if (!created_regions.empty())
-      {
-        // Find the next inner context to pass these back to
-        InnerContext *parent = find_parent_context();
-        std::vector<LogicalRegion> leaf_regions(created_regions.size());
-        unsigned index = 0;
-        for (std::map<LogicalRegion,unsigned>::const_iterator it = 
-              created_regions.begin(); it != created_regions.end(); it++)
-          leaf_regions[index++] = it->first;
-        parent->receive_leaf_region_contexts(leaf_regions, applied);
-      } 
+      // Nothing to do 
     }
 
     //--------------------------------------------------------------------------
     void LeafContext::receive_created_region_contexts(RegionTreeContext ctx,
-                             const std::set<RegionNode*> &created_states,
+                             const std::vector<RegionNode*> &created_states,
                              std::set<RtEvent> &applied_events, bool collective)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::receive_leaf_region_contexts(
-                                      const std::vector<LogicalRegion> &regions,
-                                      std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -21790,17 +21613,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InlineContext::receive_created_region_contexts(RegionTreeContext ctx,
-                             const std::set<RegionNode*> &created_states,
+                             const std::vector<RegionNode*> &created_states,
                              std::set<RtEvent> &applied_events, bool collective)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::receive_leaf_region_contexts(
-                                 const std::vector<LogicalRegion> &leaf_regions,
-                                 std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       assert(false);

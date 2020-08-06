@@ -2038,7 +2038,6 @@ namespace Legion {
       enum BroadcastMessageKind {
         RESOURCE_UPDATE_KIND,
         CREATED_REGION_UPDATE_KIND,
-        LEAF_REGION_UPDATE_KIND,
       };
     public:
       ShardManager(Runtime *rt, ReplicationID repl_id, 
@@ -2145,9 +2144,6 @@ namespace Legion {
     public:
       void broadcast_created_region_contexts(ShardTask *source, Serializer &rez,
                                              std::set<RtEvent> &applied_events);
-    public:
-      void broadcast_leaf_region_contexts(ShardTask *source, Serializer &rez,
-                                          std::set<RtEvent> &applied_events);
     protected:
       void broadcast_message(ShardTask *source, Serializer &rez,
                 BroadcastMessageKind kind, std::set<RtEvent> &applied_events);

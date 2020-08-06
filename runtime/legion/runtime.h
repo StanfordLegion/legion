@@ -2655,7 +2655,6 @@ namespace Legion {
       void send_did_remote_unregister(AddressSpaceID target, Serializer &rez,
                                       VirtualChannelKind vc);
       void send_created_region_contexts(AddressSpaceID target, Serializer &rez);
-      void send_leaf_region_contexts(AddressSpaceID target, Serializer &rez);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
       void send_atomic_reservation_request(AddressSpaceID target, 
                                            Serializer &rez);
@@ -2949,7 +2948,6 @@ namespace Legion {
       void handle_did_remote_unregister(Deserializer &derez);
       void handle_created_region_contexts(Deserializer &derez,  
                                           AddressSpaceID source);
-      void handle_leaf_region_contexts(Deserializer &derez);
       void handle_send_atomic_reservation_request(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_send_atomic_reservation_response(Deserializer &derez);

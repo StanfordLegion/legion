@@ -781,7 +781,6 @@ namespace Legion {
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_CREATED_REGION_CONTEXTS,
-      SEND_LEAF_REGION_CONTEXTS,
       SEND_MATERIALIZED_VIEW,
       SEND_FILL_VIEW,
       SEND_PHI_VIEW,
@@ -987,7 +986,6 @@ namespace Legion {
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \
         "Send Created Region Contexts",                               \
-        "Send Leaf Region Contexts",                                  \
         "Send Materialized View",                                     \
         "Send Fill View",                                             \
         "Send Phi View",                                              \

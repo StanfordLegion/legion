@@ -478,12 +478,9 @@ namespace Legion {
       virtual void invalidate_region_tree_contexts(
                                       std::set<RtEvent> &applied) = 0;
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::set<RegionNode*> &created_state,
+                            const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,
                             bool collective) = 0;
-      virtual void receive_leaf_region_contexts(
-                            const std::vector<LogicalRegion> &leaf_regions,
-                            std::set<RtEvent> &applied_events) = 0;
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source) = 0;
@@ -1256,21 +1253,14 @@ namespace Legion {
           const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &applied_events);
-      void initialize_region_tree_context(const RegionUsage &usage,
-                        EquivalenceSet *set, const FieldMask &mask, 
-                        std::set<RtEvent> &applied_events,
-                        bool created, bool local);
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
+      void invalidate_created_requirement_contexts(std::set<RtEvent> &applied,
+                                                   const bool collective);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::set<RegionNode*> &created_state,
+                            const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events, bool collective);
-      virtual void receive_leaf_region_contexts(
-                                const std::vector<LogicalRegion> &leaf_regions,
-                                std::set<RtEvent> &applied_events);
       void invalidate_region_tree_context(LogicalRegion handle, bool collective,
                                              std::set<RtEvent> &applied_events);
-      void invalidate_local_state_contexts(std::set<RtEvent> &applied_events,
-                                           bool collective);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -1389,11 +1379,6 @@ namespace Legion {
       std::list<PostTaskArgs>                         post_task_queue;
       CompletionQueue                                 post_task_comp_queue;
     protected:
-      // State for created regions that we need to invalidate or send back
-      mutable LocalLock                               created_state_lock;
-      std::set<RegionNode*>                           created_state_nodes;
-      std::set<RegionNode*>                           local_state_nodes;
-    protected:
       // Traces for this task's execution
       LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC>::tracked traces;
       LegionTrace *current_trace;
@@ -1482,11 +1467,8 @@ namespace Legion {
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::set<RegionNode*> &created_state,
+                            const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events, bool collective);
-      virtual void receive_leaf_region_contexts(
-                                const std::vector<LogicalRegion> &leaf_regions,
-                                std::set<RtEvent> &applied_events);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                           RegionNode *region, const FieldMask &mask, 
                           unsigned parent_index, AddressSpaceID source);
@@ -1749,21 +1731,13 @@ namespace Legion {
     public:
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::set<RegionNode*> &created_state,
+                            const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events, bool collective);
-      virtual void receive_leaf_region_contexts(
-                                const std::vector<LogicalRegion> &leaf_regions,
-                                std::set<RtEvent> &applied_events);
       void receive_replicate_created_region_contexts(RegionTreeContext ctx,
-                          const std::set<RegionNode*> &created_state, 
+                          const std::vector<RegionNode*> &created_state, 
                           std::set<RtEvent> &applied_events, bool collective);
-      void receive_replicate_leaf_region_contexts(
-                          const std::vector<LogicalRegion> &leaf_regions,
-                          std::set<RtEvent> &applied_events);
       void handle_created_region_contexts(Deserializer &derez,
                                           std::set<RtEvent> &applied_events);
-      void handle_leaf_region_contexts(Deserializer &derez,
-                                       std::set<RtEvent> &applied_events);
     public:
       virtual RtEvent request_shard_version_data(EqSetTracker *target,
                       RegionNode *region, const FieldMask &request_mask);
@@ -2374,15 +2348,10 @@ namespace Legion {
                                                      AddressSpaceID source);
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::set<RegionNode*> &created_state,
+                            const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events, bool collective);
-      virtual void receive_leaf_region_contexts(
-                                const std::vector<LogicalRegion> &leaf_regions,
-                                std::set<RtEvent> &applied_events);
       static void handle_created_region_contexts(Runtime *runtime, 
                                    Deserializer &derez, AddressSpaceID source);
-      static void handle_leaf_region_contexts(Runtime *runtime, 
-                                              Deserializer &derez);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
     public:
@@ -2786,11 +2755,8 @@ namespace Legion {
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::set<RegionNode*> &created_state,
+                            const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events, bool collective);
-      virtual void receive_leaf_region_contexts(
-                                const std::vector<LogicalRegion> &leaf_regions,
-                                std::set<RtEvent> &applied_events);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -3203,11 +3169,8 @@ namespace Legion {
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::set<RegionNode*> &created_state,
+                            const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events, bool collective);
-      virtual void receive_leaf_region_contexts(
-                                const std::vector<LogicalRegion> &leaf_regions,
-                                std::set<RtEvent> &applied_events);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
