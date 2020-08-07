@@ -899,6 +899,9 @@ namespace Realm {
 #if defined(REALM_ACCESSOR_DEBUG) || defined(REALM_USE_KOKKOS)
     bounds = alp->bounds;
 #endif
+#ifdef REALM_USE_KOKKOS
+    bounds_specified = false;
+#endif
 #ifdef REALM_ACCESSOR_DEBUG
     dbg_inst = inst;
 #endif
@@ -942,6 +945,9 @@ namespace Realm {
     }
 #if defined(REALM_ACCESSOR_DEBUG) || defined(REALM_USE_KOKKOS)
     bounds = subrect;  // stay inside the subrect we were given
+#endif
+#ifdef REALM_USE_KOKKOS
+    bounds_specified = true;
 #endif
 #ifdef REALM_ACCESSOR_DEBUG
     dbg_inst = inst;
@@ -1086,6 +1092,9 @@ namespace Realm {
     }
 #if defined(REALM_ACCESSOR_DEBUG) || defined(REALM_USE_KOKKOS)
     bounds = subrect;  // stay inside the subrect we were given
+#endif
+#ifdef REALM_USE_KOKKOS
+    bounds_specified = true;
 #endif
 #ifdef REALM_ACCESSOR_DEBUG
     dbg_inst = inst;
@@ -1328,8 +1337,19 @@ namespace Realm {
   inline AffineAccessor<FT,N,T>::operator Kokkos::View<Args...>() const
   {
     typename DeferType<Kokkos::LayoutStride, FT>::type kls;
+    uintptr_t base_shifted = base;
     for(int i = 0; i < N; i++) {
-      kls.dimension[i] = bounds.hi[i] + 1;
+      // a Kokkos::View uses relative indexing, so subtract out the base
+      //  of the subrectangle with which we must have been constructed
+      REALM_ASSERT(bounds_specified,
+		   "FATAL: construction of a (relative-indexed) Kokkos::View"
+		   " is only possible if the AffineAccessor was constructed"
+		   " with explicitly-specified bounds!");
+
+      base_shifted += (bounds.lo[i] * strides[i]);
+      kls.dimension[i] = ((bounds.hi[i] >= bounds.lo[i]) ?
+			    (bounds.hi[i] - bounds.lo[i] + 1) :
+			    0);
       kls.stride[i] = strides[i] / sizeof(FT);
       assert((size_t(kls.stride[i]) * sizeof(FT)) == size_t(strides[i]));
     }
@@ -1356,10 +1376,72 @@ namespace Realm {
     //  horrible template-y error messages that come if FT * is not
     //  compatible)
     typedef typename unmanaged_view::pointer_type ptrtype;
-    ptrtype baseptr = reinterpret_cast<ptrtype>(base);
+    ptrtype baseptr = reinterpret_cast<ptrtype>(base_shifted);
 
     unmanaged_view v(baseptr, kls);
     return v;
+  }
+
+  template <typename FT, int N, typename T>
+  template <typename ... Args>
+  inline AffineAccessor<FT,N,T>::operator Kokkos::Experimental::OffsetView<Args...>() const
+  {
+    typename DeferType<Kokkos::LayoutStride, FT>::type kls;
+    Kokkos::Array<int64_t, N, void> begins;
+    uintptr_t base_shifted = base;
+    for(int i = 0; i < N; i++) {
+      // a Kokkos::Experimental::OffsetView uses absolute indexing, but it's
+      //  a wrapper around a relatively-indexed Kokkos::View, so we need to
+      //  determine extents and shifted base addresses that make sense to
+      //  the inner view, and then we'll re-apply the absolute offset below
+      //
+      // compare to the direct Kokkos::View construction above though, we're
+      //  tolerant of the bounds being inferred from the layout rather than
+      //  being explicitly specified at accessor creation time
+
+      begins[i] = bounds.lo[i];
+      base_shifted += (bounds.lo[i] * strides[i]);
+      kls.dimension[i] = ((bounds.hi[i] >= bounds.lo[i]) ?
+			    (bounds.hi[i] - bounds.lo[i] + 1) :
+			    0);
+      kls.stride[i] = strides[i] / sizeof(FT);
+      assert((size_t(kls.stride[i]) * sizeof(FT)) == size_t(strides[i]));
+    }
+
+    typedef Kokkos::View<typename Kokkos::View<Args...>::data_type,
+			 Kokkos::LayoutStride,
+			 typename Kokkos::View<Args...>::memory_space,
+			 Kokkos::MemoryTraits<Kokkos_Unmanaged> > unmanaged_view;
+    // verify our Kokkos_Unmanaged enum was right
+    static_assert(unmanaged_view::traits::is_managed == 0,
+		  "incorrect value for Kokkos_Unmanaged!");
+
+    // verify the type and rank of the view match us - technically the type
+    //  part would be caught by Kokkos if we passed an FT *, but the error
+    //  messages that result are not easily understood
+    static_assert(std::is_same<typename unmanaged_view::value_type, FT>::value ||
+                  std::is_same<typename unmanaged_view::non_const_value_type, FT>::value,
+                  "base type mismatch between Kokkos view and accessor!");
+    static_assert(unmanaged_view::Rank == N,
+		  "rank mismatch between Kokkos view and accessor!");
+
+    // we're relying on the check above for type safety, so hand the
+    //  view whatever kind of pointer it wants here (eliminating the
+    //  horrible template-y error messages that come if FT * is not
+    //  compatible)
+    typedef typename unmanaged_view::pointer_type ptrtype;
+    ptrtype baseptr = reinterpret_cast<ptrtype>(base_shifted);
+
+    unmanaged_view v(baseptr, kls);
+
+    typedef Kokkos::Experimental::OffsetView<typename Kokkos::View<Args...>::data_type,
+					     Kokkos::LayoutStride,
+					     typename Kokkos::View<Args...>::memory_space,
+					     Kokkos::MemoryTraits<Kokkos_Unmanaged> > offset_view;
+
+    offset_view v_ofs(v, begins);
+
+    return v_ofs;
   }
 #endif
 
