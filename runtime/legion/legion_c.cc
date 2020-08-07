@@ -2569,6 +2569,59 @@ legion_region_requirement_get_projection(legion_region_requirement_t req_)
   return req->projection;
 }
 
+// -----------------------------------------------------------------------
+// Output Requirement Operations
+// -----------------------------------------------------------------------
+
+legion_output_requirement_t
+legion_output_requirement_create(legion_field_space_t field_space_,
+                                 legion_field_id_t *fields_,
+                                 size_t fields_size,
+                                 bool global_indexing)
+{
+  FieldSpace field_space = CObjectWrapper::unwrap(field_space_);
+  std::set<FieldID> fields;
+  for (size_t idx = 0; idx < fields_size; ++idx)
+    fields.insert(fields_[idx]);
+
+  OutputRequirement *req = new OutputRequirement(field_space,
+                                                 fields,
+                                                 global_indexing);
+  return CObjectWrapper::wrap(req);
+}
+
+void
+legion_output_requirement_destroy(legion_output_requirement_t req_)
+{
+  OutputRequirement *req = CObjectWrapper::unwrap(req_);
+
+  delete req;
+}
+
+legion_logical_region_t
+legion_output_requirement_get_region(legion_output_requirement_t req_)
+{
+  OutputRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return CObjectWrapper::wrap(req->region);
+}
+
+legion_logical_region_t
+legion_output_requirement_get_parent(legion_output_requirement_t req_)
+{
+  OutputRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return CObjectWrapper::wrap(req->parent);
+}
+
+legion_logical_partition_t
+legion_output_requirement_get_partition(legion_output_requirement_t req_)
+{
+  OutputRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return CObjectWrapper::wrap(req->partition);
+}
+
 // -------------------------------------------------------
 // Allocator and Argument Map Operations
 // -------------------------------------------------------

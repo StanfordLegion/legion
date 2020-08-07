@@ -1069,6 +1069,61 @@ namespace Legion {
     };
 
     /**
+     * \struct OutputRequirement
+     * Output requirements are a special kind of region requirements to inform
+     * the runtime that the task produces variable size outputs. Unlike
+     * normal region requirements that name regions and partitions, output
+     * requirements are filled in by the runtime with the names of the output
+     * regions, and partitions in case of index space launch, at the time when
+     * the task is launched. Output requirements still pick the output field IDs
+     * and their field space.
+     *
+     * The output region is always 1D in case of individual task launch.
+     * For index space launches, the runtime gives back the names of a region
+     * and a partition, whose construction is controlled by the indexing mode
+     * specified the output requirement in the following way:
+     *
+     * 0) For any indexing mode, the output partition is a complete, disjoint
+     *    partition whose color space is identical to the launch domain.
+     *
+     * 1) When the global indexing is requested, the output region has
+     *    a contiguous 1D index space whose volume is the sum of the sizes of
+     *    the outputs produced by point tasks. The range of the i-th subregion
+     *    is [S, S + n), where S is the sum of the previous i-1 subregions
+     *    and n is the output size of the i-th point task. The launch domain
+     *    must be 1D for the global indexing to be used.
+     *
+     * 2) With the local indexing, the output region has an (N+1)-D index
+     *    space for an N-D launch domain. The range of the subregion produced
+     *    by the point task p (where p is a point in an N-D space) is
+     *    [<0, p>, <n-1, p>] where n is the output size of the point task p.
+     *    The root index space is simply a union of all subspaces.
+     *
+     * Note that the global indexing has performance consequences since
+     * the runtime needs to perform a global prefix sum to compute the ranges
+     * of subspaces.
+     *
+     */
+
+    struct OutputRequirement : public RegionRequirement {
+    public:
+      OutputRequirement(void);
+      OutputRequirement(FieldSpace field_space,
+                        const std::set<FieldID> &fields,
+                        bool global_indexing = false);
+    public:
+      OutputRequirement(const OutputRequirement &rhs);
+      ~OutputRequirement(void);
+      OutputRequirement& operator=(const OutputRequirement &req);
+    public:
+      bool operator==(const OutputRequirement &req) const;
+      bool operator<(const OutputRequirement &req) const;
+    public:
+      FieldSpace field_space; /**< field space for the output region */
+      bool global_indexing; /**< global indexing is used when true */
+    };
+
+    /**
      * \struct IndexSpaceRequirement
      * Index space requirements are used to specify allocation and
      * deallocation privileges on logical regions.  Just like region
@@ -5990,7 +6045,9 @@ namespace Legion {
        * @param launcher the task launcher configuration
        * @return a future for the return value of the task
        */
-      Future execute_task(Context ctx, const TaskLauncher &launcher);
+      Future execute_task(Context ctx,
+                          const TaskLauncher &launcher,
+                          std::vector<OutputRequirement> *outputs = NULL);
 
       /**
        * Launch an index space of tasks with arguments specified
@@ -6001,8 +6058,9 @@ namespace Legion {
        * @return a future map for return values of the points
        *    in the index space of tasks
        */
-      FutureMap execute_index_space(Context ctx, 
-                                    const IndexTaskLauncher &launcher);
+      FutureMap execute_index_space(
+                                Context ctx, const IndexTaskLauncher &launcher,
+                                std::vector<OutputRequirement> *outputs = NULL);
 
       /**
        * Launch an index space of tasks with arguments specified
@@ -6019,8 +6077,10 @@ namespace Legion {
        * @return a future result representing the reduction of
        *    all the return values from the index space of tasks
        */
-      Future execute_index_space(Context ctx, const IndexTaskLauncher &launcher,
-                               ReductionOpID redop, bool deterministic = false);
+      Future execute_index_space(
+                               Context ctx, const IndexTaskLauncher &launcher,
+                               ReductionOpID redop, bool deterministic = false,
+                               std::vector<OutputRequirement> *outputs = NULL);
 
       /**
        * Reduce a future map down to a single future value using 

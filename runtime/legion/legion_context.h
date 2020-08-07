@@ -343,11 +343,13 @@ namespace Legion {
                                        const std::set<unsigned> &indexes,
                                        std::vector<FieldID> &to_set) const = 0;
     public:
-      virtual Future execute_task(const TaskLauncher &launcher) = 0;
-      virtual FutureMap execute_index_space(
-                                         const IndexTaskLauncher &launcher) = 0;
+      virtual Future execute_task(const TaskLauncher &launcher,
+                                  std::vector<OutputRequirement> *outputs) = 0;
+      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
+                                   std::vector<OutputRequirement> *outputs) = 0;
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
-                                   ReductionOpID redop, bool deterministic) = 0; 
+                                   ReductionOpID redop, bool deterministic,
+                                   std::vector<OutputRequirement> *outputs) = 0;
       virtual Future reduce_future_map(const FutureMap &future_map,
                                    ReductionOpID redop, bool deterministic) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
@@ -1109,10 +1111,13 @@ namespace Legion {
                                        std::vector<FieldID> &to_set) const;
     public:
       // Find an index space name for a concrete launch domain
-      virtual Future execute_task(const TaskLauncher &launcher);
-      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
+      virtual Future execute_task(const TaskLauncher &launcher,
+                                  std::vector<OutputRequirement> *outputs);
+      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
+                                       std::vector<OutputRequirement> *outputs);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
-                                      ReductionOpID redop, bool deterministic);
+                                       ReductionOpID redop, bool deterministic,
+                                       std::vector<OutputRequirement> *outputs);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic);
       virtual FutureMap construct_future_map(const Domain &domain,
@@ -1938,10 +1943,13 @@ namespace Legion {
     public:
       virtual void insert_unordered_ops(AutoLock &d_lock, const bool end_task,
                                         const bool progress);
-      virtual Future execute_task(const TaskLauncher &launcher);
-      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
+      virtual Future execute_task(const TaskLauncher &launcher,
+                                  std::vector<OutputRequirement> *outputs);
+      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
+                                       std::vector<OutputRequirement> *outputs);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
-                                      ReductionOpID redop, bool deterministic);
+                                       ReductionOpID redop, bool deterministic,
+                                       std::vector<OutputRequirement> *outputs);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
@@ -2594,10 +2602,13 @@ namespace Legion {
                                        const std::set<unsigned> &indexes,
                                        std::vector<FieldID> &to_set) const;
     public:
-      virtual Future execute_task(const TaskLauncher &launcher);
-      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
+      virtual Future execute_task(const TaskLauncher &launcher,
+                                  std::vector<OutputRequirement> *outputs);
+      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
+                                       std::vector<OutputRequirement> *outputs);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
-                                      ReductionOpID redop, bool deterministic);
+                                       ReductionOpID redop, bool deterministic,
+                                       std::vector<OutputRequirement> *outputs);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic);
       virtual FutureMap construct_future_map(const Domain &domain,
@@ -3004,10 +3015,13 @@ namespace Legion {
                                        const std::set<unsigned> &indexes,
                                        std::vector<FieldID> &to_set) const;
     public:
-      virtual Future execute_task(const TaskLauncher &launcher);
-      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
+      virtual Future execute_task(const TaskLauncher &launcher,
+                                  std::vector<OutputRequirement> *outputs);
+      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
+                                       std::vector<OutputRequirement> *outputs);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
-                                      ReductionOpID redop, bool deterministic);
+                                       ReductionOpID redop, bool deterministic,
+                                       std::vector<OutputRequirement> *outputs);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic);
       virtual FutureMap construct_future_map(const Domain &domain,

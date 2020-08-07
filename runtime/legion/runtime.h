@@ -2342,11 +2342,15 @@ namespace Legion {
     public:
       ArgumentMap create_argument_map(void);
     public:
-      Future execute_task(Context ctx, const TaskLauncher &launcher);
-      FutureMap execute_index_space(Context ctx, 
-                                    const IndexTaskLauncher &launcher);
+      Future execute_task(Context ctx,
+                          const TaskLauncher &launcher,
+                          std::vector<OutputRequirement> *outputs);
+      FutureMap execute_index_space(Context ctx,
+                                    const IndexTaskLauncher &launcher,
+                                    std::vector<OutputRequirement> *outputs);
       Future execute_index_space(Context ctx, const IndexTaskLauncher &launcher,
-                                 ReductionOpID redop, bool deterministic);
+                                 ReductionOpID redop, bool deterministic,
+                                 std::vector<OutputRequirement> *outputs);
     public:
       PhysicalRegion map_region(Context ctx, 
                                 const InlineLauncher &launcher);

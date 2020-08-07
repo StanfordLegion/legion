@@ -5993,7 +5993,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::execute_task(const TaskLauncher &launcher)
+    Future InnerContext::execute_task(const TaskLauncher &launcher,
+                                      std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6016,7 +6017,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap InnerContext::execute_index_space(
-                                              const IndexTaskLauncher &launcher)
+                                        const IndexTaskLauncher &launcher,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
@@ -6059,7 +6061,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InnerContext::execute_index_space(const IndexTaskLauncher &launcher,
-                                        ReductionOpID redop, bool deterministic)
+                                        ReductionOpID redop, bool deterministic,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
@@ -15041,7 +15044,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplicateContext::execute_task(const TaskLauncher &launcher)
+    Future ReplicateContext::execute_task(const TaskLauncher &launcher,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -15087,7 +15091,7 @@ namespace Legion {
       // If we're doing a local-function task then we can run that with just
       // a normal individual task in each shard since it is safe to duplicate
       if (launcher.local_function_task)
-        return InnerContext::execute_task(launcher);
+        return InnerContext::execute_task(launcher, outputs);
       ReplIndividualTask *task = 
         runtime->get_available_repl_individual_task();
       Future result = task->initialize_task(this, launcher);
@@ -15114,7 +15118,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap ReplicateContext::execute_index_space(
-                                              const IndexTaskLauncher &launcher)
+                                        const IndexTaskLauncher &launcher,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
@@ -15245,7 +15250,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future ReplicateContext::execute_index_space(
-     const IndexTaskLauncher &launcher, ReductionOpID redop, bool deterministic)
+                                        const IndexTaskLauncher &launcher,
+                                        ReductionOpID redop, bool deterministic,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
@@ -19509,7 +19516,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future LeafContext::execute_task(const TaskLauncher &launcher)
+    Future LeafContext::execute_task(const TaskLauncher &launcher,
+                                     std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (launcher.enable_inlining)
@@ -19534,7 +19542,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap LeafContext::execute_index_space(
-                                              const IndexTaskLauncher &launcher)
+                                        const IndexTaskLauncher &launcher,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (!launcher.must_parallelism && launcher.enable_inlining)
@@ -19561,8 +19570,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future LeafContext::execute_index_space(const IndexTaskLauncher &launcher, 
-                                        ReductionOpID redop, bool deterministic)
+    Future LeafContext::execute_index_space(const IndexTaskLauncher &launcher,
+                                        ReductionOpID redop, bool deterministic,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (!launcher.must_parallelism && launcher.enable_inlining)
@@ -21155,26 +21165,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InlineContext::execute_task(const TaskLauncher &launcher)
+    Future InlineContext::execute_task(const TaskLauncher &launcher,
+                                       std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
-      return enclosing->execute_task(launcher);
+      return enclosing->execute_task(launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
     FutureMap InlineContext::execute_index_space(
-                                              const IndexTaskLauncher &launcher)
+                                        const IndexTaskLauncher &launcher,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
-      return enclosing->execute_index_space(launcher);
+      return enclosing->execute_index_space(launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
     Future InlineContext::execute_index_space(const IndexTaskLauncher &launcher,
-                                        ReductionOpID redop, bool deterministic)
+                                        ReductionOpID redop, bool deterministic,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
-      return enclosing->execute_index_space(launcher, redop, deterministic);
+      return enclosing->execute_index_space(
+                                       launcher, redop, deterministic, outputs);
     }
 
     //--------------------------------------------------------------------------

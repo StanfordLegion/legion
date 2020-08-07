@@ -1270,6 +1270,89 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Output Requirement
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::OutputRequirement(void)
+      : RegionRequirement(), field_space(FieldSpace::NO_SPACE),
+        global_indexing(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::OutputRequirement(FieldSpace _field_space,
+                                        const std::set<FieldID> &fields,
+                                        bool _global_indexing /*=false*/)
+      : RegionRequirement(), field_space(_field_space),
+        global_indexing(_global_indexing)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<FieldID>::const_iterator it = fields.begin();
+           it != fields.end(); ++it)
+        RegionRequirement::add_field(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::OutputRequirement(const OutputRequirement &other)
+      : RegionRequirement(static_cast<const RegionRequirement&>(other)),
+        field_space(other.field_space),
+        global_indexing(other.global_indexing)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::~OutputRequirement(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement& OutputRequirement::operator=(
+                                                   const OutputRequirement &rhs)
+    //--------------------------------------------------------------------------
+    {
+      static_cast<RegionRequirement&>(*this) =
+        static_cast<const OutputRequirement&>(rhs);
+      field_space = rhs.field_space;
+      global_indexing = rhs.global_indexing;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool OutputRequirement::operator==(const OutputRequirement &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (field_space != rhs.field_space ||
+          global_indexing != rhs.global_indexing)
+        return false;
+      return static_cast<const RegionRequirement&>(*this) ==
+             static_cast<const OutputRequirement&>(rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    bool OutputRequirement::operator<(const OutputRequirement &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (field_space < rhs.field_space)
+        return true;
+      else if(field_space > rhs.field_space)
+        return false;
+      else
+      {
+        if (global_indexing < rhs.global_indexing)
+          return true;
+        else if (global_indexing > rhs.global_indexing)
+          return false;
+        else
+          return static_cast<const RegionRequirement&>(*this) <
+                 static_cast<const OutputRequirement&>(rhs);
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // Index Space Requirement 
     /////////////////////////////////////////////////////////////
 
@@ -5332,27 +5415,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_task(Context ctx, 
-                                          const TaskLauncher &launcher)
+    Future Runtime::execute_task(Context ctx, const TaskLauncher &launcher,
+                             std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_task(ctx, launcher);
+      return runtime->execute_task(ctx, launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
-    FutureMap Runtime::execute_index_space(Context ctx, 
-                                              const IndexTaskLauncher &launcher)
+    FutureMap Runtime::execute_index_space(
+                             Context ctx, const IndexTaskLauncher &launcher,
+                             std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_index_space(ctx, launcher);
+      return runtime->execute_index_space(ctx, launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_index_space(Context ctx, 
-     const IndexTaskLauncher &launcher, ReductionOpID redop, bool deterministic)
+    Future Runtime::execute_index_space(
+                             Context ctx, const IndexTaskLauncher &launcher,
+                             ReductionOpID redop, bool deterministic,
+                             std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_index_space(ctx, launcher, redop, deterministic);
+      return runtime->execute_index_space(
+                                  ctx, launcher, redop, deterministic, outputs);
     }
 
     //--------------------------------------------------------------------------
@@ -5386,7 +5473,7 @@ namespace Legion {
       TaskLauncher launcher(task_id, arg, predicate, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
-      return runtime->execute_task(ctx, launcher);
+      return runtime->execute_task(ctx, launcher, NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -5408,7 +5495,7 @@ namespace Legion {
                                  predicate, must_parallelism, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
-      return runtime->execute_index_space(ctx, launcher);
+      return runtime->execute_index_space(ctx, launcher, NULL);
     }
 
 
@@ -5433,7 +5520,7 @@ namespace Legion {
                                  predicate, must_parallelism, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
-      return runtime->execute_index_space(ctx, launcher, reduction, false);
+      return runtime->execute_index_space(ctx, launcher, reduction, false,NULL);
     }
 
     //--------------------------------------------------------------------------

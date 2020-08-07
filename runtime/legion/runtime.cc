@@ -15468,32 +15468,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_task(Context ctx, const TaskLauncher &launcher)
+    Future Runtime::execute_task(Context ctx, const TaskLauncher &launcher,
+                                 std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     { 
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context execute task!");
-      return ctx->execute_task(launcher); 
+      return ctx->execute_task(launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
-    FutureMap Runtime::execute_index_space(Context ctx, 
-                                           const IndexTaskLauncher &launcher)
+    FutureMap Runtime::execute_index_space(
+                                  Context ctx, const IndexTaskLauncher &launcher,
+                                  std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context execute index space!");
-      return ctx->execute_index_space(launcher); 
+      return ctx->execute_index_space(launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_index_space(Context ctx, 
-     const IndexTaskLauncher &launcher, ReductionOpID redop, bool deterministic)
+    Future Runtime::execute_index_space(
+                                 Context ctx, const IndexTaskLauncher &launcher,
+                                 ReductionOpID redop, bool deterministic,
+                                 std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context execute index space!");
-      return ctx->execute_index_space(launcher, redop, deterministic); 
+      return ctx->execute_index_space(launcher, redop, deterministic, outputs);
     }
 
     //--------------------------------------------------------------------------
