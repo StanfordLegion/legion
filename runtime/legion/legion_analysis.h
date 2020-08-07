@@ -900,7 +900,8 @@ namespace Legion {
       void initialize_close_operations(LogicalState &state, 
                                        Operation *creator,
                                        const LogicalTraceInfo &trace_info,
-                                       const bool check_for_refinements);
+                                       const bool check_for_refinements,
+                                       const bool has_next_child);
       void perform_dependence_analysis(const LogicalUser &current,
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
@@ -2688,7 +2689,8 @@ namespace Legion {
       void invalidate_trackers(const FieldMask &mask, bool collective,
                                std::set<RtEvent> &applied_events);
       void clone_from(EquivalenceSet *src, const FieldMask &src_mask,
-                      std::set<RtEvent> &applied_events);
+                      std::set<RtEvent> &applied_events,
+                      IndexSpaceExpression *src_expr = NULL);
       void overwrite_from(EquivalenceSet *src, const FieldMask &src_mask,
                           std::set<RtEvent> &applied_events);
     protected:

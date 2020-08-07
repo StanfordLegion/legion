@@ -8845,7 +8845,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MergeCloseOp::record_refinements(const FieldMask &refinements)
+    void MergeCloseOp::record_refinements(const FieldMask &refinements, 
+                                          bool overwrite)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8855,6 +8856,7 @@ namespace Legion {
       assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       refinement_mask = refinements;
+      refinement_overwrite = overwrite;
     }
 
     //--------------------------------------------------------------------------
@@ -8862,6 +8864,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_close();
+      refinement_overwrite = false;
     }
     
     //--------------------------------------------------------------------------
@@ -8870,6 +8873,7 @@ namespace Legion {
     {
       deactivate_close();
       close_mask.clear();
+      version_info.clear();
       refinement_mask.clear();
       runtime->free_merge_close_op(this);
     }
@@ -8906,6 +8910,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MergeCloseOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!!refinement_mask && !refinement_overwrite)
+      {
+#ifdef DEBUG_LEGION
+        assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        // Compute the current equivalence sets for this region
+        std::set<RtEvent> ready_events;
+        const ContextID ctx = parent_ctx->get_context().get_id();
+        RegionNode *region_node = runtime->forest->get_node(requirement.region);
+        region_node->perform_versioning_analysis(ctx, parent_ctx, &version_info,
+                               refinement_mask, this, 0/*index*/, ready_events);
+        if (!ready_events.empty())
+          enqueue_ready_operation(Runtime::merge_events(ready_events));
+        else
+          enqueue_ready_operation();
+      }
+      else
+        enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
     void MergeCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
@@ -8917,13 +8945,29 @@ namespace Legion {
         std::set<RtEvent> map_applied_conditions;
         const ContextID ctx = parent_ctx->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region);
-        region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
-                                  false/*collective*/, map_applied_conditions);
         // Make a new equivalence set and record it at this node
         const AddressSpaceID local_space = runtime->address_space;
         EquivalenceSet *set = new EquivalenceSet(runtime,
             runtime->get_available_distributed_id(),
             local_space, local_space, region_node, true/*register now*/);
+        // Merge over the state from the old equivalence sets if not overwriting
+        if (!refinement_overwrite)
+        {
+          const FieldMaskSet<EquivalenceSet> &previous_sets = 
+            version_info.get_equivalence_sets();
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                previous_sets.begin(); it != previous_sets.end(); it++)
+          {
+            set->clone_from(it->first, it->second, map_applied_conditions);
+            // Also add valid references here to make sure that the previous
+            // sets are not collected until these clones are done. We know
+            // we're already holding valid references to them here on this
+            // node so there is no need for a mutator
+            it->first->add_base_valid_ref(CONTEXT_REF);
+          }
+        }
+        region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
+                                  false/*collective*/, map_applied_conditions);
         region_node->record_refinement(ctx, set, refinement_mask,
                                        map_applied_conditions);
         if (!map_applied_conditions.empty())
@@ -8936,17 +8980,27 @@ namespace Legion {
       complete_execution();
     }
 
-#ifdef LEGION_SPY
     //--------------------------------------------------------------------------
     void MergeCloseOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
+      if (!!refinement_mask && !refinement_overwrite)
+      {
+        // Remove the references to the previous equivalence sets we added
+        const FieldMaskSet<EquivalenceSet> &previous_sets = 
+          version_info.get_equivalence_sets();
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              previous_sets.begin(); it != previous_sets.end(); it++)
+          if (it->first->remove_base_valid_ref(CONTEXT_REF))
+            delete it->first;
+      }
+#ifdef LEGION_SPY
       // Still need this to record that this operation is done for LegionSpy
       LegionSpy::log_operation_events(unique_op_id, 
           ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
       complete_operation();
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Post Close Operation 
@@ -9589,6 +9643,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_internal();
+      version_info.clear();
       make_from.clear();
     }
 
@@ -9644,10 +9699,35 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
+    void RefinementOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> ready_events;
+      const ContextID ctx = parent_ctx->get_context().get_id();
+      to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
+                make_from.get_valid_mask(), this, 0/*index*/, ready_events);
+      if (!ready_events.empty())
+        enqueue_ready_operation(Runtime::merge_events(ready_events));
+      else
+        enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
     void RefinementOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> map_applied_conditions;
+      // Record valid references on all our equivalence sets so that they
+      // will not be collected until after we are done with our cloning
+      // No need for a mutator here since we know our context is already
+      // holding valid references to them on this very same node
+      // We'll remove these in the completion stage once we know all
+      // the mapping effects are done
+      const FieldMaskSet<EquivalenceSet> &previous_sets = 
+        version_info.get_equivalence_sets();
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            previous_sets.begin(); it != previous_sets.end(); it++)
+        it->first->add_base_valid_ref(CONTEXT_REF);
       // First go through and invalidate the current refinements for
       // the regions that we are updating
       const ContextID ctx = parent_ctx->get_context().get_id();
@@ -9655,7 +9735,7 @@ namespace Legion {
             false/*self*/, false/*collective*/, map_applied_conditions);
       // Now we can make new equivalence sets for each of the subregions
       // in the partitions that we should be making refinements from
-      const AddressSpaceID local_space = runtime->address_space;
+      const AddressSpaceID local_space = runtime->address_space; 
       for (FieldMaskSet<PartitionNode>::const_iterator it = 
             make_from.begin(); it != make_from.end(); it++)
       {
@@ -9670,6 +9750,7 @@ namespace Legion {
             EquivalenceSet *set = new EquivalenceSet(runtime,
                 runtime->get_available_distributed_id(),
                 local_space, local_space, child, true/*register now*/);
+            initialize_set(set, it->second, map_applied_conditions);
             child->record_refinement(ctx,set,it->second,map_applied_conditions);
           }
         }
@@ -9684,6 +9765,7 @@ namespace Legion {
             EquivalenceSet *set = new EquivalenceSet(runtime,
                 runtime->get_available_distributed_id(),
                 local_space, local_space, child, true/*register now*/);
+            initialize_set(set, it->second, map_applied_conditions);
             child->record_refinement(ctx,set,it->second,map_applied_conditions);
           }
           delete itr;
@@ -9694,6 +9776,51 @@ namespace Legion {
       else
         complete_mapping();
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::initialize_set(EquivalenceSet *set,
+                   const FieldMask &set_mask, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *child_expr = set->region_node->row_source;
+      const size_t child_expr_volume = child_expr->get_volume();
+      const FieldMaskSet<EquivalenceSet> &previous_sets = 
+        version_info.get_equivalence_sets();
+      // Import state into this equivalence set
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            previous_sets.begin(); it != previous_sets.end(); it++)
+      {
+        // See if the fields overlap first
+        const FieldMask overlap = it->second & set_mask;
+        if (!overlap)
+          continue;
+        IndexSpaceExpression *overlap_expr = 
+          runtime->forest->intersect_index_spaces(child_expr,
+                        it->first->region_node->row_source);
+        if (overlap_expr->is_empty())
+          continue;
+        // See if the source dominates us or just a partial overlap
+        if (overlap_expr->get_volume() == child_expr_volume)
+          set->clone_from(it->first, overlap, applied_events);
+        else
+          set->clone_from(it->first, overlap, applied_events, overlap_expr);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Remove the valid references we added to the equivalence sets
+      // to keep them around until we were done cloning them
+      const FieldMaskSet<EquivalenceSet> &previous_sets = 
+        version_info.get_equivalence_sets();
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            previous_sets.begin(); it != previous_sets.end(); it++)
+        if (it->first->remove_base_valid_ref(CONTEXT_REF))
+          delete it->first;
+      complete_operation();
     }
 
     /////////////////////////////////////////////////////////////

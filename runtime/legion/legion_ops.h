@@ -1825,7 +1825,7 @@ namespace Legion {
       void initialize(InnerContext *ctx, const RegionRequirement &req,
                       const LogicalTraceInfo &trace_info, int close_idx,
                       const FieldMask &close_mask, Operation *create_op);
-      void record_refinements(const FieldMask &refinement_mask);
+      void record_refinements(const FieldMask &refinement_mask, bool overwrite);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1834,15 +1834,16 @@ namespace Legion {
       virtual const FieldMask& get_internal_mask(void) const;
     public:
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-#ifdef LEGION_SPY
       virtual void trigger_complete(void);
-#endif
     protected:
       unsigned parent_req_index; 
     protected:
       FieldMask close_mask;
+      VersionInfo version_info;
       FieldMask refinement_mask;
+      bool refinement_overwrite;
     };
 
     /**
@@ -1972,6 +1973,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       void verify_refinement_mask(const FieldMask &refinement_mask);
 #endif
+    protected:
+      void initialize_set(EquivalenceSet *set, const FieldMask &mask,
+                          std::set<RtEvent> &applied_events);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1979,13 +1983,17 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual const FieldMask& get_internal_mask(void) const;
     public:
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_complete(void);
     protected:
       void activate_refinement(void);
       void deactivate_refinement(void);
     protected:
       // Upper bound node where this refinement is occuring
       RegionNode *to_refine;
+      // The current equivalence sets for the node to be refined
+      VersionInfo version_info;
       // New partitions from which to make refinements
       FieldMaskSet<PartitionNode> make_from;
     };

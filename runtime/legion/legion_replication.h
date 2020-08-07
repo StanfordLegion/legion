@@ -124,6 +124,8 @@ namespace Legion {
       virtual void handle_collective_message(Deserializer &derez);
     public:
       RtEvent get_done_event(void) const;
+      inline bool is_origin(void) const
+        { return (origin == local_shard); }
     protected:
       void send_messages(void) const;
     public:
@@ -1164,9 +1166,13 @@ namespace Legion {
     public:
       void set_repl_close_info(RtBarrier mapped_barrier);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
+      virtual void trigger_complete(void);
     protected:
-      RtBarrier mapped_barrier;
+      RtBarrier mapped_barrier, clone_barrier;
+      ValueBroadcast<DistributedID> *did_collective;
+      std::vector<EquivalenceSet*> local_valid_sets;
     };
 
     /**
@@ -1187,9 +1193,15 @@ namespace Legion {
     public:
       void set_repl_refinement_info(RtBarrier mapped_barrier);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
     protected:
       RtBarrier mapped_barrier;
+      std::vector<ValueBroadcast<DistributedID>*> collective_dids;
+      // Note that this data structure ensures that we do things
+      // for these partitions in a order that is consistent across
+      // shards because all shards will sort the keys the same way
+      std::map<LogicalPartition,PartitionNode*> replicated_partitions;
     };
 
     /**

@@ -1842,7 +1842,7 @@ namespace Legion {
       FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
       region_node->perform_versioning_analysis(ctx.get_id(), context, 
-          &version_info, req.parent, user_mask, op, index, ready_events);
+                  &version_info, user_mask, op, index, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -14565,8 +14565,10 @@ namespace Legion {
         {
           // Generate the close operations         
           // Also check to see if we have any refinements for the close operation
+          const bool check_for_refinements = 
+            (arrived && IS_WRITE(user.usage) && !proj_info.is_projecting());
           closer.initialize_close_operations(state, user.op, trace_info,
-             (arrived && IS_WRITE(user.usage) && !proj_info.is_projecting()));
+                                             check_for_refinements, !arrived);
           // Perform dependence analysis for all the close operations
           closer.perform_dependence_analysis(user, open_below,
                                              state.curr_epoch_users,
@@ -14875,13 +14877,13 @@ namespace Legion {
           assert(is_region());
 #endif
           RegionNode *region_node = as_region_node();
-          RegionRequirement req(region_node->handle, LEGION_READ_WRITE,
+          RegionRequirement req(region_node->handle, LEGION_WRITE_DISCARD,
               LEGION_EXCLUSIVE, region_node->handle);
           region_node->column_source->get_field_set(unversioned,
               trace_info.req.privilege_fields, req.privilege_fields);
           initializer->initialize(context, req, trace_info, trace_info.req_idx,
                                   unversioned, user.op);
-          initializer->record_refinements(unversioned);
+          initializer->record_refinements(unversioned, true/*overwrite*/);
           // These fields are unversioned so there is nothing for 
           // this close operation to depend on
           const GenerationID initializer_gen = initializer->get_generation();
@@ -16451,7 +16453,7 @@ namespace Legion {
             // Generate the close operations         
             // We need to record the version numbers for this node as well
             closer.initialize_close_operations(state, user.op, trace_info,
-                                               false/*check for refinements*/);
+                                 false/*check for refinements*/, !arrived);
             // Perform dependence analysis for all the close operations
             closer.perform_dependence_analysis(user, open_below,
                                                state.curr_epoch_users,
@@ -17954,7 +17956,6 @@ namespace Legion {
     void RegionNode::perform_versioning_analysis(ContextID ctx,
                                                  InnerContext *parent_ctx,
                                                  VersionInfo *version_info,
-                                                 LogicalRegion upper_bound,
                                                  const FieldMask &mask,
                                                  Operation *op, unsigned index,
                                                  std::set<RtEvent> &applied)
@@ -18096,13 +18097,8 @@ namespace Legion {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
       manager.record_refinement(set, mask, parent_mask, applied_events);
-      if (!!parent_mask)
-      {
-#ifdef DEBUG_LEGION
-        assert(parent != NULL);
-#endif
+      if (!!parent_mask && (parent != NULL))
         parent->propagate_refinement(ctx, this, parent_mask, applied_events);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -18113,13 +18109,8 @@ namespace Legion {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
       manager.propagate_refinement(child, mask, parent_mask, applied_events);
-      if (!!parent_mask)
-      {
-#ifdef DEBUG_LEGION
-        assert(parent != NULL);
-#endif
+      if (!!parent_mask && (parent != NULL))
         parent->propagate_refinement(ctx, this, parent_mask, applied_events);
-      }
     }
 
     //--------------------------------------------------------------------------

@@ -1738,9 +1738,7 @@ namespace Legion {
                           std::set<RtEvent> &applied_events, bool collective);
       void handle_created_region_contexts(Deserializer &derez,
                                           std::set<RtEvent> &applied_events);
-    public:
-      virtual RtEvent request_shard_version_data(EqSetTracker *target,
-                      RegionNode *region, const FieldMask &request_mask);
+    public: 
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 
                                             TypeTag type_tag);
@@ -2018,6 +2016,7 @@ namespace Legion {
       virtual MergeCloseOp* get_merge_close_op(void);
       virtual RefinementOp* get_refinement_op(void);
 #endif
+      virtual RtBarrier get_second_gen_close_barrier(void);
     public:
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target,
@@ -2078,6 +2077,12 @@ namespace Legion {
       ShardedPhysicalTemplate* find_or_buffer_trace_update(Deserializer &derez,
                                                          AddressSpaceID source);
       void unregister_trace_template(size_t template_index);
+    public:
+      // Support for making equivalence sets (logical analysis stage only)
+      ShardID get_next_equivalence_set_origin(void);
+      bool replicate_partition_equivalence_sets(PartitionNode *node);
+      virtual RtEvent request_shard_version_data(EqSetTracker *target,
+                      RegionNode *region, const FieldMask &request_mask);
     public:
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
@@ -2164,6 +2169,7 @@ namespace Legion {
       ShardID field_allocator_shard;
       ShardID logical_region_allocator_shard;
       ShardID dynamic_id_allocator_shard;
+      ShardID equivalence_set_allocator_shard;
     protected:
       ApBarrier pending_partition_barrier;
       RtBarrier creation_barrier;

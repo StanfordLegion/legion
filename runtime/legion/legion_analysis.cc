@@ -3553,7 +3553,8 @@ namespace Legion {
     void LogicalCloser::initialize_close_operations(LogicalState &state, 
                                              Operation *creator,
                                              const LogicalTraceInfo &trace_info,
-                                             const bool check_for_refinements)
+                                             const bool check_for_refinements,
+                                             const bool has_next_child)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3591,7 +3592,9 @@ namespace Legion {
         {
           // Record that this close op should make a new equivalence
           // set at this region and invalidate all the ones below
-          close_op->record_refinements(refinement_mask);
+          const bool overwriting = HAS_WRITE_DISCARD(user.usage) &&
+                    !has_next_child && !user.op->is_predicated_op();
+          close_op->record_refinements(refinement_mask, overwriting);
 #ifdef DEBUG_LEGION
           assert(state.owner->is_region());
 #endif
@@ -14862,15 +14865,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-#ifdef DEBUG_LEGION
-      assert((disjoint_complete_children.find(child) == 
-              disjoint_complete_children.end()) ||
-             (disjoint_complete_children[child] * mask));
-#endif
-      if (disjoint_complete_children.insert(child, mask))
+      if (child != NULL)
       {
-        WrapperReferenceMutator mutator(applied_events);
-        child->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
+#ifdef DEBUG_LEGION
+        assert((disjoint_complete_children.find(child) == 
+                disjoint_complete_children.end()) ||
+               (disjoint_complete_children[child] * mask));
+#endif
+        if (disjoint_complete_children.insert(child, mask))
+        {
+          WrapperReferenceMutator mutator(applied_events);
+          child->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
+        }
       }
       parent_mask = mask;
       if (!!disjoint_complete)

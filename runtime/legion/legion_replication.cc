@@ -1040,6 +1040,8 @@ namespace Legion {
     {
       activate_close();
       mapped_barrier = RtBarrier::NO_RT_BARRIER;
+      clone_barrier = RtBarrier::NO_RT_BARRIER;
+      did_collective = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1047,6 +1049,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_close();
+      if (did_collective != NULL)
+        delete did_collective;
+      local_valid_sets.clear();
       runtime->free_repl_merge_close_op(this);
     }
 
@@ -1067,7 +1072,63 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
 #endif
+      if (!!refinement_mask)
+      {
+#ifdef DEBUG_LEGION
+        assert(did_collective == NULL);
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        const ShardID origin = repl_ctx->get_next_equivalence_set_origin();
+        const CollectiveID collective_id = 
+         repl_ctx->get_next_collective_index(COLLECTIVE_LOC_20,true/*logical*/);
+        did_collective =
+          new ValueBroadcast<DistributedID>(collective_id, repl_ctx, origin);
+        if (did_collective->is_origin())
+        {
+          const DistributedID did = runtime->get_available_distributed_id();
+          did_collective->broadcast(did);
+        }
+        if (!refinement_overwrite)
+        {
+#ifdef DEBUG_LEGION
+          assert(!clone_barrier.exists());
+#endif
+          // We know that the clone barrier and he mapped barrier will
+          // need to trigger in order, so get another generation of the
+          // previous mapped barrier
+          clone_barrier = mapped_barrier;
+          mapped_barrier = repl_ctx->get_second_gen_close_barrier();
+        }
+      }
+    }
 
+    //--------------------------------------------------------------------------
+    void ReplMergeCloseOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> ready_events;
+      if ((did_collective != NULL) && !did_collective->is_origin())
+      {
+        const RtEvent ready = 
+          did_collective->perform_collective_wait(false/*block*/);
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
+      }
+      if (!!refinement_mask && !refinement_overwrite)
+      {
+        const ContextID ctx = parent_ctx->get_context().get_id();
+        RegionNode *region_node = runtime->forest->get_node(requirement.region);
+        region_node->perform_versioning_analysis(ctx, parent_ctx, &version_info,
+                               refinement_mask, this, 0/*index*/, ready_events);
+      }
+      if (!ready_events.empty())
+        enqueue_ready_operation(Runtime::merge_events(ready_events));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -1077,7 +1138,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
 #endif
-#if 0
       if (!!refinement_mask)
       {
 #ifdef DEBUG_LEGION
@@ -1085,26 +1145,81 @@ namespace Legion {
         ReplicateContext *repl_ctx = 
           dynamic_cast<ReplicateContext*>(parent_ctx);
         assert(repl_ctx != NULL);
+        assert(did_collective != NULL);
 #else
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
         std::set<RtEvent> map_applied_conditions;
         const ContextID ctx = parent_ctx->get_context().get_id();
-        RegionNode *region_node = runtime->forest->get_node(requirement.region);
+        RegionNode *region_node = runtime->forest->get_node(requirement.region); 
+        // Make a new equivalence set and record it at this node
+        const DistributedID did = did_collective->get_value(false/*block*/);
+        EquivalenceSet *set = 
+          repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
+                                                        region_node, did); 
+        // Merge over the state from the old equivalence sets if not overwriting
+        if (!refinement_overwrite)
+        {
+          const FieldMaskSet<EquivalenceSet> &previous_sets = 
+            version_info.get_equivalence_sets();
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                previous_sets.begin(); it != previous_sets.end(); it++)
+          {
+            set->clone_from(it->first, it->second, map_applied_conditions);
+            // This is really tricky! We know that one shard is holding a
+            // reference to each of these equivalence sets, so see if it is.
+            // No shard is going to attempt to remove their reference until
+            // everybody has mapped so we know that there are no races with
+            // the cloning operations.
+            if (it->first->check_valid_and_increment(CONTEXT_REF))
+              local_valid_sets.push_back(it->first);
+          }
+#ifdef DEBUG_LEGION
+          assert(clone_barrier.exists());
+#endif
+          // Make sure everyone is done adding their references before
+          // we remove the valid references being held in the contexts
+          // by any of the shards
+          Runtime::phase_barrier_arrive(clone_barrier, 1/*count*/);
+          clone_barrier.wait();
+        }
+        // Invalidate the old refinement
         region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
           repl_ctx->shard_manager->is_total_sharding(), map_applied_conditions);
-        // Make a new equivalence set and record it at this node
-        const AddressSpaceID local_space = runtime->address_space;
-        
-
-
+        // Register this refinement in the tree 
+        region_node->record_refinement(ctx, set, refinement_mask, 
+                                       map_applied_conditions);
+        if (!map_applied_conditions.empty())
+          Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
+              Runtime::merge_events(map_applied_conditions));
+        else
+          Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
       }
       else // Arrive on our barrier
-#endif
         Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
       // Then complete the mapping once the barrier has triggered
       complete_mapping(mapped_barrier);
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMergeCloseOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!local_valid_sets.empty())
+      {
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              local_valid_sets.begin(); it != local_valid_sets.end(); it++)
+          if ((*it)->remove_base_valid_ref(CONTEXT_REF))
+            delete (*it);
+        local_valid_sets.clear();
+      }
+#ifdef LEGION_SPY
+      // Still need this to record that this operation is done for LegionSpy
+      LegionSpy::log_operation_events(unique_op_id, 
+          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
+      complete_operation();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1155,6 +1270,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_refinement();
+      if (!collective_dids.empty())
+      {
+        for (std::vector<ValueBroadcast<DistributedID>*>::const_iterator it =
+              collective_dids.begin(); it != collective_dids.end(); it++)
+          delete (*it);
+        collective_dids.clear();
+      }
+      replicated_partitions.clear();
       runtime->free_repl_refinement_op(this);
     }
 
@@ -1174,8 +1297,165 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
+      // Iterate through each of the partitions and see if we are going to
+      // shard them or not when making equivalence sets
+      size_t total_replicate_subregions = 0;
+      for (FieldMaskSet<PartitionNode>::const_iterator it =
+            make_from.begin(); it != make_from.end(); it++)
+      {
+        if (repl_ctx->replicate_partition_equivalence_sets(it->first))
+        {
+          replicated_partitions[it->first->handle] = it->first;
+          total_replicate_subregions += it->first->get_num_children();
+        }
+      }
+      if (total_replicate_subregions > 0)
+      {
+        // Create collective dids for all subregions of the replicate partitions
+        collective_dids.resize(total_replicate_subregions);
+        for (unsigned idx = 0; idx < total_replicate_subregions; idx++)
+        {
+          const ShardID origin = repl_ctx->get_next_equivalence_set_origin();
+          const CollectiveID collective_id = 
+            repl_ctx->get_next_collective_index(COLLECTIVE_LOC_21,
+                                                true/*logical*/);
+          collective_dids[idx] =
+            new ValueBroadcast<DistributedID>(collective_id, repl_ctx, origin);
+          if (collective_dids[idx]->is_origin())
+          {
+            const DistributedID did = runtime->get_available_distributed_id();
+            collective_dids[idx]->broadcast(did);
+          }
+        }
+      }
     }
+
+#if 0
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!collective_dids.empty())
+      {
+        std::set<RtEvent> ready_events;
+        for (std::vector<ValueBroadcast<DistributedID>*>::const_iterator it =
+              collective_dids.begin(); it != collective_dids.end(); it++)
+        {
+          if ((*it)->is_origin())
+            continue;
+          RtEvent ready_event = (*it)->perform_collective_wait(false/*block*/);
+          if (ready_event.exists() && !ready_event.has_triggered())
+            ready_events.insert(ready_event);
+        }
+        if (!ready_events.empty())
+          enqueue_ready_operation(Runtime::merge_events(ready_events));
+        else
+          enqueue_ready_operation();
+      }
+      else
+        enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapped_barrier.exists());
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+      assert(replicated_partitions.size() <= make_from.size());
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      std::set<RtEvent> map_applied_conditions;
+      // First go through and invalidate the current refinements for
+      // the regions that we are updating
+      const ContextID ctx = parent_ctx->get_context().get_id();
+      to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
+            false/*self*/, true/*collective*/, map_applied_conditions);
+      if (make_from.size() != replicated_partitions.size())
+      {
+        // First make the equivalence sets for our sharded partitions
+        for (FieldMaskSet<PartitionNode>::const_iterator it =
+              make_from.begin(); it != make_from.end(); it++)
+        {
+          // Skip any partitions which are going to be replicated
+          if (replicated_partitions.find(it->first->handle) != 
+              replicated_partitions.end())
+            continue;
+          // We're not actually going to make the equivalence sets here
+          // Instead we're going to just fill in the right data structure
+          // on the partition so that any traversals of the children
+          // will ping the context to figure out who the owner is. The
+          // actual owner of the initial equivalence set will be done
+          // with a first touch policy so that the first writer will
+          // the one to make the equivalence sets
+          it->first->propagate_refinement(ctx, NULL/*no child*/, 
+                                          it->second, map_applied_conditions);
+        }
+      }
+      if (!replicated_partitions.empty())
+      {
+        // Now make the replicated partitions
+        unsigned did_index = 0;
+        for (std::map<LogicalPartition,PartitionNode*>::const_iterator it =
+              replicated_partitions.begin(); it != 
+              replicated_partitions.end(); it++)
+        {
+          IndexPartNode *index_part = it->second->row_source;
+          const FieldMask &mask = make_from[it->second];
+          // Iterate over each child and make an equivalence set  
+          if (index_part->total_children == index_part->max_linearized_color)
+          {
+            for (LegionColor color = 0; 
+                  color < index_part->total_children; color++)
+            {
+              RegionNode *child = it->second->get_child(color);
+              const DistributedID did = 
+                collective_dids[did_index++]->get_value(false/*block*/);
+              EquivalenceSet *set = 
+                repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
+                                                                    child, did);
+              child->record_refinement(ctx, set, mask, map_applied_conditions);
+            }
+          }
+          else
+          {
+            ColorSpaceIterator *itr = 
+              index_part->color_space->create_color_space_iterator();
+            while (itr->is_valid())
+            {
+              const LegionColor color = itr->yield_color();
+              RegionNode *child = it->second->get_child(color);
+              const DistributedID did = 
+                collective_dids[did_index++]->get_value(false/*block*/);
+              EquivalenceSet *set = 
+                repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
+                                                                    child, did);
+              child->record_refinement(ctx, set, mask, map_applied_conditions);
+            }
+            delete itr;
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(did_index == collective_dids.size());
+#endif
+      }
+      if (!map_applied_conditions.empty())
+        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
+            Runtime::merge_events(map_applied_conditions));
+      else
+        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+      complete_mapping(mapped_barrier);
+      complete_execution();
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Repl Fill Op 

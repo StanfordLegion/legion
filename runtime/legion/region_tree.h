@@ -3807,7 +3807,6 @@ namespace Legion {
       void perform_versioning_analysis(ContextID ctx, 
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,
-                                       LogicalRegion upper_bound,
                                        const FieldMask &version_mask,
                                        Operation *op, unsigned index,
                                        std::set<RtEvent> &ready_events);

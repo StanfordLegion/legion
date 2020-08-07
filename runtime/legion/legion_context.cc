@@ -9731,10 +9731,10 @@ namespace Legion {
         index_space_allocator_shard(0), index_partition_allocator_shard(0), 
         field_space_allocator_shard(0), field_allocator_shard(0), 
         logical_region_allocator_shard(0), dynamic_id_allocator_shard(0), 
-        next_available_collective_index(0), next_logical_collective_index(1), 
-        next_physical_template_index(0), next_replicate_bar_index(0), 
-        next_logical_bar_index(0), unordered_ops_counter(0), 
-        unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
+        equivalence_set_allocator_shard(0), next_available_collective_index(0),
+        next_logical_collective_index(1), next_physical_template_index(0), 
+        next_replicate_bar_index(0), next_logical_bar_index(0), 
+        unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
     //--------------------------------------------------------------------------
     {
       // Get our allocation barriers
@@ -16200,6 +16200,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtBarrier ReplicateContext::get_second_gen_close_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      const unsigned close_index = (next_close_mapped_bar_index > 0) ?
+        (next_close_mapped_bar_index-1) : (close_mapped_barriers.size() - 1);
+      RtBarrier &mapped_bar = close_mapped_barriers[close_index]; 
+      const RtBarrier result = mapped_bar;
+      // Advance the phase for the next time through
+      advance_logical_barrier(mapped_bar, total_shards);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
 #ifdef DEBUG_LEGION_COLLECTIVES
     RefinementOp* ReplicateContext::get_refinement_op(const LogicalUser &user,
                                                       RegionTreeNode *node)
@@ -17688,6 +17701,35 @@ namespace Legion {
       physical_templates.erase(index);
 #endif
     }
+
+    //--------------------------------------------------------------------------
+    ShardID ReplicateContext::get_next_equivalence_set_origin(void)
+    //--------------------------------------------------------------------------
+    {
+      const ShardID result = equivalence_set_allocator_shard++;
+      if (equivalence_set_allocator_shard == total_shards)
+        equivalence_set_allocator_shard = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplicateContext::replicate_partition_equivalence_sets(
+                                                            PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      // This is the heuristic that decides whether or not we should replicate
+      // or shard the equivalence sets for a partition node
+      // For now we'll shard as long as there are at least as many children
+      // in the partition as there are shards, otherwise we'll replicate
+      return (node->get_num_children() < total_shards);
+    }
+
+#if 0
+    //--------------------------------------------------------------------------
+    RtEvent ReplicateContext::request_shard_version_data(EqSetTracker *target,
+                              RegionNode *region, const FieldMask &request_mask)
+    //--------------------------------------------------------------------------
+#endif
 
     //--------------------------------------------------------------------------
     RtBarrier ReplicateContext::get_next_mapping_fence_barrier(void)
