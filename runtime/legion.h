@@ -1072,24 +1072,23 @@ namespace Legion {
      * \struct OutputRequirement
      * Output requirements are a special kind of region requirements to inform
      * the runtime that the task produces variable size outputs. Unlike
-     * normal region requirements that name regions and partitions, output
-     * requirements are filled in by the runtime with the names of the output
-     * regions, and partitions in case of index space launch, at the time when
-     * the task is launched. Output requirements still pick the output field IDs
-     * and their field space.
+     * normal region requirements that name regions and partitions, the runtime
+     * will create fresh region and partition names for output requirements
+     * right after the task is launched. Output requirements still pick
+     * field IDs and the field space for the output regions.
      *
-     * The output region is always 1D in case of individual task launch.
-     * For index space launches, the runtime gives back the names of a region
-     * and a partition, whose construction is controlled by the indexing mode
-     * specified the output requirement in the following way:
+     * Output regions are always 1D in case of individual task launch and no
+     * partitions will be created by the runtime. For index space launches,
+     * the runtime gives back a fresh region and partition, whose construction
+     * is controlled by the indexing mode specified the output requirement:
      *
-     * 0) For any indexing mode, the output partition is a complete, disjoint
+     * 0) For either indexing mode, the output partition is a complete, disjoint
      *    partition whose color space is identical to the launch domain.
      *
      * 1) When the global indexing is requested, the output region has
      *    a contiguous 1D index space whose volume is the sum of the sizes of
      *    the outputs produced by point tasks. The range of the i-th subregion
-     *    is [S, S + n), where S is the sum of the previous i-1 subregions
+     *    is [S, S+n), where S is the sum of the previous i-1 subregions' sizes
      *    and n is the output size of the i-th point task. The launch domain
      *    must be 1D for the global indexing to be used.
      *
