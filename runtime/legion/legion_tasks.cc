@@ -585,6 +585,7 @@ namespace Legion {
     {
       activate_speculative();
       activate_memoizable();
+      output_region_offset = -1U;
       complete_received = false;
       commit_received = false;
       children_complete = false;
@@ -2491,7 +2492,8 @@ namespace Legion {
         if (version_info.has_version_info())
           continue;
         runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                                                 version_info, ready_events);
+                                                 version_info, ready_events,
+                                                 idx < output_region_offset);
       }
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
@@ -5275,13 +5277,18 @@ namespace Legion {
                                            const TaskLauncher &launcher,
                                            bool track /*=true*/,
                                            bool top_level /*=false*/,
-                                           bool implicit_top_level /*=false*/)
+                                           bool implicit_top_level /*=false*/,
+                              std::vector<OutputRequirement> *outputs /*=NULL*/)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
+      // Remember where the output requirements start to appear
+      output_region_offset = regions.size();
+      if (outputs != NULL)
+        initialize_output_regions(*outputs);
       if (!launcher.futures.empty())
       {
         // Only allow non-empty futures on the way in
@@ -5413,6 +5420,37 @@ namespace Legion {
       set_must_epoch(epoch, index, do_registration);
       FutureMap map = epoch->get_future_map();
       result = map.impl->get_future(index_point, true/*internal only*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::initialize_output_regions(
+                                        std::vector<OutputRequirement> &outputs)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<OutputRequirement>::iterator it = outputs.begin();
+           it != outputs.end(); ++it)
+      {
+        OutputRequirement &req = *it;
+
+        // Create a deferred index space
+        // When this is an individual task, the index space is always 1D.
+        IndexSpace index_space = parent_ctx->create_index_space(
+            get_completion_event(),
+            Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+
+        // Create the output region
+        LogicalRegion region = parent_ctx->create_logical_region(
+            runtime->forest, index_space, req.field_space, false);
+
+        // Set the region back to the output requirement so the caller
+        // can pass it downstream
+        req.region = region;
+        req.parent = region;
+        req.privilege = WRITE_DISCARD;
+
+        // Only copy the RegionRequirement portion of the output requirement
+        regions.push_back(static_cast<RegionRequirement&>(req));
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8437,7 +8475,8 @@ namespace Legion {
         if (version_info.has_version_info())
           continue;
         runtime->forest->perform_versioning_analysis(this, *it, regions[*it],
-                                         version_info, version_ready_events);
+                                         version_info, version_ready_events,
+                                         true);
       }
       Mapper::PremapTaskInput input;
       Mapper::PremapTaskOutput output;

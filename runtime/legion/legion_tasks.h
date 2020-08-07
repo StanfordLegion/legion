@@ -342,6 +342,9 @@ namespace Legion {
       // or committed.
       void trigger_children_complete(void);
       void trigger_children_committed(void);
+    public:
+      inline unsigned get_output_region_offset(void) const
+        { return output_region_offset; }
     protected:
       // Tasks have two requirements to complete:
       // - all speculation must be resolved
@@ -353,6 +356,9 @@ namespace Legion {
       virtual void trigger_task_commit(void) = 0;
     public:
       static void handle_deferred_task_complete(const void *args);
+    protected:
+      // To keep where the output region requirements start
+      unsigned output_region_offset;
     protected:
       // Early mapped regions
       std::map<unsigned/*idx*/,InstanceSet>     early_mapped_regions;
@@ -744,10 +750,13 @@ namespace Legion {
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher, 
                              bool track = true, bool top_level=false,
-                             bool implicit_top_level = false);
+                             bool implicit_top_level = false,
+                             std::vector<OutputRequirement> *outputs = NULL);
       void initialize_must_epoch(MustEpochOp *epoch, unsigned index,
                                  bool do_registration);
       void perform_base_dependence_analysis(void);
+    protected:
+      void initialize_output_regions(std::vector<OutputRequirement> &outputs);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }

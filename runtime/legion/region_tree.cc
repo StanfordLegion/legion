@@ -1819,7 +1819,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
                      unsigned idx, const RegionRequirement &req,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
+                     VersionInfo &version_info, std::set<RtEvent> &ready_events,
+                     bool check_emptiness)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1836,8 +1837,13 @@ namespace Legion {
       FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
       const RtEvent ready = 
-        region_node->perform_versioning_analysis(ctx.get_id(), context, 
-                                     &version_info, req.parent, user_mask, op);
+        region_node->perform_versioning_analysis(ctx.get_id(),
+                                                 context,
+                                                 &version_info,
+                                                 req.parent,
+                                                 user_mask,
+                                                 op,
+                                                 check_emptiness);
       if (ready.exists())
         ready_events.insert(ready);
     }
@@ -1885,7 +1891,8 @@ namespace Legion {
                   const InstanceSet &sources, ApEvent term_event, 
                   InnerContext *context,unsigned init_index,
                   std::map<PhysicalManager*,InstanceView*> &top_views,
-                  std::set<RtEvent> &applied_events)
+                  std::set<RtEvent> &applied_events,
+                  bool check_emptiness)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_INITIALIZE_CONTEXT_CALL);
@@ -1902,7 +1909,8 @@ namespace Legion {
       // Perform the version analysis and make it ready
       const RtEvent eq_ready = 
         top_node->perform_versioning_analysis(ctx.get_id(), context,
-               &init_version_info, req.region, user_mask, context->owner_task);
+               &init_version_info, req.region, user_mask, context->owner_task,
+               check_emptiness);
       // Now get the top-views for all the physical instances
       std::vector<InstanceView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
@@ -17605,7 +17613,8 @@ namespace Legion {
                                                     VersionInfo *version_info,
                                                     LogicalRegion upper_bound,
                                                     const FieldMask &mask,
-                                                    Operation *op)
+                                                    Operation *op,
+                                                    bool check_emptiness)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
@@ -17625,13 +17634,18 @@ namespace Legion {
         {
           const RtEvent ready = 
             parent->parent->perform_versioning_analysis(ctx, parent_ctx,
-                                NULL/*no version info*/, upper_bound, mask, op);
+                                                        NULL/*no version info*/,
+                                                        upper_bound,
+                                                        mask,
+                                                        op,
+                                                        check_emptiness);
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
         }
       }
       return manager.perform_versioning_analysis(parent_ctx, version_info, 
-                                                 this, mask, op);
+                                                 this, mask, op,
+                                                 check_emptiness);
     }
 
     //--------------------------------------------------------------------------

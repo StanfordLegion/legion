@@ -480,7 +480,8 @@ namespace Legion {
       void perform_versioning_analysis(Operation *op, unsigned idx,
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
-                                       std::set<RtEvent> &ready_events);
+                                       std::set<RtEvent> &ready_events,
+                                       bool check_emptiness = true);
       void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
       void invalidate_all_versions(RegionTreeContext ctx);
     public:
@@ -489,7 +490,7 @@ namespace Legion {
                     const InstanceSet &sources, ApEvent term_event, 
                     InnerContext *context, unsigned index,
                     std::map<PhysicalManager*,InstanceView*> &top_views,
-                    std::set<RtEvent> &applied_events);
+                    std::set<RtEvent> &applied_events, bool check_emptiness);
       void invalidate_current_context(RegionTreeContext ctx, bool users_only,
                                       LogicalRegion handle);
       bool match_instance_fields(const RegionRequirement &req1,
@@ -3783,7 +3784,8 @@ namespace Legion {
                                           VersionInfo *version_info,
                                           LogicalRegion upper_bound,
                                           const FieldMask &version_mask,
-                                          Operation *op);
+                                          Operation *op,
+                                          bool check_emptiness);
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,

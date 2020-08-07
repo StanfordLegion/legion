@@ -123,6 +123,10 @@ namespace Legion {
                                             TypeTag type_tag);
       virtual IndexSpace create_index_space(const Future &future,
                                             TypeTag type_tag) = 0;
+      // This variant creates an uninitialized index space
+      // that later is set by a task
+      virtual IndexSpace create_index_space(ApEvent ready,
+                                            TypeTag type_tag);
       virtual IndexSpace union_index_spaces(
                            const std::vector<IndexSpace> &spaces);
       virtual IndexSpace intersect_index_spaces(
@@ -896,7 +900,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source);
+                        AddressSpaceID source, bool check_emptiness);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1464,7 +1468,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle, 
                         IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source);
+                        AddressSpaceID source, bool check_emptiness);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<unsigned>                dummy_indexes;
@@ -1728,7 +1732,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source);
+                        AddressSpaceID source, bool check_emptiness);
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 
                                             TypeTag type_tag);
@@ -2321,7 +2325,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source);
+                        AddressSpaceID source, bool check_emptiness);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                   LogicalRegion parent);
       virtual void record_using_physical_context(LogicalRegion handle);

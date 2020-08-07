@@ -2639,7 +2639,8 @@ namespace Legion {
                                           VersionInfo *version_info,
                                           RegionNode *region_node,
                                           const FieldMask &version_mask,
-                                          Operation *op);
+                                          Operation *op,
+                                          bool check_emptiness);
       virtual void record_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set, 

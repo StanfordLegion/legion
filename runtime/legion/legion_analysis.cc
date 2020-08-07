@@ -14508,7 +14508,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent VersionManager::perform_versioning_analysis(InnerContext *context,
                              VersionInfo *version_info, RegionNode *region_node,
-                             const FieldMask &version_mask, Operation *op)
+                             const FieldMask &version_mask, Operation *op,
+                             bool check_emptiness)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14626,7 +14627,8 @@ namespace Legion {
         IndexSpace handle = region_node->row_source->handle;
         RtEvent ready = context->compute_equivalence_sets(this, 
                       region_node->get_tree_id(), handle, expr, 
-                      remaining_mask, runtime->address_space);
+                      remaining_mask, runtime->address_space,
+                      check_emptiness);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready

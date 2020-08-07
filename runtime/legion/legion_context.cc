@@ -282,6 +282,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace TaskContext::create_index_space(ApEvent ready, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id(), type_tag);
+      DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space %x in task%s (ID %lld)",
+                      handle.id, get_task_name(), get_unique_id());
+#endif
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id);
+      runtime->forest->create_index_space(
+          handle, NULL/*domain*/, did, true/*notify remote*/,
+          0/*expr id*/, ready);
+      register_index_space_creation(handle);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::create_shared_ownership(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -3631,14 +3652,14 @@ namespace Legion {
     RtEvent InnerContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle,
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source)
+                              AddressSpaceID source, bool check_emptiness)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(handle.exists());
 #endif
       EquivalenceSet *root = NULL;
-      if (expr->is_empty())
+      if (check_emptiness && expr->is_empty())
       {
         // Special case for empty expression
         {
@@ -6002,7 +6023,11 @@ namespace Legion {
       if (launcher.predicate == Predicate::FALSE_PRED)
         return predicate_task_false(launcher);
       IndividualTask *task = runtime->get_available_individual_task();
-      Future result = task->initialize_task(this, launcher);
+      Future result = task->initialize_task(this, launcher,
+                                            true/*track parent*/,
+                                            false/*top level*/,
+                                            false/*implicit top level*/,
+                                            outputs);
 #ifdef DEBUG_LEGION
       log_task.debug("Registering new single task with unique id %lld "
                       "and task %s (ID %lld) with high level runtime in "
@@ -8478,7 +8503,8 @@ namespace Legion {
             IS_SIMULT(regions[idx]) || IS_REDUCE(regions[idx]);
           runtime->forest->initialize_current_context(tree_context,
               clone_requirements[idx], restricted, physical_instances[idx],
-              unmap_events[idx], this, idx, top_views, applied_events);
+              unmap_events[idx], this, idx, top_views, applied_events,
+              idx < single_task->get_output_region_offset());
 #ifdef DEBUG_LEGION
           assert(!physical_instances[idx].empty());
 #endif
@@ -9297,9 +9323,11 @@ namespace Legion {
       derez.deserialize(origin);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
+      bool check_emptiness;
+      derez.deserialize(check_emptiness);
 
-      const RtEvent done = local_ctx->compute_equivalence_sets(target_manager, 
-                                           tree_id, handle, expr, mask, origin);
+      const RtEvent done = local_ctx->compute_equivalence_sets(
+          target_manager, tree_id, handle, expr, mask, origin, check_emptiness);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -9744,7 +9772,7 @@ namespace Legion {
     RtEvent TopLevelContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle, 
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source)
+                              AddressSpaceID source, bool check_emptiness)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -10692,7 +10720,7 @@ namespace Legion {
     RtEvent ReplicateContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle,
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source)
+                              AddressSpaceID source, bool check_emptiness)
     //--------------------------------------------------------------------------
     {
       // This one is very similar to the InnerContext version with the 
@@ -10702,7 +10730,7 @@ namespace Legion {
       assert(handle.exists());
 #endif
       EquivalenceSet *root = NULL;
-      if (expr->is_empty())
+      if (check_emptiness && expr->is_empty())
       {
         // Special case for empty expression
         // In this case we don't need to bother having the
@@ -18124,7 +18152,7 @@ namespace Legion {
     RtEvent RemoteContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle,
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source)
+                              AddressSpaceID source, bool check_emptiness)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18146,6 +18174,7 @@ namespace Legion {
         rez.serialize(mask);
         rez.serialize(handle);
         rez.serialize(source);
+        rez.serialize(check_emptiness);
         rez.serialize(ready_event);
       }
       // Send it to the owner space 
