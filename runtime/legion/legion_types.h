@@ -401,28 +401,10 @@ namespace Legion {
       LG_BEGIN_SHUTDOWN_TASK_IDS,
       LG_RETRY_SHUTDOWN_TASK_ID = LG_BEGIN_SHUTDOWN_TASK_IDS,
       // Message ID goes at the end so we can append additional 
-      // message IDs here for the profiler
+      // message IDs here for the profiler and separate meta-tasks
       LG_MESSAGE_ID,
       LG_LAST_TASK_ID, // This one should always be last
-    }; 
-
-    // Runtime task numbering 
-    enum {
-      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
-      LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
-#ifdef LEGION_SEPARATE_META_TASKS
-      LG_LEGION_PROFILING_ID  = LG_TASK_ID+LG_LAST_TASK_ID+1,
-      LG_STARTUP_TASK_ID      = LG_TASK_ID+LG_LAST_TASK_ID+2,
-      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+LG_LAST_TASK_ID+3,
-      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+LG_LAST_TASK_ID+4,
-#else
-      LG_LEGION_PROFILING_ID  = LG_TASK_ID+1,
-      LG_STARTUP_TASK_ID      = LG_TASK_ID+2,
-      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+3,
-      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+4,
-#endif
-    };
+    };  
 
     // Make this a macro so we can keep it close to 
     // declaration of the task IDs themselves
@@ -1115,6 +1097,24 @@ namespace Legion {
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
+
+    // Runtime task numbering 
+    enum {
+      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
+      LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
+#ifdef LEGION_SEPARATE_META_TASKS
+      LG_LEGION_PROFILING_ID  = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+1,
+      LG_STARTUP_TASK_ID      = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+2,
+      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+3,
+      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+4,
+#else
+      LG_LEGION_PROFILING_ID  = LG_TASK_ID+1,
+      LG_STARTUP_TASK_ID      = LG_TASK_ID+2,
+      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+3,
+      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+4,
+#endif
+    };
 
     enum RuntimeCallKind {
       PACK_BASE_TASK_CALL, 
