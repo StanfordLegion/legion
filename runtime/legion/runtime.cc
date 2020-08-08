@@ -7444,7 +7444,7 @@ namespace Legion {
         LegionProfiler::add_message_request(requests, kind, target);
         last_message_event = RtEvent(target.spawn(
 #ifdef LEGION_SEPARATE_META_TASKS
-              LG_TASK_ID + LG_MESSAGE_ID,
+              LG_TASK_ID + LG_MESSAGE_ID + kind,
 #else
               LG_TASK_ID, 
 #endif
@@ -7464,7 +7464,7 @@ namespace Legion {
       {
         last_message_event = RtEvent(target.spawn(
 #ifdef LEGION_SEPARATE_META_TASKS
-                LG_TASK_ID + LG_MESSAGE_ID,
+                LG_TASK_ID + LG_MESSAGE_ID + kind,
 #else
                 LG_TASK_ID, 
 #endif
@@ -23237,9 +23237,19 @@ namespace Legion {
                   no_requests, &it->second, sizeof(it->second))));
 #ifdef LEGION_SEPARATE_META_TASKS
           for (unsigned idx = 0; idx < LG_LAST_TASK_ID; idx++)
-            registered_events.insert(RtEvent(
-                  it->first.register_task(LG_TASK_ID+idx, lg_task,
-                    no_requests, &it->second, sizeof(it->second))));
+          {
+            if (idx == LG_MESSAGE_ID)
+            {
+              for (unsigned msg = 0; msg < LAST_SEND_KIND; msg++)
+                registered_events.insert(RtEvent(
+                    it->first.register_task(LG_TASK_ID+idx+msg, lg_task,
+                        no_requests, &it->second, sizeof(it->second))));
+            }
+            else
+              registered_events.insert(RtEvent(
+                    it->first.register_task(LG_TASK_ID+idx, lg_task,
+                      no_requests, &it->second, sizeof(it->second))));
+          }
 #else
           registered_events.insert(RtEvent(
                 it->first.register_task(LG_TASK_ID, lg_task,
