@@ -1842,7 +1842,8 @@ namespace Legion {
       FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
       region_node->perform_versioning_analysis(ctx.get_id(), context, 
-                  &version_info, user_mask, op, index, ready_events);
+                  &version_info, user_mask, op->get_unique_op_id(), 
+                  runtime->address_space, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -17957,54 +17958,54 @@ namespace Legion {
                                                  InnerContext *parent_ctx,
                                                  VersionInfo *version_info,
                                                  const FieldMask &mask,
-                                                 Operation *op, unsigned index,
+                                                 const UniqueID opid,
+                                                 const AddressSpaceID source,
                                                  std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.perform_versioning_analysis(parent_ctx, version_info, this, 
-              row_source, true/*expr covers*/, mask, op, index, applied);
+              row_source, true/*expr covers*/, mask, opid, source, applied);
     }
     
     //--------------------------------------------------------------------------
     void RegionNode::compute_equivalence_sets(ContextID ctx, 
                                               InnerContext *context,
                                               EqSetTracker *target,
+                                              const AddressSpaceID target_space,
                                               IndexSpaceExpression *expr,
                                               const FieldMask &mask,
-                                              AddressSpaceID source,
+                                              const UniqueID opid,
+                                              const AddressSpaceID source,
                                               std::set<RtEvent> &ready_events,
                                               bool downward_only)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      FieldMask parent_traversal, request_traversal;
+      FieldMask parent_traversal;
       FieldMaskSet<PartitionNode> children_traversal;
-      manager.compute_equivalence_sets(target, mask, source, ready_events,
-        children_traversal, parent_traversal, request_traversal, downward_only);
-      if (!!request_traversal)
+      std::set<RtEvent> deferral_events;
+      manager.compute_equivalence_sets(target, target_space, mask, context,
+          opid, source, ready_events, children_traversal, parent_traversal, 
+          deferral_events, downward_only);
+      if (!deferral_events.empty())
       {
 #ifdef DEBUG_LEGION
         assert(downward_only);
 #endif
-        // This case should only occur in control replication contexts
-        // We expected to see valid data here, but it's not because it
-        // exists in a different shard, so we have to ask the context
-        // to move it in for us and then run the traversal
-        const RtEvent ready_event = 
-         context->request_shard_version_data(&manager, this, request_traversal);
-        if (ready_event.exists() && !ready_event.has_triggered())
+        const RtEvent deferral_event = Runtime::merge_events(deferral_events);
+        if (deferral_event.exists() && !deferral_event.has_triggered())
         {
           // Defer this computation until the version manager data is ready
-          DeferComputeEquivalenceSetArgs args(this, ctx, context, target, expr,
-                                              request_traversal, source);
+          DeferComputeEquivalenceSetArgs args(this, ctx, context, target, 
+                                  target_space, expr, mask, opid, source);
           runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_DEFERRED_PRIORITY, ready_event);
+              LG_THROUGHPUT_DEFERRED_PRIORITY, deferral_event);
           ready_events.insert(args.ready);
         }
         else
-          compute_equivalence_sets(ctx, context, target, expr, 
-              request_traversal, source, ready_events, true/*downward only*/);
+          compute_equivalence_sets(ctx, context, target, target_space, expr,
+              mask, opid, source, ready_events, true/*downward only*/);
       }
       if (!!parent_traversal)
       {
@@ -18012,25 +18013,30 @@ namespace Legion {
         assert(parent != NULL);
         assert(!downward_only);
 #endif
-        parent->compute_equivalence_sets(ctx, context, target, expr, 
-            parent_traversal, source, ready_events, false/*downward only*/);
+        parent->compute_equivalence_sets(ctx, context, target, target_space,
+                                         expr, parent_traversal, opid, source, 
+                                         ready_events, false/*downward only*/);
       }
       if (!children_traversal.empty())
       {
         for (FieldMaskSet<PartitionNode>::const_iterator it = 
               children_traversal.begin(); it != children_traversal.end(); it++)
-          it->first->compute_equivalence_sets(ctx, context, target, expr, 
-                it->second, source, ready_events, true/*downward only*/);
+          it->first->compute_equivalence_sets(ctx, context, target, 
+                                              target_space, expr, it->second, 
+                                              opid, source, ready_events, 
+                                              true/*downward only*/);
       }
     }
 
     //--------------------------------------------------------------------------
     RegionNode::DeferComputeEquivalenceSetArgs::DeferComputeEquivalenceSetArgs(
             RegionNode *proxy, ContextID x, InnerContext *c, EqSetTracker *t, 
-            IndexSpaceExpression *e, const FieldMask &m, AddressSpaceID s)
+            const AddressSpaceID ts, IndexSpaceExpression *e, 
+            const FieldMask &m, const UniqueID id, const AddressSpaceID s)
       : LgTaskArgs<DeferComputeEquivalenceSetArgs>(implicit_provenance),
-        proxy_this(proxy), ctx(x), context(c), target(t), expr(e),
-        mask(new FieldMask(m)), source(s),ready(Runtime::create_rt_user_event())
+        proxy_this(proxy), ctx(x), context(c), target(t), target_space(ts),
+        expr(e), mask(new FieldMask(m)), opid(id), source(s),
+        ready(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
       expr->add_expression_reference();
@@ -18045,8 +18051,8 @@ namespace Legion {
         (const DeferComputeEquivalenceSetArgs*)args;
       std::set<RtEvent> ready_events;
       dargs->proxy_this->compute_equivalence_sets(dargs->ctx, dargs->context,
-          dargs->target, dargs->expr, *(dargs->mask), dargs->source, 
-          ready_events, true/*downward only*/);
+          dargs->target, dargs->target_space, dargs->expr, *(dargs->mask), 
+          dargs->opid, dargs->source, ready_events, true/*downward only*/);
       if (!ready_events.empty())
         Runtime::trigger_event(dargs->ready, 
             Runtime::merge_events(ready_events));
@@ -19424,13 +19430,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PartitionNode::compute_equivalence_sets(ContextID ctx,
-                                                InnerContext *context,
-                                                EqSetTracker *target,
-                                                IndexSpaceExpression *expr,
-                                                const FieldMask &mask,
-                                                AddressSpaceID source,
-                                                std::set<RtEvent> &ready_events,
-                                                bool downward_only)
+                                              InnerContext *context,
+                                              EqSetTracker *target,
+                                              const AddressSpaceID target_space,
+                                              IndexSpaceExpression *expr,
+                                              const FieldMask &mask,
+                                              const UniqueID opid,
+                                              const AddressSpaceID source,
+                                              std::set<RtEvent> &ready_events,
+                                              bool downward_only)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
@@ -19446,21 +19454,22 @@ namespace Legion {
               interfering_children.end(); it++)
         {
           RegionNode *child = get_child(*it);
-          child->compute_equivalence_sets(ctx, context, target, expr, mask, 
-                              source, ready_events, true/*downward only*/);
+          child->compute_equivalence_sets(ctx, context, target, target_space,
+              expr, mask, opid, source, ready_events, true/*downward only*/);
         }
       }
       else
       {
         FieldMask parent_traversal, children_traversal;
-        manager.compute_equivalence_sets(target, mask, source, ready_events,
-                                       parent_traversal, children_traversal);
+        manager.compute_equivalence_sets(mask, parent_traversal, 
+                                         children_traversal);
 #ifdef DEBUG_LEGION
         assert((parent_traversal | children_traversal) == mask);
 #endif
         if (!!parent_traversal)
-          parent->compute_equivalence_sets(ctx, context, target, expr, 
-              parent_traversal, source, ready_events, false/*downward only*/);
+          parent->compute_equivalence_sets(ctx, context, target, target_space,
+              expr, parent_traversal, opid, source, ready_events, 
+              false/*downward only*/);
         if (!!children_traversal)
         {
           std::vector<LegionColor> interfering_children;
@@ -19473,8 +19482,9 @@ namespace Legion {
                 interfering_children.end(); it++)
           {
             RegionNode *child = get_child(*it);
-            child->compute_equivalence_sets(ctx, context, target, expr, 
-               children_traversal, source, ready_events, true/*downward only*/);
+            child->compute_equivalence_sets(ctx, context, target, target_space,
+                expr, children_traversal, opid, source, ready_events, 
+                true/*downward only*/);
           }
         }
       }

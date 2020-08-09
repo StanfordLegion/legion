@@ -87,6 +87,8 @@ namespace Legion {
         { return !equivalence_sets.empty(); }
       inline const FieldMaskSet<EquivalenceSet>& get_equivalence_sets(void)
         const { return equivalence_sets; }
+      inline void swap(FieldMaskSet<EquivalenceSet> &others)
+        { equivalence_sets.swap(others); }
     public:
       void pack_equivalence_sets(Serializer &rez) const;
       void unpack_equivalence_sets(Deserializer &derez, Runtime *runtime,
@@ -2689,8 +2691,7 @@ namespace Legion {
       void invalidate_trackers(const FieldMask &mask, bool collective,
                                std::set<RtEvent> &applied_events);
       void clone_from(EquivalenceSet *src, const FieldMask &src_mask,
-                      std::set<RtEvent> &applied_events,
-                      IndexSpaceExpression *src_expr = NULL);
+                      std::set<RtEvent> &applied_events);
       void overwrite_from(EquivalenceSet *src, const FieldMask &src_mask,
                           std::set<RtEvent> &applied_events);
     protected:
@@ -2751,6 +2752,38 @@ namespace Legion {
     };
 
     /**
+     * \class PendingEquivalenceSet
+     * This is a helper class to store the equivalence sets for
+     * pending refinements where we have computed a new refinement
+     * but haven't made the equivalence set yet to represent it
+     */
+    class PendingEquivalenceSet : public LegionHeapify<PendingEquivalenceSet> {
+    public:
+      PendingEquivalenceSet(RegionNode *region_node);
+      PendingEquivalenceSet(const PendingEquivalenceSet &rhs);
+      ~PendingEquivalenceSet(void);
+    public:
+      PendingEquivalenceSet& operator=(const PendingEquivalenceSet &rhs);
+    public:
+      void record_previous(EquivalenceSet *set, const FieldMask &mask,
+                           std::set<RtEvent> &applied_events);
+      void record_all(VersionInfo &version_info, 
+                      std::set<RtEvent> &applied_events);
+    public:
+      inline const FieldMask& get_valid_mask(void) const
+        { return previous_sets.get_valid_mask(); }
+      EquivalenceSet* compute_refinement(AddressSpaceID suggested_owner,
+                      Runtime *runtime, std::set<RtEvent> &ready_events);
+      bool finalize(const FieldMask &done_mask);
+    public:
+      RegionNode *const region_node;
+    protected:
+      EquivalenceSet *new_set;
+      RtEvent clone_event;
+      FieldMaskSet<EquivalenceSet> previous_sets;
+    };
+
+    /**
      * \class VersionManager
      * The VersionManager class tracks the starting equivalence
      * sets for a given node in the logical region tree. Note
@@ -2805,7 +2838,8 @@ namespace Legion {
                                        IndexSpaceExpression *expr,
                                        const bool expr_covers,
                                        const FieldMask &version_mask,
-                                       Operation *op, unsigned index,
+                                       const UniqueID opid,
+                                       const AddressSpaceID source,
                                        std::set<RtEvent> &ready);
       virtual void record_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
@@ -2816,21 +2850,23 @@ namespace Legion {
       // Call these from region nodes
       void initialize_versioning_analysis(EquivalenceSet *set,
               const FieldMask &mask, std::set<RtEvent> &applied_events);
-      void compute_equivalence_sets(EqSetTracker *target, FieldMask mask,
-                                    AddressSpaceID source,
+      void compute_equivalence_sets(EqSetTracker *target, 
+                                    const AddressSpaceID target_space,
+                                    FieldMask mask, InnerContext *context,
+                                    const UniqueID opid,
+                                    const AddressSpaceID original_source,
                                     std::set<RtEvent> &ready_events,
                                     FieldMaskSet<PartitionNode> &children,
                                     FieldMask &parent_traversal,
-                                    FieldMask &request_traversal,
-                                    bool downward_only) const;
+                                    std::set<RtEvent> &deferral_events,
+                                    const bool downward_only);
+      static void handle_compute_equivalence_sets_response(
+                      Deserializer &derez, Runtime *runtime);
       void record_refinement(EquivalenceSet *set, const FieldMask &mask,
               FieldMask &parent_mask, std::set<RtEvent> &applied_events);
     public:
       // Call these from partition nodes
-      void compute_equivalence_sets(EqSetTracker *target, 
-                                    const FieldMask &mask,
-                                    AddressSpaceID source,
-                                    std::set<RtEvent> &ready_events,
+      void compute_equivalence_sets(const FieldMask &mask,
                                     FieldMask &parent_traversal, 
                                     FieldMask &children_traversal) const;
     public:
@@ -2878,6 +2914,13 @@ namespace Legion {
       // for partition nodes, Some sub-region nodes might only exist
       // in contexts on remote shards.
       FieldMaskSet<RegionTreeNode> disjoint_complete_children;
+      // We are sometimes lazy in filling in the equivalence sets for
+      // disjoint-complete partitions from refinement ops so we can 
+      // pick the logical owner from the first address space to attempt
+      // to touch it. In that case we need a data structure to make
+      // sure that there is only one call going out to the context
+      // at a time for each field to make the equivalence sets.
+      LegionMap<RtUserEvent,FieldMask>::aligned disjoint_complete_ready;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator; 

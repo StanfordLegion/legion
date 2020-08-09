@@ -1196,12 +1196,15 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
     protected:
-      RtBarrier mapped_barrier;
+      RtBarrier mapped_barrier, reference_barrier;
       std::vector<ValueBroadcast<DistributedID>*> collective_dids;
       // Note that this data structure ensures that we do things
       // for these partitions in a order that is consistent across
       // shards because all shards will sort the keys the same way
       std::map<LogicalPartition,PartitionNode*> replicated_partitions;
+      // Version information objects for each of our local regions
+      // that we are own after sharding non-replicated partitions
+      LegionMap<RegionNode*,VersionInfo>::aligned sharded_region_version_infos;
     };
 
     /**
@@ -2145,8 +2148,8 @@ namespace Legion {
       void send_future_map_request(ShardID target, Serializer &rez);
       void handle_future_map_request(Deserializer &derez);
     public:
-      void send_equivalence_set_request(ShardID target, Serializer &rez);
-      void handle_equivalence_set_request(Deserializer &derez);
+      void send_disjoint_complete_request(ShardID target, Serializer &rez);
+      void handle_disjoint_complete_request(Deserializer &derez);
     public:
       void send_intra_space_dependence(ShardID target, Serializer &rez);
       void handle_intra_space_dependence(Deserializer &derez);
@@ -2186,7 +2189,8 @@ namespace Legion {
       static void handle_top_view_request(Deserializer &derez, Runtime *rt,
                                           AddressSpaceID request_source);
       static void handle_top_view_response(Deserializer &derez, Runtime *rt);
-      static void handle_eq_request(Deserializer &derez, Runtime *rt);
+      static void handle_disjoint_complete_request(Deserializer &derez, 
+                                                   Runtime *rt);
       static void handle_intra_space_dependence(Deserializer &derez, 
                                                 Runtime *rt);
       static void handle_broadcast_update(Deserializer &derez, Runtime *rt);

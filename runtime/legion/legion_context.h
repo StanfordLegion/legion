@@ -699,7 +699,7 @@ namespace Legion {
     protected:
       UniqueID current_fence_uid;
 #endif
-    };
+    }; 
 
     class InnerContext : public TaskContext {
     public:
@@ -896,10 +896,14 @@ namespace Legion {
       virtual void compute_task_tree_coordinates(
           std::vector<std::pair<size_t,DomainPoint> > &coordinates);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
-                      RegionNode *region, const FieldMask &mask, 
-                      unsigned parent_index, AddressSpaceID source);
-      virtual RtEvent request_shard_version_data(EqSetTracker *target,
-                      RegionNode *region, const FieldMask &request_mask);
+                      AddressSpaceID target_space, RegionNode *region, 
+                      const FieldMask &mask, const UniqueID opid, 
+                      const AddressSpaceID original_source);
+      void record_pending_disjoint_complete_set(PendingEquivalenceSet *set);
+      virtual bool finalize_disjoint_complete_sets(RegionNode *region,
+                    VersionManager *target, FieldMask mask,
+                    const UniqueID opid, const AddressSpaceID source, 
+                    RtUserEvent ready_event, std::set<RtEvent> &applied_events);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1309,9 +1313,6 @@ namespace Legion {
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
                                bool silence_warnings, bool inlining_enabled);
-#ifdef NEWEQ
-      EquivalenceSet* find_or_create_top_equivalence_set(RegionTreeID tree_id); 
-#endif
     public:
       void clone_local_fields(
           std::map<FieldSpace,std::vector<LocalFieldInfo> > &child_local) const;
@@ -1424,6 +1425,10 @@ namespace Legion {
       std::map<PhysicalManager*,InstanceView*>  instance_top_views;
       std::map<PhysicalManager*,RtUserEvent>    pending_top_views;
     protected:
+      mutable LocalLock                         pending_set_lock;
+      std::map<RegionNode*,
+         std::list<PendingEquivalenceSet*> >    pending_equivalence_sets;
+    protected:
       mutable LocalLock                       remote_lock;
       std::map<AddressSpaceID,RemoteContext*> remote_instances;
     protected:
@@ -1470,8 +1475,9 @@ namespace Legion {
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events, bool collective);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
-                          RegionNode *region, const FieldMask &mask, 
-                          unsigned parent_index, AddressSpaceID source);
+                      AddressSpaceID target_space, RegionNode *region, 
+                      const FieldMask &mask, const UniqueID opid, 
+                      const AddressSpaceID original_source);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<unsigned>                dummy_indexes;
@@ -1542,6 +1548,20 @@ namespace Legion {
         std::map<ShardID,RtEvent> ready_deps;
         std::map<ShardID,RtUserEvent> pending_deps;
       };
+    public:
+      struct DeferDisjointCompleteResponseArgs :
+        public LgTaskArgs<DeferDisjointCompleteResponseArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_DISJOINT_COMPLETE_TASK_ID;
+      public:
+        DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *target,
+            FieldMaskSet<EquivalenceSet> &sets, RtUserEvent done_event);
+      public:
+        VersionManager *const target;
+        FieldMaskSet<EquivalenceSet> *const sets;
+        const RtUserEvent done_event;
+      };
+    public:
       enum ReplicateAPICall {
         REPLICATE_PERFORM_REGISTRATION_CALLBACK,
         REPLICATE_CONSENSUS_MATCH,
@@ -2017,6 +2037,7 @@ namespace Legion {
       virtual RefinementOp* get_refinement_op(void);
 #endif
       virtual RtBarrier get_second_gen_close_barrier(void);
+      virtual RtBarrier get_second_gen_refinement_barrier(void);
     public:
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target,
@@ -2034,10 +2055,12 @@ namespace Legion {
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
-      void handle_equivalence_set_request(Deserializer &derez);
-      void handle_equivalence_set_response(RegionTreeID tree_id, 
-                                           EquivalenceSet *result);
-      static void handle_eq_response(Deserializer &derez, Runtime *rt);
+      void handle_disjoint_complete_request(Deserializer &derez);
+      static void handle_disjoint_complete_response(Deserializer &derez, 
+                                                    Runtime *runtime);
+      static void handle_defer_disjoint_complete_response(const void *args);
+      static void finalize_disjoint_complete_response(VersionManager *target,
+            RtUserEvent done_event, const FieldMaskSet<EquivalenceSet> &sets);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
@@ -2080,9 +2103,11 @@ namespace Legion {
     public:
       // Support for making equivalence sets (logical analysis stage only)
       ShardID get_next_equivalence_set_origin(void);
-      bool replicate_partition_equivalence_sets(PartitionNode *node);
-      virtual RtEvent request_shard_version_data(EqSetTracker *target,
-                      RegionNode *region, const FieldMask &request_mask);
+      bool replicate_partition_equivalence_sets(PartitionNode *node) const;
+      virtual bool finalize_disjoint_complete_sets(RegionNode *region,
+                    VersionManager *target, FieldMask mask,
+                    const UniqueID opid, const AddressSpaceID source, 
+                    RtUserEvent ready_event, std::set<RtEvent> &applied_events);
     public:
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
@@ -2347,8 +2372,9 @@ namespace Legion {
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
-                          RegionNode *region, const FieldMask &mask, 
-                          unsigned parent_index, AddressSpaceID source);
+                      AddressSpaceID target_space, RegionNode *region, 
+                      const FieldMask &mask, const UniqueID opid, 
+                      const AddressSpaceID original_source);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);

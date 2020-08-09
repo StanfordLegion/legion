@@ -7650,7 +7650,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_equivalence_set_request(Deserializer &derez)
+    void ShardTask::handle_disjoint_complete_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7662,7 +7662,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         static_cast<ReplicateContext*>(execution_context);
 #endif
-      repl_ctx->handle_equivalence_set_request(derez);
+      repl_ctx->handle_disjoint_complete_request(derez);
     }
 
     //--------------------------------------------------------------------------

@@ -8923,7 +8923,7 @@ namespace Legion {
         const ContextID ctx = parent_ctx->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region);
         region_node->perform_versioning_analysis(ctx, parent_ctx, &version_info,
-                               refinement_mask, this, 0/*index*/, ready_events);
+           refinement_mask, unique_op_id, runtime->address_space, ready_events);
         if (!ready_events.empty())
           enqueue_ready_operation(Runtime::merge_events(ready_events));
         else
@@ -9705,7 +9705,8 @@ namespace Legion {
       std::set<RtEvent> ready_events;
       const ContextID ctx = parent_ctx->get_context().get_id();
       to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
-                make_from.get_valid_mask(), this, 0/*index*/, ready_events);
+                                    make_from.get_valid_mask(), unique_op_id, 
+                                    runtime->address_space, ready_events);
       if (!ready_events.empty())
         enqueue_ready_operation(Runtime::merge_events(ready_events));
       else
@@ -9716,29 +9717,14 @@ namespace Legion {
     void RefinementOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      // Go through and build the pending refinements so we get valid
+      // references on all the old equivalence sets before they are invalidated
       std::set<RtEvent> map_applied_conditions;
-      // Record valid references on all our equivalence sets so that they
-      // will not be collected until after we are done with our cloning
-      // No need for a mutator here since we know our context is already
-      // holding valid references to them on this very same node
-      // We'll remove these in the completion stage once we know all
-      // the mapping effects are done
-      const FieldMaskSet<EquivalenceSet> &previous_sets = 
-        version_info.get_equivalence_sets();
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            previous_sets.begin(); it != previous_sets.end(); it++)
-        it->first->add_base_valid_ref(CONTEXT_REF);
-      // First go through and invalidate the current refinements for
-      // the regions that we are updating
-      const ContextID ctx = parent_ctx->get_context().get_id();
-      to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
-            false/*self*/, false/*collective*/, map_applied_conditions);
-      // Now we can make new equivalence sets for each of the subregions
-      // in the partitions that we should be making refinements from
-      const AddressSpaceID local_space = runtime->address_space; 
       for (FieldMaskSet<PartitionNode>::const_iterator it = 
             make_from.begin(); it != make_from.end(); it++)
       {
+        // Make pending refinements for each of the child regions and
+        // register them with the context so it can find them later
         IndexPartNode *index_part = it->first->row_source;
         // Iterate over each child and make an equivalence set  
         if (index_part->total_children == index_part->max_linearized_color)
@@ -9747,11 +9733,10 @@ namespace Legion {
                 color < index_part->total_children; color++)
           {
             RegionNode *child = it->first->get_child(color);
-            EquivalenceSet *set = new EquivalenceSet(runtime,
-                runtime->get_available_distributed_id(),
-                local_space, local_space, child, true/*register now*/);
-            initialize_set(set, it->second, map_applied_conditions);
-            child->record_refinement(ctx,set,it->second,map_applied_conditions);
+            PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
+            initialize_pending(pending, it->second, map_applied_conditions);
+            // Parent context takes ownership here
+            parent_ctx->record_pending_disjoint_complete_set(pending);
           }
         }
         else
@@ -9762,15 +9747,24 @@ namespace Legion {
           {
             const LegionColor color = itr->yield_color();
             RegionNode *child = it->first->get_child(color);
-            EquivalenceSet *set = new EquivalenceSet(runtime,
-                runtime->get_available_distributed_id(),
-                local_space, local_space, child, true/*register now*/);
-            initialize_set(set, it->second, map_applied_conditions);
-            child->record_refinement(ctx,set,it->second,map_applied_conditions);
+            PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
+            initialize_pending(pending, it->second, map_applied_conditions);
+            // Parent context takes ownership here
+            parent_ctx->record_pending_disjoint_complete_set(pending);
           }
           delete itr;
         }
       }
+      // Now we can invalidate the previous refinement
+      const ContextID ctx = parent_ctx->get_context().get_id();
+      to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
+            false/*self*/, false/*collective*/, map_applied_conditions);
+      // Finally propagate the new refinements up from the partitions
+      for (FieldMaskSet<PartitionNode>::const_iterator it = 
+            make_from.begin(); it != make_from.end(); it++)
+        // Propagate this refinement up from the partition
+        it->first->propagate_refinement(ctx, NULL, it->second, 
+                                        map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -9779,12 +9773,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RefinementOp::initialize_set(EquivalenceSet *set,
+    void RefinementOp::initialize_pending(PendingEquivalenceSet *pending,
                    const FieldMask &set_mask, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode *child_expr = set->region_node->row_source;
-      const size_t child_expr_volume = child_expr->get_volume();
+      IndexSpaceNode *child_expr = pending->region_node->row_source;
       const FieldMaskSet<EquivalenceSet> &previous_sets = 
         version_info.get_equivalence_sets();
       // Import state into this equivalence set
@@ -9800,11 +9793,7 @@ namespace Legion {
                         it->first->region_node->row_source);
         if (overlap_expr->is_empty())
           continue;
-        // See if the source dominates us or just a partial overlap
-        if (overlap_expr->get_volume() == child_expr_volume)
-          set->clone_from(it->first, overlap, applied_events);
-        else
-          set->clone_from(it->first, overlap, applied_events, overlap_expr);
+        pending->record_previous(it->first, overlap, applied_events);
       }
     }
 
@@ -9812,14 +9801,11 @@ namespace Legion {
     void RefinementOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      // Remove the valid references we added to the equivalence sets
-      // to keep them around until we were done cloning them
-      const FieldMaskSet<EquivalenceSet> &previous_sets = 
-        version_info.get_equivalence_sets();
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            previous_sets.begin(); it != previous_sets.end(); it++)
-        if (it->first->remove_base_valid_ref(CONTEXT_REF))
-          delete it->first;
+#ifdef LEGION_SPY
+      // Still need this to record that this operation is done for LegionSpy
+      LegionSpy::log_operation_events(unique_op_id, 
+          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
       complete_operation();
     }
 

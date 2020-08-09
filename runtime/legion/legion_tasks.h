@@ -1003,7 +1003,7 @@ namespace Legion {
       void report_leaks_and_duplicates(std::set<RtEvent> &preconditions);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
-      void handle_equivalence_set_request(Deserializer &derez);
+      void handle_disjoint_complete_request(Deserializer &derez);
       void handle_intra_space_dependence(Deserializer &derez);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);

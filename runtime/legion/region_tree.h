@@ -1969,6 +1969,7 @@ namespace Legion {
       virtual DomainPoint delinearize_color_to_point(LegionColor c) = 0;
       // Caller takes ownership for the iterator
       virtual ColorSpaceIterator* create_color_space_iterator(void) = 0;
+      virtual size_t compute_color_offset(LegionColor color) = 0;
     public:
       bool intersects_with(IndexSpaceNode *rhs,bool compute = true);
       bool intersects_with(IndexPartNode *rhs, bool compute = true);
@@ -2200,6 +2201,7 @@ namespace Legion {
       virtual DomainPoint delinearize_color_to_point(LegionColor c);
       // Caller takes ownership for the iterator
       virtual ColorSpaceIterator* create_color_space_iterator(void);
+      virtual size_t compute_color_offset(LegionColor color);
     public:
       virtual void pack_index_space(Serializer &rez, bool include_size) const;
       virtual bool unpack_index_space(Deserializer &derez,
@@ -3685,15 +3687,18 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_COMPUTE_EQ_SETS_TASK_ID;
       public:
         DeferComputeEquivalenceSetArgs(RegionNode *proxy, ContextID x,
-            InnerContext *c, EqSetTracker *t, IndexSpaceExpression *e,
-            const FieldMask &m, AddressSpaceID s);
+            InnerContext *c, EqSetTracker *t, const AddressSpaceID ts,
+            IndexSpaceExpression *e, const FieldMask &m, 
+            const UniqueID id, const AddressSpaceID s);
       public:
         RegionNode *const proxy_this;
         const ContextID ctx;
         InnerContext *const context;
         EqSetTracker *const target;
+        const AddressSpaceID target_space;
         IndexSpaceExpression *const expr;
         FieldMask *const mask;
+        const UniqueID opid;
         const AddressSpaceID source;
         const RtUserEvent ready;
       };
@@ -3808,14 +3813,17 @@ namespace Legion {
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,
                                        const FieldMask &version_mask,
-                                       Operation *op, unsigned index,
+                                       const UniqueID opid, 
+                                       const AddressSpaceID original_source,
                                        std::set<RtEvent> &ready_events);
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *parent_ctx,
                                     EqSetTracker *target,
+                                    const AddressSpaceID target_space,
                                     IndexSpaceExpression *expr,
                                     const FieldMask &mask,
-                                    AddressSpaceID source,
+                                    const UniqueID opid,
+                                    const AddressSpaceID original_source,
                                     std::set<RtEvent> &ready_events,
                                     bool downward_only);
       static void handle_deferred_compute_equivalence_sets(const void *args);
@@ -3926,9 +3934,11 @@ namespace Legion {
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *context,
                                     EqSetTracker *target,
+                                    const AddressSpaceID target_space,
                                     IndexSpaceExpression *expr,
                                     const FieldMask &mask,
-                                    AddressSpaceID source,
+                                    const UniqueID opid,
+                                    const AddressSpaceID source,
                                     std::set<RtEvent> &ready_events,
                                     bool downward_only);
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,

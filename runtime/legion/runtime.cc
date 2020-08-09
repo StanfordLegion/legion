@@ -9461,14 +9461,16 @@ namespace Legion {
               runtime->handle_control_replicate_top_view_response(derez);
               break;
             }
-          case SEND_REPL_EQ_REQUEST:
+          case SEND_REPL_DISJOINT_COMPLETE_REQUEST:
             {
-              runtime->handle_control_replicate_eq_request(derez);
+              runtime->handle_control_replicate_disjoint_complete_request(
+                                                                    derez);
               break;
             }
-          case SEND_REPL_EQ_RESPONSE:
+          case SEND_REPL_DISJOINT_COMPLETE_RESPONSE:
             {
-              runtime->handle_control_replicate_eq_response(derez);
+              runtime->handle_control_replicate_disjoint_complete_response(
+                                                                      derez);
               break;
             }
           case SEND_REPL_INTRA_SPACE_DEP:
@@ -9635,6 +9637,11 @@ namespace Legion {
                                                remote_address_space);
               break;
             }
+          case SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE:
+            {
+              runtime->handle_compute_equivalence_sets_response(derez);
+              break;
+            }
           case SEND_EQUIVALENCE_SET_REQUEST:
             {
               runtime->handle_equivalence_set_request(derez, 
@@ -9660,17 +9667,6 @@ namespace Legion {
           case SEND_EQUIVALENCE_SET_SUBSET_UPDATE:
             {
               runtime->handle_equivalence_set_subset_update(derez);
-              break;
-            }
-          case SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST:
-            {
-              runtime->handle_equivalence_set_ray_trace_request(derez,
-                                                remote_address_space);
-              break;
-            }
-          case SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE:
-            {
-              runtime->handle_equivalence_set_ray_trace_response(derez);
               break;
             }
           case SEND_EQUIVALENCE_SET_MIGRATION:
@@ -19009,20 +19005,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_control_replicate_equivalence_set_request(
+    void Runtime::send_control_replicate_disjoint_complete_request(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_REPL_EQ_REQUEST,
-                            DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+      find_messenger(target)->send_message(rez, 
+          SEND_REPL_DISJOINT_COMPLETE_REQUEST,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_control_replicate_equivalence_set_response(
+    void Runtime::send_control_replicate_disjoint_complete_response(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_REPL_EQ_RESPONSE,
+      find_messenger(target)->send_message(rez, 
+          SEND_REPL_DISJOINT_COMPLETE_RESPONSE,
           DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
@@ -19298,6 +19296,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_compute_equivalence_sets_response(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_response(AddressSpaceID target,
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
@@ -19336,26 +19344,6 @@ namespace Legion {
       find_messenger(target)->send_message(rez, 
           SEND_EQUIVALENCE_SET_SUBSET_UPDATE, 
           SUBSET_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_ray_trace_request(AddressSpaceID target,
-                                                         Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-          SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST, 
-          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_ray_trace_response(AddressSpaceID target,
-                                                          Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez,
-          SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -20850,17 +20838,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_replicate_eq_request(Deserializer &derez)
+    void Runtime::handle_control_replicate_disjoint_complete_request(
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ShardManager::handle_eq_request(derez, this);
+      ShardManager::handle_disjoint_complete_request(derez, this);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_replicate_eq_response(Deserializer &derez)
+    void Runtime::handle_control_replicate_disjoint_complete_response(
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ReplicateContext::handle_eq_response(derez, this);
+      ReplicateContext::handle_disjoint_complete_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -21169,6 +21159,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_compute_equivalence_sets_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager::handle_compute_equivalence_sets_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_request(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -21204,21 +21201,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EquivalenceSet::handle_subset_update(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_ray_trace_request(Deserializer &derez,
-                                                         AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      EquivalenceSet::handle_ray_trace_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_ray_trace_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      EquivalenceSet::handle_ray_trace_response(derez, this);
     }
 #endif // NEWEQ
 
@@ -27913,6 +27895,11 @@ namespace Legion {
         case LG_DEFER_RELEASE_ACQUIRED_TASK_ID:
           {
             Operation::handle_deferred_release(args);
+            break;
+          }
+        case LG_DEFER_DISJOINT_COMPLETE_TASK_ID:
+          {
+            ReplicateContext::handle_defer_disjoint_complete_response(args);
             break;
           }
 #ifdef LEGION_MALLOC_INSTANCES

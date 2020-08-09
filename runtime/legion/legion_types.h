@@ -392,6 +392,7 @@ namespace Legion {
       LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
+      LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
@@ -511,6 +512,7 @@ namespace Legion {
         "Defer Reduction Manager Registration",                   \
         "Defer Verify Partition",                                 \
         "Defer Release Acquired Instances",                       \
+        "Defer Disjoint Complete Response",                       \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Defer Consensus Match",                                  \
@@ -794,8 +796,8 @@ namespace Legion {
       SEND_REPL_FUTURE_MAP_RESPONSE,
       SEND_REPL_TOP_VIEW_REQUEST,
       SEND_REPL_TOP_VIEW_RESPONSE,
-      SEND_REPL_EQ_REQUEST,
-      SEND_REPL_EQ_RESPONSE,
+      SEND_REPL_DISJOINT_COMPLETE_REQUEST,
+      SEND_REPL_DISJOINT_COMPLETE_RESPONSE,
       SEND_REPL_INTRA_SPACE_DEP,
       SEND_REPL_BROADCAST_UPDATE,
       SEND_REPL_TRACE_EVENT_REQUEST,
@@ -825,13 +827,12 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
+      SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
       SEND_EQUIVALENCE_SET_REQUEST,
       SEND_EQUIVALENCE_SET_RESPONSE,
       SEND_EQUIVALENCE_SET_SUBSET_REQUEST,
       SEND_EQUIVALENCE_SET_SUBSET_RESPONSE,
       SEND_EQUIVALENCE_SET_SUBSET_UPDATE,
-      SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST,
-      SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
       SEND_EQUIVALENCE_SET_MIGRATION,
       SEND_EQUIVALENCE_SET_OWNER_UPDATE,
       SEND_EQUIVALENCE_SET_REMOTE_REFINEMENT,
@@ -999,8 +1000,8 @@ namespace Legion {
         "Send Replicate Future Map Response",                         \
         "Send Replicate Top View Request",                            \
         "Send Replicate Top View Response",                           \
-        "Send Replicate Equivalence Set Request",                     \
-        "Send Replicate Equivalence Set Response",                    \
+        "Send Replicate Disjoint Complete Request",                   \
+        "Send Replicate Disjoint Complete Response",                  \
         "Send Replicate Intra Space Dependence",                      \
         "Send Replicate Broadcast Update",                            \
         "Send Replicate Trace Event Request",                         \
@@ -1035,8 +1036,6 @@ namespace Legion {
         "Send Equivalence Set Subset Request",                        \
         "Send Equivalence Set Subset Response",                       \
         "Send Equivalence Set Subset Update",                         \
-        "Send Equivalence Set Ray Trace Request",                     \
-        "Send Equivalence Set Ray Trace Response",                    \
         "Send Equivalence Set Migration",                             \
         "Send Equivalence Set Owner Update",                          \
         "Send Equivalence Set Remote Refinement",                     \
@@ -1758,6 +1757,7 @@ namespace Legion {
     class ProjectionEpoch;
     class LogicalState;
     class EquivalenceSet;
+    class PendingEquivalenceSet;
     class VersionManager;
     class VersionInfo;
     class RayTracer;

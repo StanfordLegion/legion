@@ -2948,6 +2948,42 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    size_t IndexSpaceNodeT<DIM,T>::compute_color_offset(LegionColor color)
+    //--------------------------------------------------------------------------
+    {
+      Point<DIM,T> color_point;
+      delinearize_color(color, &color_point, handle.get_type_tag());
+      Realm::IndexSpace<DIM,T> color_space;
+      // Wait for a tight space on which to perform the test
+      get_realm_index_space(color_space, true/*tight*/);
+      Realm::IndexSpaceIterator<DIM,T> itr(color_space);
+      size_t offset = 0;
+      while (itr.valid)
+      {
+        if (itr.rect.contains(color_point))
+        {
+          long long stride = 1;
+          for (int idx = 0; idx < DIM; idx++)
+          {
+            offset += (color_point[idx] - itr.rect.lo[idx]) * stride;
+            stride *= ((itr.rect.hi[idx] - itr.rect.lo[idx]) + 1);
+          }
+#ifdef DEBUG_LEGION
+          assert(stride == itr.rect.volume());
+#endif
+          return offset;
+        }
+        else
+          offset += itr.rect.volume();
+        itr.step();
+      }
+      // very bad if we get here because it means we can not find the point
+      assert(false); 
+      return SIZE_MAX;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::contains_color(LegionColor color, 
                                                 bool report_error/*=false*/)
     //--------------------------------------------------------------------------

@@ -1974,8 +1974,8 @@ namespace Legion {
       void verify_refinement_mask(const FieldMask &refinement_mask);
 #endif
     protected:
-      void initialize_set(EquivalenceSet *set, const FieldMask &mask,
-                          std::set<RtEvent> &applied_events);
+      void initialize_pending(PendingEquivalenceSet *set, const FieldMask &mask,
+                              std::set<RtEvent> &applied_events);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

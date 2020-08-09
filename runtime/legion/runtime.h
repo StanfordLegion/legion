@@ -2706,9 +2706,9 @@ namespace Legion {
                                                    Serializer &rez);
       void send_control_replicate_top_view_response(AddressSpaceID target,
                                                     Serializer &rez);
-      void send_control_replicate_equivalence_set_request(AddressSpaceID target,
-                                                          Serializer &rez);
-      void send_control_replicate_equivalence_set_response(
+      void send_control_replicate_disjoint_complete_request(
+                                        AddressSpaceID target, Serializer &rez);
+      void send_control_replicate_disjoint_complete_response(
                                         AddressSpaceID target, Serializer &rez);
       void send_control_replicate_intra_space_dependence(AddressSpaceID target,
                                                          Serializer &rez);
@@ -2761,6 +2761,8 @@ namespace Legion {
                                                  Serializer &rez);
       void send_compute_equivalence_sets_request(AddressSpaceID target, 
                                                  Serializer &rez);
+      void send_compute_equivalence_sets_response(AddressSpaceID target,
+                                                  Serializer &rez);
       void send_equivalence_set_response(AddressSpaceID target,Serializer &rez);
       void send_equivalence_set_subset_request(AddressSpaceID target, 
                                                Serializer &rez);
@@ -2768,10 +2770,6 @@ namespace Legion {
                                                 Serializer &rez);
       void send_equivalence_set_subset_update(AddressSpaceID target,
                                               Serializer &rez);
-      void send_equivalence_set_ray_trace_request(AddressSpaceID target,
-                                                  Serializer &rez);
-      void send_equivalence_set_ray_trace_response(AddressSpaceID target,
-                                                   Serializer &rez);
       void send_equivalence_set_migration(AddressSpaceID target, 
                                           Serializer &rez);
       void send_equivalence_set_owner_update(AddressSpaceID target,
@@ -3034,6 +3032,7 @@ namespace Legion {
       void handle_remote_context_physical_response(Deserializer &derez);
       void handle_compute_equivalence_sets_request(Deserializer &derez, 
                                                    AddressSpaceID source);
+      void handle_compute_equivalence_sets_response(Deserializer &derez);
       void handle_equivalence_set_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_equivalence_set_response(Deserializer &derez,
@@ -3041,9 +3040,6 @@ namespace Legion {
       void handle_equivalence_set_subset_request(Deserializer &derez);
       void handle_equivalence_set_subset_response(Deserializer &derez);
       void handle_equivalence_set_subset_update(Deserializer &derez);
-      void handle_equivalence_set_ray_trace_request(Deserializer &derez,
-                                                    AddressSpaceID source);
-      void handle_equivalence_set_ray_trace_response(Deserializer &derez);
       void handle_equivalence_set_migration(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_equivalence_set_owner_update(Deserializer &derez);
@@ -3098,8 +3094,10 @@ namespace Legion {
       void handle_control_replicate_top_view_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_control_replicate_top_view_response(Deserializer &derez);
-      void handle_control_replicate_eq_request(Deserializer &derez);
-      void handle_control_replicate_eq_response(Deserializer &derez);
+      void handle_control_replicate_disjoint_complete_request(
+                                                           Deserializer &derez);
+      void handle_control_replicate_disjoint_complete_response(
+                                                           Deserializer &derez);
       void handle_control_replicate_intra_space_dependence(Deserializer &derez);
       void handle_control_replicate_broadcast_update(Deserializer &derez);
       void handle_control_replicate_trace_event_request(Deserializer &derez,
