@@ -94,6 +94,8 @@ namespace Legion {
                                 ReferenceMutator *mutator);
     public:
       virtual void set_context_index(size_t index) = 0;
+    public:
+      std::vector<RegionRequirement> output_regions;
     protected:
       AllocManager *arg_manager;
     };
@@ -342,9 +344,6 @@ namespace Legion {
       // or committed.
       void trigger_children_complete(void);
       void trigger_children_committed(void);
-    public:
-      inline unsigned get_output_region_offset(void) const
-        { return output_region_offset; }
     protected:
       // Tasks have two requirements to complete:
       // - all speculation must be resolved
@@ -356,9 +355,6 @@ namespace Legion {
       virtual void trigger_task_commit(void) = 0;
     public:
       static void handle_deferred_task_complete(const void *args);
-    protected:
-      // To keep where the output region requirements start
-      unsigned output_region_offset;
     protected:
       // Early mapped regions
       std::map<unsigned/*idx*/,InstanceSet>     early_mapped_regions;

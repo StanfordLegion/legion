@@ -1650,6 +1650,13 @@ namespace Legion {
                   task.target_proc, target_memory, footprint);
         }
       }
+
+      // Finally we set a target memory for output instances
+      Memory target_memory =
+        default_policy_select_output_target(ctx, task.target_proc);
+      for (unsigned i = 0; i < output.output_targets.size(); ++i)
+        output.output_targets[i] = target_memory;
+
       if (cache_policy == DEFAULT_CACHE_POLICY_ENABLE) {
         // Now that we are done, let's cache the result so we can use it later
         std::list<CachedTaskMapping> &map_list = cached_task_mappings[cache_key];
@@ -1658,6 +1665,7 @@ namespace Legion {
         cached_result.task_hash = task_hash;
         cached_result.variant = output.chosen_variant;
         cached_result.mapping = output.chosen_instances;
+        cached_result.output_targets = output.output_targets;
       }
     }
 
@@ -2190,6 +2198,40 @@ namespace Legion {
 	cached_target_memory[target_proc] = best_memory;
 	return best_memory;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    Memory DefaultMapper::default_policy_select_output_target(
+                                       MapperContext ctx, Processor target_proc)
+    //--------------------------------------------------------------------------
+    {
+      // Find the visible memories from the processor for the given kind
+      Machine::MemoryQuery visible_memories(machine);
+      visible_memories.has_affinity_to(target_proc);
+      if (visible_memories.count() == 0)
+      {
+        log_mapper.error("No visible memories from processor " IDFMT "! "
+                         "This machine is really messed up!", target_proc.id);
+        assert(false);
+      }
+      // Figure out the memory with the highest-bandwidth
+      Memory best_memory = Memory::NO_MEMORY;
+      unsigned best_bandwidth = 0;
+      std::vector<Machine::ProcessorMemoryAffinity> affinity(1);
+      for (Machine::MemoryQuery::iterator it = visible_memories.begin();
+            it != visible_memories.end(); it++)
+      {
+        affinity.clear();
+        machine.get_proc_mem_affinity(affinity, target_proc, *it,
+				      false /*not just local affinities*/);
+        assert(affinity.size() == 1);
+        if (!best_memory.exists() || (affinity[0].bandwidth > best_bandwidth)) {
+          best_memory = *it;
+          best_bandwidth = affinity[0].bandwidth;
+        }
+      }
+      assert(best_memory.exists());
+      return best_memory;
     }
 
     //--------------------------------------------------------------------------

@@ -537,6 +537,7 @@ namespace Legion {
       };
       struct MapTaskOutput {
         std::vector<std::vector<PhysicalInstance> > chosen_instances; 
+        std::vector<Memory>                         output_targets;
         std::set<unsigned>                          untracked_valid_regions;
         std::vector<Processor>                      target_procs;
         VariantID                                   chosen_variant; // = 0 

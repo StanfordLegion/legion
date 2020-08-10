@@ -39,8 +39,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(Runtime *rt, TaskOp *owner, int d,
-                             const std::vector<RegionRequirement> &reqs)
-      : runtime(rt), owner_task(owner), regions(reqs), depth(d),
+                             const std::vector<RegionRequirement> &reqs,
+                             const std::vector<RegionRequirement> &output_reqs)
+      : runtime(rt), owner_task(owner), regions(reqs),
+        output_regions(output_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
         total_tunable_count(0), overhead_tracker(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
@@ -51,7 +53,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(const TaskContext &rhs)
-      : runtime(NULL), owner_task(NULL), regions(rhs.regions), depth(-1)
+      : runtime(NULL), owner_task(NULL), regions(rhs.regions),
+        output_regions(rhs.output_regions), depth(-1)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2730,10 +2733,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(Runtime *rt, TaskOp *owner,int d,bool full_inner,
                                const std::vector<RegionRequirement> &reqs,
+                               const std::vector<RegionRequirement> &output_reqs,
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
                                UniqueID uid, ApEvent exec_fence, bool remote)
-      : TaskContext(rt, owner, d, reqs),
+      : TaskContext(rt, owner, d, reqs, output_reqs),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(full_inner),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
@@ -2790,7 +2794,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(const InnerContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions), tree_context(rhs.tree_context),
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_regions),
+        tree_context(rhs.tree_context),
         context_uid(0), remote_context(false), full_inner_context(false),
         parent_req_indexes(rhs.parent_req_indexes), 
         virtual_mapped(rhs.virtual_mapped)
@@ -8503,8 +8508,7 @@ namespace Legion {
             IS_SIMULT(regions[idx]) || IS_REDUCE(regions[idx]);
           runtime->forest->initialize_current_context(tree_context,
               clone_requirements[idx], restricted, physical_instances[idx],
-              unmap_events[idx], this, idx, top_views, applied_events,
-              idx < single_task->get_output_region_offset());
+              unmap_events[idx], this, idx, top_views, applied_events, true);
 #ifdef DEBUG_LEGION
           assert(!physical_instances[idx].empty());
 #endif
@@ -9722,7 +9726,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(Runtime *rt, UniqueID ctx_id)
-      : InnerContext(rt, NULL, -1, false/*full inner*/, dummy_requirements, 
+      : InnerContext(rt, NULL, -1, false/*full inner*/,
+                     dummy_requirements, dummy_output_requirements,
                      dummy_indexes, dummy_mapped, ctx_id, ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -9730,8 +9735,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(const TopLevelContext &rhs)
-      : InnerContext(NULL, NULL, -1, false, dummy_requirements, dummy_indexes, 
-                     dummy_mapped, 0, ApEvent::NO_AP_EVENT)
+      : InnerContext(NULL, NULL, -1, false/*full inner*/,
+                     dummy_requirements, dummy_output_requirements,
+                     dummy_indexes, dummy_mapped, 0, ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9808,12 +9814,15 @@ namespace Legion {
     ReplicateContext::ReplicateContext(Runtime *rt, 
                                    ShardTask *owner, int d, bool full,
                                    const std::vector<RegionRequirement> &reqs,
+                            const std::vector<RegionRequirement> &output_reqs,
                                    const std::vector<unsigned> &parent_indexes,
                                    const std::vector<bool> &virt_mapped,
                                    UniqueID ctx_uid, ApEvent exec_fence,
                                    ShardManager *manager)
-      : InnerContext(rt, owner, d, full, reqs, parent_indexes, virt_mapped, 
-          ctx_uid, exec_fence), owner_shard(owner), shard_manager(manager),
+      : InnerContext(rt, owner, d, full, reqs, output_reqs, parent_indexes,
+                     virt_mapped, ctx_uid, exec_fence),
+        owner_shard(owner),
+        shard_manager(manager),
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_indirection_bar_index(0),
         next_future_map_bar_index(0), index_space_allocator_shard(0), 
@@ -18040,9 +18049,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(Runtime *rt, UniqueID context_uid)
-      : InnerContext(rt, NULL, -1, false/*full inner*/, remote_task.regions, 
-          local_parent_req_indexes, local_virtual_mapped, 
-          context_uid, ApEvent::NO_AP_EVENT, true/*remote*/),
+      : InnerContext(rt, NULL, -1, false/*full inner*/, remote_task.regions,
+                     remote_task.output_regions, local_parent_req_indexes,
+                     local_virtual_mapped, context_uid, ApEvent::NO_AP_EVENT,
+                     true/*remote*/),
         parent_ctx(NULL), shard_manager(NULL),
         top_level_context(false), remote_task(RemoteTask(this)), repl_id(0)
     //--------------------------------------------------------------------------
@@ -18051,8 +18061,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(const RemoteContext &rhs)
-      : InnerContext(NULL, NULL, 0, false, rhs.regions,local_parent_req_indexes,
-          local_virtual_mapped, 0, ApEvent::NO_AP_EVENT, true), 
+      : InnerContext(NULL, NULL, 0, false, rhs.regions, rhs.output_regions,
+                     local_parent_req_indexes, local_virtual_mapped, 0,
+                     ApEvent::NO_AP_EVENT, true),
         remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
     {
@@ -18595,7 +18606,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LeafContext::LeafContext(Runtime *rt, TaskOp *owner)
-      : TaskContext(rt, owner, owner->get_depth(), owner->regions), 
+      : TaskContext(rt, owner, owner->get_depth(), owner->regions,
+                    owner->output_regions),
         inlined_tasks(0)
     //--------------------------------------------------------------------------
     {
@@ -18603,7 +18615,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LeafContext::LeafContext(const LeafContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions)
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_regions)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -20474,7 +20486,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InlineContext::InlineContext(Runtime *rt, TaskContext *enc, TaskOp *child)
-      : TaskContext(rt, child, enc->get_depth(), child->regions), 
+      : TaskContext(rt, child, enc->get_depth(), child->regions,
+                    child->output_regions),
         enclosing(enc), inline_task(child)
     //--------------------------------------------------------------------------
     {
@@ -20516,7 +20529,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InlineContext::InlineContext(const InlineContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions), 
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_regions),
         enclosing(NULL), inline_task(NULL)
     //--------------------------------------------------------------------------
     {
