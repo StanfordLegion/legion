@@ -1846,6 +1846,7 @@ namespace Legion {
     class ReplTraceBeginOp;
     class ReplTraceSummaryOp;
     class ShardMapping;
+    class CollectiveMapping;
     class ShardManager;
     class ShardCollective;
     class GatherCollective;

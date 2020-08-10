@@ -14352,6 +14352,512 @@ namespace Legion {
 #endif // NEWEQ
 
     /////////////////////////////////////////////////////////////
+    // Equivalence Set 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::EquivalenceSet(Runtime *rt, DistributedID id,
+                                   AddressSpaceID owner, AddressSpaceID logical,
+                                   RegionNode *node, bool reg_now,
+                                   CollectiveMapping *mapping /*= NULL*/)
+      : DistributedCollectable(rt,
+          LEGION_DISTRIBUTED_HELP_ENCODE(id, EQUIVALENCE_SET_DC),
+          owner, reg_now), region_node(node), set_expr(node->row_source),
+        collective_mapping(mapping), logical_owner_space(logical),
+        replicated_state(mapping != NULL), migration_index(0), sample_count(0) 
+    //--------------------------------------------------------------------------
+    {
+      set_expr->add_expression_reference();
+      region_node->add_nested_resource_ref(did);
+      if (collective_mapping != NULL)
+        collective_mapping->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::EquivalenceSet(const EquivalenceSet &rhs)
+      : DistributedCollectable(rhs), region_node(NULL), set_expr(NULL),
+        collective_mapping(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::~EquivalenceSet(void)
+    //--------------------------------------------------------------------------
+    {
+      if (set_expr->remove_expression_reference())
+        delete set_expr;
+      if (region_node->remove_nested_resource_ref(did))
+        delete region_node;
+      if ((collective_mapping != NULL) && 
+          collective_mapping->remove_reference())
+        delete collective_mapping;
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet& EquivalenceSet::operator=(const EquivalenceSet &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::initialize_set(const RegionUsage &usage,
+                                        const FieldMask &user_mask,
+                                        const bool restricted,
+                                        const InstanceSet &sources,
+                                const std::vector<InstanceView*> &corresponding,
+                                        std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner() || replicated_state);
+      assert(sources.size() == corresponding.size());
+#endif
+      WrapperReferenceMutator mutator(applied_events);
+      AutoLock eq(eq_lock);
+      if (IS_REDUCE(usage))
+      {
+#ifdef DEBUG_LEGION
+        // Reduction-only should always be restricted for now
+        // Could change if we started issuing reduction close
+        // operations at the end of a context
+        assert(restricted);
+#endif
+        // Since these are restricted, we'll make these the actual
+        // target logical instances and record them as restricted
+        // instead of recording them as reduction instances
+        for (unsigned idx = 0; idx < sources.size(); idx++)
+        {
+          const FieldMask &view_mask = sources[idx].get_valid_fields();
+          InstanceView *view = corresponding[idx];
+          FieldMaskSet<LogicalView>::iterator finder = 
+            total_valid_instances.find(view);
+          if (finder == total_valid_instances.end())
+          {
+            total_valid_instances.insert(view, view_mask);
+            view->add_nested_valid_ref(did, &mutator);
+          }
+          else
+            finder.merge(view_mask);
+          // Always restrict reduction-only users since we know the data
+          // is going to need to be flushed anyway
+          LegionMap<InstanceView*,
+            FieldMaskSet<IndexSpaceExpression> >::aligned::iterator 
+              restricted_finder = restricted_instances.find(view);
+          if (restricted_finder == restricted_instances.end())
+          {
+            restricted_instances[view].insert(set_expr, view_mask);
+            view->add_nested_valid_ref(did, &mutator);
+          }
+          else
+            restricted_finder->second.insert(set_expr, view_mask);
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < sources.size(); idx++)
+        {
+          const FieldMask &view_mask = sources[idx].get_valid_fields();
+          InstanceView *view = corresponding[idx];
+#ifdef DEBUG_LEGION
+          assert(!view->is_reduction_view());
+#endif
+          FieldMaskSet<LogicalView>::iterator finder = 
+            total_valid_instances.find(view);
+          if (finder == total_valid_instances.end())
+          {
+            total_valid_instances.insert(view, view_mask);
+            view->add_nested_valid_ref(did, &mutator);
+          }
+          else
+            finder.merge(view_mask);
+          // If this is restricted then record it
+          if (restricted)
+          {
+            LegionMap<InstanceView*,
+              FieldMaskSet<IndexSpaceExpression> >::aligned::iterator
+                restricted_finder = restricted_instances.find(view);
+            if (restricted_finder == restricted_instances.end())
+            {
+              restricted_instances[view].insert(set_expr, view_mask);
+              view->add_nested_valid_ref(did, &mutator);
+            }
+            else
+              restricted_finder->second.insert(set_expr, view_mask);
+          }
+        }
+      }
+      // Update any restricted fields 
+      if (restricted)
+        restricted_fields |= user_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::find_valid_instances(ValidInstAnalysis &analysis,
+                                             IndexSpaceExpression *expr,
+                                             const bool expr_covers, 
+                                             const FieldMask &user_mask,
+                                             std::set<RtEvent> &deferral_events,
+                                             std::set<RtEvent> &applied_events,
+                                             const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+      {
+        defer_traversal(eq, analysis, user_mask, deferral_events,
+                        applied_events, already_deferred);
+        return;
+      }
+      // This is a read-only analysis so we don't need to invalidate
+      // replicated state if we get a non-collective operation
+      if (!is_logical_owner() && !replicated_state)
+      {
+        analysis.record_remote(this, user_mask, logical_owner_space);
+        return;
+      }
+      // Lock the analysis so we can perform updates here
+      AutoLock a_lock(analysis);
+      if (analysis.redop != 0)
+      {
+        // Iterate over all the fields
+        int fidx = user_mask.find_first_set();
+        while (fidx >= 0)
+        {
+          std::map<unsigned,std::vector<
+            std::pair<ReductionView*,IndexSpaceExpression*> > >::const_iterator
+              current = reduction_instances.find(fidx);
+          if (current != reduction_instances.end())
+          {
+            FieldMask local_mask;
+            local_mask.set_bit(fidx);
+            for (std::vector<std::pair<ReductionView*,IndexSpaceExpression*> >
+                  ::const_reverse_iterator it = current->second.rbegin(); it !=
+                  current->second.rend(); it++)
+            {
+              PhysicalManager *manager = it->first->get_manager();
+              if (manager->redop != analysis.redop)
+                break;
+              if (!expr_covers)
+              {
+                IndexSpaceExpression *overlap = 
+                  runtime->forest->intersect_index_spaces(expr, it->second);
+                if (overlap->is_empty())
+                  continue;
+              }
+              analysis.record_instance(it->first, local_mask);
+            }
+          }
+          fidx = user_mask.find_next_set(fidx+1);
+        }
+      }
+      else
+      {
+        if (!(user_mask * total_valid_instances.get_valid_mask()))
+        {
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                total_valid_instances.begin(); it != 
+                total_valid_instances.end(); it++)
+          {
+            if (!it->first->is_instance_view())
+              continue;
+            const FieldMask overlap = it->second & user_mask;
+            if (!overlap)
+              continue;
+            analysis.record_instance(it->first->as_instance_view(), overlap);
+          }
+        }
+        if (!(user_mask * partial_fields))
+        {
+          for (LegionMap<LogicalView*,
+                FieldMaskSet<IndexSpaceExpression> >::aligned::const_iterator
+                pit = partial_valid_instances.begin(); 
+                pit != partial_valid_instances.end(); pit++)
+          {
+            if (expr_covers)
+            {
+              const FieldMask overlap = 
+                user_mask & pit->second.get_valid_mask();
+              if (!!overlap)
+                analysis.record_instance(pit->first->as_instance_view(), 
+                                         overlap);
+              continue;
+            }
+            else if (user_mask * pit->second.get_valid_mask())
+              continue;
+            FieldMask total_overlap;
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  pit->second.begin(); it != pit->second.end(); it++)
+            {
+              const FieldMask overlap = user_mask & it->second;
+              if (!overlap)
+                continue;
+              IndexSpaceExpression *expr_overlap = 
+                  runtime->forest->intersect_index_spaces(expr, it->first);   
+              if (expr_overlap->is_empty())
+                continue;
+              total_overlap |= overlap;
+            }
+            if (!!total_overlap)
+              analysis.record_instance(pit->first->as_instance_view(), 
+                                       total_overlap);
+          }
+        }
+      }
+      if (initialized_data.insert(set_expr, user_mask))
+        set_expr->add_expression_reference();
+      if (!(user_mask * restricted_fields))
+        analysis.record_restriction();
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_set(UpdateAnalysis &analysis,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    FieldMask user_mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred/*=false*/)
+    //--------------------------------------------------------------------------
+    {
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+      {
+        defer_traversal(eq, analysis, user_mask, deferral_events,
+                        applied_events, already_deferred);
+        return;
+      }
+      if (is_remote_analysis(analysis, user_mask))
+        return;
+      WrapperReferenceMutator mutator(applied_events);
+      // Now that we're ready to perform the analysis 
+      // we need to lock the analysis 
+      AutoLock a_lock(analysis);
+      // Check for any uninitialized data
+      // Don't report uninitialized warnings for empty equivalence classes
+      if (analysis.check_initialized && !set_expr->is_empty())
+      {
+        // Do the easy check for the full cover which will be the common case
+        FieldMask uninit = user_mask;
+        FieldMaskSet<IndexSpaceExpression>::const_iterator finder =
+          initialized_data.find(set_expr);
+        if (finder != initialized_data.end())
+          uninit -= finder->second;
+        if (!!uninit)
+        {
+          // All the rest of these are partial so only test them if 
+          // expr_covers is false because we know they aren't covered otherwise
+          if (!expr_covers)
+          {
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  initialized_data.begin(); it != initialized_data.end(); it++)
+            {
+              if (uninit * it->second)
+                continue;
+              // Don't actually need to subtract here since we don't care
+              // about the difference size, just care about domination
+              IndexSpaceExpression *overlap_expr = 
+                runtime->forest->intersect_index_spaces(it->first, expr);
+              if (overlap_expr->get_volume() != expr->get_volume())
+                continue;
+              uninit -= it->second;
+              if (!uninit)
+                break;
+            }
+          }
+          if (!!uninit)
+            analysis.record_uninitialized(uninit, applied_events);
+        }
+      }
+      if (analysis.output_aggregator != NULL)
+        analysis.output_aggregator->clear_update_fields();
+      if (IS_REDUCE(analysis.usage))
+      {
+
+      }
+      else if (IS_WRITE(analysis.usage) && IS_DISCARD(analysis.usage))
+      {
+        // Update the initialized data before messing with the user mask
+        update_initialized_data(expr, expr_covers, user_mask);
+
+      }
+      else if (IS_READ_ONLY(analysis.usage) && !update_guards.empty() && 
+                !(user_mask * update_guards.get_valid_mask()))
+      {
+        // If we're doing read-only mode, get the set of events that
+        // we need to wait for before we can do our registration, this 
+        // ensures that we serialize read-only operations correctly
+        // In order to avoid deadlock we have to make different copy fill
+        // aggregators for each of the different fields of prior updates
+
+      }
+      else
+      {
+        // Read-write or read-only case
+        // Read-only case if there are no guards
+        if (IS_WRITE(analysis.usage))
+          update_initialized_data(expr, expr_covers, user_mask);
+
+      }
+      check_for_migration(analysis, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::defer_traversal(AutoTryLock &eq,
+                                         PhysicalAnalysis &analysis,
+                                         const FieldMask &mask,
+                                         std::set<RtEvent> &deferral_events,
+                                         std::set<RtEvent> &applied_events,
+                                         const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!eq.has_lock());
+#endif
+      // See if we've already deferred this or not
+      if (!already_deferred)
+      {
+        const RtUserEvent deferral_event = Runtime::create_rt_user_event();
+        const RtEvent precondition = chain_deferral_events(deferral_event);
+        analysis.defer_traversal(precondition, this, mask, deferral_events, 
+                                 applied_events, deferral_event);
+      }
+      else
+        analysis.defer_traversal(eq.try_next(), this, mask, deferral_events, 
+                                 applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_initialized_data(IndexSpaceExpression *expr,
+                             const bool expr_covers, const FieldMask &user_mask)
+    //--------------------------------------------------------------------------
+    {
+      if (!expr_covers)
+      {
+        FieldMask subinit = user_mask;
+        FieldMaskSet<IndexSpaceExpression>::iterator finder =
+          initialized_data.find(set_expr);
+        // Check to see if we've already initialized it for the full set_expr
+        if (finder != initialized_data.end())
+          subinit -= finder->second;
+        // Already initialized for full expression so we are done
+        if (!subinit)
+          return;
+        std::vector<IndexSpaceExpression*> to_delete;
+        FieldMaskSet<IndexSpaceExpression> to_add;
+        for (FieldMaskSet<IndexSpaceExpression>::iterator it = 
+              initialized_data.begin(); it != initialized_data.end(); it++)
+        {
+          if (it->first == set_expr)
+            continue;
+          const FieldMask overlap = subinit & it->second;
+          if (!overlap)
+            continue;
+          // Compute the union expression
+          IndexSpaceExpression *union_expr = 
+            runtime->forest->union_index_spaces(it->first, expr);
+          const size_t union_size = union_expr->get_volume();
+#ifdef DEBUG_LEGION
+          assert(union_size <= set_expr->get_volume());
+#endif
+          if (union_size == it->first->get_volume())
+          {
+            // Existing expression already covers expr
+            subinit -= overlap;
+            if (!subinit)
+              break;
+          }
+          else if (union_size == expr->get_volume())
+          {
+            // New expression covers the old expression
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          else if (union_size == set_expr->get_volume())
+          {
+            // Union is the same as the set expression
+            if (finder != initialized_data.end())
+              finder.merge(overlap);
+            else
+              to_add.insert(set_expr, overlap);
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+            subinit -= overlap;
+            if (!subinit)
+              break;
+          }
+          else
+          {
+            // Union is bigger than both expression but not set_expr
+            to_add.insert(union_expr, overlap);
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+            subinit -= overlap;
+            if (!subinit)
+              break;
+          }
+        }
+        // Delete old ones
+        if (!to_delete.empty())
+        {
+          for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            initialized_data.erase(*it);
+            if ((*it)->remove_expression_reference())
+              delete (*it);
+          }
+        }
+        // Add new ones
+        if (!to_add.empty())
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                to_add.begin(); it != to_add.end(); it++)
+            if (initialized_data.insert(it->first, it->second))
+              it->first->add_expression_reference();
+        }
+        // Add the new expression if we still have fields to add
+        if (!!subinit && initialized_data.insert(expr, subinit))
+          expr->add_expression_reference();
+      }
+      else if (initialized_data.insert(set_expr, user_mask))
+        set_expr->add_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::record_tracker(EqSetTracker *tracker, 
+                                        const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      recorded_trackers.insert(tracker, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::remove_tracker(EqSetTracker *tracker,
+                                        const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      FieldMaskSet<EqSetTracker>::iterator finder = 
+        recorded_trackers.find(tracker);
+#ifdef DEBUG_LEGION
+      assert(finder != recorded_trackers.end());
+#endif
+      finder.filter(mask);
+      if (!finder->second)
+        recorded_trackers.erase(finder);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Pending Equivalence Set 
     /////////////////////////////////////////////////////////////
 

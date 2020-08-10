@@ -2615,7 +2615,8 @@ namespace Legion {
                      AddressSpaceID owner_space,
                      AddressSpaceID logical_owner,
                      RegionNode *region_node,
-                     bool register_now, bool collective = false);
+                     bool register_now, 
+                     CollectiveMapping *mapping = NULL);
       EquivalenceSet(const EquivalenceSet &rhs);
       virtual ~EquivalenceSet(void);
     public:
@@ -2640,7 +2641,8 @@ namespace Legion {
                           std::set<RtEvent> &applied_events);
       void find_valid_instances(ValidInstAnalysis &analysis,
                                 IndexSpaceExpression *expr,
-                                const bool expr_covers, FieldMask user_mask,
+                                const bool expr_covers, 
+                                const FieldMask &user_mask,
                                 std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
@@ -2697,6 +2699,24 @@ namespace Legion {
     protected:
       void check_for_migration(PhysicalAnalysis &analysis,
                                std::set<RtEvent> &applied_events);
+      void defer_traversal(AutoTryLock &eq, PhysicalAnalysis &analysis,
+                           const FieldMask &mask,
+                           std::set<RtEvent> &deferral_events,
+                           std::set<RtEvent> &applied_events,
+                           const bool already_deferred);
+      inline RtEvent chain_deferral_events(RtUserEvent deferral_event)
+      {
+        volatile Realm::Event::id_t *ptr = &next_deferral_precondition.id;
+        RtEvent continuation_pre;
+        do {
+          continuation_pre.id = *ptr;
+        } while (!__sync_bool_compare_and_swap(ptr,
+                  continuation_pre.id, deferral_event.id));
+        return continuation_pre;
+      }
+      bool is_remote_analysis(PhysicalAnalysis &analysis,const FieldMask &mask);
+      void update_initialized_data(IndexSpaceExpression *expr, 
+                            const bool expr_covers, const FieldMask &user_mask);
     public:
       static void handle_remote_references(const void *args);
       static void handle_make_owner(const void *args);
@@ -2714,28 +2734,39 @@ namespace Legion {
     public:
       RegionNode *const region_node;
       IndexSpaceNode *const set_expr;
+      CollectiveMapping *const collective_mapping;
     protected:
       // This is the physical state of the equivalence set
-      mutable LocalLock                                 state_lock;
-      AddressSpaceID                                    logical_owner_space;
+      mutable LocalLock                                 eq_lock;
       FieldMaskSet<LogicalView>                         total_valid_instances;
       LegionMap<LogicalView*,
         FieldMaskSet<IndexSpaceExpression> >::aligned   partial_valid_instances;
+      FieldMask                                         partial_fields;
+      // Expressions and fields that have valid data
+      FieldMaskSet<IndexSpaceExpression>                initialized_data;
+      // Reductions always need to be applied in order so keep them in order
       std::map<unsigned/*fidx*/,std::vector<std::pair<
         ReductionView*,IndexSpaceExpression*> > >       reduction_instances;
-      FieldMaskSet<IndexSpaceExpression>                reduction_fields;
+      FieldMask                                         reduction_fields;
       LegionMap<InstanceView*,
         FieldMaskSet<IndexSpaceExpression> >::aligned   restricted_instances;
-      FieldMaskSet<IndexSpaceExpression>                restricted_fields;
+      FieldMask                                         restricted_fields;
+    protected:
       // This tracks the most recent copy-fill aggregator for each field
       FieldMaskSet<CopyFillGuard>                       update_guards;
+      // An event to order to deferral tasks
+      volatile RtEvent                               next_deferral_precondition;
     protected:
-      // These next two fields are valid on all nodes
-      // Track whether we are in a collective state or not
-      FieldMask                                         collective_state;
-      // Which VersionManager objects on this node are
+      // This node is the node which contains the valid state data
+      AddressSpaceID                                    logical_owner_space;
+      // In control replicated cases, we allow equivalence sets to have
+      // all the sets in the collective mapping be owners as long as they
+      // all continue to to make updates to the state together
+      bool                                              replicated_state;
+    protected:
+      // Which EqSetTracker objects on this node are
       // tracking this equivalence set and need to be invalidated
-      FieldMaskSet<EqSetTracker>                        tracking_managers;
+      FieldMaskSet<EqSetTracker>                        recorded_trackers;
     protected:
       // Uses these for determining when we should do migration
       // There is an implicit assumption here that equivalence sets

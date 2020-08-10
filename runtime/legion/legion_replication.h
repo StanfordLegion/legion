@@ -2021,6 +2021,29 @@ namespace Legion {
     };
 
     /**
+     * \class CollectiveMapping
+     * A collective mapping is an ordering of unique address spaces
+     * and can be used to construct broadcast and reduction trees.
+     */
+    class CollectiveMapping : public Collectable {
+    public:
+      CollectiveMapping(const std::vector<AddressSpaceID> &spaces,
+                        AddressSpaceID local_space);
+      CollectiveMapping(const ShardMapping &shard_mapping,
+                        AddressSpaceID local_space);
+    public:
+      inline AddressSpaceID operator[](unsigned idx) const
+        { return unique_sorted_spaces[idx]; }
+      inline size_t size(void) const { return unique_sorted_spaces.size(); }
+      bool operator==(const CollectiveMapping &rhs) const;
+    public:
+       
+    protected:
+      std::vector<AddressSpaceID> unique_sorted_spaces;
+      unsigned local_index;
+    };
+
+    /**
      * \class ShardManager
      * This is a class that manages the execution of one or
      * more shards for a given control replication context on
@@ -2111,6 +2134,8 @@ namespace Legion {
     public:
       inline ShardMapping& get_mapping(void) const
         { return *address_spaces; }
+      inline CollectiveMapping& get_collective_mapping(void) const
+        { return *collective_mapping; }
       inline AddressSpaceID get_shard_space(ShardID sid) const
         { return (*address_spaces)[sid]; }    
       inline bool is_first_local_shard(ShardTask *task) const
@@ -2227,6 +2252,7 @@ namespace Legion {
       // Inheritted from Mapper::SelectShardingFunctorInput
       // std::vector<Processor>        shard_mapping;
       ShardMapping*                    address_spaces;
+      CollectiveMapping*               collective_mapping;
       std::vector<ShardTask*>          local_shards;
       std::vector<EquivalenceSet*>     mapped_equivalence_sets;
     protected:

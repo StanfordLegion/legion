@@ -6961,7 +6961,7 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Shard Manager 
+    // Shard Mapping
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
@@ -7044,6 +7044,64 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Collective Mapping
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping::CollectiveMapping(
+          const std::vector<AddressSpaceID> &spaces, AddressSpaceID local_space)
+    //--------------------------------------------------------------------------
+    {
+      std::set<AddressSpaceID> unique_spaces(spaces.begin(), spaces.end());
+#ifdef DEBUG_LEGION
+      assert(unique_spaces.find(local_space) != unique_spaces.end());
+#endif
+      unsigned index = 0;
+      unique_sorted_spaces.resize(unique_spaces.size());
+      for (std::set<AddressSpaceID>::const_iterator it =
+            unique_spaces.begin(); it != unique_spaces.end(); it++, index++)
+      {
+        unique_sorted_spaces[index] = *it;
+        if ((*it) == local_space)
+          local_index = index;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping::CollectiveMapping(const ShardMapping &shard_mapping,
+                                         AddressSpaceID local_space)
+    //--------------------------------------------------------------------------
+    {
+      std::set<AddressSpaceID> unique_spaces;
+      for (unsigned idx = 0; idx < shard_mapping.size(); idx++)
+        unique_spaces.insert(shard_mapping[idx]);
+#ifdef DEBUG_LEGION
+      assert(unique_spaces.find(local_space) != unique_spaces.end());
+#endif
+      unsigned index = 0;
+      unique_sorted_spaces.resize(unique_spaces.size());
+      for (std::set<AddressSpaceID>::const_iterator it =
+            unique_spaces.begin(); it != unique_spaces.end(); it++, index++)
+      {
+        unique_sorted_spaces[index] = *it;
+        if ((*it) == local_space)
+          local_index = index;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveMapping::operator==(const CollectiveMapping &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (size() != rhs.size())
+        return false;
+      for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
+        if (unique_sorted_spaces[idx] != rhs[idx])
+          return false;
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Shard Manager 
     /////////////////////////////////////////////////////////////
 
@@ -7053,7 +7111,7 @@ namespace Legion {
                                SingleTask *original/*= NULL*/, RtBarrier bar)
       : runtime(rt), repl_id(id), owner_space(owner), total_shards(total),
         original_task(original),control_replicated(control),
-        top_level_task(top), address_spaces(NULL), 
+        top_level_task(top), address_spaces(NULL), collective_mapping(NULL), 
         local_mapping_complete(0), remote_mapping_complete(0),
         local_execution_complete(0), remote_execution_complete(0),
         trigger_local_complete(0), trigger_remote_complete(0),
@@ -7221,6 +7279,9 @@ namespace Legion {
       }
       if ((address_spaces != NULL) && address_spaces->remove_reference())
         delete address_spaces;
+      if ((collective_mapping != NULL) && 
+          collective_mapping->remove_reference())
+        delete collective_mapping;
       if (local_future_result != NULL)
         free(local_future_result);
 #ifdef DEBUG_LEGION
@@ -7254,9 +7315,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(address_spaces == NULL);
+      assert(collective_mapping == NULL);
 #endif
       address_spaces = new ShardMapping(spaces);
       address_spaces->add_reference();
+      collective_mapping = new CollectiveMapping(spaces,runtime->address_space);
+      collective_mapping->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -7300,6 +7364,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!local_shards.empty());
       assert(address_spaces == NULL);
+      assert(collective_mapping == NULL);
       assert(original_task->regions.size() == virtual_mapped.size());
 #endif
       address_spaces = new ShardMapping();
@@ -7319,6 +7384,9 @@ namespace Legion {
         (*address_spaces)[(*it)->shard_id] = target;
       }
       local_shards.clear();
+      collective_mapping = 
+        new CollectiveMapping(*address_spaces, runtime->address_space);
+      collective_mapping->add_reference();
       // Compute the unique shard spaces and make callback barrier
       // which has as many arrivers as unique shard spaces
       callback_barrier = 
@@ -7332,10 +7400,9 @@ namespace Legion {
         // Make an equivalence set to contain the initial data
         RegionNode *node = 
           runtime->forest->get_node(original_task->regions[idx].region);
-        const bool collective = is_total_sharding();
         EquivalenceSet *result = new EquivalenceSet(runtime,
             runtime->get_available_distributed_id(), runtime->address_space,
-            runtime->address_space, node, true/*register now*/, collective);
+            runtime->address_space, node, true/*reg now*/, collective_mapping);
         // Record all the remote nodes we're going to be sending this
         // equivalence set to so we don't need to page it in
         // No need for the lock here, nothing happening in parallel
@@ -7472,10 +7539,14 @@ namespace Legion {
       assert(owner_space != runtime->address_space);
       assert(local_shards.empty());
       assert(address_spaces == NULL);
+      assert(collective_mapping == NULL);
 #endif
       address_spaces = new ShardMapping();
       address_spaces->add_reference();
       address_spaces->unpack_mapping(derez);
+      collective_mapping = 
+        new CollectiveMapping(*address_spaces, runtime->address_space);
+      collective_mapping->add_reference();
       if (control_replicated)
       {
         derez.deserialize(pending_partition_barrier);
@@ -7519,7 +7590,7 @@ namespace Legion {
           RegionNode *region_node = runtime->forest->get_node(handle);
           mapped_equivalence_sets[idx] = new EquivalenceSet(runtime, did,
               owner_space, owner_space, region_node, true/*register now*/,
-              is_total_sharding());
+              collective_mapping);
         }
         else
           mapped_equivalence_sets[idx] = NULL;
@@ -7569,6 +7640,9 @@ namespace Legion {
                                      RegionNode *region_node, DistributedID did)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+#endif
       const AddressSpaceID owner_space = runtime->determine_owner(did);
       EquivalenceSet *result = NULL;
       if (local_shards.size() > 1)
@@ -7589,7 +7663,7 @@ namespace Legion {
         }
         // Didn't find it so make it
         result = new EquivalenceSet(runtime, did, owner_space, owner_space,
-                      region_node, true/*register now*/, true/*collective*/);
+                      region_node, true/*register now*/, collective_mapping);
         // Record it for the shards that come later
         std::pair<EquivalenceSet*,size_t> &pending = 
           created_equivalence_sets[did];
@@ -7598,7 +7672,7 @@ namespace Legion {
       }
       else // Only one shard here on this node so just make it
         result = new EquivalenceSet(runtime, did, owner_space, owner_space,
-                      region_node, true/*register now*/, true/*collective*/);
+                      region_node, true/*register now*/, collective_mapping);
       // We made it so if we're the owner record all the remote locations
       // of shards where we know that it also exists
       if (result->is_owner())
