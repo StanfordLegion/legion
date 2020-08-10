@@ -12,6 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-findex-launch-dynamic", "0"]]
+
 -- fails-with:
 -- optimize_index_launch_noninterference1.rg:71: loop optimization failed: argument 1 interferes with itself
 --       g(p_disjoint[(j + 1) % n])
