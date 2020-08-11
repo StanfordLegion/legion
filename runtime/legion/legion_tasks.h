@@ -579,6 +579,8 @@ namespace Legion {
       std::vector<Processor>                target_processors;
       // Hold the result of the mapping 
       std::deque<InstanceSet>               physical_instances;
+    protected:
+      std::vector<Memory>                   output_targets;
     protected: // Mapper choices 
       std::set<unsigned>                    untracked_valid_regions;
       VariantID                             selected_variant;

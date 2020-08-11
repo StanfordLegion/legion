@@ -3421,6 +3421,126 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Output Region Impl
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OutputRegionImpl::OutputRegionImpl(unsigned i,
+                                       const RegionRequirement &r,
+                                       Memory m,
+                                       TaskContext *ctx,
+                                       Runtime *rt)
+      : Collectable(), runtime(rt), context(ctx),
+        index(i), req(r), memory(m), domain()
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegionImpl::OutputRegionImpl(const OutputRegionImpl &rhs)
+      : Collectable(), runtime(NULL), context(NULL),
+        index(-1U), req(), memory(Memory::NO_MEMORY), domain()
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegionImpl::~OutputRegionImpl(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegionImpl& OutputRegionImpl::operator=(
+                                                  const OutputRegionImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::return_data(size_t num_elements,
+                                       FieldID field_id,
+                                       void *ptr,
+                                       size_t alignment)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = runtime->forest->get_node(req.region);
+      FieldSpaceNode *column_source = node->get_column_source();
+      size_t field_size = column_source->get_field_size(field_id);
+
+      // Initialize the index space domain
+      Domain dom(Rect<1>(0, num_elements - 1));
+      if (domain.exists())
+      {
+        if (dom != domain)
+        {
+          size_t old_size = domain.get_volume();
+          size_t new_size = dom.get_volume();
+          REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
+            "Output region %u has already been initialized to have %zd "
+            "elements, but the new output data holds %zd elements",
+            index, old_size, new_size);
+        }
+      }
+      else
+      {
+        domain = dom;
+        IndexSpaceNode *index_node =
+          node->get_row_source()->as_index_space_node();
+        index_node->set_domain(domain, runtime->address_space);
+      }
+
+      // Create an external instance
+      PhysicalInstance instance;
+      {
+        const DomainT<1,coord_t> bounds = Rect<1,coord_t>(domain);
+        const std::vector<size_t> field_sizes(1, field_size);
+        Realm::InstanceLayoutConstraints constraints(field_sizes,
+                                                     0 /*blocking*/);
+        int dim_order[] = {0};
+        Realm::InstanceLayoutGeneric *layout =
+          Realm::InstanceLayoutGeneric::choose_instance_layout(bounds,
+                                                               constraints,
+                                                               dim_order);
+
+        // If no alignment is given, set it to the field size
+        if (alignment == 0)
+          alignment = field_size;
+
+        Realm::InstanceLayoutGeneric::FieldLayout &field_layout =
+          layout->fields[field_id];
+        field_layout.list_idx = 0;
+        field_layout.rel_offset = 0;
+        field_layout.size_in_bytes =
+          (num_elements * field_size + alignment - 1) / alignment * alignment;
+
+        Realm::ProfilingRequestSet no_requests;
+        RtEvent wait_on(Realm::RegionInstance::create_external(
+          instance, memory, reinterpret_cast<uintptr_t>(ptr), layout,
+          no_requests));
+        if (wait_on.exists())
+          wait_on.wait();
+      }
+#ifdef DEBUG_LEGION
+      assert(instance.exists());
+#endif
+
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::return_data(size_t num_elements,
+                                       std::map<FieldID,void*> ptrs,
+                                       std::map<FieldID,size_t> *alignments)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // Grant Impl 
     /////////////////////////////////////////////////////////////
 
@@ -15551,6 +15671,25 @@ namespace Legion {
       ctx->unmap_all_regions();
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion Runtime::get_output_region(Context ctx, unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT("Illegal dummy context get output region!");
+      return ctx->get_output_region(index);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_output_regions(
+                                Context ctx, std::vector<OutputRegion> &regions)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT("Illegal dummy context get output regions!");
+      regions = ctx->get_output_regions();
     }
 
     //--------------------------------------------------------------------------

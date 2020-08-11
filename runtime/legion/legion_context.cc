@@ -40,9 +40,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(Runtime *rt, TaskOp *owner, int d,
                              const std::vector<RegionRequirement> &reqs,
-                             const std::vector<RegionRequirement> &output_reqs)
+                             const std::vector<RegionRequirement> &out_reqs)
       : runtime(rt), owner_task(owner), regions(reqs),
-        output_regions(output_reqs), depth(d),
+        output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
         total_tunable_count(0), overhead_tracker(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
@@ -54,7 +54,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(const TaskContext &rhs)
       : runtime(NULL), owner_task(NULL), regions(rhs.regions),
-        output_regions(rhs.output_regions), depth(-1)
+        output_reqs(rhs.output_reqs), depth(-1)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -732,6 +732,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::add_output_region(
+                                    const RegionRequirement &req, Memory memory)
+    //--------------------------------------------------------------------------
+    {
+      size_t index = output_regions.size();
+      OutputRegionImpl *impl =
+        new OutputRegionImpl(index, req, memory, this, runtime);
+      output_regions.push_back(OutputRegion(impl));
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion TaskContext::get_physical_region(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -740,6 +751,16 @@ namespace Legion {
 #endif
       return physical_regions[idx];
     } 
+
+    //--------------------------------------------------------------------------
+    OutputRegion TaskContext::get_output_region(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < output_regions.size()); //should be one of our output regions
+#endif
+      return output_regions[idx];
+    }
 
     //--------------------------------------------------------------------------
     void TaskContext::destroy_user_lock(Reservation r)
@@ -2794,7 +2815,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(const InnerContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_regions),
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs),
         tree_context(rhs.tree_context),
         context_uid(0), remote_context(false), full_inner_context(false),
         parent_req_indexes(rhs.parent_req_indexes), 
@@ -18061,7 +18082,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(const RemoteContext &rhs)
-      : InnerContext(NULL, NULL, 0, false, rhs.regions, rhs.output_regions,
+      : InnerContext(NULL, NULL, 0, false, rhs.regions, rhs.output_reqs,
                      local_parent_req_indexes, local_virtual_mapped, 0,
                      ApEvent::NO_AP_EVENT, true),
         remote_task(RemoteTask(this))
@@ -18615,7 +18636,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LeafContext::LeafContext(const LeafContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_regions)
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -20529,7 +20550,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InlineContext::InlineContext(const InlineContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_regions),
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs),
         enclosing(NULL), inline_task(NULL)
     //--------------------------------------------------------------------------
     {

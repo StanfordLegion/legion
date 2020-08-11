@@ -628,6 +628,46 @@ namespace Legion {
     };
 
     /**
+     * \class OutputRegionImpl
+     * The base implementation of an output region object.
+     *
+     * Just like physical region impls, we don't need to make
+     * output region impls thread safe, because they are accessed
+     * exclusively by a single task.
+     */
+    class OutputRegionImpl : public Collectable,
+                             public LegionHeapify<OutputRegionImpl> {
+    public:
+      static const AllocationType alloc_type = OUTPUT_REGION_ALLOC;
+    public:
+      OutputRegionImpl(unsigned index,
+                       const RegionRequirement &req,
+                       Memory memory,
+                       TaskContext *ctx,
+                       Runtime *rt);
+      OutputRegionImpl(const OutputRegionImpl &rhs);
+      ~OutputRegionImpl(void);
+    public:
+      OutputRegionImpl& operator=(const OutputRegionImpl &rhs);
+    public:
+      void return_data(size_t num_elements,
+                       FieldID field_id,
+                       void *ptr,
+                       size_t alignment);
+      void return_data(size_t num_elements,
+                       std::map<FieldID,void*> ptrs,
+                       std::map<FieldID,size_t> *alignments);
+    public:
+      Runtime *const runtime;
+      TaskContext *const context;
+    private:
+      unsigned index;
+      RegionRequirement req;
+      Memory memory;
+      Domain domain;
+    };
+
+    /**
      * \class GrantImpl
      * This is the base implementation of a grant object.
      * The grant implementation remembers the locks that
@@ -2359,6 +2399,9 @@ namespace Legion {
       void remap_region(Context ctx, PhysicalRegion region);
       void unmap_region(Context ctx, PhysicalRegion region);
       void unmap_all_regions(Context ctx);
+    public:
+      OutputRegion get_output_region(Context ctx, unsigned index);
+      void get_output_regions(Context ctx, std::vector<OutputRegion> &regions);
     public:
       void fill_fields(Context ctx, const FillLauncher &launcher);
       void fill_fields(Context ctx, const IndexFillLauncher &launcher);

@@ -122,6 +122,7 @@ namespace Legion {
   class Grant;
   class PhaseBarrier;
   struct RegionRequirement;
+  struct OutputRequirement;
   struct IndexSpaceRequirement;
   struct FieldSpaceRequirement;
   struct TaskLauncher;
@@ -138,6 +139,7 @@ namespace Legion {
   class FutureMap;
   class Predicate;
   class PhysicalRegion;
+  class OutputRegion;
   template<PrivilegeMode,typename,int,typename,typename,bool> 
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
@@ -1556,6 +1558,7 @@ namespace Legion {
     class FutureMapImpl;
     class ReplFutureMapImpl;
     class PhysicalRegionImpl;
+    class OutputRegionImpl;
     class PieceIteratorImpl;
     class GrantImpl;
     class PredicateImpl;

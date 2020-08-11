@@ -620,6 +620,7 @@ namespace Legion {
       deactivate_speculative();
       indexes.clear();
       regions.clear();
+      output_regions.clear();
       futures.clear();
       grants.clear();
       wait_barriers.clear();
@@ -3128,10 +3129,11 @@ namespace Legion {
       }
 
       // Now we prepare output instances
+      output_targets = output.output_targets;
       if (!runtime->unsafe_mapper)
         for (unsigned idx = 0; idx < output_regions.size(); idx++)
         {
-          Memory target = output.output_targets[idx];
+          Memory target = output_targets[idx];
           if (!target.exists() ||
               visible_memories.find(target) == visible_memories.end())
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -4385,6 +4387,11 @@ namespace Legion {
             // back the local instance references
           }
         }
+        // Initialize output regions
+        for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+          execution_context->add_output_region(output_regions[idx],
+                                               output_targets[idx]);
+
         // Initialize any region tree contexts
         execution_context->initialize_region_tree_contexts(clone_requirements,
                                         unmap_events, map_applied_conditions);

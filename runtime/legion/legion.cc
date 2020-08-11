@@ -2551,6 +2551,87 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Output Region
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OutputRegion::OutputRegion(void)
+      : impl(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion::OutputRegion(const OutputRegion &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion::OutputRegion(Internal::OutputRegionImpl *i)
+      : impl(i)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion::~OutputRegion(void)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+        impl = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion& OutputRegion::operator=(const OutputRegion &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+      }
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::return_data(size_t num_elements,
+                                   FieldID field_id,
+                                   void *ptr,
+                                   size_t alignment /*= 0*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->return_data(num_elements, field_id, ptr, alignment);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::return_data(size_t num_elements,
+                                   std::map<FieldID,void*> ptrs,
+                                std::map<FieldID,size_t> *alignments /*= NULL*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->return_data(num_elements, ptrs, alignments);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Piece Iterator
     /////////////////////////////////////////////////////////////
 
@@ -5567,6 +5648,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->unmap_all_regions(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion Runtime::get_output_region(Context ctx, unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_output_region(ctx, index);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_output_regions(
+                                Context ctx, std::vector<OutputRegion> &regions)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_output_regions(ctx, regions);
     }
 
     //--------------------------------------------------------------------------

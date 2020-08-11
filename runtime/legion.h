@@ -2967,7 +2967,29 @@ namespace Legion {
       DomainT<DIM,COORD_T> bounds;
 #endif
     };
- 
+
+    class OutputRegion : public Unserializable<OutputRegion> {
+    public:
+      OutputRegion(void);
+      OutputRegion(const OutputRegion &rhs);
+      ~OutputRegion(void);
+    private:
+      Internal::OutputRegionImpl *impl;
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      explicit OutputRegion(Internal::OutputRegionImpl *impl);
+    public:
+      OutputRegion& operator=(const OutputRegion &rhs);
+    public:
+      void return_data(size_t num_elements,
+                       FieldID field_id,
+                       void *ptr,
+                       size_t alignment = 0);
+      void return_data(size_t num_elements,
+                       std::map<FieldID,void*> ptrs,
+                       std::map<FieldID,size_t> *alignments = NULL);
+    };
+
     //==========================================================================
     //                      Software Coherence Classes
     //==========================================================================
@@ -6042,6 +6064,7 @@ namespace Legion {
        * @see TaskLauncher
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
+       * @param outputs optional output requirements
        * @return a future for the return value of the task
        */
       Future execute_task(Context ctx,
@@ -6054,6 +6077,7 @@ namespace Legion {
        * @see IndexTaskLauncher
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
+       * @param outputs optional output requirements
        * @return a future map for return values of the points
        *    in the index space of tasks
        */
@@ -6073,6 +6097,7 @@ namespace Legion {
        * @param redop ID for the reduction op to use for reducing return values
        * @param deterministic request that the reduced future value be computed 
        *        in a deterministic way (more expensive than non-deterministic)
+       * @param outputs optional output requirements
        * @return a future result representing the reduction of
        *    all the return values from the index space of tasks
        */
@@ -6270,6 +6295,24 @@ namespace Legion {
        * @param ctx enclosing task context
        */
       void unmap_all_regions(Context ctx);
+    public:
+      //------------------------------------------------------------------------
+      // Output Region Operations
+      //------------------------------------------------------------------------
+      /**
+       * Return a single output region of a task.
+       * @param ctx enclosing task context
+       * @param index the output region index to query
+       */
+      OutputRegion get_output_region(Context ctx, unsigned index);
+
+      /**
+       * Return all output regions of a task.
+       * @param ctx enclosing task context
+       * @param regions a vector to which output regions are returned
+       */
+      void get_output_regions(Context ctx, std::vector<OutputRegion> &regions);
+
     public:
       //------------------------------------------------------------------------
       // Fill Field Operations

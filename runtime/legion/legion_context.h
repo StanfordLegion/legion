@@ -512,6 +512,10 @@ namespace Legion {
       PhysicalRegion get_physical_region(unsigned idx);
       void get_physical_references(unsigned idx, InstanceSet &refs);
     public:
+      OutputRegion get_output_region(unsigned idx) const;
+      const std::vector<OutputRegion> get_output_regions(void) const
+        { return output_regions; }
+    public:
       void add_created_region(LogicalRegion handle, bool task_local);
       // for logging created region requirements
       void log_created_requirements(void);
@@ -606,6 +610,7 @@ namespace Legion {
       void add_physical_region(const RegionRequirement &req, bool mapped,
           MapperID mid, MappingTagID tag, ApUserEvent unmap_event,
           bool virtual_mapped, const InstanceSet &physical_instances);
+      void add_output_region(const RegionRequirement &req, Memory memory);
       void initialize_overhead_tracker(void);
       void unmap_all_regions(void); 
       inline void begin_runtime_call(void);
@@ -634,7 +639,7 @@ namespace Legion {
       Runtime *const runtime;
       TaskOp *const owner_task;
       const std::vector<RegionRequirement> &regions;
-      const std::vector<RegionRequirement> &output_regions;
+      const std::vector<RegionRequirement> &output_reqs;
     protected:
       // For profiling information
       friend class SingleTask;
@@ -663,6 +668,8 @@ namespace Legion {
       // so we can see when there are conflicts
       LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::tracked
                                                 inline_regions; 
+    protected:
+      std::vector<OutputRegion>                 output_regions;
     protected:
       Processor                             executing_processor;
       unsigned                              total_tunable_count;
