@@ -24,6 +24,7 @@ add_subdirectory(attach_file_mini)
 add_subdirectory(legion_stl)
 add_subdirectory(rendering)
 add_subdirectory(realm)
+add_subdirectory(gather_perf)
 
 if(Legion_USE_HDF5)
   add_subdirectory(hdf_attach_subregion_parallel)
