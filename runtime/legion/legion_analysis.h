@@ -2715,8 +2715,72 @@ namespace Legion {
         return continuation_pre;
       }
       bool is_remote_analysis(PhysicalAnalysis &analysis,const FieldMask &mask);
+    protected:
       void update_initialized_data(IndexSpaceExpression *expr, 
                             const bool expr_covers, const FieldMask &user_mask);
+      void record_instances(IndexSpaceExpression *expr, const bool expr_covers,
+                            const FieldMask &record_mask, 
+                            const InstanceSet &target_instances,
+                            const std::vector<InstanceView*> &target_views,
+                                  ReferenceMutator &mutator);
+      void record_unrestricted_instances(IndexSpaceExpression *expr,
+                            const bool expr_covers, FieldMask record_mask, 
+                            const InstanceSet &target_instances,
+                            const std::vector<InstanceView*> &target_views,
+                                  ReferenceMutator &mutator);
+      bool record_partial_valid_instance(LogicalView *instance,
+                                         IndexSpaceExpression *expr,
+                                         FieldMask valid_mask,
+                                         ReferenceMutator &mutator);
+      void filter_valid_instances(IndexSpaceExpression *expr, 
+                          const bool expr_covers, const FieldMask &filter_mask);
+      void filter_unrestricted_instances(IndexSpaceExpression *expr,
+                          const bool expr_covers, FieldMask filter_mask);
+      void filter_reduction_instances(IndexSpaceExpression *expr,
+                          const bool expr_covers, const FieldMask &filter_mask);
+      void update_set_internal(CopyFillAggregator *&input_aggregator,
+                               const RtEvent guard_event,
+                               Operation *op, const unsigned index,
+                               const RegionUsage &usage,
+                               IndexSpaceExpression *expr, 
+                               const bool expr_covers,
+                               const FieldMask &user_mask,
+                               const InstanceSet &target_instances,
+                               const std::vector<InstanceView*> &target_views,
+                               std::set<RtEvent> &applied_events,
+                               const bool record_valid);
+      void make_instances_valid(CopyFillAggregator *&aggregator,
+                                const RtEvent guard_event,
+                                Operation *op, const unsigned index,
+                                const bool track_events,
+                                IndexSpaceExpression *expr,
+                                const bool expr_covers,
+                                const FieldMask &update_mask,
+                                const InstanceSet &target_instances,
+                                const std::vector<InstanceView*> &target_views,
+                                const bool skip_check = false,
+                                const int dst_index = -1) const;
+      void issue_update_copies_and_fills(InstanceView *target,
+                                         CopyFillAggregator *&aggregator,
+                                         const RtEvent guard_event,
+                                         Operation *op, const unsigned index,
+                                         const bool track_events,
+                                         IndexSpaceExpression *expr,
+                                         const bool expr_covers,
+                                         FieldMask update_mask,
+                                         const int dst_index) const;
+      void apply_reductions(const FieldMaskSet<InstanceView> &reduction_targets,
+                            IndexSpaceExpression *expr, const bool expr_covers,
+                            CopyFillAggregator *&aggregator,RtEvent guard_event,
+                            Operation *op, const unsigned index, 
+                            const bool track_events, const bool track_exprs,
+                            FieldMaskSet<IndexSpaceExpression> &applied_exprs);
+      void copy_out(IndexSpaceExpression *expr, const bool expr_covers,
+                    const FieldMask &restricted_mask, 
+                    const InstanceSet &src_instances,
+                    const std::vector<InstanceView*> &src_views,
+                    Operation *op, const unsigned index,
+                    CopyFillAggregator *&aggregator);
     public:
       static void handle_remote_references(const void *args);
       static void handle_make_owner(const void *args);
@@ -2741,15 +2805,15 @@ namespace Legion {
       FieldMaskSet<LogicalView>                         total_valid_instances;
       LegionMap<LogicalView*,
         FieldMaskSet<IndexSpaceExpression> >::aligned   partial_valid_instances;
-      FieldMask                                         partial_fields;
+      FieldMask                                         partial_valid_fields;
       // Expressions and fields that have valid data
       FieldMaskSet<IndexSpaceExpression>                initialized_data;
       // Reductions always need to be applied in order so keep them in order
-      std::map<unsigned/*fidx*/,std::vector<std::pair<
+      std::map<unsigned/*fidx*/,std::list<std::pair<
         ReductionView*,IndexSpaceExpression*> > >       reduction_instances;
       FieldMask                                         reduction_fields;
-      LegionMap<InstanceView*,
-        FieldMaskSet<IndexSpaceExpression> >::aligned   restricted_instances;
+      LegionMap<IndexSpaceExpression*,
+        FieldMaskSet<InstanceView> >::aligned           restricted_instances;
       FieldMask                                         restricted_fields;
     protected:
       // This tracks the most recent copy-fill aggregator for each field
