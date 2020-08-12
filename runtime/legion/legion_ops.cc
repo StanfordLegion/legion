@@ -6965,6 +6965,8 @@ namespace Legion {
       {
         if (!IS_WRITE(dst_requirements[idx]))
           continue;
+        if (!IS_EXCLUSIVE(dst_requirements[idx]))
+          continue;
         const unsigned index = src_requirements.size() + idx;
         interfering_requirements.insert(
             std::pair<unsigned,unsigned>(index,index));
