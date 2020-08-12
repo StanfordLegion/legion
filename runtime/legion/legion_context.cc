@@ -9057,8 +9057,25 @@ namespace Legion {
                                            res, res_size, 
                                            deferred_result_instance);
       else if (callback_functor != NULL)
-        parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size,
-                          deferred_result_instance, callback_functor, owned);
+      {
+        if (owner_task->is_reducing_future())
+        {
+          // If we're reducing this future value then just do the callback
+          // now since there is no point in deferring it to later
+          const size_t callback_size = 
+            callback_functor->callback_get_future_size();
+          void *buffer = malloc(callback_size);
+          callback_functor->callback_pack_future(buffer, callback_size);
+          callback_functor->callback_release_future();
+          if (owned)
+            delete callback_functor;
+          parent_ctx->add_to_post_task_queue(this, effects_done, 
+                                             buffer, callback_size);
+        }
+        else
+          parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size,
+                            deferred_result_instance, callback_functor, owned);
+      }
       else if (!owned)
       {
         void *result_copy = malloc(res_size);
@@ -9090,7 +9107,8 @@ namespace Legion {
       SingleTask *single_task = static_cast<SingleTask*>(owner_task);
 #endif
       // Handle the future result
-      single_task->handle_future(res, res_size, owned, callback_functor);
+      single_task->handle_future(res, res_size, owned, 
+                                 callback_functor, executing_processor);
       // If we weren't a leaf task, compute the conditions for being mapped
       // which is that all of our children are now mapped
       // Also test for whether we need to trigger any of our child
@@ -20313,8 +20331,25 @@ namespace Legion {
                                            res, res_size, 
                                            deferred_result_instance);
       else if (callback_functor != NULL)
-        parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size,
-                          deferred_result_instance, callback_functor, owned);
+      {
+        if (owner_task->is_reducing_future())
+        {
+          // If we're reducing this future value then just do the callback
+          // now since there is no point in deferring it
+          const size_t callback_size = 
+            callback_functor->callback_get_future_size();
+          void *buffer = malloc(callback_size);
+          callback_functor->callback_pack_future(buffer, callback_size);
+          callback_functor->callback_release_future();
+          if (owned)
+            delete callback_functor;
+          parent_ctx->add_to_post_task_queue(this, effects_done, 
+                                             buffer, callback_size);
+        }
+        else
+          parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size,
+                            deferred_result_instance, callback_functor, owned);
+      }
       else if (!owned)
       {
         void *result_copy = malloc(res_size);
@@ -20346,7 +20381,8 @@ namespace Legion {
       SingleTask *single_task = static_cast<SingleTask*>(owner_task);
 #endif
       // Handle the future result
-      single_task->handle_future(res, res_size, owned, callback_functor);
+      single_task->handle_future(res, res_size, owned, 
+                                 callback_functor, executing_processor);
       bool need_complete = false;
       bool need_commit = false;
       {

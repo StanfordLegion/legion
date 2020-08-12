@@ -202,6 +202,14 @@ namespace Legion {
         const DynamicCollective dc;
         const unsigned count;
       };
+      struct FutureCallbackArgs : public LgTaskArgs<FutureCallbackArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FUTURE_CALLBACK_TASK_ID;
+      public:
+        FutureCallbackArgs(FutureImpl *i);
+      public:
+        FutureImpl *const impl;
+      };
     public:
       FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
                  AddressSpaceID owner_space, ApEvent complete,
@@ -233,7 +241,8 @@ namespace Legion {
     public:
       // This will simply save the value of the future
       void set_result(const void *args, size_t arglen, bool own);
-      void set_result(FutureFunctor *callback_functor, bool own);
+      void set_result(FutureFunctor *callback_functor, bool own,
+                      Processor functor_proc);
       // This will save the value of the future locally
       void unpack_future(Deserializer &derez);
       // Reset the future in case we need to restart the
@@ -266,12 +275,14 @@ namespace Legion {
       void register_remote(AddressSpaceID sid, ReferenceMutator *mutator);
     protected:
       void finish_set_future(void); // must be holding lock
-      void invoke_callback(void); // must be holding lock
       void mark_sampled(void);
       void broadcast_result(std::set<AddressSpaceID> &targets,
                             ApEvent complete, const bool need_lock);
       void record_subscription(AddressSpaceID subscriber, bool need_lock);
       void notify_remote_set(AddressSpaceID remote_space);
+    protected:
+      ApEvent invoke_callback(void); // must be holding lock
+      void perform_callback(void);
     public:
       void record_future_registered(ReferenceMutator *mutator);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
@@ -283,6 +294,7 @@ namespace Legion {
     public:
       void contribute_to_collective(const DynamicCollective &dc,unsigned count);
       static void handle_contribute_to_collective(const void *args);
+      static void handle_callback(const void *args);
     public:
       // These three fields are only valid on the owner node
       Operation *const producer_op;
@@ -307,9 +319,12 @@ namespace Legion {
       void *result; 
       size_t result_size;
       AddressSpaceID result_set_space; // space on which the result was set
+    private:
+      ApUserEvent callback_ready;
+      Processor callback_proc;
       FutureFunctor *callback_functor;
       bool own_callback_functor;
-      bool callback_invoked;
+    private:
       volatile bool empty;
       volatile bool sampled;
     };
@@ -3220,6 +3235,10 @@ namespace Legion {
                                              LgPriority lg_priority,
                                    RtEvent precondition = RtEvent::NO_RT_EVENT,
                                    Processor proc = Processor::NO_PROC);
+      template<typename T>
+      inline RtEvent issue_application_processor_task(const LgTaskArgs<T> &args,
+                                   LgPriority lg_priority, const Processor proc,
+                                   RtEvent precondition = RtEvent::NO_RT_EVENT);
     public:
       DistributedID get_available_distributed_id(void); 
       void free_distributed_id(DistributedID did);
@@ -3498,6 +3517,10 @@ namespace Legion {
 			  const void *userdata, size_t userlen,
 			  Processor p);
       static void endpoint_runtime_task(
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
+      static void application_processor_runtime_task(
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
@@ -4162,6 +4185,50 @@ namespace Legion {
                                     precondition, priority));
 #else
         return RtEvent(target.spawn(LG_TASK_ID, &args, sizeof(T), 
+                                    precondition, priority));
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline RtEvent Runtime::issue_application_processor_task(
+                                 const LgTaskArgs<T> &args, LgPriority priority,
+                                 const Processor target, RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT(T::TASK_ID < LG_BEGIN_SHUTDOWN_TASK_IDS,
+          "Shutdown tasks should never be run directly on application procs");
+      // If this is not a task directly related to shutdown or is a message, 
+      // to a remote node then increment the number of outstanding tasks
+#ifdef DEBUG_LEGION
+      assert(target.exists());
+      assert(target.kind() != Processor::UTIL_PROC);
+      increment_total_outstanding_tasks(args.lg_task_id, true/*meta*/);
+#else
+      increment_total_outstanding_tasks();
+#endif
+#ifdef DEBUG_SHUTDOWN_HANG
+      __sync_fetch_and_add(&outstanding_counts[T::TASK_ID],1);
+#endif
+      DETAILED_PROFILER(this, REALM_SPAWN_META_CALL);
+      if (profiler != NULL)
+      {
+        Realm::ProfilingRequestSet requests;
+        profiler->add_meta_request(requests, T::TASK_ID, args.provenance);
+#ifdef LEGION_SEPARATE_META_TASKS
+        return RtEvent(target.spawn(LG_APP_PROC_TASK_ID + T::TASK_ID, &args,
+                              sizeof(T), requests, precondition, priority));
+#else
+        return RtEvent(target.spawn(LG_APP_PROC_TASK_ID, &args, sizeof(T),
+                                    requests, precondition, priority));
+#endif
+      }
+      else
+#ifdef LEGION_SEPARATE_META_TASKS
+        return RtEvent(target.spawn(LG_APP_PROC_TASK_ID + T::TASK_ID, &args,
+                                    sizeof(T), precondition, priority));
+#else
+        return RtEvent(target.spawn(LG_APP_PROC_TASK_ID, &args, sizeof(T), 
                                     precondition, priority));
 #endif
     }

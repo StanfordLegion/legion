@@ -317,6 +317,7 @@ namespace Legion {
       LG_DEFERRED_FUTURE_MAP_SET_ID,
       LG_RESOLVE_FUTURE_PRED_ID,
       LG_CONTRIBUTE_COLLECTIVE_ID,
+      LG_FUTURE_CALLBACK_TASK_ID,
       LG_TOP_FINISH_TASK_ID,
       LG_MAPPER_TASK_ID,
       LG_DISJOINTNESS_TASK_ID,
@@ -435,6 +436,7 @@ namespace Legion {
         "Deferred Future Map Set",                                \
         "Resolve Future Predicate",                               \
         "Contribute Collective",                                  \
+        "Future Callback",                                        \
         "Top Finish",                                             \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
@@ -1104,15 +1106,17 @@ namespace Legion {
       LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
 #ifdef LEGION_SEPARATE_META_TASKS
-      LG_LEGION_PROFILING_ID  = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+1,
-      LG_STARTUP_TASK_ID      = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+2,
-      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+3,
-      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+4,
+      LG_LEGION_PROFILING_ID  = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND,
+      LG_STARTUP_TASK_ID      = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+1,
+      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+2,
+      LG_APP_PROC_TASK_ID     = LG_TASK_ID+LG_LAST_TASK_ID+LAST_SEND_KIND+3,
+      LG_TASK_ID_AVAILABLE    = LG_APP_PROC_TASK_ID+LG_LAST_TASK_ID,
 #else
       LG_LEGION_PROFILING_ID  = LG_TASK_ID+1,
       LG_STARTUP_TASK_ID      = LG_TASK_ID+2,
       LG_ENDPOINT_TASK_ID     = LG_TASK_ID+3,
-      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+4,
+      LG_APP_PROC_TASK_ID     = LG_TASK_ID+4,
+      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+5,
 #endif
     };
 
