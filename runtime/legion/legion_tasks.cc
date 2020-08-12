@@ -9437,7 +9437,7 @@ namespace Legion {
         if (is_remote())
         {
 #ifdef DEBUG_LEGION
-          assert(functor != NULL);
+          assert(functor == NULL);
 #endif
           // Store the future result in our temporary futures unless we're 
           // doing a non-deterministic reduction in which case we can eagerly
