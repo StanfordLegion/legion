@@ -18206,8 +18206,8 @@ namespace Legion {
         rez.serialize(mask);
         rez.serialize(handle);
         rez.serialize(source);
-        rez.serialize(check_empty);
         rez.serialize(ready_event);
+        rez.serialize(check_empty);
       }
       // Send it to the owner space 
       runtime->send_compute_equivalence_sets_request(target, rez);
