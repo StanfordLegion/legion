@@ -487,6 +487,9 @@ namespace Legion {
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner,
                                     std::vector<InstanceSet> &valid_instances); 
+      void prepare_output_instance(InstanceSet &instance_set,
+                                   const RegionRequirement &req,
+                                   Memory target);
       void replay_map_task_output(void);
       virtual InnerContext* create_implicit_context(void);
       void set_shard_manager(ShardManager *manager);
@@ -580,7 +583,7 @@ namespace Legion {
       // Hold the result of the mapping 
       std::deque<InstanceSet>               physical_instances;
     protected:
-      std::vector<Memory>                   output_targets;
+      std::vector<InstanceSet>              output_instances;
     protected: // Mapper choices 
       std::set<unsigned>                    untracked_valid_regions;
       VariantID                             selected_variant;

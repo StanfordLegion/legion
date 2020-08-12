@@ -3427,11 +3427,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRegionImpl::OutputRegionImpl(unsigned i,
                                        const RegionRequirement &r,
-                                       Memory m,
+                                       InstanceSet is,
                                        TaskContext *ctx,
                                        Runtime *rt)
       : Collectable(), runtime(rt), context(ctx),
-        index(i), req(r), memory(m), domain()
+        index(i), req(r), instances(is), domain()
     //--------------------------------------------------------------------------
     {
     }
@@ -3439,7 +3439,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRegionImpl::OutputRegionImpl(const OutputRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL),
-        index(-1U), req(), memory(Memory::NO_MEMORY), domain()
+        index(-1U), req(), instances(), domain()
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3470,8 +3470,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RegionNode *node = runtime->forest->get_node(req.region);
-      FieldSpaceNode *column_source = node->get_column_source();
-      size_t field_size = column_source->get_field_size(field_id);
+      FieldSpaceNode *fspace_node = node->get_column_source();
+      size_t field_size = fspace_node->get_field_size(field_id);
+      std::set<FieldID> fields; fields.insert(field_id);
+      FieldMask mask = fspace_node->get_field_mask(fields);
 
       // Initialize the index space domain
       Domain dom(Rect<1>(0, num_elements - 1));
@@ -3495,41 +3497,53 @@ namespace Legion {
         index_node->set_domain(domain, runtime->address_space);
       }
 
+      // Find the right instance manager for a given output
+      IndividualManager *manager = NULL;
+      for (unsigned idx = 0; idx < instances.size(); ++idx)
+      {
+        const InstanceRef &instance = instances[idx];
+        if (!!(instance.get_valid_fields() & mask))
+        {
+          manager =
+            instance.get_instance_manager()->as_individual_manager();
+          break;
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+#endif
+
       // Create an external instance
       PhysicalInstance instance;
       {
         const DomainT<1,coord_t> bounds = Rect<1,coord_t>(domain);
-        const std::vector<size_t> field_sizes(1, field_size);
+        std::map<Realm::FieldID,size_t> field_sizes;
+        field_sizes[field_id] = field_size;
         Realm::InstanceLayoutConstraints constraints(field_sizes,
-                                                     0 /*blocking*/);
+                                                     0 /*block_size*/);
         int dim_order[] = {0};
         Realm::InstanceLayoutGeneric *layout =
           Realm::InstanceLayoutGeneric::choose_instance_layout(bounds,
                                                                constraints,
                                                                dim_order);
-
         // If no alignment is given, set it to the field size
         if (alignment == 0)
           alignment = field_size;
 
-        Realm::InstanceLayoutGeneric::FieldLayout &field_layout =
-          layout->fields[field_id];
-        field_layout.list_idx = 0;
-        field_layout.rel_offset = 0;
-        field_layout.size_in_bytes =
+        layout->bytes_used =
           (num_elements * field_size + alignment - 1) / alignment * alignment;
 
         Realm::ProfilingRequestSet no_requests;
         RtEvent wait_on(Realm::RegionInstance::create_external(
-          instance, memory, reinterpret_cast<uintptr_t>(ptr), layout,
-          no_requests));
+          instance, manager->get_memory(), reinterpret_cast<uintptr_t>(ptr),
+          layout, no_requests));
         if (wait_on.exists())
           wait_on.wait();
       }
 #ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
-
+      manager->update_physical_instance(instance);
     }
 
     //--------------------------------------------------------------------------

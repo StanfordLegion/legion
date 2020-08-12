@@ -1149,14 +1149,16 @@ namespace Legion {
                         LayoutDescription *desc, ReductionOpID redop_id, 
                         bool register_now, size_t footprint,
                         ApEvent u_event, bool external_instance,
-                        const ReductionOp *op /*= NULL*/, bool shadow/*=false*/)
+                        const ReductionOp *op /*= NULL*/, bool shadow/*=false*/,
+                        bool _deferred/*=false*/)
       : PhysicalManager(ctx, desc, encode_instance_did(did, external_instance,
             (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
           instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow),
         memory_manager(memory), instance(inst),
-        use_event(fetch_metadata(inst, u_event))
+        use_event(!_deferred ? fetch_metadata(inst, u_event) : u_event),
+        deferred(_deferred)
     //--------------------------------------------------------------------------
     {
       if (!is_owner() && !shadow_instance)
@@ -1170,7 +1172,7 @@ namespace Legion {
                         LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
                         inst.id, memory->memory.id);
 #endif
-      if (runtime->legion_spy_enabled)
+      if (runtime->legion_spy_enabled && !deferred)
       {
 #ifdef DEBUG_LEGION
         assert(unique_event.exists());
@@ -1216,7 +1218,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (is_owner())
-        assert(instance.exists());
+        assert(deferred || instance.exists());
 #endif
       // Shadow instances do not participate here
       if (shadow_instance)
@@ -1254,7 +1256,7 @@ namespace Legion {
       // No need to do anything
 #ifdef DEBUG_LEGION
       if (is_owner())
-        assert(instance.exists());
+        assert(deferred || instance.exists());
 #endif
       // Shadow instances do not participate here
       if (shadow_instance)
@@ -1313,6 +1315,30 @@ namespace Legion {
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> temp(instance);
       return temp.get_untyped_field_accessor(info.field_id, info.size);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent IndividualManager::get_use_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      return use_event;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent IndividualManager::get_use_event(ApEvent user) const
+    //--------------------------------------------------------------------------
+    {
+      if (!deferred)
+      {
+#ifdef DEBUG_LEGION
+        assert(user != use_event);
+#endif
+        return use_event;
+      }
+      else
+        // If the user is the one that is going to bind an instance
+        // to this manager, return a no event
+        return user == use_event ? ApEvent::NO_AP_EVENT : use_event;
     }
 
     //--------------------------------------------------------------------------
@@ -2007,6 +2033,33 @@ namespace Legion {
     }
 #endif // LEGION_GPU_REDUCTIONS
 
+    //--------------------------------------------------------------------------
+    void IndividualManager::update_physical_instance(
+                                                  PhysicalInstance new_instance)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock lock(inst_lock);
+#ifdef DEBUG_LEGION
+        assert(deferred);
+        assert(instance_footprint == 0);
+#endif
+        instance = new_instance;
+        ApEvent ready(
+            instance.fetch_metadata(Processor::get_executing_processor()));
+        ready.wait();
+        update_instance_footprint(instance.get_layout()->bytes_used);
+
+        if (runtime->legion_spy_enabled)
+        {
+          LegionSpy::log_physical_instance(unique_event, instance.id,
+            memory_manager->memory.id, instance_domain->expr_id,
+            field_space_node->handle, tree_id, redop);
+          layout->log_instance_layout(unique_event);
+        }
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Collective Manager
     /////////////////////////////////////////////////////////////
@@ -2079,6 +2132,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent CollectiveManager::get_use_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      // TODO: implement this
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent CollectiveManager::get_use_event(ApEvent user) const
     //--------------------------------------------------------------------------
     {
       // TODO: implement this
@@ -3296,6 +3358,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent VirtualManager::get_use_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent VirtualManager::get_use_event(ApEvent user) const
     //--------------------------------------------------------------------------
     {
       return ApEvent::NO_AP_EVENT;

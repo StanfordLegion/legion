@@ -132,6 +132,7 @@ namespace Legion {
           get_field_accessor(FieldID fid) const = 0;
     public: 
       virtual ApEvent get_use_event(void) const = 0;
+      virtual ApEvent get_use_event(ApEvent user) const = 0;
       virtual ApEvent get_unique_event(void) const = 0;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const = 0;
       virtual PointerConstraint 
@@ -274,6 +275,8 @@ namespace Legion {
       virtual bool has_visible_from(const std::set<Memory> &memories) const = 0;
       virtual Memory get_memory(void) const = 0; 
       inline size_t get_instance_size(void) const { return instance_footprint; }
+      void update_instance_footprint(size_t footprint)
+        { instance_footprint = footprint; }
 #ifdef LEGION_GPU_REDUCTIONS
     public:
       virtual bool is_gpu_visible(PhysicalManager *other) const = 0;
@@ -303,7 +306,7 @@ namespace Legion {
     public: 
       static ApEvent fetch_metadata(PhysicalInstance inst, ApEvent use_event);
     public:
-      const size_t instance_footprint;
+      size_t instance_footprint;
       const ReductionOp *reduction_op;
       const ReductionOpID redop;
       // Unique identifier event that is common across nodes
@@ -407,7 +410,8 @@ namespace Legion {
                         bool register_now, size_t footprint,
                         ApEvent use_event, bool external_instance,
                         const ReductionOp *op = NULL,
-                        bool shadow_instance = false);
+                        bool shadow_instance = false,
+                        bool deferred = false);
       IndividualManager(const IndividualManager &rhs);
       virtual ~IndividualManager(void);
     public:
@@ -425,7 +429,8 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
     public:
-      virtual ApEvent get_use_event(void) const { return use_event; }
+      virtual ApEvent get_use_event(void) const;
+      virtual ApEvent get_use_event(ApEvent user) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const 
                                                    { return instance; }
       virtual PointerConstraint
@@ -489,11 +494,14 @@ namespace Legion {
           ReductionOpID redop, ReductionView *view);
 #endif
     public:
+      void update_physical_instance(PhysicalInstance new_instance);
+    public:
       MemoryManager *const memory_manager;
-      const PhysicalInstance instance;
+      PhysicalInstance instance;
       // Event that needs to trigger before we can start using
       // this physical instance.
       const ApEvent use_event; 
+      bool deferred;
     };
 
     /**
@@ -565,6 +573,7 @@ namespace Legion {
       void finalize_collective_instance(ApUserEvent instance_event);
     public:
       virtual ApEvent get_use_event(void) const;
+      virtual ApEvent get_use_event(ApEvent user) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const;
       virtual PointerConstraint
                      get_pointer_constraint(const DomainPoint &key) const;
@@ -695,6 +704,7 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public: 
       virtual ApEvent get_use_event(void) const;
+      virtual ApEvent get_use_event(ApEvent user) const;
       virtual ApEvent get_unique_event(void) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const;
       virtual PointerConstraint

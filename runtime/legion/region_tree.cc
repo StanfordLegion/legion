@@ -1820,7 +1820,7 @@ namespace Legion {
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
                      unsigned idx, const RegionRequirement &req,
                      VersionInfo &version_info, std::set<RtEvent> &ready_events,
-                     bool check_emptiness)
+                     bool check_empty)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1843,7 +1843,7 @@ namespace Legion {
                                                  req.parent,
                                                  user_mask,
                                                  op,
-                                                 check_emptiness);
+                                                 check_empty);
       if (ready.exists())
         ready_events.insert(ready);
     }
@@ -1892,7 +1892,7 @@ namespace Legion {
                   InnerContext *context,unsigned init_index,
                   std::map<PhysicalManager*,InstanceView*> &top_views,
                   std::set<RtEvent> &applied_events,
-                  bool check_emptiness)
+                  bool check_empty)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_INITIALIZE_CONTEXT_CALL);
@@ -1910,7 +1910,7 @@ namespace Legion {
       const RtEvent eq_ready = 
         top_node->perform_versioning_analysis(ctx.get_id(), context,
                &init_version_info, req.region, user_mask, context->owner_task,
-               check_emptiness);
+               check_empty);
       // Now get the top-views for all the physical instances
       std::vector<InstanceView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
@@ -2212,7 +2212,8 @@ namespace Legion {
                                          UpdateAnalysis *analysis,
                                          InstanceSet &targets,
                                          const PhysicalTraceInfo &trace_info,
-                                         std::set<RtEvent> &map_applied_events)
+                                         std::set<RtEvent> &map_applied_events,
+                                         bool check_empty /*=true*/)
     //--------------------------------------------------------------------------
     {
       // If we are a NO_ACCESS or there are no fields then analysis will be NULL
@@ -2236,7 +2237,7 @@ namespace Legion {
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index, 
                 analysis->term_event, collect_event,
-                user_applied, trace_info, local_space);
+                user_applied, trace_info, local_space, check_empty);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -2260,7 +2261,7 @@ namespace Legion {
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index,
                 analysis->term_event, collect_event, map_applied_events, 
-                trace_info, local_space);
+                trace_info, local_space, check_empty);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -17614,7 +17615,7 @@ namespace Legion {
                                                     LogicalRegion upper_bound,
                                                     const FieldMask &mask,
                                                     Operation *op,
-                                                    bool check_emptiness)
+                                                    bool check_empty)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
@@ -17638,14 +17639,14 @@ namespace Legion {
                                                         upper_bound,
                                                         mask,
                                                         op,
-                                                        check_emptiness);
+                                                        check_empty);
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
         }
       }
       return manager.perform_versioning_analysis(parent_ctx, version_info, 
                                                  this, mask, op,
-                                                 check_emptiness);
+                                                 check_empty);
     }
 
     //--------------------------------------------------------------------------

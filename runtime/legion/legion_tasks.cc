@@ -2175,6 +2175,7 @@ namespace Legion {
       deactivate_task();
       target_processors.clear();
       physical_instances.clear();
+      output_instances.clear();
       virtual_mapped.clear();
       no_access_regions.clear();
       version_infos.clear();
@@ -3129,11 +3130,10 @@ namespace Legion {
       }
 
       // Now we prepare output instances
-      output_targets = output.output_targets;
       if (!runtime->unsafe_mapper)
         for (unsigned idx = 0; idx < output_regions.size(); idx++)
         {
-          Memory target = output_targets[idx];
+          Memory target = output.output_targets[idx];
           if (!target.exists() ||
               visible_memories.find(target) == visible_memories.end())
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -3144,6 +3144,22 @@ namespace Legion {
                           mapper->get_mapper_name(), target.id, idx,
                           get_task_name(), get_unique_id())
         }
+      output_instances.resize(output_regions.size());
+      for (unsigned idx = 0; idx < output_regions.size(); idx++)
+      {
+        prepare_output_instance(output_instances[idx],
+                                output_regions[idx],
+                                output.output_targets[idx]);
+      }
+      if (runtime->legion_spy_enabled)
+      {
+        unsigned offset = regions.size();
+        for (unsigned idx = 0; idx < output_regions.size(); idx++)
+          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
+                                                offset + idx,
+                                                output_regions[idx],
+                                                output_instances[idx]);
+      }
 
       // Now that we have our physical instances we can validate the variant
       if (!runtime->unsafe_mapper)
@@ -3180,6 +3196,84 @@ namespace Legion {
           else
             it++;
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::prepare_output_instance(InstanceSet &instance_set,
+                                             const RegionRequirement &req,
+                                             Memory target)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = runtime->forest->get_node(req.region);
+      IndexSpaceNode *index_node =
+        node->get_row_source()->as_index_space_node();
+      FieldSpaceNode *fspace_node = node->get_column_source();
+      MemoryManager *memory_manager = runtime->find_memory_manager(target);
+
+      std::vector<DimensionKind> ordering;
+      ordering.push_back(DIM_X);
+      ordering.push_back(DIM_F);
+
+      LayoutConstraintSet constraints;
+      constraints.add_constraint(MemoryConstraint(target.kind()))
+        .add_constraint(OrderingConstraint(ordering, false))
+        .add_constraint(
+            SpecializedConstraint(LEGION_AFFINE_SPECIALIZE, 0, false, true));
+
+      for (std::set<FieldID>::iterator it = req.privilege_fields.begin();
+           it != req.privilege_fields.end(); ++it)
+      {
+        // Create a layout description for a single field
+        std::vector<FieldID> fields(1, *it);
+        constraints.field_constraint = FieldConstraint(fields, false, false);
+
+        FieldMask instance_mask;
+        std::vector<size_t> field_sizes(fields.size());
+        std::vector<unsigned> mask_index_map(fields.size());
+        std::vector<CustomSerdezID> serdez(fields.size());
+        fspace_node->compute_field_layout(
+            fields, field_sizes, mask_index_map, serdez, instance_mask);
+
+        LayoutDescription *layout =
+          fspace_node->find_layout_description(instance_mask, 1, constraints);
+        if (layout == NULL)
+        {
+          LayoutConstraints *internal_constraints =
+            runtime->register_layout(
+                fspace_node->handle, constraints, true/*internal*/);
+          layout = fspace_node->create_layout_description(
+              instance_mask, 1, internal_constraints,
+              mask_index_map, fields, field_sizes, serdez);
+        }
+
+        // Create an individual manager with a null instance
+        DistributedID did = runtime->get_available_distributed_id();
+        IndividualManager *manager =
+          new IndividualManager(runtime->forest, did,
+                                runtime->address_space,
+                                memory_manager,
+                                PhysicalInstance::NO_INST,
+                                index_node,
+                                NULL/*piece_list*/,
+                                0/*piece_list_size*/,
+                                fspace_node,
+                                req.region.get_tree_id(),
+                                layout,
+                                0/*redop id*/, true/*register now*/,
+                                0/*instance_footprint*/,
+                                get_task_completion(),
+                                true/*external_instnace*/,
+                                NULL/*op*/,
+                                false/*shadow_instance*/,
+                                true/*output_instance*/);
+
+        // Add an instance ref of the new manager to the instance set
+        instance_set.add_instance(InstanceRef(manager, instance_mask));
+
+        // Finally, register the instance to the memory manager
+        memory_manager->record_created_instance(
+            manager, true, map_id, target_proc, 0, false);
       }
     }
 
@@ -4010,6 +4104,58 @@ namespace Legion {
           if (perform_postmap)
             perform_post_mapping(trace_info);
         } // if (!regions.empty())
+
+        if (!output_regions.empty())
+        {
+          std::vector<unsigned> performed_regions;
+          std::vector<UpdateAnalysis*> analyses(output_regions.size(), NULL);
+          std::vector<ApEvent> effects(
+              output_regions.size(), ApEvent::NO_AP_EVENT);
+          std::vector<RtEvent> reg_pre(
+              output_regions.size(), RtEvent::NO_RT_EVENT);
+          unsigned offset = regions.size();
+          for (unsigned idx = 0; idx < output_regions.size(); idx++)
+          {
+            VersionInfo &local_info = get_version_info(offset + idx);
+            performed_regions.push_back(idx);
+            // Register output instances to the region tree
+            reg_pre[idx] = runtime->forest->physical_perform_updates(
+                                        output_regions[idx], local_info,
+                                        this, offset + idx, init_precondition,
+                                        local_termination_event,
+                                        output_instances[idx],
+                                        PhysicalTraceInfo(trace_info,
+                                                          offset + idx),
+                                        map_applied_conditions,
+                                        analyses[idx],
+#ifdef DEBUG_LEGION
+                                        get_logging_name(),
+                                        unique_op_id,
+#endif
+                                        false /*track_effects*/);
+          }
+          for (std::vector<unsigned>::const_iterator it =
+               performed_regions.begin(); it != performed_regions.end(); it++)
+          {
+#ifdef DEBUG_LEGION
+            // Output regions do not have any preconditions or output updates
+            assert(!(reg_pre[*it].exists() ||
+                     analyses[*it]->has_output_updates()));
+#endif
+            effects[*it] = runtime->forest->physical_perform_registration(
+                                      analyses[*it], output_instances[*it],
+                                      PhysicalTraceInfo(trace_info,
+                                                        offset + *it),
+                                      map_applied_conditions,
+                                      false /*check_empty*/);
+          }
+          for (std::vector<unsigned>::const_iterator it =
+               performed_regions.begin(); it != performed_regions.end(); it++)
+          {
+            if (effects[*it].exists())
+              effects_postconditions.insert(effects[*it]);
+          }
+        } // if (!output_regions.empty())
       }
       else // third invocation
       {
@@ -4390,7 +4536,7 @@ namespace Legion {
         // Initialize output regions
         for (unsigned idx = 0; idx < output_regions.size(); ++idx)
           execution_context->add_output_region(output_regions[idx],
-                                               output_targets[idx]);
+                                               output_instances[idx]);
 
         // Initialize any region tree contexts
         execution_context->initialize_region_tree_contexts(clone_requirements,
@@ -5574,6 +5720,9 @@ namespace Legion {
       {
         for (unsigned idx = 0; idx < regions.size(); idx++)
           log_requirement(unique_op_id, idx, regions[idx]);
+        unsigned offset = regions.size();
+        for (unsigned idx = 0; idx < output_regions.size(); idx++)
+          log_requirement(unique_op_id, offset + idx, output_regions[idx]);
       }
     }
 

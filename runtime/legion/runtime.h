@@ -642,7 +642,7 @@ namespace Legion {
     public:
       OutputRegionImpl(unsigned index,
                        const RegionRequirement &req,
-                       Memory memory,
+                       InstanceSet instances,
                        TaskContext *ctx,
                        Runtime *rt);
       OutputRegionImpl(const OutputRegionImpl &rhs);
@@ -663,7 +663,7 @@ namespace Legion {
     private:
       unsigned index;
       RegionRequirement req;
-      Memory memory;
+      InstanceSet instances;
       Domain domain;
     };
 

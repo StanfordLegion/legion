@@ -733,12 +733,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::add_output_region(
-                                    const RegionRequirement &req, Memory memory)
+                            const RegionRequirement &req, InstanceSet instances)
     //--------------------------------------------------------------------------
     {
       size_t index = output_regions.size();
       OutputRegionImpl *impl =
-        new OutputRegionImpl(index, req, memory, this, runtime);
+        new OutputRegionImpl(index, req, instances, this, runtime);
       output_regions.push_back(OutputRegion(impl));
     }
 
@@ -3678,14 +3678,14 @@ namespace Legion {
     RtEvent InnerContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle,
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source, bool check_emptiness)
+                              AddressSpaceID source, bool check_empty)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(handle.exists());
 #endif
       EquivalenceSet *root = NULL;
-      if (check_emptiness && expr->is_empty())
+      if (check_empty && expr->is_empty())
       {
         // Special case for empty expression
         {
@@ -9348,11 +9348,11 @@ namespace Legion {
       derez.deserialize(origin);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
-      bool check_emptiness;
-      derez.deserialize(check_emptiness);
+      bool check_empty;
+      derez.deserialize(check_empty);
 
       const RtEvent done = local_ctx->compute_equivalence_sets(
-          target_manager, tree_id, handle, expr, mask, origin, check_emptiness);
+          target_manager, tree_id, handle, expr, mask, origin, check_empty);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -9799,7 +9799,7 @@ namespace Legion {
     RtEvent TopLevelContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle, 
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source, bool check_emptiness)
+                              AddressSpaceID source, bool check_empty)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -10750,7 +10750,7 @@ namespace Legion {
     RtEvent ReplicateContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle,
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source, bool check_emptiness)
+                              AddressSpaceID source, bool check_empty)
     //--------------------------------------------------------------------------
     {
       // This one is very similar to the InnerContext version with the 
@@ -10760,7 +10760,7 @@ namespace Legion {
       assert(handle.exists());
 #endif
       EquivalenceSet *root = NULL;
-      if (check_emptiness && expr->is_empty())
+      if (check_empty && expr->is_empty())
       {
         // Special case for empty expression
         // In this case we don't need to bother having the
@@ -18184,7 +18184,7 @@ namespace Legion {
     RtEvent RemoteContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle,
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source, bool check_emptiness)
+                              AddressSpaceID source, bool check_empty)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18206,7 +18206,7 @@ namespace Legion {
         rez.serialize(mask);
         rez.serialize(handle);
         rez.serialize(source);
-        rez.serialize(check_emptiness);
+        rez.serialize(check_empty);
         rez.serialize(ready_event);
       }
       // Send it to the owner space 

@@ -610,7 +610,7 @@ namespace Legion {
       void add_physical_region(const RegionRequirement &req, bool mapped,
           MapperID mid, MappingTagID tag, ApUserEvent unmap_event,
           bool virtual_mapped, const InstanceSet &physical_instances);
-      void add_output_region(const RegionRequirement &req, Memory memory);
+      void add_output_region(const RegionRequirement &req, InstanceSet instances);
       void initialize_overhead_tracker(void);
       void unmap_all_regions(void); 
       inline void begin_runtime_call(void);
@@ -910,7 +910,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source, bool check_emptiness);
+                        AddressSpaceID source, bool check_empty);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1478,7 +1478,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle, 
                         IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source, bool check_emptiness);
+                        AddressSpaceID source, bool check_empty);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<RegionRequirement>       dummy_output_requirements;
@@ -1744,7 +1744,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source, bool check_emptiness);
+                        AddressSpaceID source, bool check_empty);
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 
                                             TypeTag type_tag);
@@ -2337,7 +2337,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source, bool check_emptiness);
+                        AddressSpaceID source, bool check_empty);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                   LogicalRegion parent);
       virtual void record_using_physical_context(LogicalRegion handle);
