@@ -40,7 +40,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(Runtime *rt, TaskOp *owner, int d,
                              const std::vector<RegionRequirement> &reqs,
-                             const std::vector<RegionRequirement> &out_reqs)
+                             const std::vector<OutputRequirement> &out_reqs)
       : runtime(rt), owner_task(owner), regions(reqs),
         output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
@@ -2754,7 +2754,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(Runtime *rt, TaskOp *owner,int d,bool full_inner,
                                const std::vector<RegionRequirement> &reqs,
-                               const std::vector<RegionRequirement> &output_reqs,
+                               const std::vector<OutputRequirement> &output_reqs,
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
                                UniqueID uid, ApEvent exec_fence, bool remote)
@@ -9835,7 +9835,7 @@ namespace Legion {
     ReplicateContext::ReplicateContext(Runtime *rt, 
                                    ShardTask *owner, int d, bool full,
                                    const std::vector<RegionRequirement> &reqs,
-                            const std::vector<RegionRequirement> &output_reqs,
+                            const std::vector<OutputRequirement> &output_reqs,
                                    const std::vector<unsigned> &parent_indexes,
                                    const std::vector<bool> &virt_mapped,
                                    UniqueID ctx_uid, ApEvent exec_fence,

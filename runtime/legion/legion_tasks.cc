@@ -5668,13 +5668,13 @@ namespace Legion {
             runtime->forest, index_space, req.field_space, false);
 
         // Set the region back to the output requirement so the caller
-        // can pass it downstream
+        // can use it for downstream tasks
         req.region = region;
         req.parent = region;
         req.privilege = WRITE_DISCARD;
 
-        // Only copy the RegionRequirement portion of the output requirement
-        output_regions.push_back(static_cast<RegionRequirement&>(req));
+        // Store the output requiremen in the task
+        output_regions.push_back(req);
       }
     }
 

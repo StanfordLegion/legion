@@ -95,7 +95,7 @@ namespace Legion {
     public:
       virtual void set_context_index(size_t index) = 0;
     public:
-      std::vector<RegionRequirement> output_regions;
+      std::vector<OutputRequirement> output_regions;
     protected:
       AllocManager *arg_manager;
     };
