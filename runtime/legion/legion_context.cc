@@ -6097,7 +6097,11 @@ namespace Legion {
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
       IndexTask *task = runtime->get_available_index_task();
-      FutureMap result = task->initialize_task(this, launcher, launch_space);
+      FutureMap result = task->initialize_task(this,
+                                               launcher,
+                                               launch_space,
+                                               true /*track*/,
+                                               outputs);
 #ifdef DEBUG_LEGION
       log_task.debug("Registering new index space task with unique id "
                      "%lld and task %s (ID %lld) with high level runtime in "
@@ -6141,7 +6145,7 @@ namespace Legion {
         launch_space = find_index_launch_space(launcher.launch_domain);
       IndexTask *task = runtime->get_available_index_task();
       Future result = task->initialize_task(this, launcher, launch_space, 
-                                            redop, deterministic);
+                                            redop, deterministic, outputs);
 #ifdef DEBUG_LEGION
       log_task.debug("Registering new index space task with unique id "
                      "%lld and task %s (ID %lld) with high level runtime in "

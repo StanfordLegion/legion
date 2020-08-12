@@ -1057,18 +1057,23 @@ namespace Legion {
       FutureMap initialize_task(InnerContext *ctx,
                                 const IndexTaskLauncher &launcher,
                                 IndexSpace launch_space,
-                                bool track = true);
+                                bool track = true,
+                                std::vector<OutputRequirement> *outputs = NULL);
       Future initialize_task(InnerContext *ctx,
                              const IndexTaskLauncher &launcher,
                              IndexSpace launch_space,
                              ReductionOpID redop,
                              bool deterministic,
-                             bool track = true);
+                             bool track = true,
+                             std::vector<OutputRequirement> *outputs = NULL);
       void initialize_predicate(const Future &pred_future,
                                 const TaskArgument &pred_arg);
       void initialize_must_epoch(MustEpochOp *epoch, unsigned index,
                                  bool do_registration);
       void perform_base_dependence_analysis(void);
+    protected:
+      void initialize_output_regions(std::vector<OutputRequirement> &outputs,
+                                     IndexSpace launch_space);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

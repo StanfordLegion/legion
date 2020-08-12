@@ -1630,6 +1630,7 @@ namespace Legion {
       this->task_id = rhs->task_id;
       this->indexes = rhs->indexes;
       this->regions = rhs->regions;
+      this->output_regions = rhs->output_regions;
       this->futures = rhs->futures;
       this->grants = rhs->grants;
       this->wait_barriers = rhs->wait_barriers;
@@ -7208,9 +7209,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(idx < regions.size());
+      assert(idx < get_region_count());
 #endif
-      RegionRequirement &req = regions[idx];
+      RegionRequirement &req = idx < regions.size() ? regions[idx]
+                               : output_regions[idx - regions.size()];
 #ifdef DEBUG_LEGION
       assert(req.handle_type != LEGION_SINGULAR_PROJECTION);
 #endif
@@ -8154,13 +8156,16 @@ namespace Legion {
     FutureMap IndexTask::initialize_task(InnerContext *ctx,
                                          const IndexTaskLauncher &launcher,
                                          IndexSpace launch_sp,
-                                         bool track /*= true*/)
+                                         bool track /*= true*/,
+                             std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
+      if (outputs != NULL)
+        initialize_output_regions(*outputs, launch_sp);
       if (!launcher.futures.empty())
       {
         // Only allow non-empty futures on the way in
@@ -8242,13 +8247,16 @@ namespace Legion {
                                       IndexSpace launch_sp,
                                       ReductionOpID redop_id, 
                                       bool deterministic,
-                                      bool track /*= true*/)
+                                      bool track /*= true*/,
+                             std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
+      if (outputs != NULL)
+        initialize_output_regions(*outputs, launch_sp);
       if (!launcher.futures.empty())
       {
         // Only allow non-empty futures on the way in
@@ -8483,6 +8491,76 @@ namespace Legion {
                                                      map_applied_conditions);
       }
     }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::initialize_output_regions(
+               std::vector<OutputRequirement> &outputs, IndexSpace launch_space)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<OutputRequirement>::iterator it = outputs.begin();
+           it != outputs.end(); ++it)
+      {
+        OutputRequirement &req = *it;
+
+        // Create a deferred index space
+        assert(!req.global_indexing);
+
+        // When local indexing is requested, create an (N+1)-D index space
+        // for an N-D launch domain
+        TypeTag type_tag;
+        switch (launch_space.get_dim())
+        {
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
+              break; \
+            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+          default:
+            assert(false);
+        }
+        IndexSpace index_space =
+          parent_ctx->create_index_space(get_completion_event(), type_tag);
+
+        // Create the output region
+        LogicalRegion region = parent_ctx->create_logical_region(
+            runtime->forest, index_space, req.field_space, false);
+
+        // Create a pending partition for the output region
+        // using the launch domain as the color space
+        IndexPartition pid(runtime->get_unique_index_partition_id(),
+                           index_space.get_tree_id(),
+                           index_space.get_type_tag());
+
+        IndexSpace color_space = launch_space;
+        size_t color_space_size =
+          runtime->forest->get_domain_volume(color_space);
+        const ApBarrier partition_ready(
+            Realm::Barrier::create_barrier(color_space_size));
+        DistributedID did = runtime->get_available_distributed_id();
+        RtEvent safe = runtime->forest->create_pending_partition(
+            parent_ctx, pid, index_space, color_space, LEGION_AUTO_GENERATE_ID,
+            LEGION_DISJOINT_COMPLETE_KIND, did, partition_ready,
+            partition_ready);
+        if (safe.exists())
+          safe.wait();
+
+        LogicalPartition partition(region.get_tree_id(), pid, req.field_space);
+
+        // Set the region back to the output requirement so the caller
+        // can use it for downstream tasks
+        req.partition = partition;
+        req.parent = region;
+        req.privilege = WRITE_DISCARD;
+        req.handle_type = LEGION_PARTITION_PROJECTION;
+
+        // Store the output requiremen in the task
+        output_regions.push_back(req);
+      }
+    }
+
 
     //--------------------------------------------------------------------------
     void IndexTask::perform_base_dependence_analysis(void)
@@ -10870,6 +10948,16 @@ namespace Legion {
           function->project_points(regions[idx], idx, runtime, 
                                    index_domain, points);
         }
+      }
+      // Evaluate projection functions on output requirements as well
+      for (unsigned out_idx = 0, idx = regions.size();
+           out_idx < output_regions.size(); ++out_idx, ++idx)
+      {
+        ProjectionFunction *function =
+          runtime->find_projection_function(
+              output_regions[out_idx].projection);
+        function->project_points(
+            output_regions[out_idx], idx, runtime, index_domain, points);
       }
       // Update the no access regions
       for (unsigned idx = 0; idx < num_points; idx++)
