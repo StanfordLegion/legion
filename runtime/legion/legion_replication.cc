@@ -7816,7 +7816,7 @@ namespace Legion {
         else
         {
           original_task->handle_future(local_future_result, local_future_size, 
-                                       true/*owned*/, NULL/*functor*/);
+                           true/*owned*/, NULL/*functor*/, Processor::NO_PROC);
           local_future_result = NULL;
           local_future_size = 0;
           original_task->complete_execution();

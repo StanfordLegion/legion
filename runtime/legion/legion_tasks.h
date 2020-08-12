@@ -219,6 +219,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual const char* get_task_name(void) const;
+      virtual bool is_reducing_future(void) const;
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void pack_profiling_requests(Serializer &rez,
@@ -552,7 +553,8 @@ namespace Legion {
       virtual void perform_inlining(TaskContext *enclosing) = 0;
     public:
       virtual void handle_future(const void *res, size_t res_size, 
-                                 bool owned, FutureFunctor *functor) = 0;
+                                 bool owned, FutureFunctor *functor,
+                                 Processor future_proc) = 0;
       virtual void handle_post_mapped(bool deferral,
                           RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_misspeculation(void) = 0;
@@ -643,6 +645,7 @@ namespace Legion {
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
+      virtual bool is_reducing_fuutre(void) const { return (redop > 0); }
     public:
       virtual void trigger_dependence_analysis(void) = 0;
     public:
@@ -671,7 +674,8 @@ namespace Legion {
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                       Processor p, bool recurse, bool stealable) = 0;
       virtual void handle_future(const DomainPoint &point, const void *result,
-                    size_t result_size, bool owner, FutureFunctor *functor) = 0;
+                                 size_t result_size, bool owner, 
+                                 FutureFunctor *functor, Processor proc) = 0;
       virtual void register_must_epoch(void) = 0;
     public:
       // Methods for supporting intra-index-space mapping dependences
@@ -775,7 +779,8 @@ namespace Legion {
       virtual void trigger_task_commit(void);
     public:
       virtual void handle_future(const void *res, size_t res_size, 
-                                 bool owned, FutureFunctor *functor);
+                                 bool owned, FutureFunctor *functor,
+                                 Processor future_proc);
       virtual void handle_post_mapped(bool deferral, 
                           RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
@@ -850,6 +855,7 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual SingleTask* get_origin_task(void) const { return orig_task; }
+      virtual bool is_reducing_future(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -880,7 +886,8 @@ namespace Legion {
                                        get_acquired_instances_ref(void);
     public:
       virtual void handle_future(const void *res, size_t res_size, 
-                                 bool owned, FutureFunctor *functor);
+                                 bool owned, FutureFunctor *functor,
+                                 Processor future_proc);
       virtual void handle_post_mapped(bool deferral,
                           RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
@@ -951,6 +958,7 @@ namespace Legion {
         { assert(false); return NULL; }
       virtual bool is_shard_task(void) const { return true; }
       virtual bool is_top_level_task(void) const; 
+      virtual bool is_reducing_future(void) const { return true; }
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
@@ -986,7 +994,8 @@ namespace Legion {
       virtual void perform_inlining(TaskContext *enclosing);
     public:
       virtual void handle_future(const void *res, size_t res_size, 
-                                 bool owned, FutureFunctor *functor); 
+                                 bool owned, FutureFunctor *functor,
+                                 Processor future_proc); 
       virtual void handle_post_mapped(bool deferral,
                           RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
@@ -1100,7 +1109,8 @@ namespace Legion {
                   Processor p, bool recurse, bool stealable);
     public:
       virtual void handle_future(const DomainPoint &point, const void *result,
-                        size_t result_size, bool owner, FutureFunctor *functor);
+                                 size_t result_size, bool owner, 
+                                 FutureFunctor *functor, Processor future_proc);
     public:
       virtual void pack_profiling_requests(Serializer &rez,
                                            std::set<RtEvent> &applied) const;
@@ -1253,7 +1263,8 @@ namespace Legion {
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
       virtual void handle_future(const DomainPoint &point, const void *result,
-                       size_t result_size, bool owner, FutureFunctor *functor);
+                                 size_t result_size, bool owner, 
+                                 FutureFunctor *functor, Processor future_proc);
     public:
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &point);

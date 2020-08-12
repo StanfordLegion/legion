@@ -2401,10 +2401,10 @@ namespace Legion {
       for (unsigned idx = 0; idx < replay_parallelism; ++idx)
       {
         ReplaySliceArgs args(this, idx);
-        RtEvent done =
-          runtime->issue_runtime_meta_task(args,
-            runtime->replay_on_cpus ? LG_LOW_PRIORITY
-                                    : LG_THROUGHPUT_WORK_PRIORITY,
+        RtEvent done = runtime->replay_on_cpus ?
+          runtime->issue_application_processor_task(args, LG_LOW_PRIORITY,
+            replay_targets[idx % replay_targets.size()], replay_ready) :
+          runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY,
             replay_ready, replay_targets[idx % replay_targets.size()]);
         replay_done_events.insert(done);
       }

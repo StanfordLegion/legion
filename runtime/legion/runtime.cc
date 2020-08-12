@@ -642,8 +642,7 @@ namespace Legion {
 #endif
         future_complete(complete), result(NULL), result_size(0), 
         result_set_space(local_space), callback_functor(NULL),
-        own_callback_functor(false), callback_invoked(false), 
-        empty(true), sampled(false)
+        own_callback_functor(false), empty(true), sampled(false)
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
@@ -705,7 +704,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!subscription_event.exists());
 #endif
-      // Remote the extra reference on a remote set future if there is one
+      // Remove the extra reference on a remote set future if there is one
       if (empty && (result_set_space != local_space))
       {
         Serializer rez;
@@ -830,12 +829,6 @@ namespace Legion {
             ready_event.wait();
         }
       }
-      if (callback_functor != NULL)
-      {
-        AutoLock f_lock(future_lock);
-        if (!callback_invoked)
-          invoke_callback();
-      }
       if (check_size)
       {
         if (empty)
@@ -935,9 +928,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::set_result(FutureFunctor *functor, bool own)
+    void FutureImpl::set_result(FutureFunctor *functor, bool own,Processor proc)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(proc.kind() != Processor::UTIL_PROC);
+#endif
       AutoLock f_lock(future_lock);
       if (!empty || (callback_functor != NULL))
         REPORT_LEGION_ERROR(ERROR_DUPLICATE_FUTURE_SET,
@@ -948,6 +944,7 @@ namespace Legion {
             "then this is likely a runtime bug.")
       callback_functor = functor;
       own_callback_functor = own;
+      callback_proc = proc;
       finish_set_future();
     }
 
@@ -971,10 +968,7 @@ namespace Legion {
         runtime->send_future_notification(owner_space, rez); 
       }
       else if (!subscribers.empty())
-      {
         broadcast_result(subscribers, future_complete, false/*need lock*/);
-        subscribers.clear();
-      }
       if (subscription_internal.exists())
       {
         Runtime::trigger_event(subscription_internal);
@@ -999,20 +993,64 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::invoke_callback(void)
+    ApEvent FutureImpl::invoke_callback(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!callback_invoked);
       assert(callback_functor != NULL);
-      assert(result == NULL);
 #endif
-      callback_invoked = true;
+      if (!callback_ready.exists())
+      {
+        callback_ready = Runtime::create_ap_user_event(NULL);
+        FutureCallbackArgs args(this);    
+        runtime->issue_application_processor_task(args, 
+            LG_LATENCY_WORK_PRIORITY, callback_proc);
+      }
+      return callback_ready;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::perform_callback(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(callback_functor != NULL);
+      assert(callback_ready.exists());
+#endif
       result_size = callback_functor->callback_get_future_size();
-      if (result_size == 0)
-        return;
-      result = malloc(result_size);
-      callback_functor->callback_pack_future(result, result_size);
+      if (result_size > 0)
+      {
+        result = malloc(result_size);
+        callback_functor->callback_pack_future(result, result_size);
+      }
+      callback_functor->callback_release_future();
+      if (own_callback_functor)
+        delete callback_functor;
+      // Retake the lock and remove the guards
+      AutoLock f_lock(future_lock);
+      callback_functor = NULL;
+      Runtime::trigger_event(NULL, callback_ready, future_complete);
+      // Check for any subscribers that we need to tell about the result
+      if (!subscribers.empty())
+        broadcast_result(subscribers, future_complete, false/*need lock*/);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureImpl::FutureCallbackArgs::FutureCallbackArgs(FutureImpl *i)
+      : LgTaskArgs<FutureCallbackArgs>(implicit_provenance), impl(i)
+    //--------------------------------------------------------------------------
+    {
+      impl->add_base_gc_ref(DEFERRED_TASK_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureImpl::handle_callback(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const FutureCallbackArgs *fargs = (const FutureCallbackArgs*)args;
+      fargs->impl->perform_callback();
+      if (fargs->impl->remove_base_gc_ref(DEFERRED_TASK_REF))
+        delete fargs->impl;
     }
 
     //--------------------------------------------------------------------------
@@ -1128,7 +1166,11 @@ namespace Legion {
         return subscription_event;
       }
       else
+      {
+        if (callback_functor != NULL)
+          return invoke_callback();
         return future_complete;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1304,6 +1346,8 @@ namespace Legion {
                                       ApEvent complete, const bool need_lock)
     //--------------------------------------------------------------------------
     {
+      if (targets.empty())
+        return;
       if (need_lock)
       {
         AutoLock f_lock(future_lock,1,false/*exclusive*/);
@@ -1313,13 +1357,22 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!empty);
 #endif
+      if (callback_functor != NULL)
+      {
+        // If we still have a callback to perform do
+        // that now to get it in flight, it will send
+        // out any updates to subscribers
+        invoke_callback();
+        // Make sure these targets are all in the set of subscribers
+        // so that the callback will broadcast them later
+        subscribers.insert(targets.begin(), targets.end());
+        return;
+      }
       for (std::set<AddressSpaceID>::const_iterator it = 
             targets.begin(); it != targets.end(); it++)
       {
         if ((*it) == local_space)
           continue;
-        if ((callback_functor != NULL) && !callback_invoked)
-          invoke_callback();
         Serializer rez;
         {
           rez.serialize(did);
@@ -1331,6 +1384,7 @@ namespace Legion {
         }
         runtime->send_future_result(*it, rez);
       }
+      targets.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -1375,8 +1429,15 @@ namespace Legion {
       }
       else
       {
-        if ((callback_functor != NULL) && !callback_invoked)
+        if (callback_functor != NULL)
+        {
           invoke_callback();
+          // If we still have a callback to be done, make sure
+          // it is in flight and that the subscriber is there
+          // for it to be messaged when the callback is done
+          subscribers.insert(subscriber);
+          return;
+        }
         // We've got the result so we can't send it back right away
         Serializer rez;
         {
@@ -1549,16 +1610,8 @@ namespace Legion {
                                          Runtime::protect_event(ready));
       }
       else // If we've already triggered, then we can do the arrival now
-      {
-        if (callback_functor != NULL)
-        {
-          AutoLock f_lock(future_lock);
-          if (!callback_invoked)
-            invoke_callback();
-        }
         Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT,
                                       result, result_size);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -8157,8 +8210,9 @@ namespace Legion {
             if (needs_deferral)
             {
               MallocInstanceArgs args(this, footprint, &result);
-              const RtEvent wait_on = runtime->issue_runtime_meta_task(args,
-                  LG_LATENCY_WORK_PRIORITY, RtEvent::NO_RT_EVENT, local_gpu);
+              const RtEvent wait_on = 
+                runtime->issue_application_processor_task(args,
+                  LG_LATENCY_WORK_PRIORITY, local_gpu);
               if (wait_on.exists() && !wait_on.has_triggered())
                 wait_on.wait();
               return result;
@@ -8271,8 +8325,8 @@ namespace Legion {
             FreeInstanceArgs args(this, ptr);
 #ifdef LEGION_USE_CUDA
             if (local_gpu.exists())
-              runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, 
-                                               defer, local_gpu);
+              runtime->issue_application_processor_task(args, LG_LOW_PRIORITY, 
+                                                        local_gpu, defer);
             else
               runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, defer);
 #else
@@ -8320,8 +8374,8 @@ namespace Legion {
                 allocations[ptr] = size;
               }
               FreeInstanceArgs args(this, ptr);
-              runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, 
-                                               defer, local_gpu);
+              runtime->issue_application_processor_task(args, LG_LOW_PRIORITY, 
+                                                        local_gpu, defer);
             }
             else
             {
@@ -26322,6 +26376,7 @@ namespace Legion {
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor startup_task(Runtime::startup_runtime_task);
       CodeDescriptor endpoint_task(Runtime::endpoint_runtime_task); 
+      CodeDescriptor app_proc_task(Runtime::application_processor_runtime_task);
       for (std::map<Processor,Runtime*>::const_iterator it = 
             processor_mapping.begin(); it != processor_mapping.end(); it++)
       {
@@ -26336,13 +26391,9 @@ namespace Legion {
                 no_requests, &it->second, sizeof(it->second))));
         }
         // Register these tasks on utility processors if we have
-        // them otherwise register them on the CPU processors
-        if ((!local_util_procs.empty() && 
-              (it->first.kind() == Processor::UTIL_PROC)) ||
-            ((local_util_procs.empty() || config.replay_on_cpus) &&
-              ((it->first.kind() == Processor::LOC_PROC) ||
-               (it->first.kind() == Processor::TOC_PROC) ||
-               (it->first.kind() == Processor::IO_PROC))))
+        // them otherwise register them on all the processor kinds
+        if (local_util_procs.empty() || 
+            (it->first.kind() == Processor::UTIL_PROC))
         {
           registered_events.insert(RtEvent(
                 it->first.register_task(LG_SHUTDOWN_TASK_ID, shutdown_task,
@@ -26379,38 +26430,23 @@ namespace Legion {
           registered_events.insert(RtEvent(
               it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
                 no_requests, &it->second, sizeof(it->second))));
-      }
-#if defined(LEGION_MALLOC_INSTANCES) && defined(LEGION_USE_CUDA)
-      std::set<Processor> gpu_procs;
-      for (std::set<Processor>::const_iterator it = 
-            local_procs.begin(); it != local_procs.end(); it++)
-        if (it->kind() == Processor::TOC_PROC)
-          gpu_procs.insert(*it);
-#endif
-#if defined(LEGION_MALLOC_INSTANCES) && defined(LEGION_USE_CUDA)
+        // Application processor tasks get registered on all
+        // processors which are not utility processors
 #ifdef LEGION_SEPARATE_META_TASKS
-      // Only need to register two task IDs here
-      for (std::set<Processor>::const_iterator it = 
-            gpu_procs.begin(); it != gpu_procs.end(); it++)
-      {
-        registered_events.insert(RtEvent(
-              it->register_task(LG_TASK_ID + LG_MALLOC_INSTANCE_TASK_ID,
-                lg_task, no_requests, &processor_mapping[*it], 
-                sizeof(processor_mapping[*it]))));
-        registered_events.insert(RtEvent(
-              it->register_task(LG_TASK_ID + LG_FREE_INSTANCE_TASK_ID,
-                lg_task, no_requests, &processor_mapping[*it], 
-                sizeof(processor_mapping[*it]))));
-      }
+        if (it->first.kind() != Processor::UTIL_PROC)
+        {
+          for (unsigned idx = 0; idx < LG_LAST_TASK_ID; idx++)
+            registered_events.insert(RtEvent(
+                it->first.register_task(LG_APP_PROC_TASK_ID+idx, app_proc_task,
+                      no_requests, &it->second, sizeof(it->second))));
+        }
 #else
-      for (std::set<Processor>::const_iterator it = 
-            gpu_procs.begin(); it != gpu_procs.end(); it++)
-        registered_events.insert(RtEvent(
-              it->register_task(LG_TASK_ID, lg_task,
-                no_requests, &processor_mapping[*it], 
-                sizeof(processor_mapping[*it]))));
+        if (it->first.kind() != Processor::UTIL_PROC)
+          registered_events.insert(RtEvent(
+                it->first.register_task(LG_APP_PROC_TASK_ID, app_proc_task,
+                  no_requests, &it->second, sizeof(it->second))));
 #endif
-#endif
+      }
       // Lastly do any other registrations we might have
 #ifdef DEBUG_LEGION_COLLECTIVES
       ReductionOpTable& red_table = get_reduction_table(true/*safe*/);
@@ -27903,11 +27939,7 @@ namespace Legion {
             break;
           }
 #ifdef LEGION_MALLOC_INSTANCES
-        case LG_MALLOC_INSTANCE_TASK_ID:
-          {
-            MemoryManager::handle_malloc_instance(args);
-            break;
-          }
+        // LG_MALLOC_INSTANCE_TASK_ID should always run app processor
         case LG_FREE_INSTANCE_TASK_ID:
           {
             MemoryManager::handle_free_instance(args);
@@ -28002,6 +28034,65 @@ namespace Legion {
 #endif
       Deserializer derez(args, arglen);
       runtime->handle_endpoint_creation(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::application_processor_runtime_task(
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = *((Runtime**)userdata);
+#ifdef DEBUG_LEGION
+      assert(userlen == sizeof(Runtime**));
+#endif
+      implicit_runtime = runtime;
+      // We immediately bump the priority of all meta-tasks once they start
+      // up to the highest level to ensure that they drain once they begin
+      Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
+      const char *data = (const char*)args;
+      implicit_provenance = *((const UniqueID*)data);
+      data += sizeof(implicit_provenance);
+      arglen -= sizeof(implicit_provenance);
+      LgTaskID tid = *((const LgTaskID*)data);
+      data += sizeof(tid);
+      arglen -= sizeof(tid);
+      switch (tid)
+      {
+        case LG_FUTURE_CALLBACK_TASK_ID:
+          {
+            FutureImpl::handle_callback(args);
+            break;
+          }
+        case LG_REPLAY_SLICE_ID:
+          {
+            PhysicalTemplate::handle_replay_slice(args);
+            break;
+          }
+#ifdef LEGION_MALLOC_INSTANCES
+        case LG_MALLOC_INSTANCE_TASK_ID:
+          {
+            MemoryManager::handle_malloc_instance(args);
+            break;
+          }
+        case LG_FREE_INSTANCE_TASK_ID:
+          {
+            MemoryManager::handle_free_instance(args);
+            break;
+          }
+#endif
+        default:
+          assert(false); // should never get here
+      }
+#ifdef DEBUG_LEGION
+      runtime->decrement_total_outstanding_tasks(tid, true/*meta*/);
+#else
+      runtime->decrement_total_outstanding_tasks();
+#endif
+#ifdef DEBUG_SHUTDOWN_HANG
+      __sync_fetch_and_add(&runtime->outstanding_counts[tid],-1);
+#endif
     }
 
 #ifdef TRACE_ALLOCATION
