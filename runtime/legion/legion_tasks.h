@@ -573,18 +573,19 @@ namespace Legion {
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx);
     protected:
       // Boolean for each region saying if it is virtual mapped
-      std::vector<bool>                     virtual_mapped;
+      std::vector<bool>                           virtual_mapped;
       // Regions which are NO_ACCESS or have no privilege fields
-      std::vector<bool>                     no_access_regions; 
+      std::vector<bool>                           no_access_regions; 
     protected:
-      std::vector<Processor>                target_processors;
+      std::vector<Processor>                      target_processors;
       // Hold the result of the mapping 
-      std::deque<InstanceSet>               physical_instances;
+      std::deque<InstanceSet>                     physical_instances;
+      std::vector<std::vector<PhysicalManager*> > source_instances;
     protected: // Mapper choices 
-      std::set<unsigned>                    untracked_valid_regions;
-      VariantID                             selected_variant;
-      TaskPriority                          task_priority;
-      bool                                  perform_postmap;
+      std::set<unsigned>                          untracked_valid_regions;
+      VariantID                                   selected_variant;
+      TaskPriority                                task_priority;
+      bool                                        perform_postmap;
     protected:
       // origin-mapped cases need to know if they've been mapped or not yet
       bool                                  first_mapping;

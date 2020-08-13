@@ -402,6 +402,7 @@ namespace Legion {
       struct PremapTaskOutput {
         Processor                                          new_target_proc;
         std::map<unsigned,std::vector<PhysicalInstance> >  premapped_instances;
+        std::map<unsigned,std::vector<PhysicalInstance> >  premapped_sources;
         ProfilingRequest                                   copy_prof_requests;
         TaskPriority                                       profiling_priority;
       };
@@ -537,6 +538,7 @@ namespace Legion {
       };
       struct MapTaskOutput {
         std::vector<std::vector<PhysicalInstance> > chosen_instances; 
+        std::vector<std::vector<PhysicalInstance> > source_instances;
         std::set<unsigned>                          untracked_valid_regions;
         std::vector<Processor>                      target_procs;
         VariantID                                   chosen_variant; // = 0 
@@ -636,6 +638,7 @@ namespace Legion {
       };
       struct PostMapOutput {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances;
+        std::vector<std::vector<PhysicalInstance> >     source_instances;
       };
       //------------------------------------------------------------------------
       virtual void postmap_task(const MapperContext      ctx,
@@ -790,6 +793,7 @@ namespace Legion {
       };
       struct MapInlineOutput {
         std::vector<PhysicalInstance>           chosen_instances;
+        std::vector<PhysicalInstance>           source_instances;
         ProfilingRequest                        profiling_requests;
         TaskPriority                            profiling_priority;
         bool                                    track_valid_region; /*=true*/
@@ -907,6 +911,11 @@ namespace Legion {
         std::vector<std::vector<PhysicalInstance> >   dst_instances;
         std::vector<PhysicalInstance>                 src_indirect_instances;
         std::vector<PhysicalInstance>                 dst_indirect_instances;
+        std::vector<std::vector<PhysicalInstance> >   src_source_instances;
+        std::vector<std::vector<PhysicalInstance> >   dst_source_instances;
+        std::vector<std::vector<PhysicalInstance> >   src_indirect_source_instances;
+        std::vector<std::vector<PhysicalInstance> >   dst_indirect_source_instances;
+
         std::set<unsigned>                            untracked_valid_srcs;
         std::set<unsigned>                            untracked_valid_ind_srcs;
         std::set<unsigned>                            untracked_valid_ind_dsts;
@@ -1392,6 +1401,7 @@ namespace Legion {
       };
       struct MapPartitionOutput {
         std::vector<PhysicalInstance>           chosen_instances;
+        std::vector<PhysicalInstance>           source_instances;
         ProfilingRequest                        profiling_requests;
         TaskPriority                            profiling_priority;
         bool                                    track_valid_region; /*=true*/

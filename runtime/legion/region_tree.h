@@ -496,6 +496,7 @@ namespace Legion {
                                 Operation *op, unsigned index,
                                 ApEvent precondition, ApEvent term_event,
                                 const InstanceSet &targets,
+                                const std::vector<PhysicalManager*> &sources,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &map_applied_events,
                                 UpdateAnalysis *&analysis,
@@ -521,6 +522,7 @@ namespace Legion {
                                    Operation *op, unsigned index,
                                    ApEvent precondition, ApEvent term_event,
                                    InstanceSet &targets,
+                                   const std::vector<PhysicalManager*> &sources,
                                    const PhysicalTraceInfo &trace_info,
                                    std::set<RtEvent> &map_applied_events,
 #ifdef DEBUG_LEGION
@@ -663,6 +665,11 @@ namespace Legion {
                                   const PhysicalTraceInfo &trace_info,
                                   std::set<RtEvent> &map_applied_events);
     public:
+      void physical_convert_sources(Operation *op,
+                               const RegionRequirement &req,
+                               const std::vector<MappingInstance> &sources,
+                               std::vector<PhysicalManager*> &result,
+                               std::map<PhysicalManager*,unsigned> *acquired);
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,

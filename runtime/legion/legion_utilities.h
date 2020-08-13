@@ -3006,6 +3006,145 @@ namespace Legion {
         output_sets.push_front(FieldSet<T*>(universe_mask));
     }
 
+    //--------------------------------------------------------------------------
+    template<typename T1, typename T2>
+    inline void unique_join_on_field_mask_sets(
+             const FieldMaskSet<T1> &left, const FieldMaskSet<T2> &right,
+             typename LegionMap<std::pair<T1*,T2*>,FieldMask>::aligned &results)
+    //--------------------------------------------------------------------------
+    {
+      if (left.empty() || right.empty())
+        return;
+      if (left.get_valid_mask() * right.get_valid_mask())
+        return;
+#ifdef DEBUG_LEGION
+      FieldMask unique_test;
+#endif
+      if (left.size() == 1)
+      {
+        typename FieldMaskSet<T1>::const_iterator first = left.begin();
+        for (typename FieldMaskSet<T2>::const_iterator it =
+              right.begin(); it != right.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          const FieldMask overlap = first->second & it->second;
+          if (!overlap)
+            continue;
+          const std::pair<T1*,T2*> key(first->first, it->first);
+          results[key] = overlap;
+        }
+        return;
+      }
+      if (right.size() == 1)
+      {
+        typename FieldMaskSet<T2>::const_iterator first = right.begin();
+        for (typename FieldMaskSet<T1>::const_iterator it =
+              left.begin(); it != left.end(); it++)
+        {
+          const FieldMask overlap = first->second & it->second;
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          if (!overlap)
+            continue;
+          const std::pair<T1*,T2*> key(it->first, first->first);
+          results[key] = overlap;
+        }
+        return;
+      }
+      // Build the lookup table for the one with fewer fields
+      // since it is probably more costly to allocate memory
+      if (left.get_valid_mask().pop_count() < 
+          right.get_valid_mask().pop_count())
+      {
+        // Build the hash table for left
+        std::map<unsigned,T1*> hash_table;
+        for (typename FieldMaskSet<T1>::const_iterator it =
+              left.begin(); it != left.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          int fidx = it->second.find_first_set();
+          while (fidx >= 0)
+          {
+            hash_table[fidx] = it->first;
+            fidx = it->second.find_next_set(fidx+1);
+          }
+        }
+#ifdef DEBUG_LEGION
+        unique_test.clear();
+#endif
+        for (typename FieldMaskSet<T2>::const_iterator it =
+              right.begin(); it != right.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          int fidx = it->second.find_first_set();
+          while (fidx >= 0)
+          {
+            typename std::map<unsigned,T1*>::const_iterator
+              finder = hash_table.find(fidx);
+            if (finder != hash_table.end())
+            {
+              const std::pair<T1*,T2*> key(finder->second,it->first);
+              results[key].set_bit(fidx);
+            }
+            fidx = it->second.find_next_set(fidx+1);
+          }
+        }
+      }
+      else
+      {
+        // Build the hash table for the right
+        std::map<unsigned,T2*> hash_table;
+        for (typename FieldMaskSet<T2>::const_iterator it =
+              right.begin(); it != right.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          int fidx = it->second.find_first_set();
+          while (fidx >= 0)
+          {
+            hash_table[fidx] = it->first;
+            fidx = it->second.find_next_set(fidx+1);
+          }
+        }
+#ifdef DEBUG_LEGION
+        unique_test.clear();
+#endif
+        for (typename FieldMaskSet<T1>::const_iterator it =
+              left.begin(); it != left.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          int fidx = it->second.find_first_set();
+          while (fidx >= 0)
+          {
+            typename std::map<unsigned,T2*>::const_iterator
+              finder = hash_table.find(fidx);
+            if (finder != hash_table.end())
+            {
+              const std::pair<T1*,T2*> key(it->first,finder->second);
+              results[key].set_bit(fidx);
+            }
+            fidx = it->second.find_next_set(fidx+1);
+          }
+        }
+      }
+    }
+
   }; // namespace Internal
 }; // namespace Legion 
 

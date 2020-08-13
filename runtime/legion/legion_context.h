@@ -1304,6 +1304,8 @@ namespace Legion {
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
     public:
+      void convert_source_views(const std::vector<PhysicalManager*> &sources,
+                                std::vector<InstanceView*> &source_views);
       void convert_target_views(const InstanceSet &targets, 
                                 std::vector<InstanceView*> &target_views);
       // I hate the container problem, same as previous except MaterializedView

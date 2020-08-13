@@ -5068,15 +5068,17 @@ namespace Legion {
         }
       }
       InstanceSet mapped_instances;
+      std::vector<PhysicalManager*> source_instances;
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
       bool record_valid = true;
       if (remap_region)
         region.impl->get_references(mapped_instances);
       else
-        record_valid = invoke_mapper(mapped_instances);
+        record_valid = invoke_mapper(mapped_instances, source_instances);
       // First kick off the exchange to get that in flight
       std::vector<InstanceView*> mapped_views;
+      std::vector<InstanceView*> source_views;
       {
         InnerContext *context = find_physical_context(0/*index*/);
         context->convert_target_views(mapped_instances, mapped_views);
@@ -5101,10 +5103,10 @@ namespace Legion {
           InnerContext *context = find_physical_context(0/*index*/);
           context->convert_target_views(mapped_instances, mapped_views); 
           RegionNode *node = runtime->forest->get_node(requirement.region);
-          UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
-                                      0/*index*/, requirement, node, 
+          UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this,
+                                      0/*index*/, requirement, node,
                                       mapped_instances, mapped_views,
-                                      trace_info, init_precondition,
+                                      source_views,trace_info,init_precondition,
                                       termination_event, true/*track effects*/,
                                       false/*check initialized*/, record_valid,
                                       false/*skip output*/);
@@ -5117,8 +5119,8 @@ namespace Legion {
           effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
                 requirement, version_info, this, 0/*index*/, init_precondition,
-                termination_event, mapped_instances, trace_info, 
-                map_applied_conditions,
+                termination_event, mapped_instances, source_instances,
+                trace_info, map_applied_conditions,
 #ifdef DEBUG_LEGION
                 get_logging_name(), unique_op_id,
 #endif
@@ -5139,7 +5141,7 @@ namespace Legion {
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
                                       0/*index*/, requirement, node, 
                                       mapped_instances, mapped_views,
-                                      trace_info, init_precondition,
+                                      source_views,trace_info,init_precondition,
                                       termination_event, true/*track effects*/,
                                       false/*check initialized*/, record_valid,
                                       false/*skip output*/);
@@ -5184,7 +5186,8 @@ namespace Legion {
         const RtEvent registration_precondition = 
           runtime->forest->physical_perform_updates(requirement, version_info,
               this, 0/*index*/, init_precondition, termination_event, 
-              mapped_instances, trace_info, map_applied_conditions, analysis,
+              mapped_instances, source_instances, trace_info, 
+              map_applied_conditions, analysis,
 #ifdef DEBUG_LEGION
               get_logging_name(), unique_op_id,
 #endif
@@ -5593,9 +5596,11 @@ namespace Legion {
         if (mapping)
           termination_event = Runtime::create_ap_user_event(NULL);
         const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
+        std::vector<InstanceView*> dummy_source_views;
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 0/*index*/,
-          requirement, node, attach_instances, attach_views, trace_info, 
-          ApEvent::NO_AP_EVENT, mapping ? termination_event : completion_event, 
+          requirement, node, attach_instances, attach_views, dummy_source_views,
+          trace_info, ApEvent::NO_AP_EVENT, 
+          mapping ? termination_event : completion_event, 
           false/*track effects*/, false/*check initialized*/, 
           true/*record valid*/, true/*skip output*/);
         analysis->add_reference();

@@ -1105,7 +1105,8 @@ namespace Legion {
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
-      bool invoke_mapper(InstanceSet &mapped_instances);
+      bool invoke_mapper(InstanceSet &mapped_instances,
+                         std::vector<PhysicalManager*> &source_instances);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -3204,7 +3205,8 @@ namespace Legion {
       void check_privilege(void);
       void compute_parent_index(void);
       void select_partition_projection(void);
-      bool invoke_mapper(InstanceSet &mapped_instances);
+      bool invoke_mapper(InstanceSet &mapped_instances,
+                         std::vector<PhysicalManager*> &source_instances);
       void activate_dependent_op(void);
       void deactivate_dependent_op(void);
       void finalize_partition_profiling(void);

@@ -1983,6 +1983,7 @@ namespace Legion {
                                Operation *op, unsigned index,
                                ApEvent precondition, ApEvent term_event,
                                const InstanceSet &targets,
+                               const std::vector<PhysicalManager*> &sources,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &map_applied_events,
                                UpdateAnalysis *&analysis,
@@ -2023,6 +2024,9 @@ namespace Legion {
       // Perform the registration
       std::vector<InstanceView*> target_views;
       context->convert_target_views(targets, target_views);
+      std::vector<InstanceView*> source_views;
+      if (sources.empty())
+        context->convert_source_views(sources, source_views);
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
 #ifdef DEBUG_LEGION
@@ -2030,8 +2034,8 @@ namespace Legion {
       // Should be recording or must be read-only
       assert(record_valid || IS_READ_ONLY(req));
 #endif
-      analysis = new UpdateAnalysis(runtime, op, index, req, 
-                                    region_node, targets, target_views, 
+      analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
+                                    targets, target_views, source_views, 
                                     trace_info, precondition, term_event, 
                                     track_effects, check_initialized,
                                     record_valid, skip_output);
@@ -2152,6 +2156,7 @@ namespace Legion {
                                        ApEvent precondition, 
                                        ApEvent term_event,
                                        InstanceSet &targets,
+                                       const std::vector<PhysicalManager*> &src,
                                        const PhysicalTraceInfo &trace_info,
                                        std::set<RtEvent> &map_applied_events,
 #ifdef DEBUG_LEGION
@@ -2165,8 +2170,8 @@ namespace Legion {
     {
       UpdateAnalysis *analysis = NULL;
       const RtEvent registration_precondition = physical_perform_updates(req,
-         version_info, op, index, precondition, term_event, targets, trace_info,
-         map_applied_events, analysis,
+         version_info, op, index, precondition, term_event, targets, src,
+         trace_info, map_applied_events, analysis,
 #ifdef DEBUG_LEGION
          log_name, uid,
 #endif
@@ -3339,6 +3344,54 @@ namespace Legion {
       }
     }
 #endif // NEWEQ
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::physical_convert_sources(Operation *op,
+                                  const RegionRequirement &req,
+                                  const std::vector<MappingInstance> &sources,
+                                  std::vector<PhysicalManager*> &result,
+                                  std::map<PhysicalManager*,unsigned> *acquired)
+    //--------------------------------------------------------------------------
+    {
+      const RegionTreeID req_tid = req.parent.get_tree_id();
+      std::vector<PhysicalManager*> unacquired;
+      for (std::vector<MappingInstance>::const_iterator it = 
+            sources.begin(); it != sources.end(); it++)
+      {
+        InstanceManager *man = it->impl;
+        if (man == NULL)
+          continue;
+        if (man->is_virtual_manager())
+          continue;
+        PhysicalManager *manager = man->as_instance_manager();
+        // Check to see if the region trees are the same
+        if (req_tid != manager->tree_id)
+          continue;
+        if ((acquired != NULL) && (acquired->find(manager) == acquired->end()))
+          unacquired.push_back(manager);
+        result.push_back(manager);
+      }
+      if (!unacquired.empty())
+      {
+        perform_missing_acquires(op, *acquired, unacquired);
+        unsigned unacquired_index = 0;
+        for (std::vector<PhysicalManager*>::iterator it = 
+              result.begin(); it != result.end(); /*nothing*/)
+        {
+          if ((*it) == unacquired[unacquired_index])
+          {
+            if (acquired->find(unacquired[unacquired_index]) == acquired->end())
+              it = result.erase(it);
+            else
+              it++;
+            if ((++unacquired_index) == unacquired.size())
+              break;
+          }
+          else
+            it++;
+        }
+      }
+    }
 
     //--------------------------------------------------------------------------
     int RegionTreeForest::physical_convert_mapping(Operation *op,

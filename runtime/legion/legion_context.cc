@@ -8572,6 +8572,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::convert_source_views(
+                                   const std::vector<PhysicalManager*> &sources,
+                                   std::vector<InstanceView*> &source_views)
+    //--------------------------------------------------------------------------
+    {
+      source_views.resize(sources.size());
+      std::vector<unsigned> still_needed;
+      {
+        AutoLock inst_lock(instance_view_lock,1,false/*exclusive*/); 
+        for (unsigned idx = 0; idx < sources.size(); idx++)
+        {
+          // See if we can find it
+          PhysicalManager *manager = sources[idx];
+          std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+            instance_top_views.find(manager);     
+          if (finder != instance_top_views.end())
+            source_views[idx] = finder->second;
+          else
+            still_needed.push_back(idx);
+        }
+      }
+      if (!still_needed.empty())
+      {
+        const AddressSpaceID local_space = runtime->address_space;
+        for (std::vector<unsigned>::const_iterator it = 
+              still_needed.begin(); it != still_needed.end(); it++)
+        {
+          PhysicalManager *manager = sources[*it];
+          source_views[*it] = create_instance_top_view(manager, local_space);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::convert_target_views(const InstanceSet &targets,
                                        std::vector<InstanceView*> &target_views)
     //--------------------------------------------------------------------------

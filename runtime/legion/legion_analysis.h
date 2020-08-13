@@ -1350,12 +1350,23 @@ namespace Legion {
     public:
       CopyFillAggregator& operator=(const CopyFillAggregator &rhs);
     public:
+      void record_update(InstanceView *dst_view,
+                          InstanceView *src_view,
+                          const FieldMask &src_mask,
+                          IndexSpaceExpression *expr,
+                          ReductionOpID redop = 0,
+                          CopyAcrossHelper *across_helper = NULL);
       void record_updates(InstanceView *dst_view, 
                           const FieldMaskSet<LogicalView> &src_views,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
+      void record_partial_updates(InstanceView *dst_view,
+                          const LegionMap<LogicalView*,
+                      FieldMaskSet<IndexSpaceExpression> >::aligned &src_views,
+                          const FieldMask &src_mask,
+                          IndexSpaceExpression *expr);
       // Neither fills nor reductions should have a redop across as they
       // should have been applied an instance directly for across copies
       void record_fill(InstanceView *dst_view,
@@ -1704,6 +1715,7 @@ namespace Legion {
                      const RegionRequirement &req,
                      RegionNode *node, const InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
+                     std::vector<InstanceView*> &source_views,
                      const PhysicalTraceInfo &trace_info,
                      const ApEvent precondition, const ApEvent term_event,
                      const bool track_effects, const bool check_initialized,
@@ -1713,6 +1725,7 @@ namespace Legion {
                      const RegionUsage &usage, RegionNode *node, 
                      InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
+                     std::vector<InstanceView*> &source_views,
                      const PhysicalTraceInfo &trace_info,
                      const RtEvent user_registered,
                      const ApEvent precondition, const ApEvent term_event,
@@ -1754,6 +1767,7 @@ namespace Legion {
       RegionNode *const node;
       const InstanceSet target_instances;
       const std::vector<InstanceView*> target_views;
+      const std::vector<InstanceView*> source_views;
       const PhysicalTraceInfo trace_info;
       const ApEvent precondition;
       const ApEvent term_event;
@@ -2747,6 +2761,7 @@ namespace Legion {
                                const FieldMask &user_mask,
                                const InstanceSet &target_instances,
                                const std::vector<InstanceView*> &target_views,
+                               const std::vector<InstanceView*> &source_views,
                                std::set<RtEvent> &applied_events,
                                const bool record_valid);
       void make_instances_valid(CopyFillAggregator *&aggregator,
@@ -2758,9 +2773,11 @@ namespace Legion {
                                 const FieldMask &update_mask,
                                 const InstanceSet &target_instances,
                                 const std::vector<InstanceView*> &target_views,
+                                const std::vector<InstanceView*> &source_views,
                                 const bool skip_check = false,
                                 const int dst_index = -1) const;
       void issue_update_copies_and_fills(InstanceView *target,
+                                const std::vector<InstanceView*> &source_views,
                                          CopyFillAggregator *&aggregator,
                                          const RtEvent guard_event,
                                          Operation *op, const unsigned index,

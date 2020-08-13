@@ -2139,6 +2139,7 @@ namespace Legion {
       deactivate_task();
       target_processors.clear();
       physical_instances.clear();
+      source_instances.clear();
       virtual_mapped.clear();
       no_access_regions.clear();
       intra_space_mapping_dependences.clear();
@@ -2527,6 +2528,7 @@ namespace Legion {
       valid.resize(regions.size());
       input.valid_instances.resize(regions.size());
       output.chosen_instances.resize(regions.size());
+      output.source_instances.resize(regions.size());
       // If we have must epoch owner, we have to check for any 
       // constrained mappings which must be heeded
       if (must_epoch_owner != NULL)
@@ -2789,6 +2791,7 @@ namespace Legion {
       // - all satisfy the region requirement
       // - all are visible from all the target processors
       physical_instances.resize(regions.size());
+      source_instances.resize(regions.size());
       // If we're doing safety checks, we need the set of memories
       // visible from all the target processors
       std::set<Memory> visible_memories;
@@ -2857,7 +2860,7 @@ namespace Legion {
         }
         // Skip any NO_ACCESS or empty privilege field regions
         if (no_access_regions[idx])
-          continue;
+          continue; 
         // Do the conversion
         InstanceSet &result = physical_instances[idx];
         RegionTreeID bad_tree = 0;
@@ -2883,6 +2886,10 @@ namespace Legion {
           else
             acquired = get_acquired_instances_ref();
         }
+        // Convert any sources first
+        if (!output.source_instances[idx].empty())
+          runtime->forest->physical_convert_sources(this, regions[idx],
+              output.source_instances[idx], source_instances[idx], acquired);
         int composite_idx = 
           runtime->forest->physical_convert_mapping(this, regions[idx],
                 output.chosen_instances[idx], result, bad_tree, missing_fields,
@@ -3841,7 +3848,8 @@ namespace Legion {
                 runtime->forest->physical_perform_updates_and_registration(
                     regions[0], version_infos[0], this, 0, 
                     init_precondition, local_termination_event,
-                    physical_instances[0], PhysicalTraceInfo(trace_info, 0),
+                    physical_instances[0], source_instances[0],
+                    PhysicalTraceInfo(trace_info, 0),
                                           map_applied_conditions,
 #ifdef DEBUG_LEGION
                                           get_logging_name(),
@@ -3885,6 +3893,7 @@ namespace Legion {
                                           this, idx, init_precondition,
                                           local_termination_event,
                                           physical_instances[idx],
+                                          source_instances[idx],
                                           PhysicalTraceInfo(trace_info, idx),
                                           map_applied_conditions,
                                           analyses[idx],
@@ -4018,6 +4027,7 @@ namespace Legion {
       input.mapped_regions.resize(regions.size());
       input.valid_instances.resize(regions.size());
       output.chosen_instances.resize(regions.size());
+      output.source_instances.resize(regions.size());
       std::vector<InstanceSet> postmap_valid(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -4175,11 +4185,16 @@ namespace Legion {
         const PrivilegeMode mode = regions[idx].privilege;
         regions[idx].privilege = LEGION_READ_ONLY; 
         VersionInfo &local_version_info = get_version_info(idx);
+        std::vector<PhysicalManager*> sources;
+        if (!output.source_instances[idx].empty())
+          runtime->forest->physical_convert_sources(this, regions[idx],
+              output.source_instances[idx], sources, 
+              !runtime->unsafe_mapper ? get_acquired_instances_ref() : NULL);
         runtime->forest->physical_perform_updates_and_registration(
                           regions[idx], local_version_info, this, idx,
                           completion_event/*wait for task to be done*/,
                           ApEvent::NO_AP_EVENT/*done immediately*/, 
-                          result, PhysicalTraceInfo(trace_info, idx), 
+                          result, sources, PhysicalTraceInfo(trace_info, idx), 
                           map_applied_conditions,
 #ifdef DEBUG_LEGION
                           get_logging_name(), unique_op_id,
@@ -8663,11 +8678,18 @@ namespace Legion {
         // for themselves when they map their regions
         const bool track_effects = 
           (!atomic_locks.empty() || !arrive_barriers.empty());
+        std::vector<PhysicalManager*> sources;
+        std::map<unsigned,std::vector<MappingInstance> >::const_iterator
+          source_finder = output.premapped_sources.find(*it);
+        if (source_finder != output.premapped_sources.end())
+          runtime->forest->physical_convert_sources(this, regions[*it],
+              source_finder->second, sources, 
+              !runtime->unsafe_mapper ? get_acquired_instances_ref() : NULL);
         ApEvent effects_done = 
           runtime->forest->physical_perform_updates_and_registration(
                               regions[*it], version_info, 
                               this, *it, init_precondition, completion_event,
-                              chosen_instances, 
+                              chosen_instances, sources,
                               PhysicalTraceInfo(trace_info, *it), 
                               applied_conditions,
 #ifdef DEBUG_LEGION

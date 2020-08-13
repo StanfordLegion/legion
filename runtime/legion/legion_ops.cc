@@ -2944,6 +2944,7 @@ namespace Legion {
         }
       }
       InstanceSet mapped_instances;
+      std::vector<PhysicalManager*> source_instances;
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
       ApEvent effects_done;
@@ -2959,6 +2960,7 @@ namespace Legion {
                                                 init_precondition,
                                                 termination_event,
                                                 mapped_instances, 
+                                                source_instances,
                                                 trace_info,
                                                 map_applied_conditions,
 #ifdef DEBUG_LEGION
@@ -2970,7 +2972,8 @@ namespace Legion {
       else
       { 
         // Now we've got the valid instances so invoke the mapper
-        const bool record_valid = invoke_mapper(mapped_instances); 
+        const bool record_valid = 
+          invoke_mapper(mapped_instances, source_instances);
         // Then we can register our mapped instances
         effects_done = 
           runtime->forest->physical_perform_updates_and_registration(
@@ -2979,6 +2982,7 @@ namespace Legion {
                                                 init_precondition,
                                                 termination_event, 
                                                 mapped_instances,
+                                                source_instances,
                                                 trace_info,
                                                 map_applied_conditions,
 #ifdef DEBUG_LEGION
@@ -3416,7 +3420,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MapOp::invoke_mapper(InstanceSet &chosen_instances)
+    bool MapOp::invoke_mapper(InstanceSet &chosen_instances,
+                              std::vector<PhysicalManager*> &source_instances)
     //--------------------------------------------------------------------------
     {
       Mapper::MapInlineInput input;
@@ -3446,6 +3451,10 @@ namespace Legion {
           prepare_for_mapping(valid_instances, input.valid_instances);
       }
       mapper->invoke_map_inline(this, &input, &output);
+      if (!output.source_instances.empty())
+        runtime->forest->physical_convert_sources(this, requirement,
+            output.source_instances, source_instances, 
+            !runtime->unsafe_mapper ? &acquired_instances : NULL);
       if (!output.profiling_requests.empty())
       {
         filter_copy_request_kinds(mapper,
@@ -4602,6 +4611,12 @@ namespace Legion {
       output.dst_instances.resize(dst_requirements.size());
       output.src_indirect_instances.resize(src_indirect_requirements.size());
       output.dst_indirect_instances.resize(dst_indirect_requirements.size());
+      output.src_source_instances.resize(src_requirements.size());
+      output.dst_source_instances.resize(dst_requirements.size());
+      output.src_indirect_source_instances.resize(
+          src_indirect_requirements.size());
+      output.dst_indirect_source_instances.resize(
+          dst_indirect_requirements.size());
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       if (mapper == NULL)
       {
@@ -4745,13 +4760,19 @@ namespace Legion {
           PhysicalTraceInfo src_info(trace_info, idx, false/*update validity*/);
           const bool record_valid = (output.untracked_valid_srcs.find(idx) ==
                                      output.untracked_valid_srcs.end());
+          std::vector<PhysicalManager*> src_sources;
+          const RegionRequirement &src_req = src_requirements[idx];
+          if (!output.src_source_instances[idx].empty())
+            runtime->forest->physical_convert_sources(this, src_req,
+             output.src_source_instances[idx], src_sources, 
+             !runtime->unsafe_mapper ? &acquired_instances : NULL);
           runtime->forest->physical_perform_updates_and_registration(
-                                              src_requirements[idx],
-                                              src_versions[idx],
+                                              src_req, src_versions[idx],
                                               this, idx,
                                               local_init_precondition,
                                               local_completion,
                                               src_targets,
+                                              src_sources,
                                               src_info,
                                               local_applied_events,
 #ifdef DEBUG_LEGION
@@ -4782,6 +4803,11 @@ namespace Legion {
         // Don't track target views of copy across operations here,
         // as they will do later when the realm copies are recorded.
         PhysicalTraceInfo dst_info(trace_info,dst_idx,false/*update_validity*/);
+        std::vector<PhysicalManager*> dst_sources;
+        if (!output.dst_source_instances[idx].empty())
+          runtime->forest->physical_convert_sources(this, dst_requirements[idx],
+             output.dst_source_instances[idx], dst_sources, 
+             !runtime->unsafe_mapper ? &acquired_instances : NULL);
         ApEvent effects_done = 
           runtime->forest->physical_perform_updates_and_registration(
                                           dst_requirements[idx],
@@ -4790,6 +4816,7 @@ namespace Legion {
                                           local_init_precondition,
                                           local_completion,
                                           dst_targets,
+                                          dst_sources,
                                           dst_info,
                                           local_applied_events,
 #ifdef DEBUG_LEGION
@@ -4820,6 +4847,12 @@ namespace Legion {
           PhysicalTraceInfo gather_info(trace_info, gather_idx);
           const bool record_valid = (output.untracked_valid_ind_srcs.find(idx) 
                                     == output.untracked_valid_ind_srcs.end());
+          std::vector<PhysicalManager*> gather_sources;
+          if (!output.src_indirect_source_instances[idx].empty())
+            runtime->forest->physical_convert_sources(this, 
+                src_indirect_requirements[idx], 
+                output.src_indirect_source_instances[idx], gather_sources, 
+                !runtime->unsafe_mapper ? &acquired_instances : NULL);
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
                                        src_indirect_requirements[idx],
@@ -4828,6 +4861,7 @@ namespace Legion {
                                        local_init_precondition,
                                        local_completion,
                                        gather_targets,
+                                       gather_sources,
                                        gather_info,
                                        local_applied_events,
 #ifdef DEBUG_LEGION
@@ -4856,6 +4890,12 @@ namespace Legion {
           const bool record_valid = (output.untracked_valid_ind_dsts.find(idx) 
                                     == output.untracked_valid_ind_dsts.end());
           PhysicalTraceInfo scatter_info(trace_info, scatter_idx);
+          std::vector<PhysicalManager*> scatter_sources;
+          if (!output.dst_indirect_source_instances[idx].empty())
+            runtime->forest->physical_convert_sources(this,
+                dst_indirect_requirements[idx], 
+                output.dst_indirect_source_instances[idx], scatter_sources, 
+                !runtime->unsafe_mapper ? &acquired_instances : NULL);
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
                                       dst_indirect_requirements[idx],
@@ -4864,6 +4904,7 @@ namespace Legion {
                                       local_init_precondition,
                                       local_completion,
                                       scatter_targets,
+                                      scatter_sources,
                                       scatter_info,
                                       local_applied_events,
 #ifdef DEBUG_LEGION
@@ -9148,6 +9189,7 @@ namespace Legion {
 #endif
       const PhysicalTraceInfo trace_info(this, 0/*index*/, false/*init*/);
       ApUserEvent close_event = Runtime::create_ap_user_event(NULL);
+      std::vector<PhysicalManager*> dummy_sources;
       ApEvent effects_done = 
         runtime->forest->physical_perform_updates_and_registration(
                                               requirement, version_info,
@@ -9155,6 +9197,7 @@ namespace Legion {
                                               ApEvent::NO_AP_EVENT,
                                               close_event,
                                               target_instances, 
+                                              dummy_sources,
                                               trace_info,
                                               map_applied_conditions,
 #ifdef DEBUG_LEGION
@@ -14510,7 +14553,9 @@ namespace Legion {
       const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
       // Perform the mapping call to get the physical isntances 
       InstanceSet mapped_instances;
-      const bool record_valid = invoke_mapper(mapped_instances);
+      std::vector<PhysicalManager*> source_instances;
+      const bool record_valid = 
+        invoke_mapper(mapped_instances, source_instances);
       if (runtime->legion_spy_enabled)
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
@@ -14525,6 +14570,7 @@ namespace Legion {
                                               ApEvent::NO_AP_EVENT,
                                               completion_event,
                                               mapped_instances,
+                                              source_instances,
                                               trace_info,
                                               map_applied_conditions,
 #ifdef DEBUG_LEGION
@@ -14628,7 +14674,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DependentPartitionOp::invoke_mapper(InstanceSet &mapped_instances)
+    bool DependentPartitionOp::invoke_mapper(InstanceSet &mapped_instances,
+                                std::vector<PhysicalManager*> &source_instances)
     //--------------------------------------------------------------------------
     {
       Mapper::MapPartitionInput input;
@@ -14649,6 +14696,10 @@ namespace Legion {
         prepare_for_mapping(valid_instances, input.valid_instances);
       }
       mapper->invoke_map_partition(this, &input, &output);
+      if (!output.source_instances.empty())
+        runtime->forest->physical_convert_sources(this, requirement,
+            output.source_instances, source_instances, 
+            !runtime->unsafe_mapper ? &acquired_instances : NULL);
       if (!output.profiling_requests.empty())
       {
         filter_copy_request_kinds(mapper,
@@ -17961,13 +18012,15 @@ namespace Legion {
       if (flush)
       {
         requirement.privilege = LEGION_READ_ONLY;
+        std::vector<PhysicalManager*> dummy_sources;
         effects_done = 
           runtime->forest->physical_perform_updates_and_registration(
                                                   requirement, version_info,
                                                   this, 0/*idx*/, 
                                                   ApEvent::NO_AP_EVENT, 
                                                   ApEvent::NO_AP_EVENT,
-                                                  references, trace_info,
+                                                  references, dummy_sources,
+                                                  trace_info,
                                                   map_applied_conditions,
 #ifdef DEBUG_LEGION
                                                   get_logging_name(),
