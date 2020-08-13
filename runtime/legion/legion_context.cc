@@ -3767,7 +3767,7 @@ namespace Legion {
 #endif
       RtUserEvent ready = Runtime::create_rt_user_event();
       root->ray_trace_equivalence_sets(manager, expr, mask,
-                                       handle, source, ready);
+                                       handle, source, ready, !check_empty);
       return ready;
     } 
 
