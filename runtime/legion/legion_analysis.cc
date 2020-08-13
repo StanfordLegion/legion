@@ -8758,9 +8758,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::DisjointPartitionRefinement::DisjointPartitionRefinement(
-     EquivalenceSet *owner, IndexPartNode *p, std::set<RtEvent> &applied_events)
+                                    EquivalenceSet *owner, IndexPartNode *p,
+                                    std::set<RtEvent> &applied_events, bool sym)
       : owner_did(owner->did), partition(p), total_child_volume(0),
-        partition_volume(partition->color_space->get_volume())
+        partition_volume(
+          sym ? partition->color_space->get_volume()
+              : partition->get_union_expression()->get_volume()),
+        symbolic(sym)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8775,7 +8779,7 @@ namespace Legion {
       const DisjointPartitionRefinement &rhs, std::set<RtEvent> &applied_events)
       : owner_did(rhs.owner_did), partition(rhs.partition), 
         children(rhs.get_children()), total_child_volume(children.size()), 
-        partition_volume(rhs.get_volume())
+        partition_volume(rhs.get_volume()), symbolic(rhs.symbolic)
     //--------------------------------------------------------------------------
     {
       WrapperReferenceMutator mutator(applied_events);
@@ -8800,7 +8804,10 @@ namespace Legion {
       assert(children.find(node) == children.end());
 #endif
       children[node] = child;
-      total_child_volume += 1;
+      if (symbolic)
+        total_child_volume += 1;
+      else
+        total_child_volume += node->get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -9699,7 +9706,8 @@ namespace Legion {
                    node->parent->is_disjoint() && node->parent->is_complete());
 #endif
             DisjointPartitionRefinement *dis =
-              new DisjointPartitionRefinement(this, node->parent, done_events);
+              new DisjointPartitionRefinement(this, node->parent, done_events,
+                                              true/*symbolic*/);
             EquivalenceSet *child =
               add_pending_refinement(expr, disjoint_mask, node, source);
             pending_to_traverse.insert(child, disjoint_mask);

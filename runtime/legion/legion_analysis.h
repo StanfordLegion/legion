@@ -2275,7 +2275,8 @@ namespace Legion {
       struct DisjointPartitionRefinement {
       public:
         DisjointPartitionRefinement(EquivalenceSet *owner, IndexPartNode *p,
-                                    std::set<RtEvent> &applied_events);
+                                    std::set<RtEvent> &applied_events,
+                                    bool symbolic=false);
         DisjointPartitionRefinement(const DisjointPartitionRefinement &rhs,
                                     std::set<RtEvent> &applied_events);
         ~DisjointPartitionRefinement(void);
@@ -2295,6 +2296,7 @@ namespace Legion {
         std::map<IndexSpaceNode*,EquivalenceSet*> children;
         size_t total_child_volume;
         const size_t partition_volume;
+        const bool symbolic;
       };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
