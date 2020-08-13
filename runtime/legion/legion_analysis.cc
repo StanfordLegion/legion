@@ -8760,7 +8760,7 @@ namespace Legion {
     EquivalenceSet::DisjointPartitionRefinement::DisjointPartitionRefinement(
      EquivalenceSet *owner, IndexPartNode *p, std::set<RtEvent> &applied_events)
       : owner_did(owner->did), partition(p), total_child_volume(0),
-        partition_volume(partition->get_union_expression()->get_volume())
+        partition_volume(partition->color_space->get_volume())
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8800,7 +8800,7 @@ namespace Legion {
       assert(children.find(node) == children.end());
 #endif
       children[node] = child;
-      total_child_volume += node->get_volume();
+      total_child_volume += 1;
     }
 
     //--------------------------------------------------------------------------
