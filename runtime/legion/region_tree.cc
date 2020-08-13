@@ -8967,6 +8967,18 @@ namespace Legion {
       return diff->is_empty();
     }
 
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::mark_index_space_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      ApUserEvent ready = *(reinterpret_cast<ApUserEvent*>(
+                         const_cast<ApEvent*>(&index_space_ready)));
+#ifdef DEBUG_LEGION
+      assert(!ready.has_triggered());
+#endif
+      Runtime::trigger_event(NULL, ready);
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Partition Node 
     /////////////////////////////////////////////////////////////
@@ -9832,31 +9844,36 @@ namespace Legion {
       {
         // If we're complete then we can use the parent index space expresion
         if (!check_complete || !is_complete())
-        {
-          std::set<IndexSpaceExpression*> child_spaces;
-          if (total_children == max_linearized_color)
-          {
-            for (LegionColor color = 0; color < total_children; color++)
-              child_spaces.insert(get_child(color));
-          }
-          else
-          {
-            for (LegionColor color = 0; color < max_linearized_color; color++)
-            {
-              if (!color_space->contains_color(color))
-                continue;
-              child_spaces.insert(get_child(color));
-            }
-          }
           // We can always write the result immediately since we know
           // that the common sub-expression code will give the same
           // result if there is a race
-          union_expr = context->union_index_spaces(child_spaces);
-        }
+          union_expr = compute_union_expression();
         else // if we're complete the parent is our expression
           union_expr = parent;
       }
       return const_cast<IndexSpaceExpression*>(union_expr);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* IndexPartNode::compute_union_expression(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<IndexSpaceExpression*> child_spaces;
+      if (total_children == max_linearized_color)
+      {
+        for (LegionColor color = 0; color < total_children; color++)
+          child_spaces.insert(get_child(color));
+      }
+      else
+      {
+        for (LegionColor color = 0; color < max_linearized_color; color++)
+        {
+          if (!color_space->contains_color(color))
+            continue;
+          child_spaces.insert(get_child(color));
+        }
+      }
+      return context->union_index_spaces(child_spaces);
     }
 
     //--------------------------------------------------------------------------

@@ -3202,7 +3202,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SingleTask::prepare_output_instance(InstanceSet &instance_set,
-                                             const RegionRequirement &req,
+                                             const OutputRequirement &req,
                                              Memory target)
     //--------------------------------------------------------------------------
     {
@@ -3213,7 +3213,8 @@ namespace Legion {
       MemoryManager *memory_manager = runtime->find_memory_manager(target);
 
       std::vector<DimensionKind> ordering;
-      ordering.push_back(DIM_X);
+      for (unsigned idx = 0; idx < index_node->get_num_dims(); ++idx)
+        ordering.push_back(static_cast<DimensionKind>(DIM_X + idx));
       ordering.push_back(DIM_F);
 
       LayoutConstraintSet constraints;
@@ -8117,6 +8118,7 @@ namespace Legion {
     void IndexTask::deactivate_index_task(void)
     //--------------------------------------------------------------------------
     {
+      finalize_output_regions();
       deactivate_multi();
       privilege_paths.clear();
       if (!origin_mapped_slices.empty())
@@ -8150,6 +8152,24 @@ namespace Legion {
       point_requirements.clear();
       assert(pending_intra_space_dependences.empty());
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::finalize_output_regions(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+      {
+        const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
+        const IndexPartition &part =
+          output_regions[idx].partition.get_index_partition();
+        IndexSpaceNode *parent_node =
+          runtime->forest->get_node(ispace)->as_index_space_node();
+        IndexPartNode *part_node =
+          runtime->forest->get_node(part)->as_index_part_node();
+        parent_node->construct_realm_index_space_from_union(
+            part_node, runtime->address_space);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8497,6 +8517,13 @@ namespace Legion {
                std::vector<OutputRequirement> &outputs, IndexSpace launch_space)
     //--------------------------------------------------------------------------
     {
+      if (launch_space.get_dim() + 1 > LEGION_MAX_DIM)
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_DOMAIN,
+          "Dimensionality of output regions of task %s (UID: %lld) "
+          "exceeded LEGION_MAX_DIM. You may rebuild your code with a "
+          "bigger LEGION_MAX_DIM value or reduce dimensionality of "
+          "the launch domain.", get_task_name(), get_unique_op_id());
+
       for (std::vector<OutputRequirement>::iterator it = outputs.begin();
            it != outputs.end(); ++it)
       {
@@ -8508,7 +8535,7 @@ namespace Legion {
         // When local indexing is requested, create an (N+1)-D index space
         // for an N-D launch domain
         TypeTag type_tag;
-        switch (launch_space.get_dim())
+        switch (launch_space.get_dim() + 1)
         {
 #define DIMFUNC(DIM) \
           case DIM: \

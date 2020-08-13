@@ -2125,6 +2125,10 @@ namespace Legion {
                                             IndexSpace shard_space) = 0;
       virtual void destroy_shard_domain(const Domain &domain) = 0;
     public:
+      void mark_index_space_ready(void);
+      virtual void construct_realm_index_space_from_union(
+                           IndexPartNode *part_node, AddressSpaceID source) = 0;
+    public:
       const IndexSpace handle;
       IndexPartNode *const parent;
       const ApEvent index_space_ready;
@@ -2465,6 +2469,9 @@ namespace Legion {
       bool contains_point(const Realm::Point<DIM,T> &point);
     protected:
       void compute_linearization_metadata(void);
+    public:
+      virtual void construct_realm_index_space_from_union(
+                               IndexPartNode *part_node, AddressSpaceID source);
     protected:
       Realm::IndexSpace<DIM,T> realm_index_space;
     protected: // linearization meta-data, computed on demand
@@ -2905,6 +2912,7 @@ namespace Legion {
                                LegionColor c1, LegionColor c2);
       bool is_complete(bool from_app = false, bool false_if_not_ready = false);
       IndexSpaceExpression* get_union_expression(bool check_complete=true);
+      IndexSpaceExpression* compute_union_expression(void);
       void record_remote_disjoint_ready(RtUserEvent ready);
       void record_remote_disjoint_result(const bool disjoint_result);
     public:

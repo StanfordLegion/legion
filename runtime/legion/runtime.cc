@@ -3426,7 +3426,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OutputRegionImpl::OutputRegionImpl(unsigned i,
-                                       const RegionRequirement &r,
+                                       const OutputRequirement &r,
                                        InstanceSet is,
                                        TaskContext *ctx,
                                        Runtime *rt)
@@ -3474,9 +3474,30 @@ namespace Legion {
       size_t field_size = fspace_node->get_field_size(field_id);
       std::set<FieldID> fields; fields.insert(field_id);
       FieldMask mask = fspace_node->get_field_mask(fields);
+      TaskOp *task = context->owner_task;
 
       // Initialize the index space domain
-      Domain dom(Rect<1>(0, num_elements - 1));
+      Domain dom;
+      if (req.partition.exists())
+      {
+        assert(!req.global_indexing);
+        DomainPoint index_point = task->index_point;
+        dom.dim = index_point.get_dim() + 1;
+#ifdef DEBUG_LEGION
+        assert(dom.dim <= LEGION_MAX_DIM);
+#endif
+
+        for (int idx = 0; idx < index_point.dim; ++idx)
+        {
+          dom.rect_data[idx + 1] = index_point[idx];
+          dom.rect_data[idx + 1 + dom.dim] = index_point[idx];
+        }
+        dom.rect_data[0] = 0;
+        dom.rect_data[dom.dim] = num_elements - 1;
+      }
+      else
+        dom = Rect<1>(0, num_elements - 1);
+
       if (domain.exists())
       {
         if (dom != domain)
@@ -3484,9 +3505,12 @@ namespace Legion {
           size_t old_size = domain.get_volume();
           size_t new_size = dom.get_volume();
           REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
-            "Output region %u has already been initialized to have %zd "
-            "elements, but the new output data holds %zd elements",
-            index, old_size, new_size);
+            "Output region %u of task %s (UID: %lld) has already been "
+            "initialized to have %zd elements, but the new output data "
+            "holds %zd elements. You must return the same number of "
+            "elements to all the fields in the same output region.",
+            index, task->get_task_name(), task->get_unique_op_id(),
+            old_size, new_size);
         }
       }
       else
@@ -3495,6 +3519,8 @@ namespace Legion {
         IndexSpaceNode *index_node =
           node->get_row_source()->as_index_space_node();
         index_node->set_domain(domain, runtime->address_space);
+        if (req.partition.exists())
+          index_node->mark_index_space_ready();
       }
 
       // Find the right instance manager for a given output
@@ -3516,16 +3542,35 @@ namespace Legion {
       // Create an external instance
       PhysicalInstance instance;
       {
-        const DomainT<1,coord_t> bounds = Rect<1,coord_t>(domain);
         std::map<Realm::FieldID,size_t> field_sizes;
         field_sizes[field_id] = field_size;
         Realm::InstanceLayoutConstraints constraints(field_sizes,
                                                      0 /*block_size*/);
-        int dim_order[] = {0};
-        Realm::InstanceLayoutGeneric *layout =
-          Realm::InstanceLayoutGeneric::choose_instance_layout(bounds,
-                                                               constraints,
-                                                               dim_order);
+
+        Realm::InstanceLayoutGeneric *layout = NULL;
+        switch (domain.get_dim())
+        {
+#define DIMFUNC(DIM)                                                         \
+          case DIM:                                                          \
+            {                                                                \
+              int dim_order[DIM];                                            \
+              for (unsigned idx = 0; idx < DIM; ++idx)                       \
+                dim_order[idx] = idx;                                        \
+              const DomainT<DIM,coord_t> bounds = Rect<DIM,coord_t>(domain); \
+              layout =                                                       \
+                Realm::InstanceLayoutGeneric::choose_instance_layout(        \
+                    bounds, constraints, dim_order);                         \
+              break;                                                         \
+            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+          default:
+            assert(false);
+        }
+#ifdef DEBUG_LEGION
+        assert(layout != NULL);
+#endif
+
         // If no alignment is given, set it to the field size
         if (alignment == 0)
           alignment = field_size;

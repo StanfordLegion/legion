@@ -2879,6 +2879,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::construct_realm_index_space_from_union(
+                                IndexPartNode *part_node, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceExpression *expr = part_node->compute_union_expression();
+      Realm::IndexSpace<DIM,T> realm_is;
+      ApEvent ready = expr->get_expr_index_space(&realm_is, type_tag, true);
+      if (ready.exists())
+        ready.wait();
+      set_realm_index_space(source, realm_is);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     LegionColor IndexSpaceNodeT<DIM,T>::linearize_color(const void *realm_color,
                                                         TypeTag type_tag)
     //--------------------------------------------------------------------------

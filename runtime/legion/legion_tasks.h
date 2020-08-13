@@ -488,7 +488,7 @@ namespace Legion {
                                     MustEpochOp *must_epoch_owner,
                                     std::vector<InstanceSet> &valid_instances); 
       void prepare_output_instance(InstanceSet &instance_set,
-                                   const RegionRequirement &req,
+                                   const OutputRequirement &req,
                                    Memory target);
       void replay_map_task_output(void);
       virtual InnerContext* create_implicit_context(void);
@@ -1080,6 +1080,7 @@ namespace Legion {
     protected:
       void activate_index_task(void);
       void deactivate_index_task(void);
+      void finalize_output_regions(void);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }

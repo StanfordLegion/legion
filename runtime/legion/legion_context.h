@@ -610,7 +610,7 @@ namespace Legion {
       void add_physical_region(const RegionRequirement &req, bool mapped,
           MapperID mid, MappingTagID tag, ApUserEvent unmap_event,
           bool virtual_mapped, const InstanceSet &physical_instances);
-      void add_output_region(const RegionRequirement &req, InstanceSet instances);
+      void add_output_region(const OutputRequirement &req, InstanceSet instances);
       void initialize_overhead_tracker(void);
       void unmap_all_regions(void); 
       inline void begin_runtime_call(void);

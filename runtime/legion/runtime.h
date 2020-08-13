@@ -641,7 +641,7 @@ namespace Legion {
       static const AllocationType alloc_type = OUTPUT_REGION_ALLOC;
     public:
       OutputRegionImpl(unsigned index,
-                       const RegionRequirement &req,
+                       const OutputRequirement &req,
                        InstanceSet instances,
                        TaskContext *ctx,
                        Runtime *rt);
@@ -662,7 +662,7 @@ namespace Legion {
       TaskContext *const context;
     private:
       unsigned index;
-      RegionRequirement req;
+      OutputRequirement req;
       InstanceSet instances;
       Domain domain;
     };

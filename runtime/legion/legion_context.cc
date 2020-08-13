@@ -733,7 +733,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::add_output_region(
-                            const RegionRequirement &req, InstanceSet instances)
+                            const OutputRequirement &req, InstanceSet instances)
     //--------------------------------------------------------------------------
     {
       size_t index = output_regions.size();
