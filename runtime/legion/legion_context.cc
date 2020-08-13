@@ -6145,7 +6145,8 @@ namespace Legion {
         launch_space = find_index_launch_space(launcher.launch_domain);
       IndexTask *task = runtime->get_available_index_task();
       Future result = task->initialize_task(this, launcher, launch_space, 
-                                            redop, deterministic, outputs);
+                                            redop, deterministic,
+                                            true /*track*/, outputs);
 #ifdef DEBUG_LEGION
       log_task.debug("Registering new index space task with unique id "
                      "%lld and task %s (ID %lld) with high level runtime in "
