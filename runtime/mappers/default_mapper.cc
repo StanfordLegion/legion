@@ -1538,6 +1538,7 @@ namespace Legion {
             // Have to copy it before we do the external call which 
             // might invalidate our iterator
             output.chosen_instances = it->mapping;
+            output.output_targets = it->output_targets;
             found = true;
             break;
           }
