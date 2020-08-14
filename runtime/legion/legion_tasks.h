@@ -577,7 +577,6 @@ namespace Legion {
       // Regions which are NO_ACCESS or have no privilege fields
       std::vector<bool>                           no_access_regions; 
     protected:
-<<<<<<< HEAD
       std::vector<Processor>                      target_processors;
       // Hold the result of the mapping 
       std::deque<InstanceSet>                     physical_instances;
@@ -587,16 +586,6 @@ namespace Legion {
       VariantID                                   selected_variant;
       TaskPriority                                task_priority;
       bool                                        perform_postmap;
-=======
-      std::vector<Processor>                target_processors;
-      // Hold the result of the mapping
-      std::deque<InstanceSet>               physical_instances;
-    protected: // Mapper choices
-      std::set<unsigned>                    untracked_valid_regions;
-      VariantID                             selected_variant;
-      TaskPriority                          task_priority;
-      bool                                  perform_postmap;
->>>>>>> control_replication
     protected:
       // origin-mapped cases need to know if they've been mapped or not yet
       bool                                  first_mapping;
