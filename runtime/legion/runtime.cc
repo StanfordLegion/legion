@@ -576,7 +576,7 @@ namespace Legion {
         if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
           implicit_context->record_blocking_call();
       }
-      const ApEvent ready_event = empty ? subscribe() : future_complete;
+      const ApEvent ready_event = subscribe();
       if (!ready_event.has_triggered())
       {
         TaskContext *context = implicit_context;
@@ -642,7 +642,7 @@ namespace Legion {
       }
       if (block)
       {
-        const ApEvent ready_event = empty ? subscribe() : future_complete;
+        const ApEvent ready_event = subscribe();
         if (!ready_event.has_triggered())
         {
           TaskContext *context =
@@ -875,7 +875,7 @@ namespace Legion {
     ApEvent FutureImpl::subscribe(void)
     //--------------------------------------------------------------------------
     {
-      if (!empty)
+      if (!empty && (callback_functor == NULL))
         return future_complete;
       AutoLock f_lock(future_lock);
       // See if we lost the race
