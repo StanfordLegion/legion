@@ -24937,12 +24937,10 @@ namespace Legion {
           return "Default Predicate";
         case FUTURE_RESULT_ALLOC:
           return "Future Result";
-        case INSTANCE_MANAGER_ALLOC:
-          return "Instance Manager";
-        case LIST_MANAGER_ALLOC:
-          return "List Reduction Manager";
-        case FOLD_MANAGER_ALLOC:
-          return "Fold Reduction Manager";
+        case INDIVIDUAL_INST_MANAGER_ALLOC:
+          return "Individual Manager";
+        case COLLECTIVE_INST_MANAGER_ALLOC:
+          return "Collective Manager";
         case TREE_CLOSE_ALLOC:
           return "Tree Close List";
         case TREE_CLOSE_IMPL_ALLOC:
