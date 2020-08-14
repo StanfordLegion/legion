@@ -1016,6 +1016,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   local is_constant_time = not node.annotations.constant_time_launch:is(ast.annotation.Forbid)
 
   local free_vars = terralib.newlist()
+  local needs_dynamic_check = false
 
   -- Perform a simpler analysis if the expression is not a task launch
   if not call:is(ast.typed.expr.Call) then
@@ -1147,22 +1148,11 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
         end
 
         do
-          local passed, needs_dynamic_check = analyze_noninterference_self(
+          local passed
+          passed, needs_dynamic_check = analyze_noninterference_self(
             loop_cx, task, arg, partition_type, mapping, loop_vars)
           if not passed then
-            if emit_dynamic_check and needs_dynamic_check then
-              report_pass(call, "static loop optimization failed, emitting dynamic check")
-              return {
-                preamble = preamble,
-                call = call,
-                reduce_lhs = reduce_lhs,
-                reduce_op = reduce_op,
-                args_provably = args_provably,
-                free_variables = free_vars,
-                loop_variables = loop_vars,
-                needs_dynamic_check = true
-              }
-            else
+            if not (emit_dynamic_check and needs_dynamic_check) then
               report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
                 " interferes with itself")
               return
@@ -1187,7 +1177,12 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     end
   end
 
-  report_pass("loop optimization succeeded")
+  if needs_dynamic_check then
+    report_pass("static loop optimization failed, emitting dynamic check")
+  else
+    report_pass("loop optimization succeeded")
+  end
+
   return {
     preamble = preamble,
     call = call,
@@ -1197,7 +1192,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     is_constant_time = is_constant_time,
     free_variables = free_vars,
     loop_variables = loop_vars,
-    needs_dynamic_check = false
+    needs_dynamic_check = needs_dynamic_check
   }
 end
 
