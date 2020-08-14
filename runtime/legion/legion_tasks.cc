@@ -8530,24 +8530,31 @@ namespace Legion {
         OutputRequirement &req = *it;
 
         // Create a deferred index space
-        assert(!req.global_indexing);
-
-        // When local indexing is requested, create an (N+1)-D index space
-        // for an N-D launch domain
         TypeTag type_tag;
-        switch (launch_space.get_dim() + 1)
+
+        if (req.global_indexing)
         {
-#define DIMFUNC(DIM) \
-          case DIM: \
-            { \
-              type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
-              break; \
-            }
-          LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-          default:
-            assert(false);
+          type_tag = NT_TemplateHelper::encode_tag<1,coord_t>();
         }
+        else
+        {
+          // When local indexing is requested, create an (N+1)-D index space
+          // for an N-D launch domain
+          switch (launch_space.get_dim() + 1)
+          {
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
+                break; \
+              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+              default:
+                assert(false);
+          }
+        }
+
         IndexSpace index_space =
           parent_ctx->create_index_space(get_completion_event(), type_tag);
 

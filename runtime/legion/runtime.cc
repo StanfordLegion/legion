@@ -3478,9 +3478,8 @@ namespace Legion {
 
       // Initialize the index space domain
       Domain dom;
-      if (req.partition.exists())
+      if (req.partition.exists() && !req.global_indexing)
       {
-        assert(!req.global_indexing);
         DomainPoint index_point = task->index_point;
         dom.dim = index_point.get_dim() + 1;
 #ifdef DEBUG_LEGION
