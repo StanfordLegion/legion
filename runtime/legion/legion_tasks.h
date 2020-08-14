@@ -29,8 +29,8 @@ namespace Legion {
   namespace Internal {
 
     /**
-     * \class ResourceTracker 
-     * A helper class for tracking which privileges an 
+     * \class ResourceTracker
+     * A helper class for tracking which privileges an
      * operation owns. This is inherited by multi-tasks
      * for aggregating the privilege results of their
      * children as well as task contexts for tracking
@@ -101,7 +101,7 @@ namespace Legion {
     /**
      * \class TaskOp
      * This is the base task operation class for all
-     * kinds of tasks in the system.  
+     * kinds of tasks in the system.
      */
     class TaskOp : public ExternalTask, public MemoizableOp<SpeculativeOp> {
     public:
@@ -141,8 +141,8 @@ namespace Legion {
                          std::vector<unsigned> *performed,
                          std::vector<ApEvent> *eff)
           : LgTaskArgs<DeferMappingArgs>(op->get_unique_op_id()),
-            proxy_this(op), must_op(owner), done_event(done), 
-            invocation_count(cnt), performed_regions(performed), 
+            proxy_this(op), must_op(owner), done_event(done),
+            invocation_count(cnt), performed_regions(performed),
             effects(eff) { }
       public:
         TaskOp *const proxy_this;
@@ -157,7 +157,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_LAUNCH_TASK_ID;
       public:
         DeferLaunchArgs(TaskOp *op)
-          : LgTaskArgs<DeferLaunchArgs>(op->get_unique_op_id()), 
+          : LgTaskArgs<DeferLaunchArgs>(op->get_unique_op_id()),
             proxy_this(op) { }
       public:
         TaskOp *const proxy_this;
@@ -174,7 +174,7 @@ namespace Legion {
         FutureImpl *const result;
         TaskOp *const task_op;
       };
-      struct DeferredFutureMapSetArgs : 
+      struct DeferredFutureMapSetArgs :
         public LgTaskArgs<DeferredFutureMapSetArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_FUTURE_MAP_SET_ID;
@@ -234,23 +234,23 @@ namespace Legion {
       void set_current_proc(Processor current);
       inline void set_origin_mapped(bool origin) { map_origin = origin; }
       inline void set_replicated(bool repl) { replicate = repl; }
-      inline void set_target_proc(Processor next) { target_proc = next; } 
+      inline void set_target_proc(Processor next) { target_proc = next; }
     protected:
       void activate_task(void);
-      void deactivate_task(void); 
+      void deactivate_task(void);
     public:
-      void set_must_epoch(MustEpochOp *epoch, unsigned index, 
+      void set_must_epoch(MustEpochOp *epoch, unsigned index,
                           bool do_registration);
     public:
       void pack_base_task(Serializer &rez, AddressSpaceID target);
-      void unpack_base_task(Deserializer &derez, 
+      void unpack_base_task(Deserializer &derez,
                             std::set<RtEvent> &ready_events);
       void pack_base_external_task(Serializer &rez, AddressSpaceID target);
       void unpack_base_external_task(Deserializer &derez,
-                                     ReferenceMutator *mutator); 
+                                     ReferenceMutator *mutator);
     public:
       void mark_stolen(void);
-      void initialize_base_task(InnerContext *ctx, bool track, 
+      void initialize_base_task(InnerContext *ctx, bool track,
             const std::vector<StaticDependence> *dependences,
             const Predicate &p, Processor::TaskFuncID tid);
       void check_empty_field_requirements(void);
@@ -301,7 +301,7 @@ namespace Legion {
                                std::set<RtEvent> &ready_events) = 0;
       virtual void perform_inlining(TaskContext *enclosing) = 0;
     public:
-      virtual void end_inline_task(const void *result, size_t result_size, 
+      virtual void end_inline_task(const void *result, size_t result_size,
                                    bool owned, FutureFunctor *functor);
     public:
       RtEvent defer_distribute_task(RtEvent precondition);
@@ -317,17 +317,17 @@ namespace Legion {
     public:
       // Tell the parent context that this task is in a ready queue
       void activate_outstanding_task(void);
-      void deactivate_outstanding_task(void); 
+      void deactivate_outstanding_task(void);
     public:
       void perform_privilege_checks(void);
     public:
       void find_early_mapped_region(unsigned idx, InstanceSet &ref);
-      void clone_task_op_from(TaskOp *rhs, Processor p, 
+      void clone_task_op_from(TaskOp *rhs, Processor p,
                               bool stealable, bool duplicate_args);
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
       void compute_point_region_requirements(void);
-      void complete_point_projection(void); 
+      void complete_point_projection(void);
       bool prepare_steal(void);
     public:
       void compute_parent_indexes(TaskContext *alt_context = NULL);
@@ -362,7 +362,7 @@ namespace Legion {
       // Post condition effects for copies out
       std::set<ApEvent>                         effects_postconditions;
     protected:
-      std::vector<unsigned>                     parent_req_indexes; 
+      std::vector<unsigned>                     parent_req_indexes;
     protected:
       bool complete_received;
       bool commit_received;
@@ -381,7 +381,7 @@ namespace Legion {
       mutable bool local_cached;
     protected:
       bool children_complete;
-      bool children_commit; 
+      bool children_commit;
     protected:
       MapperManager *mapper;
     public:
@@ -389,7 +389,7 @@ namespace Legion {
       unsigned must_epoch_index;
     public:
       // Static methods
-      static void process_unpack_task(Runtime *rt, Deserializer &derez); 
+      static void process_unpack_task(Runtime *rt, Deserializer &derez);
       static void process_remote_replay(Runtime *rt, Deserializer &derez);
     public:
       static void log_requirement(UniqueID uid, unsigned idx,
@@ -452,7 +452,7 @@ namespace Legion {
       void activate_single(void);
       void deactivate_single(void);
     public:
-      virtual void trigger_dependence_analysis(void) = 0; 
+      virtual void trigger_dependence_analysis(void) = 0;
     public:
       // These two functions are only safe to call after
       // the task has had its variant selected
@@ -470,11 +470,11 @@ namespace Legion {
         get_physical_instances(void) const { return physical_instances; }
       inline const std::vector<bool>& get_no_access_regions(void) const
         { return no_access_regions; }
-      inline VariantID get_selected_variant(void) const 
+      inline VariantID get_selected_variant(void) const
         { return selected_variant; }
       inline const std::set<RtEvent>& get_map_applied_conditions(void) const
         { return map_applied_conditions; }
-      inline RtEvent get_profiling_reported(void) const 
+      inline RtEvent get_profiling_reported(void) const
         { return profiling_reported; }
     public:
       RtEvent perform_versioning_analysis(const bool post_mapper);
@@ -485,7 +485,7 @@ namespace Legion {
       void finalize_map_task_output(Mapper::MapTaskInput &input,
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner,
-                                    std::vector<InstanceSet> &valid_instances); 
+                                    std::vector<InstanceSet> &valid_instances);
       void replay_map_task_output(void);
       virtual InnerContext* create_implicit_context(void);
       void set_shard_manager(ShardManager *manager);
@@ -502,7 +502,7 @@ namespace Legion {
       void replicate_task(void);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
-      void unpack_single_task(Deserializer &derez, 
+      void unpack_single_task(Deserializer &derez,
                               std::set<RtEvent> &ready_events);
       void send_remote_context(AddressSpaceID target, RemoteTask *dst);
     public:
@@ -525,19 +525,19 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched) = 0;
       virtual void launch_task(void);
       virtual void early_map_task(void) = 0;
-      virtual bool distribute_task(void) = 0; 
+      virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL) = 0;
       // For tasks that are sharded off by control replication
       virtual void shard_off(RtEvent mapped_precondition);
       virtual bool is_stealable(void) const = 0;
-      virtual bool can_early_complete(ApUserEvent &chain_event) = 0; 
+      virtual bool can_early_complete(ApUserEvent &chain_event) = 0;
     public:
       virtual ApEvent get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
     public:
       // Override these methods from operation class
-      virtual void trigger_mapping(void); 
+      virtual void trigger_mapping(void);
     protected:
       friend class ShardManager;
       virtual void trigger_task_complete(bool deferred = false) = 0;
@@ -550,7 +550,7 @@ namespace Legion {
                                       AddressSpaceID target) = 0;
       virtual void perform_inlining(TaskContext *enclosing) = 0;
     public:
-      virtual void handle_future(const void *res, size_t res_size, 
+      virtual void handle_future(const void *res, size_t res_size,
                                  bool owned, FutureFunctor *functor,
                                  Processor future_proc) = 0;
       virtual void handle_post_mapped(bool deferral,
@@ -564,7 +564,7 @@ namespace Legion {
       virtual void replay_mapping_output(void) { replay_map_task_output(); }
       virtual void set_effects_postcondition(ApEvent postcondition);
     public:
-      void handle_remote_profiling_response(Deserializer &derez); 
+      void handle_remote_profiling_response(Deserializer &derez);
       static void process_remote_profiling_response(Deserializer &derez);
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
@@ -577,9 +577,9 @@ namespace Legion {
       LegionVector<VersionInfo>::aligned    version_infos;
     protected:
       std::vector<Processor>                target_processors;
-      // Hold the result of the mapping 
+      // Hold the result of the mapping
       std::deque<InstanceSet>               physical_instances;
-    protected: // Mapper choices 
+    protected: // Mapper choices
       std::set<unsigned>                    untracked_valid_regions;
       VariantID                             selected_variant;
       TaskPriority                          task_priority;
@@ -644,7 +644,7 @@ namespace Legion {
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
-      virtual bool is_reducing_fuutre(void) const { return (redop > 0); }
+      virtual bool is_reducing_future(void) const { return (redop > 0); }
     public:
       virtual void trigger_dependence_analysis(void) = 0;
     public:
@@ -673,7 +673,7 @@ namespace Legion {
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                       Processor p, bool recurse, bool stealable) = 0;
       virtual void handle_future(const DomainPoint &point, const void *result,
-                                 size_t result_size, bool owner, 
+                                 size_t result_size, bool owner,
                                  FutureFunctor *functor, Processor proc) = 0;
       virtual void register_must_epoch(void) = 0;
     public:
@@ -689,7 +689,7 @@ namespace Legion {
     public:
       void initialize_reduction_state(void);
       void fold_reduction_future(const void *result, size_t result_size,
-                                 bool owner, bool exclusive); 
+                                 bool owner, bool exclusive);
     protected:
       std::list<SliceTask*> slices;
       bool sliced;
@@ -705,7 +705,7 @@ namespace Legion {
       // For handling reductions of types with serdez methods
       const SerdezRedopFns *serdez_redop_fns;
       size_t reduction_state_size;
-      void *reduction_state; 
+      void *reduction_state;
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
       // used for detecting cases where we've already mapped a mutli task
@@ -727,7 +727,7 @@ namespace Legion {
      * This class serves as the basis for all individual task
      * launch calls performed by the runtime.
      */
-    class IndividualTask : public SingleTask, 
+    class IndividualTask : public SingleTask,
                            public LegionHeapify<IndividualTask> {
     public:
       static const AllocationType alloc_type = INDIVIDUAL_TASK_ALLOC;
@@ -746,7 +746,7 @@ namespace Legion {
       virtual SingleTask* get_origin_task(void) const { return orig_task; }
     public:
       Future initialize_task(InnerContext *ctx,
-                             const TaskLauncher &launcher, 
+                             const TaskLauncher &launcher,
                              bool track = true, bool top_level=false,
                              bool implicit_top_level = false);
       void initialize_must_epoch(MustEpochOp *epoch, unsigned index,
@@ -779,7 +779,7 @@ namespace Legion {
       virtual void trigger_task_complete(bool deferred = false);
       virtual void trigger_task_commit(void);
     public:
-      virtual void handle_future(const void *res, size_t res_size, 
+      virtual void handle_future(const void *res, size_t res_size,
                                  bool owned, FutureFunctor *functor,
                                  Processor future_proc);
       virtual void handle_post_mapped(bool deferral, 
@@ -794,7 +794,7 @@ namespace Legion {
       virtual void pack_as_shard_task(Serializer &rez, AddressSpaceID target);
       virtual void perform_inlining(TaskContext *enclosing);
       virtual bool is_top_level_task(void) const { return top_level_task; }
-      virtual void end_inline_task(const void *result, size_t result_size, 
+      virtual void end_inline_task(const void *result, size_t result_size,
                                    bool owned, FutureFunctor *functor);
     protected:
       void pack_remote_versions(Serializer &rez);
@@ -842,7 +842,7 @@ namespace Legion {
      * launch.  It will primarily be managed by its enclosing
      * slice task owner.
      */
-    class PointTask : public SingleTask, public ProjectionPoint,  
+    class PointTask : public SingleTask, public ProjectionPoint,
                       public LegionHeapify<PointTask> {
     public:
       static const AllocationType alloc_type = POINT_TASK_ALLOC;
@@ -886,7 +886,7 @@ namespace Legion {
       virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
     public:
-      virtual void handle_future(const void *res, size_t res_size, 
+      virtual void handle_future(const void *res, size_t res_size,
                                  bool owned, FutureFunctor *functor,
                                  Processor future_proc);
       virtual void handle_post_mapped(bool deferral,
@@ -925,7 +925,7 @@ namespace Legion {
       virtual void report_total_collective_instance_calls(MappingCallKind call,
                                                           unsigned total_calls);
     public:
-      void record_intra_space_dependences(unsigned index, 
+      void record_intra_space_dependences(unsigned index,
              const std::vector<DomainPoint> &dependences);
     protected:
       friend class SliceTask;
@@ -1101,7 +1101,7 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual void perform_inlining(TaskContext *enclosing);
-      virtual void end_inline_task(const void *result, size_t result_size, 
+      virtual void end_inline_task(const void *result, size_t result_size,
                                    bool owned, FutureFunctor *functor);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
@@ -1112,7 +1112,7 @@ namespace Legion {
                   Processor p, bool recurse, bool stealable);
     public:
       virtual void handle_future(const DomainPoint &point, const void *result,
-                                 size_t result_size, bool owner, 
+                                 size_t result_size, bool owner,
                                  FutureFunctor *functor, Processor future_proc);
     public:
       virtual void pack_profiling_requests(Serializer &rez,
@@ -1144,14 +1144,14 @@ namespace Legion {
       void record_origin_mapped_slice(SliceTask *local_slice);
     public:
       void return_slice_mapped(unsigned points,
-                               RtEvent applied_condition, 
+                               RtEvent applied_condition,
                                ApEvent restrict_postcondition);
       void return_slice_complete(unsigned points, RtEvent applied_condition);
       void return_slice_commit(unsigned points, RtEvent applied_condition);
     public:
       void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
       void unpack_slice_complete(Deserializer &derez);
-      void unpack_slice_commit(Deserializer &derez); 
+      void unpack_slice_commit(Deserializer &derez);
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
@@ -1160,7 +1160,7 @@ namespace Legion {
       virtual IndexSpaceNode *get_collective_space(void) const
         { return launch_space; }
     public:
-      static void process_slice_mapped(Deserializer &derez, 
+      static void process_slice_mapped(Deserializer &derez,
                                        AddressSpaceID source);
       static void process_slice_complete(Deserializer &derez);
       static void process_slice_commit(Deserializer &derez);
@@ -1265,7 +1265,7 @@ namespace Legion {
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
       virtual void handle_future(const DomainPoint &point, const void *result,
-                                 size_t result_size, bool owner, 
+                                 size_t result_size, bool owner,
                                  FutureFunctor *functor, Processor future_proc);
     public:
       virtual void register_must_epoch(void);
@@ -1273,7 +1273,7 @@ namespace Legion {
       size_t enumerate_points(void);
       const void* get_predicate_false_result(size_t &result_size);
     public:
-      virtual std::map<PhysicalManager*,unsigned>* 
+      virtual std::map<PhysicalManager*,unsigned>*
                                      get_acquired_instances_ref(void);
       void check_target_processors(void) const;
       void update_target_processor(void);
@@ -1287,10 +1287,10 @@ namespace Legion {
     public:
       void return_privileges(TaskContext *point_context,
                              std::set<RtEvent> &preconditions);
-      void record_child_mapped(RtEvent child_mapped, 
+      void record_child_mapped(RtEvent child_mapped,
                                ApEvent restrict_postcondition);
       void record_child_complete(RtEvent child_complete);
-      void record_child_committed(RtEvent commit_precondition = 
+      void record_child_committed(RtEvent commit_precondition =
                                   RtEvent::NO_RT_EVENT);
     protected:
       void trigger_slice_mapped(void);
@@ -1361,7 +1361,7 @@ namespace Legion {
       UniqueID remote_owner_uid;
       TraceInfo *remote_trace_info;
       ApUserEvent effects_postcondition;
-    protected: 
+    protected:
       std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
       std::set<RtEvent> complete_preconditions;
@@ -1370,7 +1370,7 @@ namespace Legion {
       std::set<std::pair<DomainPoint,DomainPoint> > unique_intra_space_deps;
     };
 
-  }; // namespace Internal 
+  }; // namespace Internal
 }; // namespace Legion
 
 #endif // __LEGION_TASKS_H__

@@ -798,8 +798,7 @@ namespace Legion {
       }
       if (internal)
       {
-        const RtEvent ready_event = empty ? 
-          subscribe_internal() : RtEvent::NO_RT_EVENT;
+        const RtEvent ready_event = subscribe_internal();
         if (!ready_event.has_triggered())
         {
           TaskContext *context = implicit_context;
@@ -815,7 +814,7 @@ namespace Legion {
       }
       else
       {
-        const ApEvent ready_event = empty ? subscribe() : future_complete;
+        const ApEvent ready_event = subscribe();
         if (!ready_event.has_triggered())
         {
           TaskContext *context = implicit_context;
@@ -882,7 +881,7 @@ namespace Legion {
       }
       if (block)
       {
-        const ApEvent ready_event = empty ? subscribe() : future_complete;
+        const ApEvent ready_event = subscribe();
         if (!ready_event.has_triggered())
         {
           TaskContext *context =
@@ -1131,7 +1130,7 @@ namespace Legion {
     ApEvent FutureImpl::subscribe(void)
     //--------------------------------------------------------------------------
     {
-      if (!empty)
+      if (!empty && (callback_functor == NULL))
         return future_complete;
       AutoLock f_lock(future_lock);
       // See if we lost the race
@@ -1177,7 +1176,7 @@ namespace Legion {
     RtEvent FutureImpl::subscribe_internal(void)
     //--------------------------------------------------------------------------
     {
-      if (!empty)
+      if (!empty && (callback_functor == NULL))
         return RtEvent::NO_RT_EVENT;
       AutoLock f_lock(future_lock);
       // See if we lost the race
@@ -1205,7 +1204,15 @@ namespace Legion {
         return subscription_internal;
       }
       else
+      {
+        if (callback_functor != NULL)
+        {
+          const ApEvent ready = invoke_callback();
+          if (ready.exists() && !ready.has_triggered())
+            return Runtime::protect_event(ready);
+        }
         return RtEvent::NO_RT_EVENT;
+      }
     }
 
     //--------------------------------------------------------------------------
