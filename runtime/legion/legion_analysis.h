@@ -1375,10 +1375,10 @@ namespace Legion {
                        IndexSpaceExpression *expr,
                        CopyAcrossHelper *across_helper = NULL);
       void record_reductions(InstanceView *dst_view,
-                             const std::vector<ReductionView*> &src_views,
+                             const std::list<std::pair<ReductionView*,
+                                    IndexSpaceExpression*> > &src_views,
                              const unsigned src_fidx,
                              const unsigned dst_fidx,
-                             IndexSpaceExpression *expr,
                              CopyAcrossHelper *across_helper = NULL);
       void record_reduction_fill(ReductionView *init_view,
                                  const FieldMask &fill_mask,
@@ -2788,10 +2788,11 @@ namespace Legion {
                                          const int dst_index) const;
       void apply_reductions(const FieldMaskSet<InstanceView> &reduction_targets,
                             IndexSpaceExpression *expr, const bool expr_covers,
+                            const FieldMask &reduction_mask, 
                             CopyFillAggregator *&aggregator,RtEvent guard_event,
                             Operation *op, const unsigned index, 
-                            const bool track_events, const bool track_exprs,
-                            FieldMaskSet<IndexSpaceExpression> &applied_exprs);
+                            const bool track_events,
+                            FieldMaskSet<IndexSpaceExpression> *applied_exprs);
       void copy_out(IndexSpaceExpression *expr, const bool expr_covers,
                     const FieldMask &restricted_mask, 
                     const InstanceSet &src_instances,
