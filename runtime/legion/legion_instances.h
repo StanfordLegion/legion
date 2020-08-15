@@ -365,6 +365,19 @@ namespace Legion {
     class IndividualManager : public PhysicalManager,
                               public LegionHeapify<IndividualManager> { 
     public:
+      enum InstanceKind {
+        // Normal Realm allocations
+        INTERNAL,
+        // External allocations imported by attach operations
+        EXTERNAL_ATTACHED,
+        // External allocations from output regions, owned by the runtime
+        EXTERNAL_OWNED,
+        // Allocations drawn from the eager pool
+        EAGER,
+        // Instance not yet bound
+        DEFERRED,
+      };
+    public:
       static const AllocationType alloc_type = INDIVIDUAL_INST_MANAGER_ALLOC;
     public:
       struct DeferIndividualManagerArgs : 
@@ -376,9 +389,9 @@ namespace Legion {
             Memory m, PhysicalInstance i, size_t f, bool local, 
             IndexSpaceExpression *lx, bool is, IndexSpace dh, 
             IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid, 
-            LayoutConstraintID l, ApEvent use, ReductionOpID redop, 
-            const void *piece_list, size_t piece_list_size, 
-            bool shadow_instance);
+            LayoutConstraintID l, ApEvent use, InstanceKind kind,
+            ReductionOpID redop, const void *piece_list,
+            size_t piece_list_size, bool shadow_instance);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
@@ -394,6 +407,7 @@ namespace Legion {
         const RegionTreeID tree_id;
         const LayoutConstraintID layout_id;
         const ApEvent use_event;
+        const InstanceKind kind;
         const ReductionOpID redop;
         const void *const piece_list;
         const size_t piece_list_size;
@@ -408,10 +422,9 @@ namespace Legion {
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop, 
                         bool register_now, size_t footprint,
-                        ApEvent use_event, bool external_instance,
+                        ApEvent use_event, InstanceKind kind,
                         const ReductionOp *op = NULL,
-                        bool shadow_instance = false,
-                        bool deferred = false);
+                        bool shadow_instance = false);
       IndividualManager(const IndividualManager &rhs);
       virtual ~IndividualManager(void);
     public:
@@ -473,7 +486,7 @@ namespace Legion {
           const void *piece_list, size_t piece_list_size,
           FieldSpaceNode *space_node, RegionTreeID tree_id,
           LayoutConstraints *constraints, ApEvent use_event,
-          ReductionOpID redop, bool shadow_instance);
+          InstanceKind kind, ReductionOpID redop, bool shadow_instance);
     public:
       virtual bool acquire_instance(ReferenceSource source, 
                                     ReferenceMutator *mutator);
@@ -494,14 +507,18 @@ namespace Legion {
           ReductionOpID redop, ReductionView *view);
 #endif
     public:
-      void update_physical_instance(PhysicalInstance new_instance);
+      void update_physical_instance(PhysicalInstance new_instance,
+                                    InstanceKind new_kind,
+                                    uintptr_t new_pointer = 0);
     public:
       MemoryManager *const memory_manager;
       PhysicalInstance instance;
       // Event that needs to trigger before we can start using
       // this physical instance.
       const ApEvent use_event; 
-      bool deferred;
+      InstanceKind kind;
+      // Keep the pointer for owned external instances
+      uintptr_t external_pointer;
     };
 
     /**

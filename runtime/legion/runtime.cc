@@ -37,11 +37,9 @@
 
 #include <unistd.h> // sleep for warnings
 
-#ifdef LEGION_MALLOC_INSTANCES
 #include <sys/mman.h>
 #ifdef LEGION_USE_CUDA
 #include <cuda.h>
-#endif
 #endif
 
 #define REPORT_DUMMY_CONTEXT(message)                        \
@@ -3587,7 +3585,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
-      manager->update_physical_instance(instance);
+      manager->update_physical_instance(instance,
+                                        IndividualManager::EXTERNAL_OWNED,
+                                        reinterpret_cast<uintptr_t>(ptr));
     }
 
     //--------------------------------------------------------------------------
@@ -8068,6 +8068,7 @@ namespace Legion {
       // to avoid races with deletions
       bool early_valid = acquire || (priority == LEGION_GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
+      bool external = !manager->is_external_instance();
       // Since we're going to put this in the table add a reference
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       {
@@ -8081,6 +8082,7 @@ namespace Legion {
           info.current_state = VALID_STATE;
         info.min_priority = priority;
         info.instance_size = instance_size;
+        info.external = external;
         info.mapper_priorities[
           std::pair<MapperID,Processor>(mapper_id,p)] = priority;
       }
@@ -8140,7 +8142,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MemoryManager::delete_by_size_and_state(const size_t needed_size,
-                                          InstanceState state, bool larger_only)
+                                                 const InstanceState state,
+                                                 const bool larger_only,
+                                                 const bool external)
     //--------------------------------------------------------------------------
     {
       bool pass_complete = true;
@@ -8156,7 +8160,8 @@ namespace Legion {
             for (TreeInstances::const_iterator it = 
                   cit->second.begin(); it != cit->second.end(); it++)
             {
-              if (it->second.current_state != COLLECTABLE_STATE)
+              if ((it->second.current_state != COLLECTABLE_STATE) ||
+                  (it->second.external == external))
                 continue;
               const size_t inst_size = it->first->get_instance_size();
               if ((inst_size >= needed_size) || !larger_only)
@@ -8202,7 +8207,8 @@ namespace Legion {
             for (TreeInstances::iterator it = 
                   cit->second.begin(); it != cit->second.end(); it++)
             {
-              if (it->second.current_state != ACTIVE_STATE)
+              if ((it->second.current_state != ACTIVE_STATE) ||
+                  (it->second.external == external))
                 continue;
               const size_t inst_size = it->first->get_instance_size();
               if ((inst_size >= needed_size) || !larger_only)
@@ -8420,6 +8426,42 @@ namespace Legion {
       fargs->manager->free_eager_instance(fargs->inst, RtEvent::NO_RT_EVENT);
     }
 
+    //--------------------------------------------------------------------------
+    void MemoryManager::free_external_allocation(uintptr_t ptr, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      switch (memory.kind())
+      {
+        case SYSTEM_MEM:
+        case SOCKET_MEM:
+          {
+            free((void*)ptr);
+            break;
+          }
+        case REGDMA_MEM:
+          {
+            munlock((void*)ptr, size);
+            free((void*)ptr);
+            break;
+          }
+#ifdef LEGION_USE_CUDA
+        case GPU_FB_MEM:
+          {
+            cuMemFree((CUdeviceptr)ptr);
+            break;
+          }
+        case Z_COPY_MEM:
+          {
+            cuMemFreeHost((void*)ptr);
+            break;
+          }
+#endif
+        default:
+          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+              "Unsupported memory kind %d", memory.kind())
+      }
+    }
+
 #ifdef LEGION_MALLOC_INSTANCES
     //--------------------------------------------------------------------------
     uintptr_t MemoryManager::allocate_legion_instance(size_t footprint,
@@ -8593,54 +8635,26 @@ namespace Legion {
         size = finder->second;
         allocations.erase(finder);
       }
-      switch (memory.kind())
-      {
-        case SYSTEM_MEM:
-        case SOCKET_MEM:
-          {
-            free((void*)ptr);
-            break;
-          }
-        case REGDMA_MEM:
-          {
-            munlock((void*)ptr, size);
-            free((void*)ptr);
-            break;
-          }
 #ifdef LEGION_USE_CUDA
-        case Z_COPY_MEM:
-        case GPU_FB_MEM:
-          {
-            if (needs_defer)
-            {
-              // Put the allocation back in for when we go to look
-              // for it on the second pass
-              {
-                AutoLock m_lock(manager_lock);
+      if (needs_defer &&
+          ((memory.kind() == Z_COPY_MEM) || (memory.kind() == GPU_FB_MEM)))
+      {
+        // Put the allocation back in for when we go to look
+        // for it on the second pass
+        {
+          AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
-                assert(allocations.find(ptr) == allocations.end());
+          assert(allocations.find(ptr) == allocations.end());
 #endif
-                allocations[ptr] = size;
-              }
-              FreeInstanceArgs args(this, ptr);
-              runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, 
-                                               defer, local_gpu);
-            }
-            else
-            {
-              if (memory.kind() == Memory::GPU_FB_MEM)
-                cuMemFree((CUdeviceptr)ptr);
-              else
-                cuMemFreeHost((void*)ptr);
-            }
-            break;
-          }
-#endif
-        default:
-          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
-              "Unsupported memory kind for LEGION_MALLOC_INSTANCES %d",
-              memory.kind())
+          allocations[ptr] = size;
+        }
+        FreeInstanceArgs args(this, ptr);
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
+                                         defer, local_gpu);
+        return;
       }
+#endif
+      free_external_allocation(ptr, size);
     }
 
     //--------------------------------------------------------------------------

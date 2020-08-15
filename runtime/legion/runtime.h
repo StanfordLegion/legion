@@ -1013,13 +1013,15 @@ namespace Legion {
         InstanceInfo(void)
           : current_state(COLLECTABLE_STATE), 
             deferred_collect(RtUserEvent::NO_RT_USER_EVENT),
-            instance_size(0), pending_acquires(0), min_priority(0) { }
+            instance_size(0), pending_acquires(0), min_priority(0),
+            external(false) { }
       public:
         InstanceState current_state;
         RtUserEvent deferred_collect;
         size_t instance_size;
         unsigned pending_acquires;
         GCPriority min_priority;
+        bool external;
         std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
         // For tracking external instances and whether they can be used
       };
@@ -1201,8 +1203,10 @@ namespace Legion {
                                           CollectiveManager *collective = NULL,
                                           DomainPoint *collective_point = NULL);
     public:
-      bool delete_by_size_and_state(const size_t needed_size, 
-                                    InstanceState state, bool larger_only); 
+      bool delete_by_size_and_state(const size_t needed_size,
+                                    const InstanceState state,
+                                    const bool larger_only,
+                                    const bool external = false);
       RtEvent attach_external_instance(PhysicalManager *manager);
       RtEvent detach_external_instance(PhysicalManager *manager);
     public:
@@ -1212,6 +1216,8 @@ namespace Legion {
                                     Realm::InstanceLayoutGeneric *layout);
       void free_eager_instance(PhysicalInstance instance, RtEvent defer);
       static void handle_free_eager_instance(const void *args);
+    public:
+      void free_external_allocation(uintptr_t ptr, size_t size);
 #ifdef LEGION_MALLOC_INSTANCES
     public:
       uintptr_t allocate_legion_instance(size_t footprint, 

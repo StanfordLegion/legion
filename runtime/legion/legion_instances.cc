@@ -1148,17 +1148,16 @@ namespace Legion {
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop_id, 
                         bool register_now, size_t footprint,
-                        ApEvent u_event, bool external_instance,
-                        const ReductionOp *op /*= NULL*/, bool shadow/*=false*/,
-                        bool _deferred/*=false*/)
-      : PhysicalManager(ctx, desc, encode_instance_did(did, external_instance,
+                        ApEvent u_event, InstanceKind k,
+                        const ReductionOp *op /*= NULL*/, bool shadow/*=false*/)
+      : PhysicalManager(ctx, desc, encode_instance_did(did, k != INTERNAL,
             (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
           instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow),
         memory_manager(memory), instance(inst),
-        use_event(!_deferred ? fetch_metadata(inst, u_event) : u_event),
-        deferred(_deferred)
+        use_event(k != DEFERRED ? fetch_metadata(inst, u_event) : u_event),
+        kind(k), external_pointer(0)
     //--------------------------------------------------------------------------
     {
       if (!is_owner() && !shadow_instance)
@@ -1172,7 +1171,7 @@ namespace Legion {
                         LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
                         inst.id, memory->memory.id);
 #endif
-      if (runtime->legion_spy_enabled && !deferred)
+      if (runtime->legion_spy_enabled && kind != DEFERRED)
       {
 #ifdef DEBUG_LEGION
         assert(unique_event.exists());
@@ -1218,7 +1217,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (is_owner())
-        assert(deferred || instance.exists());
+        assert(kind == DEFERRED || instance.exists());
 #endif
       // Shadow instances do not participate here
       if (shadow_instance)
@@ -1256,7 +1255,7 @@ namespace Legion {
       // No need to do anything
 #ifdef DEBUG_LEGION
       if (is_owner())
-        assert(deferred || instance.exists());
+        assert(kind == DEFERRED || instance.exists());
 #endif
       // Shadow instances do not participate here
       if (shadow_instance)
@@ -1328,7 +1327,7 @@ namespace Legion {
     ApEvent IndividualManager::get_use_event(ApEvent user) const
     //--------------------------------------------------------------------------
     {
-      if (!deferred)
+      if (kind != DEFERRED)
       {
 #ifdef DEBUG_LEGION
         assert(user != use_event);
@@ -1536,6 +1535,7 @@ namespace Legion {
         layout->pack_layout_description(rez, target);
         rez.serialize(redop);
         rez.serialize<bool>(shadow_instance);
+        rez.serialize(kind);
       }
       context->runtime->send_instance_manager(target, rez);
       update_remote_instances(target);
@@ -1590,6 +1590,8 @@ namespace Legion {
       derez.deserialize(redop);
       bool shadow_inst;
       derez.deserialize<bool>(shadow_inst);
+      InstanceKind kind;
+      derez.deserialize(kind);
       if (domain_ready.exists() || fs_ready.exists() || layout_ready.exists())
       {
         const RtEvent precondition = 
@@ -1599,8 +1601,8 @@ namespace Legion {
           // We need to defer this instance creation
           DeferIndividualManagerArgs args(did, owner_space, mem, inst,
               inst_footprint, local_is, inst_domain, domain_is, domain_handle, 
-              domain_expr_id, handle, tree_id, layout_id, unique_event, redop, 
-              piece_list, piece_list_size, shadow_inst);
+              domain_expr_id, handle, tree_id, layout_id, unique_event, kind,
+              redop, piece_list, piece_list_size, shadow_inst);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
@@ -1620,7 +1622,7 @@ namespace Legion {
       create_remote_manager(runtime, did, owner_space, mem, inst,inst_footprint,
                             inst_domain, piece_list, piece_list_size, 
                             space_node, tree_id, constraints, unique_event, 
-                            redop, shadow_inst);
+                            kind, redop, shadow_inst);
     }
 
     //--------------------------------------------------------------------------
@@ -1628,14 +1630,14 @@ namespace Legion {
             DistributedID d, AddressSpaceID own, Memory m, PhysicalInstance i, 
             size_t f, bool local, IndexSpaceExpression *lx, bool is, 
             IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
-            LayoutConstraintID l, ApEvent u, ReductionOpID r, const void *pl, 
-            size_t pl_size, bool shadow)
+            LayoutConstraintID l, ApEvent u, InstanceKind k, ReductionOpID r,
+            const void *pl, size_t pl_size, bool shadow)
       : LgTaskArgs<DeferIndividualManagerArgs>(implicit_provenance),
             did(d), owner(own), mem(m), inst(i), footprint(f), local_is(local),
             domain_is(is), local_expr(local ? lx : NULL), domain_handle(dh), 
             domain_expr(dx), handle(h), tree_id(tid), layout_id(l), 
-            use_event(u), redop(r), piece_list(pl), piece_list_size(pl_size), 
-            shadow_instance(shadow)
+            use_event(u), kind(k), redop(r), piece_list(pl),
+            piece_list_size(pl_size), shadow_instance(shadow)
     //--------------------------------------------------------------------------
     {
       if (local_is)
@@ -1658,7 +1660,7 @@ namespace Legion {
       create_remote_manager(runtime, dargs->did, dargs->owner, dargs->mem,
           dargs->inst, dargs->footprint, inst_domain, dargs->piece_list,
           dargs->piece_list_size, space_node, dargs->tree_id, constraints, 
-          dargs->use_event, dargs->redop, dargs->shadow_instance);
+          dargs->use_event, dargs->kind, dargs->redop, dargs->shadow_instance);
       // Remove the local expression reference if necessary
       if (dargs->local_is && dargs->local_expr->remove_expression_reference())
         delete dargs->local_expr;
@@ -1671,7 +1673,8 @@ namespace Legion {
           IndexSpaceExpression *inst_domain, const void *piece_list,
           size_t piece_list_size, FieldSpaceNode *space_node, 
           RegionTreeID tree_id, LayoutConstraints *constraints, 
-          ApEvent use_event, ReductionOpID redop, bool shadow_instance)
+          ApEvent use_event, InstanceKind kind, ReductionOpID redop,
+          bool shadow_instance)
     //--------------------------------------------------------------------------
     {
       LayoutDescription *layout = 
@@ -1682,7 +1685,6 @@ namespace Legion {
         (redop == 0) ? NULL : runtime->get_reduction(redop);
       void *location;
       IndividualManager *man = NULL;
-      const bool external_instance = InstanceManager::is_external_did(did);
       if (runtime->find_pending_collectable_location(did, location))
         man = new(location) IndividualManager(runtime->forest, did, owner_space,
                                               memory, inst, inst_domain, 
@@ -1690,14 +1692,14 @@ namespace Legion {
                                               space_node, tree_id, layout, 
                                               redop, false/*reg now*/, 
                                               inst_footprint, use_event, 
-                                              external_instance, op,
+                                              kind, op,
                                               shadow_instance);
       else
         man = new IndividualManager(runtime->forest, did, owner_space, memory, 
                               inst, inst_domain, piece_list, piece_list_size,
                               space_node, tree_id, layout, redop, 
                               false/*reg now*/, inst_footprint, use_event, 
-                              external_instance, op, shadow_instance);
+                              kind, op, shadow_instance);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -1742,6 +1744,10 @@ namespace Legion {
       log_garbage.spew("Deleting physical instance " IDFMT " in memory " 
                        IDFMT "", instance.id, memory_manager->memory.id);
 #ifndef DISABLE_GC
+      // If this is an owned external instance, deallocate it manually
+      if (kind == EXTERNAL_OWNED)
+        memory_manager->free_external_allocation(
+            external_pointer, instance_footprint);
       std::vector<PhysicalInstance::DestroyedField> serdez_fields;
       layout->compute_destroyed_fields(serdez_fields); 
       if (!serdez_fields.empty())
@@ -1795,6 +1801,10 @@ namespace Legion {
       log_garbage.spew("Force deleting physical instance " IDFMT " in memory "
                        IDFMT "", instance.id, memory_manager->memory.id);
 #ifndef DISABLE_GC
+      // If this is an owned external instance, deallocate it manually
+      if (kind == EXTERNAL_OWNED)
+        memory_manager->free_external_allocation(
+            external_pointer, instance_footprint);
       std::vector<PhysicalInstance::DestroyedField> serdez_fields;
       layout->compute_destroyed_fields(serdez_fields); 
       if (!serdez_fields.empty())
@@ -2035,16 +2045,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualManager::update_physical_instance(
-                                                  PhysicalInstance new_instance)
+                                                  PhysicalInstance new_instance,
+                                                  InstanceKind new_kind,
+                                                  uintptr_t new_pointer)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock lock(inst_lock);
 #ifdef DEBUG_LEGION
-        assert(deferred);
+        assert(kind == DEFERRED);
         assert(instance_footprint == 0);
 #endif
         instance = new_instance;
+        kind = new_kind;
+        external_pointer = new_pointer;
+#ifdef DEBUG_LEGION
+        assert(kind != EXTERNAL_OWNED || external_pointer != 0);
+#endif
+
         ApEvent ready(
             instance.fetch_metadata(Processor::get_executing_processor()));
         ready.wait();
@@ -3637,7 +3655,7 @@ namespace Legion {
                                            layout, 0/*redop id*/,
                                            true/*register now*/, 
                                            instance_footprint, ready,
-                                           false/*external instance*/);
+                                           IndividualManager::INTERNAL);
             // manager takes ownership of the piece list
             piece_list = NULL;
             break;
@@ -3652,7 +3670,7 @@ namespace Legion {
                                            tree_id, layout, redop_id,
                                            true/*register now*/,
                                            instance_footprint, ready,
-                                           false/*external instance*/,
+                                           IndividualManager::INTERNAL,
                                            reduction_op, shadow_instance);
             // manager takes ownership of the piece list
             piece_list = NULL;

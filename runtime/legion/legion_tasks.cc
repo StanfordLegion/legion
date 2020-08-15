@@ -3265,10 +3265,9 @@ namespace Legion {
                                 0/*redop id*/, true/*register now*/,
                                 0/*instance_footprint*/,
                                 get_task_completion(),
-                                true/*external_instnace*/,
+                                IndividualManager::DEFERRED,
                                 NULL/*op*/,
-                                false/*shadow_instance*/,
-                                true/*output_instance*/);
+                                false/*shadow_instance*/);
 
         // Add an instance ref of the new manager to the instance set
         instance_set.add_instance(InstanceRef(manager, instance_mask));
