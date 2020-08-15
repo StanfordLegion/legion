@@ -3279,6 +3279,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::check_output_instances(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < output_instances.size(); ++idx)
+      {
+        const InstanceSet &instance_set = output_instances[idx];
+        for (unsigned iidx = 0; iidx < instance_set.size(); ++iidx)
+        {
+          const InstanceRef &instance = instance_set[iidx];
+          if (instance.get_manager()->as_individual_manager()->kind ==
+              IndividualManager::DEFERRED)
+          {
+            const FieldMask &mask = instance.get_valid_fields();
+            FieldSpaceNode *fspace_node = runtime->forest->get_node(
+                output_regions[idx].region.get_field_space());
+            std::set<FieldID> fields;
+            fspace_node->get_field_set(mask, execution_context, fields);
+
+            REPORT_LEGION_ERROR(ERROR_UNBOUND_OUTPUT_REGION,
+              "Task %s (UID %lld) did not return any instance for field %d "
+              "of output requirement %u",
+              get_task_name(), get_unique_id(), *fields.begin(), idx);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::replay_map_task_output(void)
     //--------------------------------------------------------------------------
     {
@@ -6084,6 +6112,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_TRIGGER_COMPLETE_CALL);
+      // Check that we received data for all output fields
+      check_output_instances();
       // Invalidate any state that we had if we didn't already
       // Do this before sending the complete message to avoid the
       // race condition in the remote case where the top-level
@@ -7003,6 +7033,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_TASK_COMPLETE_CALL);
+      // Check that we received data for all output fields
+      check_output_instances();
       // Pass back our created and deleted operations 
       std::set<RtEvent> preconditions;
       if (execution_context != NULL)

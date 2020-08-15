@@ -487,9 +487,12 @@ namespace Legion {
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner,
                                     std::vector<InstanceSet> &valid_instances); 
+    protected:
       void prepare_output_instance(InstanceSet &instance_set,
                                    const OutputRequirement &req,
                                    Memory target);
+      void check_output_instances(void);
+    public:
       void replay_map_task_output(void);
       virtual InnerContext* create_implicit_context(void);
       void set_shard_manager(ShardManager *manager);
