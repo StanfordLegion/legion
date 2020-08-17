@@ -3222,6 +3222,9 @@ namespace Legion {
         .add_constraint(
             SpecializedConstraint(LEGION_AFFINE_SPECIALIZE, 0, false, true));
 
+      std::map<PhysicalManager*,unsigned> *acquired_instances =
+        get_acquired_instances_ref();
+
       for (std::set<FieldID>::iterator it = req.privilege_fields.begin();
            it != req.privilege_fields.end(); ++it)
       {
@@ -3240,6 +3243,9 @@ namespace Legion {
         // Add an instance ref of the new manager to the instance set
         instance_set.add_instance(
             InstanceRef(manager, manager->layout->allocated_fields));
+
+        // Add the manager to the map of acquired instances
+        acquired_instances->insert(std::make_pair(manager, 1));
       }
     }
 
