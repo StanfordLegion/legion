@@ -3429,7 +3429,7 @@ namespace Legion {
                                        TaskContext *ctx,
                                        Runtime *rt)
       : Collectable(), runtime(rt), context(ctx),
-        index(i), req(r), instances(is), domain()
+        index(i), req(r), instance_set(is), num_elements(-1LU)
     //--------------------------------------------------------------------------
     {
     }
@@ -3437,7 +3437,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRegionImpl::OutputRegionImpl(const OutputRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL),
-        index(-1U), req(), instances(), domain()
+        index(-1U), req(), instance_set(), num_elements(-1LU)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3461,89 +3461,117 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(size_t num_elements,
+    void OutputRegionImpl::return_data(size_t new_num_elements,
                                        FieldID field_id,
                                        void *ptr,
                                        size_t alignment)
     //--------------------------------------------------------------------------
     {
-      RegionNode *node = runtime->forest->get_node(req.region);
-      FieldSpaceNode *fspace_node = node->get_column_source();
-      size_t field_size = fspace_node->get_field_size(field_id);
-      std::set<FieldID> fields; fields.insert(field_id);
-      FieldMask mask = fspace_node->get_field_mask(fields);
-      TaskOp *task = context->owner_task;
-
-      // Initialize the index space domain
-      Domain dom;
-      if (req.partition.exists() && !req.global_indexing)
+      std::map<FieldID,ExternalInstanceInfo>::iterator finder =
+        returned_instances.find(field_id);
+      if (finder != returned_instances.end())
       {
-        DomainPoint index_point = task->index_point;
-        dom.dim = index_point.get_dim() + 1;
-#ifdef DEBUG_LEGION
-        assert(dom.dim <= LEGION_MAX_DIM);
-#endif
-
-        for (int idx = 0; idx < index_point.dim; ++idx)
-        {
-          dom.rect_data[idx + 1] = index_point[idx];
-          dom.rect_data[idx + 1 + dom.dim] = index_point[idx];
-        }
-        dom.rect_data[0] = 0;
-        dom.rect_data[dom.dim] = num_elements - 1;
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
+          "Data has already been set to field %u of output region %u of "
+          "task %s (UID: %lld). You can return data for each field of an "
+          "output region only once.",
+          field_id, index, context->owner_task->get_task_name(),
+          context->owner_task->get_unique_op_id());
       }
-      else
-        dom = Rect<1>(0, num_elements - 1);
 
-      if (domain.exists())
+      if (num_elements != -1LU && new_num_elements != num_elements)
       {
-        if (dom != domain)
-        {
-          size_t old_size = domain.get_volume();
-          size_t new_size = dom.get_volume();
           REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
             "Output region %u of task %s (UID: %lld) has already been "
             "initialized to have %zd elements, but the new output data "
             "holds %zd elements. You must return the same number of "
             "elements to all the fields in the same output region.",
-            index, task->get_task_name(), task->get_unique_op_id(),
-            old_size, new_size);
-        }
+            index, context->owner_task->get_task_name(),
+            context->owner_task->get_unique_op_id(),
+            num_elements, new_num_elements);
       }
       else
-      {
-        domain = dom;
-        IndexSpaceNode *index_node =
-          node->get_row_source()->as_index_space_node();
-        index_node->set_domain(domain, runtime->address_space);
-        if (req.partition.exists())
-          index_node->mark_index_space_ready();
-      }
+        num_elements = new_num_elements;
 
-      // Find the right instance manager for a given output
-      IndividualManager *manager = NULL;
-      for (unsigned idx = 0; idx < instances.size(); ++idx)
+      ExternalInstanceInfo &info = returned_instances[field_id];
+      info.ptr = ptr;
+      info.alignment = alignment;
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::return_data(size_t num_elements,
+                                       std::map<FieldID,void*> ptrs,
+                                       std::map<FieldID,size_t> *alignments)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: Implement this function
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::finalize(void)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = runtime->forest->get_node(req.region);
+
+      // Initialize the index space domain
+      Domain domain;
+      if (req.partition.exists() && !req.global_indexing)
       {
-        const InstanceRef &instance = instances[idx];
-        if (!!(instance.get_valid_fields() & mask))
-        {
-          manager =
-            instance.get_instance_manager()->as_individual_manager();
-          break;
-        }
-      }
+        DomainPoint index_point = context->owner_task->index_point;
+        domain.dim = index_point.get_dim() + 1;
 #ifdef DEBUG_LEGION
-      assert(manager != NULL);
+        assert(domain.dim <= LEGION_MAX_DIM);
 #endif
+        for (int idx = 0; idx < index_point.dim; ++idx)
+        {
+          domain.rect_data[idx + 1] = index_point[idx];
+          domain.rect_data[idx + 1 + domain.dim] = index_point[idx];
+        }
+        domain.rect_data[0] = 0;
+        domain.rect_data[domain.dim] = num_elements - 1;
+      }
+      else
+        domain = Rect<1>(0, num_elements - 1);
 
-      // Create an external instance
-      PhysicalInstance instance;
+      IndexSpaceNode *index_node =
+        node->get_row_source()->as_index_space_node();
+      index_node->set_domain(domain, runtime->address_space);
+      if (req.partition.exists())
+        index_node->mark_index_space_ready();
+
+      // Update the corresponding instance manager for each output field
+      FieldSpaceNode *fspace_node = node->get_column_source();
+
+      for (std::map<FieldID,ExternalInstanceInfo>::iterator it =
+           returned_instances.begin(); it !=
+           returned_instances.end(); ++it)
       {
+        FieldID field_id = it->first;
+        ExternalInstanceInfo &info = it->second;
+        size_t field_size = fspace_node->get_field_size(field_id);
+        std::set<FieldID> fields; fields.insert(field_id);
+        FieldMask mask = fspace_node->get_field_mask(fields);
+
+        // Find an instance ref
+        IndividualManager *manager = NULL;
+        for (unsigned idx = 0; idx < instance_set.size(); ++idx)
+        {
+          const InstanceRef &instance = instance_set[idx];
+          if (!!(instance.get_valid_fields() & mask))
+          {
+            manager =
+              instance.get_instance_manager()->as_individual_manager();
+            break;
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(manager != NULL);
+#endif
+        // Create a Realm layout;
         std::map<Realm::FieldID,size_t> field_sizes;
         field_sizes[field_id] = field_size;
         Realm::InstanceLayoutConstraints constraints(field_sizes,
                                                      0 /*block_size*/);
-
         Realm::InstanceLayoutGeneric *layout = NULL;
         switch (domain.get_dim())
         {
@@ -3569,33 +3597,43 @@ namespace Legion {
 #endif
 
         // If no alignment is given, set it to the field size
+        size_t alignment = info.alignment;
         if (alignment == 0)
           alignment = field_size;
-
         layout->bytes_used =
           (num_elements * field_size + alignment - 1) / alignment * alignment;
 
+        Realm::RegionInstance instance;
         Realm::ProfilingRequestSet no_requests;
         RtEvent wait_on(Realm::RegionInstance::create_external(
-          instance, manager->get_memory(), reinterpret_cast<uintptr_t>(ptr),
+          instance, manager->get_memory(), reinterpret_cast<uintptr_t>(info.ptr),
           layout, no_requests));
         if (wait_on.exists())
           wait_on.wait();
-      }
 #ifdef DEBUG_LEGION
-      assert(instance.exists());
+        assert(instance.exists());
 #endif
-      manager->update_physical_instance(instance,
-                                        IndividualManager::EXTERNAL_OWNED,
-                                        reinterpret_cast<uintptr_t>(ptr));
+        manager->update_physical_instance(instance,
+                                          IndividualManager::EXTERNAL_OWNED,
+                                          reinterpret_cast<uintptr_t>(info.ptr));
+      }
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(size_t num_elements,
-                                       std::map<FieldID,void*> ptrs,
-                                       std::map<FieldID,size_t> *alignments)
+    bool OutputRegionImpl::is_complete(FieldID &unbound_field) const
     //--------------------------------------------------------------------------
     {
+      for (std::vector<FieldID>::const_iterator it =
+           req.instance_fields.begin(); it !=
+           req.instance_fields.end(); ++it)
+      {
+        if (returned_instances.find(*it) == returned_instances.end())
+        {
+          unbound_field = *it;
+          return false;
+        }
+      }
+      return true;
     }
 
     /////////////////////////////////////////////////////////////
@@ -7951,7 +7989,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalManager* MemoryManager::create_deferred_instance(
+    PhysicalManager* MemoryManager::create_unbound_instance(
                                                LogicalRegion region,
                                                LayoutConstraintSet &constraints,
                                                ApEvent ready_event,
@@ -8003,7 +8041,7 @@ namespace Legion {
                               0/*redop id*/, true/*register now*/,
                               0/*instance_footprint*/,
                               ready_event,
-                              IndividualManager::DEFERRED,
+                              IndividualManager::UNBOUND,
                               NULL/*op*/,
                               false/*shadow_instance*/);
 

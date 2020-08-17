@@ -491,7 +491,7 @@ namespace Legion {
       void prepare_output_instance(InstanceSet &instance_set,
                                    const OutputRequirement &req,
                                    Memory target);
-      void check_output_instances(void);
+      void finalize_output_regions(void);
     public:
       void replay_map_task_output(void);
       virtual InnerContext* create_implicit_context(void);
@@ -1083,6 +1083,7 @@ namespace Legion {
     protected:
       void activate_index_task(void);
       void deactivate_index_task(void);
+    protected:
       void finalize_output_regions(void);
     public:
       virtual bool has_prepipeline_stage(void) const

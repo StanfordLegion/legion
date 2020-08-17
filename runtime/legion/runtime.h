@@ -642,7 +642,7 @@ namespace Legion {
     public:
       OutputRegionImpl(unsigned index,
                        const OutputRequirement &req,
-                       InstanceSet instances,
+                       InstanceSet instance_set,
                        TaskContext *ctx,
                        Runtime *rt);
       OutputRegionImpl(const OutputRegionImpl &rhs);
@@ -658,13 +658,23 @@ namespace Legion {
                        std::map<FieldID,void*> ptrs,
                        std::map<FieldID,size_t> *alignments);
     public:
+      void finalize(void);
+    public:
+      bool is_complete(FieldID &unbound_field) const;
+    public:
       Runtime *const runtime;
       TaskContext *const context;
     private:
+      struct ExternalInstanceInfo {
+        void *ptr;
+        size_t alignment;
+      };
+    private:
       unsigned index;
       OutputRequirement req;
-      InstanceSet instances;
-      Domain domain;
+      InstanceSet instance_set;
+      size_t num_elements;
+      std::map<FieldID,ExternalInstanceInfo> returned_instances;
     };
 
     /**
@@ -1191,12 +1201,12 @@ namespace Legion {
                                                         &candidates) const;
     public:
       PhysicalManager* create_shadow_instance(InstanceBuilder &builder);
-      PhysicalManager* create_deferred_instance(LogicalRegion region,
+      PhysicalManager* create_unbound_instance(LogicalRegion region,
                                                LayoutConstraintSet &constraints,
-                                                ApEvent ready_event,
-                                                MapperID mapper_id,
-                                                Processor target_proc,
-                                                GCPriority priority);
+                                               ApEvent ready_event,
+                                               MapperID mapper_id,
+                                               Processor target_proc,
+                                               GCPriority priority);
     protected:
       // We serialize all allocation attempts in a memory in order to 
       // ensure find_and_create calls will remain atomic

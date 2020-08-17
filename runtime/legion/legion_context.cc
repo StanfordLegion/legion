@@ -763,6 +763,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::check_unbound_output_regions(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+      {
+        OutputRegion &output_region = output_regions[idx];
+        FieldID unbound_field = 0;
+        if (!output_region.impl->is_complete(unbound_field))
+        {
+          REPORT_LEGION_ERROR(ERROR_UNBOUND_OUTPUT_REGION,
+            "Task %s (UID %lld) did not return any instance for field %d "
+            "of output requirement %u",
+            owner_task->get_task_name(), owner_task->get_unique_id(),
+            unbound_field, idx);
+        }
+        output_region.impl->finalize();
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::destroy_user_lock(Reservation r)
     //--------------------------------------------------------------------------
     {
@@ -9101,6 +9121,8 @@ namespace Legion {
           add_to_dependence_queue(close_op);
         }
       }
+      // Check if there is any unbound output region
+      check_unbound_output_regions();
       // Check to see if we have any unordered operations that we need to inject
       {
         AutoLock d_lock(dependence_lock);
@@ -20386,6 +20408,8 @@ namespace Legion {
         if (it->is_mapped())
           it->impl->unmap_region();
       }
+      // Check if there is any unbound output region
+      check_unbound_output_regions();
       if (!execution_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(execution_events);
