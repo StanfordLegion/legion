@@ -4221,6 +4221,7 @@ namespace Legion {
       scatter_versions.clear();
       gather_is_range.clear();
       scatter_is_range.clear();
+      across_sources.clear();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       atomic_locks.clear();
@@ -4789,6 +4790,11 @@ namespace Legion {
           assert(src_targets[0].is_virtual_ref());
 #endif
           src_targets.clear();
+          if (!output.src_source_instances[idx].empty())
+            runtime->forest->physical_convert_sources(this, 
+                src_requirements[idx], output.src_source_instances[idx], 
+                across_sources,
+               !runtime->unsafe_mapper ? &acquired_instances : NULL);
         }
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
@@ -5046,9 +5052,9 @@ namespace Legion {
           copy_done = runtime->forest->copy_across( 
               src_requirements[index], dst_requirements[index],
               src_versions[index], dst_versions[index],
-              src_targets, dst_targets, this, index, trace_info.dst_index,
-              local_init_precondition, predication_guard, 
-              trace_info, applied_conditions);
+              src_targets, dst_targets, across_sources, this, index, 
+              trace_info.dst_index, local_init_precondition, 
+              predication_guard, trace_info, applied_conditions);
         }
         else
         {

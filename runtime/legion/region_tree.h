@@ -567,8 +567,9 @@ namespace Legion {
                           VersionInfo &src_version_info,
                           VersionInfo &dst_version_info,
                           const InstanceSet &src_targets,
-                          const InstanceSet &dst_targets, CopyOp *op,
-                          unsigned src_index, unsigned dst_index,
+                          const InstanceSet &dst_targets, 
+                          const std::vector<PhysicalManager*> &sources,
+                          CopyOp *op, unsigned src_index, unsigned dst_index,
                           ApEvent precondition, PredEvent pred_guard,
                           const PhysicalTraceInfo &trace_info,
                           std::set<RtEvent> &map_applied_events);

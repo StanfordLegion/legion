@@ -2357,17 +2357,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::copy_across(
-                                        const RegionRequirement &src_req,
-                                        const RegionRequirement &dst_req,
-                                        VersionInfo &src_version_info,
-                                        VersionInfo &dst_version_info,
-                                        const InstanceSet &src_targets,
-                                        const InstanceSet &dst_targets,
-                                        CopyOp *op, 
-                                        unsigned src_index, unsigned dst_index,
-                                        ApEvent precondition, PredEvent guard, 
-                                        const PhysicalTraceInfo &trace_info,
-                                        std::set<RtEvent> &map_applied_events)
+                                   const RegionRequirement &src_req,
+                                   const RegionRequirement &dst_req,
+                                   VersionInfo &src_version_info,
+                                   VersionInfo &dst_version_info,
+                                   const InstanceSet &src_targets,
+                                   const InstanceSet &dst_targets,
+                                   const std::vector<PhysicalManager*> &sources,
+                                   CopyOp *op, 
+                                   unsigned src_index, unsigned dst_index,
+                                   ApEvent precondition, PredEvent guard, 
+                                   const PhysicalTraceInfo &trace_info,
+                                   std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_COPY_ACROSS_CALL);
@@ -2550,25 +2551,22 @@ namespace Legion {
         perfect = false;
         break;
       }
+      std::vector<InstanceView*> source_views;
+      if (!sources.empty())
+      {
+        InnerContext *src_context = op->find_physical_context(src_index);
+        src_context->convert_source_views(sources, source_views);
+      }
       CopyAcrossAnalysis *analysis = new CopyAcrossAnalysis(runtime, op, 
           src_index, dst_index, src_req, dst_req, dst_targets, target_views, 
-          precondition, guard, dst_req.redop, src_indexes, dst_indexes, 
-          trace_info, perfect);
+          source_views, precondition, guard, dst_req.redop, src_indexes, 
+          dst_indexes, trace_info, perfect);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             src_eq_sets.begin(); it != src_eq_sets.end(); it++)
-      {
-        // Check that the index spaces intersect
-        IndexSpaceExpression *overlap = 
-          intersect_index_spaces(it->first->set_expr, dst_expr);
-        if (overlap->is_empty())
-          continue;
-        // No alt-set tracking here because some equivalence sets
-        // may need to be traversed multiple times
-        it->first->issue_across_copies(*analysis, it->second, overlap,
-                                       deferral_events, map_applied_events);
-      }
+        analysis->traverse(it->first, it->second, deferral_events,
+                           map_applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       // Start with the source mask here in case we need to filter which

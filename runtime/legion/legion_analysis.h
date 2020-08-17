@@ -1366,7 +1366,9 @@ namespace Legion {
                           const LegionMap<LogicalView*,
                       FieldMaskSet<IndexSpaceExpression> >::aligned &src_views,
                           const FieldMask &src_mask,
-                          IndexSpaceExpression *expr);
+                          IndexSpaceExpression *expr,
+                          ReductionOpID redop = 0,
+                          CopyAcrossHelper *across_helper = NULL);
       // Neither fills nor reductions should have a redop across as they
       // should have been applied an instance directly for across copies
       void record_fill(InstanceView *dst_view,
@@ -1883,6 +1885,7 @@ namespace Legion {
                          const RegionRequirement &dst_req,
                          const InstanceSet &target_instances,
                          const std::vector<InstanceView*> &target_views,
+                         const std::vector<InstanceView*> &source_views,
                          const ApEvent precondition,
                          const PredEvent pred_guard, const ReductionOpID redop,
                          const std::vector<unsigned> &src_indexes,
@@ -1897,6 +1900,7 @@ namespace Legion {
                          const LogicalRegion dst_region,
                          const InstanceSet &target_instances,
                          const std::vector<InstanceView*> &target_views,
+                         const std::vector<InstanceView*> &source_views,
                          const ApEvent precondition,
                          const PredEvent pred_guard, const ReductionOpID redop,
                          const std::vector<unsigned> &src_indexes,
@@ -1913,8 +1917,13 @@ namespace Legion {
       void record_uninitialized(const FieldMask &uninit,
                                 std::set<RtEvent> &applied_events);
       CopyFillAggregator* get_across_aggregator(void);
-      // No perform_traversal here since we also need an
-      // index space expression to perform the traversal
+      virtual void perform_traversal(EquivalenceSet *set,
+                                     IndexSpaceExpression *expr,
+                                     const bool expr_covers,
+                                     const FieldMask &mask,
+                                     std::set<RtEvent> &deferral_events,
+                                     std::set<RtEvent> &applied_events,
+                                     const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -1951,6 +1960,7 @@ namespace Legion {
       const LogicalRegion dst_region;
       const InstanceSet target_instances;
       const std::vector<InstanceView*> target_views;
+      const std::vector<InstanceView*> source_views;
       const ApEvent precondition;
       const PredEvent pred_guard;
       const ReductionOpID redop;
@@ -2662,7 +2672,8 @@ namespace Legion {
                                 const bool already_deferred = false);
       void find_invalid_instances(InvalidInstAnalysis &analysis,
                                 IndexSpaceExpression *expr,
-                                const bool expr_covers, FieldMask user_mask,
+                                const bool expr_covers, 
+                                const FieldMask &user_mask,
                                 std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
@@ -2673,30 +2684,34 @@ namespace Legion {
                       const bool already_deferred = false);
       void acquire_restrictions(AcquireAnalysis &analysis, 
                                 IndexSpaceExpression *expr,
-                                const bool expr_covers, FieldMask acquire_mask,
+                                const bool expr_covers, 
+                                const FieldMask &acquire_mask,
                                 std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
       void release_restrictions(ReleaseAnalysis &analysis,
                                 IndexSpaceExpression *expr,
-                                const bool expr_covers, FieldMask release_mask,
+                                const bool expr_covers, 
+                                const FieldMask &release_mask,
                                 std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
       void issue_across_copies(CopyAcrossAnalysis &analysis,
-                               FieldMask src_mask, 
-                               IndexSpaceExpression *overlap,
+                               const FieldMask &src_mask, 
+                               IndexSpaceExpression *expr,
+                               const bool expr_covers,
                                std::set<RtEvent> &deferral_events,
-                               std::set<RtEvent> &applied_events);
+                               std::set<RtEvent> &applied_events,
+                               const bool already_deferred = false);
       void overwrite_set(OverwriteAnalysis &analysis, 
                          IndexSpaceExpression *expr, const bool expr_covers,
-                         const FieldMask &mask,
+                         const FieldMask &overwrite_mask,
                          std::set<RtEvent> &deferral_events,
                          std::set<RtEvent> &applied_events,
                          const bool already_deferred = false);
       void filter_set(FilterAnalysis &analysis, 
                       IndexSpaceExpression *expr, const bool expr_covers,
-                      FieldMask mask, 
+                      const FieldMask &filter_mask, 
                       std::set<RtEvent> &deferral_events,
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
@@ -2710,9 +2725,7 @@ namespace Legion {
                       std::set<RtEvent> &applied_events);
       void overwrite_from(EquivalenceSet *src, const FieldMask &src_mask,
                           std::set<RtEvent> &applied_events);
-    protected:
-      void check_for_migration(PhysicalAnalysis &analysis,
-                               std::set<RtEvent> &applied_events);
+    protected: 
       void defer_traversal(AutoTryLock &eq, PhysicalAnalysis &analysis,
                            const FieldMask &mask,
                            std::set<RtEvent> &deferral_events,
@@ -2730,6 +2743,10 @@ namespace Legion {
       }
       bool is_remote_analysis(PhysicalAnalysis &analysis,const FieldMask &mask);
     protected:
+      template<typename T>
+      void check_for_uninitialized_data(T &analysis, IndexSpaceExpression *expr,
+                                  const bool expr_cover, FieldMask uninit,
+                                  std::set<RtEvent> &applied_events) const;
       void update_initialized_data(IndexSpaceExpression *expr, 
                             const bool expr_covers, const FieldMask &user_mask);
       template<typename T>
@@ -2747,9 +2764,13 @@ namespace Legion {
                                          FieldMask valid_mask,
                                          ReferenceMutator &mutator);
       void filter_valid_instances(IndexSpaceExpression *expr, 
-                          const bool expr_covers, const FieldMask &filter_mask);
+                                  const bool expr_covers, 
+                                  const FieldMask &filter_mask,
+                                  ReferenceMutator &mutator);
       void filter_unrestricted_instances(IndexSpaceExpression *expr,
-                          const bool expr_covers, FieldMask filter_mask);
+                                         const bool expr_covers, 
+                                         FieldMask filter_mask,
+                                         ReferenceMutator &mutator);
       void filter_reduction_instances(IndexSpaceExpression *expr,
                           const bool expr_covers, const FieldMask &filter_mask);
       void update_set_internal(CopyFillAggregator *&input_aggregator,
@@ -2761,7 +2782,7 @@ namespace Legion {
                                const FieldMask &user_mask,
                                const FieldMaskSet<InstanceView> &target_insts,
                                const std::vector<InstanceView*> &source_insts,
-                               std::set<RtEvent> &applied_events,
+                               ReferenceMutator &mutator, 
                                const bool record_valid);
       void make_instances_valid(CopyFillAggregator *&aggregator,
                                 const RtEvent guard_event,
@@ -2773,7 +2794,9 @@ namespace Legion {
                                 const FieldMaskSet<InstanceView> &target_insts,
                                 const std::vector<InstanceView*> &source_insts,
                                 const bool skip_check = false,
-                                const int dst_index = -1) const;
+                                const int dst_index = -1,
+                                const ReductionOpID redop = 0,
+                                CopyAcrossHelper *across_helper = NULL) const;
       void issue_update_copies_and_fills(InstanceView *target,
                                 const std::vector<InstanceView*> &source_views,
                                          CopyFillAggregator *&aggregator,
@@ -2783,14 +2806,17 @@ namespace Legion {
                                          IndexSpaceExpression *expr,
                                          const bool expr_covers,
                                          FieldMask update_mask,
-                                         const int dst_index) const;
+                                         const int dst_index,
+                                         const ReductionOpID redop,
+                                         CopyAcrossHelper *across_helper) const;
       void apply_reductions(const FieldMaskSet<InstanceView> &reduction_targets,
                             IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &reduction_mask, 
                             CopyFillAggregator *&aggregator,RtEvent guard_event,
                             Operation *op, const unsigned index, 
                             const bool track_events,
-                            FieldMaskSet<IndexSpaceExpression> *applied_exprs);
+                            FieldMaskSet<IndexSpaceExpression> *applied_exprs,
+                            CopyAcrossHelper *across_helper = NULL);
       template<typename T>
       void copy_out(IndexSpaceExpression *expr, const bool expr_covers,
                     const FieldMask &restricted_mask, 
@@ -2800,7 +2826,11 @@ namespace Legion {
       void record_restriction(IndexSpaceExpression *expr, 
                               const bool expr_covers,
                               const FieldMask &restrict_mask,
-                              InstanceView *restricted_view);
+                              InstanceView *restricted_view,
+                              ReferenceMutator &mutator);
+    protected:
+      void check_for_migration(PhysicalAnalysis &analysis,
+                               std::set<RtEvent> &applied_events);
     public:
       static void handle_remote_references(const void *args);
       static void handle_make_owner(const void *args);
@@ -2832,9 +2862,15 @@ namespace Legion {
       std::map<unsigned/*fidx*/,std::list<std::pair<
         ReductionView*,IndexSpaceExpression*> > >       reduction_instances;
       FieldMask                                         reduction_fields;
+      // The list of expressions with the single instance for each
+      // field that represents the restriction of that expression
       LegionMap<IndexSpaceExpression*,
         FieldMaskSet<InstanceView> >::aligned           restricted_instances;
+      // Summary of any field that has a restriction
       FieldMask                                         restricted_fields;
+      // List of instances that were restricted, but have been acquired
+      LegionMap<IndexSpaceExpression*,
+        FieldMaskSet<InstanceView> >::aligned           released_instances;
     protected:
       // This tracks the most recent copy-fill aggregator for each field
       FieldMaskSet<CopyFillGuard>                       update_guards;
@@ -2844,8 +2880,8 @@ namespace Legion {
       // This node is the node which contains the valid state data
       AddressSpaceID                                    logical_owner_space;
       // In control replicated cases, we allow equivalence sets to have
-      // all the sets in the collective mapping be owners as long as they
-      // all continue to to make updates to the state together
+      // replicated state as long as their is a total sharding that updates
+      // all the equivalence sets across the machine collectively.
       bool                                              replicated_state;
     protected:
       // Which EqSetTracker objects on this node are

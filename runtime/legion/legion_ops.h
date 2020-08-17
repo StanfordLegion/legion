@@ -1329,6 +1329,7 @@ namespace Legion {
     protected: // for support with mapping
       MapperManager*              mapper;
     protected:
+      std::vector<PhysicalManager*>         across_sources;
       std::map<PhysicalManager*,unsigned> acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
       std::set<RtEvent> map_applied_conditions;
