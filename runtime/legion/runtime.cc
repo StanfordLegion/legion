@@ -7951,6 +7951,74 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalManager* MemoryManager::create_deferred_instance(
+                                               LogicalRegion region,
+                                               LayoutConstraintSet &constraints,
+                                               ApEvent ready_event,
+                                               MapperID mapper_id,
+                                               Processor target_proc,
+                                               GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      // We don't need to acquire allocation privilege as this function
+      // doesn't eagerly perform any instance collections.
+
+      RegionNode *node = runtime->forest->get_node(region);
+      FieldSpaceNode *fspace_node = node->get_column_source();
+
+      const std::vector<FieldID> &fields =
+        constraints.field_constraint.field_set;
+      FieldMask instance_mask;
+      std::vector<size_t> field_sizes(fields.size());
+      std::vector<unsigned> mask_index_map(fields.size());
+      std::vector<CustomSerdezID> serdez(fields.size());
+      fspace_node->compute_field_layout(
+          fields, field_sizes, mask_index_map, serdez, instance_mask);
+
+      LayoutDescription *layout =
+        fspace_node->find_layout_description(instance_mask, 1, constraints);
+      if (layout == NULL)
+      {
+        LayoutConstraints *internal_constraints =
+          runtime->register_layout(
+              fspace_node->handle, constraints, true/*internal*/);
+        layout = fspace_node->create_layout_description(
+            instance_mask, 1, internal_constraints,
+            mask_index_map, fields, field_sizes, serdez);
+      }
+
+      // Create an individual manager with a null instance
+      DistributedID did = runtime->get_available_distributed_id();
+      IndividualManager *manager =
+        new IndividualManager(runtime->forest, did,
+                              runtime->address_space,
+                              this,
+                              PhysicalInstance::NO_INST,
+                              node->get_row_source()->as_index_space_node(),
+                              NULL/*piece_list*/,
+                              0/*piece_list_size*/,
+                              fspace_node,
+                              region.get_tree_id(),
+                              layout,
+                              0/*redop id*/, true/*register now*/,
+                              0/*instance_footprint*/,
+                              ready_event,
+                              IndividualManager::DEFERRED,
+                              NULL/*op*/,
+                              false/*shadow_instance*/);
+
+      // Register the instance to make it visible to downstream tasks
+      record_created_instance(manager,
+                              true/*acquire*/,
+                              mapper_id,
+                              target_proc,
+                              priority,
+                              false/*remote*/);
+
+      return manager;
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent MemoryManager::acquire_allocation_privilege(void)
     //--------------------------------------------------------------------------
     {

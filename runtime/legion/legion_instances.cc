@@ -1156,7 +1156,7 @@ namespace Legion {
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
           instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow),
         memory_manager(memory), instance(inst),
-        use_event(k != DEFERRED ? fetch_metadata(inst, u_event) : u_event),
+        use_event(k != UNBOUND ? fetch_metadata(inst, u_event) : u_event),
         kind(k), external_pointer(0)
     //--------------------------------------------------------------------------
     {
@@ -1171,7 +1171,7 @@ namespace Legion {
                         LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
                         inst.id, memory->memory.id);
 #endif
-      if (runtime->legion_spy_enabled && kind != DEFERRED)
+      if (runtime->legion_spy_enabled && kind != UNBOUND)
       {
 #ifdef DEBUG_LEGION
         assert(unique_event.exists());
@@ -1217,7 +1217,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (is_owner())
-        assert(kind == DEFERRED || instance.exists());
+        assert(kind == UNBOUND || instance.exists());
 #endif
       // Shadow instances do not participate here
       if (shadow_instance)
@@ -1255,7 +1255,7 @@ namespace Legion {
       // No need to do anything
 #ifdef DEBUG_LEGION
       if (is_owner())
-        assert(kind == DEFERRED || instance.exists());
+        assert(kind == UNBOUND || instance.exists());
 #endif
       // Shadow instances do not participate here
       if (shadow_instance)
@@ -1327,7 +1327,7 @@ namespace Legion {
     ApEvent IndividualManager::get_use_event(ApEvent user) const
     //--------------------------------------------------------------------------
     {
-      if (kind != DEFERRED)
+      if (kind != UNBOUND)
       {
 #ifdef DEBUG_LEGION
         assert(user != use_event);
@@ -2053,7 +2053,7 @@ namespace Legion {
       {
         AutoLock lock(inst_lock);
 #ifdef DEBUG_LEGION
-        assert(kind == DEFERRED);
+        assert(kind == UNBOUND);
         assert(instance_footprint == 0);
 #endif
         instance = new_instance;

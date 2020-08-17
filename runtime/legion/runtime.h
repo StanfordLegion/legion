@@ -1191,6 +1191,12 @@ namespace Legion {
                                                         &candidates) const;
     public:
       PhysicalManager* create_shadow_instance(InstanceBuilder &builder);
+      PhysicalManager* create_deferred_instance(LogicalRegion region,
+                                               LayoutConstraintSet &constraints,
+                                                ApEvent ready_event,
+                                                MapperID mapper_id,
+                                                Processor target_proc,
+                                                GCPriority priority);
     protected:
       // We serialize all allocation attempts in a memory in order to 
       // ensure find_and_create calls will remain atomic

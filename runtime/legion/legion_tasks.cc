@@ -3209,7 +3209,6 @@ namespace Legion {
       RegionNode *node = runtime->forest->get_node(req.region);
       IndexSpaceNode *index_node =
         node->get_row_source()->as_index_space_node();
-      FieldSpaceNode *fspace_node = node->get_column_source();
       MemoryManager *memory_manager = runtime->find_memory_manager(target);
 
       std::vector<DimensionKind> ordering;
@@ -3230,51 +3229,17 @@ namespace Legion {
         std::vector<FieldID> fields(1, *it);
         constraints.field_constraint = FieldConstraint(fields, false, false);
 
-        FieldMask instance_mask;
-        std::vector<size_t> field_sizes(fields.size());
-        std::vector<unsigned> mask_index_map(fields.size());
-        std::vector<CustomSerdezID> serdez(fields.size());
-        fspace_node->compute_field_layout(
-            fields, field_sizes, mask_index_map, serdez, instance_mask);
-
-        LayoutDescription *layout =
-          fspace_node->find_layout_description(instance_mask, 1, constraints);
-        if (layout == NULL)
-        {
-          LayoutConstraints *internal_constraints =
-            runtime->register_layout(
-                fspace_node->handle, constraints, true/*internal*/);
-          layout = fspace_node->create_layout_description(
-              instance_mask, 1, internal_constraints,
-              mask_index_map, fields, field_sizes, serdez);
-        }
-
-        // Create an individual manager with a null instance
-        DistributedID did = runtime->get_available_distributed_id();
-        IndividualManager *manager =
-          new IndividualManager(runtime->forest, did,
-                                runtime->address_space,
-                                memory_manager,
-                                PhysicalInstance::NO_INST,
-                                index_node,
-                                NULL/*piece_list*/,
-                                0/*piece_list_size*/,
-                                fspace_node,
-                                req.region.get_tree_id(),
-                                layout,
-                                0/*redop id*/, true/*register now*/,
-                                0/*instance_footprint*/,
-                                get_task_completion(),
-                                IndividualManager::DEFERRED,
-                                NULL/*op*/,
-                                false/*shadow_instance*/);
+        PhysicalManager *manager =
+          memory_manager->create_deferred_instance(req.region,
+                                                   constraints,
+                                                   get_task_completion(),
+                                                   map_id,
+                                                   target_proc,
+                                                   0/*priority*/);
 
         // Add an instance ref of the new manager to the instance set
-        instance_set.add_instance(InstanceRef(manager, instance_mask));
-
-        // Finally, register the instance to the memory manager
-        memory_manager->record_created_instance(
-            manager, true, map_id, target_proc, 0, false);
+        instance_set.add_instance(
+            InstanceRef(manager, manager->layout->allocated_fields));
       }
     }
 
@@ -3288,8 +3253,7 @@ namespace Legion {
         for (unsigned iidx = 0; iidx < instance_set.size(); ++iidx)
         {
           const InstanceRef &instance = instance_set[iidx];
-          if (instance.get_manager()->as_individual_manager()->kind ==
-              IndividualManager::DEFERRED)
+          if (instance.get_manager()->as_individual_manager()->is_unbound())
           {
             const FieldMask &mask = instance.get_valid_fields();
             FieldSpaceNode *fspace_node = runtime->forest->get_node(

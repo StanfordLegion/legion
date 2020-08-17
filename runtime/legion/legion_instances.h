@@ -375,7 +375,7 @@ namespace Legion {
         // Allocations drawn from the eager pool
         EAGER,
         // Instance not yet bound
-        DEFERRED,
+        UNBOUND,
       };
     public:
       static const AllocationType alloc_type = INDIVIDUAL_INST_MANAGER_ALLOC;
@@ -507,6 +507,7 @@ namespace Legion {
           ReductionOpID redop, ReductionView *view);
 #endif
     public:
+      inline bool is_unbound() const { return kind == UNBOUND; }
       void update_physical_instance(PhysicalInstance new_instance,
                                     InstanceKind new_kind,
                                     uintptr_t new_pointer = 0);
