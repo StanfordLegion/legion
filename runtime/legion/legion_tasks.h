@@ -1308,7 +1308,7 @@ namespace Legion {
       void record_child_committed(RtEvent commit_precondition = 
                                   RtEvent::NO_RT_EVENT);
     public:
-      void record_output_sizes(const Point<1> &point,
+      void record_output_sizes(const DomainPoint &point,
                                const std::vector<OutputRegion> &output_regions);
     protected:
       void trigger_slice_mapped(void);

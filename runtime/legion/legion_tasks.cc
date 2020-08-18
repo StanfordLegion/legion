@@ -6981,9 +6981,6 @@ namespace Legion {
         slice_owner->return_privileges(execution_context, preconditions);
         if (!output_regions.empty())
         {
-#ifdef DEBUG_LEGION
-          assert(index_point.dim == 1);
-#endif
           slice_owner->record_output_sizes(
               index_point, execution_context->get_output_regions());
         }
@@ -11159,7 +11156,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::record_output_sizes(
-                                const Point<1> &point,
+                                const DomainPoint &point,
                                 const std::vector<OutputRegion> &output_regions)
     //--------------------------------------------------------------------------
     {
@@ -11175,7 +11172,9 @@ namespace Legion {
       if (point_sizes.empty()) return;
 
       AutoLock o_lock(op_lock);
-
+#ifdef DEBUG_LEGION
+      assert(point.dim == 1);
+#endif
       for (std::map<unsigned,size_t>::iterator it = point_sizes.begin();
            it != point_sizes.end(); ++it)
       {
