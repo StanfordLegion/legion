@@ -8540,25 +8540,25 @@ namespace Legion {
     {
       switch (memory.kind())
       {
-        case SYSTEM_MEM:
-        case SOCKET_MEM:
+        case Memory::SYSTEM_MEM:
+        case Memory::SOCKET_MEM:
           {
             free((void*)ptr);
             break;
           }
-        case REGDMA_MEM:
+        case Memory::REGDMA_MEM:
           {
             munlock((void*)ptr, size);
             free((void*)ptr);
             break;
           }
 #ifdef LEGION_USE_CUDA
-        case GPU_FB_MEM:
+        case Memory::GPU_FB_MEM:
           {
             cuMemFree((CUdeviceptr)ptr);
             break;
           }
-        case Z_COPY_MEM:
+        case Memory::Z_COPY_MEM:
           {
             cuMemFreeHost((void*)ptr);
             break;
