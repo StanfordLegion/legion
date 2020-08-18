@@ -23,6 +23,7 @@
 #define LEGION_DEPRECATED(x)
 
 #include "legion.h"
+#include "mappers/null_mapper.h"
 #include "realm/cmdline.h"
 #include "philox.h"
 
@@ -836,6 +837,266 @@ void top_level_task(const Task *task,
   runtime->destroy_field_space(ctx, fs_affinity);
 }
 
+class GatherMapper : public Mapping::NullMapper {
+public:
+  GatherMapper(Mapping::MapperRuntime *_rt, Machine _machine)
+    : NullMapper(_rt, _machine)
+  {
+    Machine::MemoryQuery mq(machine);
+    mq.only_kind(Memory::SYSTEM_MEM);
+    for(Machine::MemoryQuery::iterator it = mq.begin();
+	it != mq.end();
+	++it) {
+      //log_app.print() << "memory: " << *it;
+      memories.push_back(*it);
+
+      // get a processor with affinity to that memory
+      Processor p = Machine::ProcessorQuery(machine).only_kind(Processor::LOC_PROC).has_affinity_to(*it).first();
+      assert(p.exists());
+      //log_app.print() << " proc: " << p;
+      procs.push_back(p);
+    }
+  }
+
+  const char *get_mapper_name(void) const
+  {
+    return "gathermapper";
+  }
+
+  MapperSyncModel get_mapper_sync_model(void) const
+  {
+    return CONCURRENT_MAPPER_MODEL;
+  }
+
+  bool request_valid_instances(void) const
+  {
+    return false;
+  }
+
+  void select_steal_targets(const Mapping::MapperContext ctx,
+			    const SelectStealingInput& input,
+			    SelectStealingOutput& output)
+  {
+    // no stealing
+  }
+
+  void select_task_options(const Mapping::MapperContext ctx,
+			   const Task& task, TaskOptions& output)
+  {
+    // we're going to do all mapping from node 0
+    output.map_locally = true;
+  }
+
+  void select_tasks_to_map(const Mapping::MapperContext ctx,
+			   const SelectMappingInput& input,
+			   SelectMappingOutput& output)
+  {
+    // map 'em all
+    output.map_tasks.insert(input.ready_tasks.begin(),
+			    input.ready_tasks.end());
+  }
+
+  void map_task(const Mapping::MapperContext ctx,
+		const Task& task,
+		const MapTaskInput& input, MapTaskOutput& output)
+  {
+    //log_app.print() << "map task id=" << task.task_id;
+
+    Processor p = Processor::NO_PROC;
+
+    switch(task.task_id) {
+    case TOP_LEVEL_TASK_ID:
+      {
+	p = procs[0];
+	break;
+      }
+
+    case INIT_OWNED_TASK_ID:
+    case INIT_GHOST_TASK_ID:
+    case CHECK_GHOST_TASK_ID:
+      {
+	int index_point = task.index_point[0];
+	int num_points = task.index_domain.get_volume();
+	//log_app.print() << "map task: id=" << task.task_id << " pt=" << index_point << " num=" << num_points;
+	int points_per_mem = 1 + (num_points - 1) / memories.size();
+	int mem_idx = index_point / points_per_mem;
+	p = procs[mem_idx];
+
+	for(size_t i = 0; i < task.regions.size(); i++) {
+	  Mapping::PhysicalInstance inst;
+	  inst = choose_instance(ctx, index_point, num_points,
+				 task.regions[i]);
+	  output.chosen_instances[i].push_back(inst);
+	}
+	break;
+      }
+
+    default:
+      assert(0);
+    }
+
+    output.target_procs.push_back(p);
+
+    std::vector<VariantID> valid_variants;
+    runtime->find_valid_variants(ctx, task.task_id, valid_variants, p.kind());
+    assert(!valid_variants.empty());
+    output.chosen_variant = valid_variants[0];
+  }
+
+  void configure_context(const Mapping::MapperContext ctx,
+			 const Task& task, ContextConfigOutput& output)
+  {
+    // defaults are fine
+  }
+
+  void map_inline(const Mapping::MapperContext ctx,
+		  const InlineMapping& inline_op,
+		  const MapInlineInput& input, MapInlineOutput& output)
+  {
+    Mapping::PhysicalInstance inst;
+    inst = choose_instance(ctx, 0, 1, inline_op.requirement);
+    output.chosen_instances.push_back(inst);
+  }
+
+  void slice_task(const Mapping::MapperContext ctx,
+		  const Task& task, const SliceTaskInput& input,
+		  SliceTaskOutput& output)
+  {
+    // even though we're going to map everything from the first processor,
+    //  we need to slice apart all the points so that they can be mapped
+    //  to different places
+    for(Domain::DomainPointIterator dpi(input.domain); dpi; dpi.step())
+      output.slices.push_back(TaskSlice(Domain(dpi.p, dpi.p), procs[0],
+					false /*!recurse*/,
+					false /*!stealable*/));
+  }
+
+  void select_partition_projection(const Mapping::MapperContext  ctx,
+				   const Partition& partition,
+				   const SelectPartitionProjectionInput& input,
+				   SelectPartitionProjectionOutput& output)
+  {
+    // expect to always have an open complete partition to use
+    assert(!input.open_complete_partitions.empty());
+    output.chosen_partition = input.open_complete_partitions[0];
+  }
+
+  void map_partition(const Mapping::MapperContext ctx,
+		     const Partition& partition,
+		     const MapPartitionInput& input,
+		     MapPartitionOutput& output)
+  {
+    // we didn't ask for valid instances
+    assert(input.valid_instances.empty());
+
+    int index_point = partition.index_point[0];
+    int num_points = partition.index_domain.get_volume();
+
+    Mapping::PhysicalInstance inst;
+    inst = choose_instance(ctx, index_point, num_points,
+			   partition.requirement);
+    output.chosen_instances.push_back(inst);
+  }
+
+  void map_copy(const Mapping::MapperContext ctx,
+		const Copy& copy, const MapCopyInput& input,
+		MapCopyOutput& output)
+  {
+    int src_index, dst_index, num_points;
+    if(copy.index_domain.get_dim() == 1) {
+      src_index = copy.index_point[0];
+      dst_index = copy.index_point[0];
+      num_points = copy.index_domain.get_volume();
+    } else {
+      // the 2D index copies we launch are indexed by:
+      //             (gathering_piece, data_source_piece)
+      src_index = copy.index_point[1];
+      dst_index = copy.index_point[0];
+      Rect<2,coord_t> bounds = copy.index_domain.bounds<2,coord_t>();
+      num_points = bounds.hi[0] - bounds.lo[0] + 1;
+    }
+
+    for(size_t i = 0; i < copy.src_requirements.size(); i++) {
+      Mapping::PhysicalInstance inst;
+      inst = choose_instance(ctx, src_index, num_points,
+			     copy.src_requirements[i]);
+      output.src_instances[i].push_back(inst);
+    }
+
+    for(size_t i = 0; i < copy.dst_requirements.size(); i++) {
+      Mapping::PhysicalInstance inst;
+      inst = choose_instance(ctx, dst_index, num_points,
+			     copy.dst_requirements[i]);
+      output.dst_instances[i].push_back(inst);
+    }
+
+    if(!copy.src_indirect_requirements.empty()) {
+      assert(copy.src_indirect_requirements.size() == 1);
+
+      Mapping::PhysicalInstance inst;
+      inst = choose_instance(ctx, dst_index, num_points,
+			     copy.src_indirect_requirements[0]);
+      output.src_indirect_instances[0] = inst;
+    }
+  }
+
+  void select_copy_sources(const Mapping::MapperContext ctx,
+			   const Copy& copy,
+			   const SelectCopySrcInput& input,
+			   SelectCopySrcOutput& output)
+  {
+    // let the runtime decide (this is just used for constructing large
+    //  images for the O(1) and O(N) copies)
+  }
+
+protected:
+  Mapping::PhysicalInstance choose_instance(const Mapping::MapperContext ctx,
+					    int piece_index, int num_pieces,
+					    const RegionRequirement& req,
+					    bool all_fields = true)
+  {
+    int pieces_per_mem = 1 + (num_pieces - 1) / memories.size();
+    int mem_idx = piece_index / pieces_per_mem;
+    Memory m = memories[mem_idx];
+
+    LayoutConstraintSet constraints;
+    if(all_fields) {
+      FieldConstraint fc(false /*!contiguous*/);
+      runtime->get_field_space_fields(ctx, req.region.get_field_space(),
+				      fc.field_set);
+      constraints.add_constraint(fc);
+    } else {
+      constraints.add_constraint(FieldConstraint(req.privilege_fields,
+						 false /*!contiguous*/));
+    }
+    std::vector<LogicalRegion> regions(1, req.region);
+    Mapping::PhysicalInstance result;
+    bool created;
+    bool ok = runtime->find_or_create_physical_instance(ctx,
+							m,
+							constraints,
+							regions,
+							result,
+							created);
+    assert(ok);
+    return result;
+  }
+
+  // track a bunch of things for each piece
+  std::vector<Memory> memories;
+  std::vector<Processor> procs;
+};
+
+void mapper_registration(Machine machine, Runtime *rt,
+                          const std::set<Processor> &local_procs)
+{
+  for(std::set<Processor>::const_iterator it = local_procs.begin();
+      it != local_procs.end();
+      ++it)
+    rt->replace_default_mapper(new GatherMapper(rt->get_mapper_runtime(),
+						machine), *it);
+}
+
 int main(int argc, char **argv)
 {
   Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
@@ -858,6 +1119,8 @@ int main(int argc, char **argv)
 					  new ProjectionTwoLevel(0,
 								 PID_GHOST_PREIMAGE_PER_RANK,
 								 1));
+
+  Runtime::add_registration_callback(mapper_registration);
 
   return Runtime::start(argc, argv);
 }
