@@ -662,6 +662,9 @@ namespace Legion {
     public:
       bool is_complete(FieldID &unbound_field) const;
     public:
+      const OutputRequirement &get_requirement(void) const { return req; }
+      size_t size(void) const { return num_elements; }
+    public:
       Runtime *const runtime;
       TaskContext *const context;
     private:

@@ -1159,6 +1159,9 @@ namespace Legion {
       void return_slice_complete(unsigned points, RtEvent applied_condition);
       void return_slice_commit(unsigned points, RtEvent applied_condition);
     public:
+      void return_output_sizes(
+              const std::map<unsigned,std::map<Point<1>,size_t> > &to_merge);
+    public:
       void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
       void unpack_slice_complete(Deserializer &derez);
       void unpack_slice_commit(Deserializer &derez); 
@@ -1221,6 +1224,9 @@ namespace Legion {
       void check_point_requirements(
           const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs);
 #endif
+    protected:
+      // Sizes of subspaces for globally indexed output regions
+      std::map<unsigned,std::map<Point<1>,size_t> > all_output_sizes;
     };
 
     /**
@@ -1301,6 +1307,9 @@ namespace Legion {
       void record_child_complete(RtEvent child_complete);
       void record_child_committed(RtEvent commit_precondition = 
                                   RtEvent::NO_RT_EVENT);
+    public:
+      void record_output_sizes(const Point<1> &point,
+                               const std::vector<OutputRegion> &output_regions);
     protected:
       void trigger_slice_mapped(void);
       void trigger_slice_complete(void);
@@ -1377,6 +1386,9 @@ namespace Legion {
       std::set<RtEvent> commit_preconditions;
     protected:
       std::set<std::pair<DomainPoint,DomainPoint> > unique_intra_space_deps;
+    protected:
+      // Sizes of subspaces for globally indexed output regions
+      std::map<unsigned,std::map<Point<1>,size_t> > all_output_sizes;
     };
 
   }; // namespace Internal 

@@ -6979,6 +6979,14 @@ namespace Legion {
       if (execution_context != NULL)
       {
         slice_owner->return_privileges(execution_context, preconditions);
+        if (!output_regions.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(index_point.dim == 1);
+#endif
+          slice_owner->record_output_sizes(
+              index_point, execution_context->get_output_regions());
+        }
         if (runtime->legion_spy_enabled)
           execution_context->log_created_requirements();
         // Invalidate any context that we had so that the child
@@ -6999,6 +7007,7 @@ namespace Legion {
             Runtime::merge_events(preconditions));
       else
         slice_owner->record_child_complete(RtEvent::NO_RT_EVENT);
+
       // See if we need to trigger that our children are complete
       const bool need_commit = (execution_context != NULL) ? 
         execution_context->attempt_children_commit() : false;
@@ -8137,8 +8146,30 @@ namespace Legion {
           runtime->forest->get_node(ispace)->as_index_space_node();
         IndexPartNode *part_node =
           runtime->forest->get_node(part)->as_index_part_node();
-        parent_node->construct_realm_index_space_from_union(
-            part_node, runtime->address_space);
+
+        if (!output_regions[idx].global_indexing)
+          parent_node->construct_realm_index_space_from_union(
+              part_node, runtime->address_space);
+        else
+        {
+          typedef std::map<Point<1>,size_t> SizeMap;
+          const SizeMap &output_sizes = all_output_sizes[idx];
+          size_t sum = 0;
+          for (SizeMap::const_iterator it = output_sizes.begin();
+               it != output_sizes.end(); ++it)
+          {
+            size_t size = it->second;
+            LegionColor color =
+              part_node->color_space->linearize_color(
+                  &it->first, parent_node->type_tag);
+            IndexSpaceNode *child = part_node->get_child(color);
+            Rect<1> bounds(sum, sum + size - 1);
+            child->set_domain(bounds, runtime->address_space);
+            child->mark_index_space_ready();
+            sum += size;
+          }
+          parent_node->set_domain(Rect<1>(0, sum - 1), runtime->address_space);
+        }
       }
     }
 
@@ -8504,6 +8535,13 @@ namespace Legion {
 
         if (req.global_indexing)
         {
+          if (launch_space.get_dim() > 1)
+            REPORT_LEGION_ERROR(ERROR_INVALID_GLOBAL_INDEXING,
+              "Any index task requesting global indexing on an output region "
+              "must be launched with a 1-D launch domain, but task %s "
+              "(UID: %lld) has a %d-D launch domain.",
+              get_task_name(), get_unique_op_id(), launch_space.get_dim());
+
           type_tag = NT_TemplateHelper::encode_tag<1,coord_t>();
         }
         else
@@ -9833,6 +9871,28 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void IndexTask::return_output_sizes(
+                  const std::map<unsigned,std::map<Point<1>,size_t> > &to_merge)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      typedef std::map<Point<1>,size_t> SizeMap;
+      for (std::map<unsigned,SizeMap>::const_iterator it = to_merge.begin();
+           it != to_merge.end(); ++it)
+      {
+        SizeMap &output_sizes = all_output_sizes[it->first];
+        for (SizeMap::const_iterator sit = it->second.begin();
+             sit != it->second.end(); ++sit)
+        {
+#ifdef DEBUG_LEGION
+          assert(output_sizes.find(sit->first) == output_sizes.end());
+#endif
+          output_sizes[sit->first] = sit->second;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::unpack_slice_mapped(Deserializer &derez, 
                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -11096,6 +11156,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::record_output_sizes(
+                                const Point<1> &point,
+                                const std::vector<OutputRegion> &output_regions)
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned, size_t> point_sizes;
+      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+      {
+        OutputRegionImpl *region = output_regions[idx].impl;
+        if (!region->get_requirement().global_indexing)
+          continue;
+        point_sizes[idx] = region->size();
+      }
+
+      if (point_sizes.empty()) return;
+
+      AutoLock o_lock(op_lock);
+
+      for (std::map<unsigned,size_t>::iterator it = point_sizes.begin();
+           it != point_sizes.end(); ++it)
+      {
+        std::map<Point<1>,size_t> &output_sizes= all_output_sizes[it->first];
+#ifdef DEBUG_LEGION
+        assert(output_sizes.find(point) == output_sizes.end());
+#endif
+        output_sizes[point] = it->second;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void SliceTask::trigger_slice_mapped(void)
     //--------------------------------------------------------------------------
     {
@@ -11195,6 +11285,8 @@ namespace Legion {
       else
       {
         index_owner->return_slice_complete(points.size(),complete_precondition);
+        if (!all_output_sizes.empty())
+          index_owner->return_output_sizes(all_output_sizes);
       }
       complete_operation();
     }

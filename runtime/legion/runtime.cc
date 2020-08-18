@@ -3511,6 +3511,8 @@ namespace Legion {
     void OutputRegionImpl::finalize(void)
     //--------------------------------------------------------------------------
     {
+      if (req.partition.exists() && req.global_indexing) return;
+
       RegionNode *node = runtime->forest->get_node(req.region);
 
       // Initialize the index space domain
