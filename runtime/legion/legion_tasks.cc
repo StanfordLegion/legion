@@ -368,7 +368,7 @@ namespace Legion {
         pack_region_requirement(regions[idx], rez);
       rez.serialize(output_regions.size());
       for (unsigned idx = 0; idx < output_regions.size(); idx++)
-        pack_region_requirement(output_regions[idx], rez);
+        pack_output_requirement(output_regions[idx], rez);
       rez.serialize(futures.size());
       // If we are remote we can just do the normal pack
       for (unsigned idx = 0; idx < futures.size(); idx++)
@@ -422,7 +422,7 @@ namespace Legion {
       derez.deserialize(num_output_regions);
       output_regions.resize(num_output_regions);
       for (unsigned idx = 0; idx < output_regions.size(); idx++)
-        unpack_region_requirement(output_regions[idx], derez);
+        unpack_output_requirement(output_regions[idx], derez);
       size_t num_futures;
       derez.deserialize(num_futures);
       futures.resize(num_futures);
@@ -2550,7 +2550,7 @@ namespace Legion {
         runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                      output_regions[idx],
                                                      version_info, ready_events,
-                                                     false /*check_emptiness*/);
+                                                     true /*symbolic*/);
       }
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
@@ -4119,7 +4119,7 @@ namespace Legion {
                                       PhysicalTraceInfo(trace_info,
                                                         offset + *it),
                                       map_applied_conditions,
-                                      false /*check_empty*/);
+                                      true /*symbolic*/);
           }
           for (std::vector<unsigned>::const_iterator it =
                performed_regions.begin(); it != performed_regions.end(); it++)
@@ -8848,7 +8848,7 @@ namespace Legion {
           continue;
         runtime->forest->perform_versioning_analysis(this, *it, regions[*it],
                                          version_info, version_ready_events,
-                                         true);
+                                         false /*symbolic*/);
       }
       Mapper::PremapTaskInput input;
       Mapper::PremapTaskOutput output;
@@ -9966,6 +9966,26 @@ namespace Legion {
           derez.advance_pointer(reduc_size);
         }
       }
+      std::map<unsigned,std::map<Point<1>,size_t> > to_merge;
+      size_t map_size;
+      derez.deserialize(map_size);
+      for (size_t i = 0; i < map_size; ++i)
+      {
+        unsigned idx;
+        derez.deserialize(idx);
+        std::map<Point<1>,size_t> &output_sizes = to_merge[idx];
+        for (unsigned j = 0; j < points; ++j)
+        {
+          Point<1> point;
+          derez.deserialize(point);
+          size_t size;
+          derez.deserialize(size);
+          output_sizes[point] = size;
+        }
+      }
+      if (map_size > 0)
+        return_output_sizes(to_merge);
+
       if (resources_returned.exists())
       {
         if (complete_precondition.exists())
@@ -11386,6 +11406,22 @@ namespace Legion {
         {
           rez.serialize<size_t>(reduction_state_size);
           rez.serialize(reduction_state,reduction_state_size);
+        }
+      }
+      rez.serialize(all_output_sizes.size());
+      if (!all_output_sizes.empty())
+      {
+        for (std::map<unsigned,std::map<Point<1>,size_t> >::iterator it =
+             all_output_sizes.begin(); it !=
+             all_output_sizes.end(); ++it)
+        {
+          rez.serialize(it->first);
+          for (std::map<Point<1>,size_t>::iterator sit = it->second.begin();
+               sit != it->second.end(); ++sit)
+          {
+            rez.serialize(sit->first);
+            rez.serialize(sit->second);
+          }
         }
       }
     }

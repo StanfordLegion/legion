@@ -1820,7 +1820,7 @@ namespace Legion {
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
                      unsigned idx, const RegionRequirement &req,
                      VersionInfo &version_info, std::set<RtEvent> &ready_events,
-                     bool check_empty)
+                     bool symbolic)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1843,7 +1843,7 @@ namespace Legion {
                                                  req.parent,
                                                  user_mask,
                                                  op,
-                                                 check_empty);
+                                                 symbolic);
       if (ready.exists())
         ready_events.insert(ready);
     }
@@ -1892,7 +1892,7 @@ namespace Legion {
                   InnerContext *context,unsigned init_index,
                   std::map<PhysicalManager*,InstanceView*> &top_views,
                   std::set<RtEvent> &applied_events,
-                  bool check_empty)
+                  bool symbolic)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_INITIALIZE_CONTEXT_CALL);
@@ -1910,7 +1910,7 @@ namespace Legion {
       const RtEvent eq_ready = 
         top_node->perform_versioning_analysis(ctx.get_id(), context,
                &init_version_info, req.region, user_mask, context->owner_task,
-               check_empty);
+               symbolic);
       // Now get the top-views for all the physical instances
       std::vector<InstanceView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
@@ -2213,7 +2213,7 @@ namespace Legion {
                                          InstanceSet &targets,
                                          const PhysicalTraceInfo &trace_info,
                                          std::set<RtEvent> &map_applied_events,
-                                         bool check_empty /*=true*/)
+                                         bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
       // If we are a NO_ACCESS or there are no fields then analysis will be NULL
@@ -2237,7 +2237,7 @@ namespace Legion {
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index, 
                 analysis->term_event, collect_event,
-                user_applied, trace_info, local_space, check_empty);
+                user_applied, trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -2261,7 +2261,7 @@ namespace Legion {
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index,
                 analysis->term_event, collect_event, map_applied_events, 
-                trace_info, local_space, check_empty);
+                trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -17632,7 +17632,7 @@ namespace Legion {
                                                     LogicalRegion upper_bound,
                                                     const FieldMask &mask,
                                                     Operation *op,
-                                                    bool check_empty)
+                                                    bool symbolic)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
@@ -17642,7 +17642,7 @@ namespace Legion {
       // in the shattering code for equivalence sets that tries to
       // recognize disjoint partitions. If we ever switch to using
       // explicit shattering operations then we can remove this code
-      if ((handle != upper_bound) && (!manager.has_versions(mask)))
+      if ((handle != upper_bound) && (!manager.has_versions(mask)) && !symbolic)
       {
 #ifdef DEBUG_LEGION
         assert(parent != NULL);
@@ -17656,14 +17656,14 @@ namespace Legion {
                                                         upper_bound,
                                                         mask,
                                                         op,
-                                                        check_empty);
+                                                        symbolic);
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
         }
       }
       return manager.perform_versioning_analysis(parent_ctx, version_info, 
                                                  this, mask, op,
-                                                 check_empty);
+                                                 symbolic);
     }
 
     //--------------------------------------------------------------------------

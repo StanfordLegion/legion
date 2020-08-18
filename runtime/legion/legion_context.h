@@ -911,7 +911,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source, bool check_empty);
+                        AddressSpaceID source, bool symbolic);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1479,7 +1479,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle, 
                         IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source, bool check_empty);
+                        AddressSpaceID source, bool symbolic);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<OutputRequirement>       dummy_output_requirements;
@@ -1745,7 +1745,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source, bool check_empty);
+                        AddressSpaceID source, bool symbolic);
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 
                                             TypeTag type_tag);
@@ -2338,7 +2338,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source, bool check_empty);
+                        AddressSpaceID source, bool symbolic);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                   LogicalRegion parent);
       virtual void record_using_physical_context(LogicalRegion handle);

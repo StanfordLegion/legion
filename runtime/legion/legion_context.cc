@@ -3698,14 +3698,14 @@ namespace Legion {
     RtEvent InnerContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle,
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source, bool check_empty)
+                              AddressSpaceID source, bool symbolic)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(handle.exists());
 #endif
       EquivalenceSet *root = NULL;
-      if (check_empty && expr->is_empty())
+      if (!symbolic && expr->is_empty())
       {
         // Special case for empty expression
         {
@@ -3787,7 +3787,7 @@ namespace Legion {
 #endif
       RtUserEvent ready = Runtime::create_rt_user_event();
       root->ray_trace_equivalence_sets(manager, expr, mask,
-                                       handle, source, ready, !check_empty);
+                                       handle, source, ready, symbolic);
       return ready;
     } 
 
@@ -9375,11 +9375,11 @@ namespace Legion {
       derez.deserialize(origin);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
-      bool check_empty;
-      derez.deserialize(check_empty);
+      bool symbolic;
+      derez.deserialize(symbolic);
 
       const RtEvent done = local_ctx->compute_equivalence_sets(
-          target_manager, tree_id, handle, expr, mask, origin, check_empty);
+          target_manager, tree_id, handle, expr, mask, origin, symbolic);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -9826,7 +9826,7 @@ namespace Legion {
     RtEvent TopLevelContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle, 
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source, bool check_empty)
+                              AddressSpaceID source, bool symbolic)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -10777,7 +10777,7 @@ namespace Legion {
     RtEvent ReplicateContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle,
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source, bool check_empty)
+                              AddressSpaceID source, bool symbolic)
     //--------------------------------------------------------------------------
     {
       // This one is very similar to the InnerContext version with the 
@@ -10787,7 +10787,7 @@ namespace Legion {
       assert(handle.exists());
 #endif
       EquivalenceSet *root = NULL;
-      if (check_empty && expr->is_empty())
+      if (!symbolic && expr->is_empty())
       {
         // Special case for empty expression
         // In this case we don't need to bother having the
@@ -18211,7 +18211,7 @@ namespace Legion {
     RtEvent RemoteContext::compute_equivalence_sets(VersionManager *manager,
                               RegionTreeID tree_id, IndexSpace handle,
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                              AddressSpaceID source, bool check_empty)
+                              AddressSpaceID source, bool symbolic)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18234,7 +18234,7 @@ namespace Legion {
         rez.serialize(handle);
         rez.serialize(source);
         rez.serialize(ready_event);
-        rez.serialize(check_empty);
+        rez.serialize(symbolic);
       }
       // Send it to the owner space 
       runtime->send_compute_equivalence_sets_request(target, rez);

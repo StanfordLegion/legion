@@ -2636,11 +2636,11 @@ namespace Legion {
                                             std::set<RtEvent> &applied_events,
                                             const PhysicalTraceInfo &trace_info,
                                             const AddressSpaceID source,
-                                            bool check_empty /*=true*/)
+                                            bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
       // Quick test for empty index space expressions
-      if (check_empty && user_expr->is_empty())
+      if (!symbolic && user_expr->is_empty())
         return manager->get_use_event(term_event);
       if (!is_logical_owner())
       {
@@ -4718,14 +4718,14 @@ namespace Legion {
                                          std::set<RtEvent> &applied_events,
                                          const PhysicalTraceInfo &trace_info,
                                          const AddressSpaceID source,
-                                         bool check_empty /*=true*/)
+                                         bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(usage.redop == manager->redop);
 #endif
       // Quick test for empty index space expressions
-      if (check_empty && user_expr->is_empty())
+      if (!symbolic && user_expr->is_empty())
         return manager->get_use_event(term_event);
       if (!is_logical_owner())
       {

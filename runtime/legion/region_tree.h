@@ -481,7 +481,7 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
-                                       bool check_empty = true);
+                                       bool symbolic = false);
       void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
       void invalidate_all_versions(RegionTreeContext ctx);
     public:
@@ -490,7 +490,7 @@ namespace Legion {
                     const InstanceSet &sources, ApEvent term_event, 
                     InnerContext *context, unsigned index,
                     std::map<PhysicalManager*,InstanceView*> &top_views,
-                    std::set<RtEvent> &applied_events, bool check_empty);
+                    std::set<RtEvent> &applied_events, bool symbolic);
       void invalidate_current_context(RegionTreeContext ctx, bool users_only,
                                       LogicalRegion handle);
       bool match_instance_fields(const RegionRequirement &req1,
@@ -528,7 +528,7 @@ namespace Legion {
                                  InstanceSet &targets,
                                  const PhysicalTraceInfo &trace_info,
                                  std::set<RtEvent> &map_applied_events,
-                                 bool check_empty = true);
+                                 bool symbolic = false);
       // Same as the two above merged together
       ApEvent physical_perform_updates_and_registration(
                                    const RegionRequirement &req,
@@ -3794,7 +3794,7 @@ namespace Legion {
                                           LogicalRegion upper_bound,
                                           const FieldMask &version_mask,
                                           Operation *op,
-                                          bool check_empty);
+                                          bool symbolic);
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
