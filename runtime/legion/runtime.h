@@ -657,8 +657,20 @@ namespace Legion {
       void return_data(size_t num_elements,
                        std::map<FieldID,void*> ptrs,
                        std::map<FieldID,size_t> *alignments);
+    private:
+      struct FinalizeOutputArgs : public LgTaskArgs<FinalizeOutputArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FIANLIZE_OUTPUT_ID;
+      public:
+        FinalizeOutputArgs(OutputRegionImpl *r)
+          : LgTaskArgs<FinalizeOutputArgs>(implicit_provenance),
+            region(r) { }
+        OutputRegionImpl *region;
+      };
     public:
-      void finalize(void);
+      void finalize(bool defer = true);
+    public:
+      static void handle_fianlize_output(const void *args);
     public:
       bool is_complete(FieldID &unbound_field) const;
     public:

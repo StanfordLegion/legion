@@ -8126,6 +8126,7 @@ namespace Legion {
       }
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
+      all_output_sizes.clear();
 #ifdef DEBUG_LEGION
       interfering_requirements.clear();
       point_requirements.clear();
@@ -10437,6 +10438,7 @@ namespace Legion {
       created_index_spaces.clear();
       created_index_partitions.clear();
       unique_intra_space_deps.clear();
+      all_output_sizes.clear();
       runtime->free_slice_task(this);
     }
 

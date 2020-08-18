@@ -399,6 +399,7 @@ namespace Legion {
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_YIELD_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
+      LG_FIANLIZE_OUTPUT_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
       LG_BEGIN_SHUTDOWN_TASK_IDS,
       LG_RETRY_SHUTDOWN_TASK_ID = LG_BEGIN_SHUTDOWN_TASK_IDS,

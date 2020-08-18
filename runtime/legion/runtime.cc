@@ -3508,38 +3508,61 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::finalize(void)
+    void OutputRegionImpl::finalize(bool defer /*= true*/)
     //--------------------------------------------------------------------------
     {
-      if (req.partition.exists() && req.global_indexing) return;
-
       RegionNode *node = runtime->forest->get_node(req.region);
+      IndexSpaceNode *index_node =
+        node->get_row_source()->as_index_space_node();
+
+      if (defer && req.partition.exists() && req.global_indexing)
+      {
+        add_reference();
+        FinalizeOutputArgs args(this);
+        runtime->issue_runtime_meta_task(
+            args, LG_THROUGHPUT_DEFERRED_PRIORITY,
+            Runtime::protect_event(index_node->index_space_ready));
+        return;
+      }
 
       // Initialize the index space domain
       Domain domain;
-      if (req.partition.exists() && !req.global_indexing)
+      if (req.partition.exists())
       {
-        DomainPoint index_point = context->owner_task->index_point;
-        domain.dim = index_point.get_dim() + 1;
-#ifdef DEBUG_LEGION
-        assert(domain.dim <= LEGION_MAX_DIM);
-#endif
-        for (int idx = 0; idx < index_point.dim; ++idx)
+        if (!req.global_indexing)
         {
-          domain.rect_data[idx + 1] = index_point[idx];
-          domain.rect_data[idx + 1 + domain.dim] = index_point[idx];
+          DomainPoint index_point = context->owner_task->index_point;
+          domain.dim = index_point.get_dim() + 1;
+#ifdef DEBUG_LEGION
+          assert(domain.dim <= LEGION_MAX_DIM);
+#endif
+          for (int idx = 0; idx < index_point.dim; ++idx)
+          {
+            domain.rect_data[idx + 1] = index_point[idx];
+            domain.rect_data[idx + 1 + domain.dim] = index_point[idx];
+          }
+          domain.rect_data[0] = 0;
+          domain.rect_data[domain.dim] = num_elements - 1;
+
+          index_node->set_domain(domain, runtime->address_space);
+          if (req.partition.exists())
+            index_node->mark_index_space_ready();
         }
-        domain.rect_data[0] = 0;
-        domain.rect_data[domain.dim] = num_elements - 1;
+        else
+        {
+          ApEvent ready = ApEvent::NO_AP_EVENT;
+          domain = index_node->get_domain(ready, true);
+          if (ready.exists())
+            ready.wait();
+        }
       }
       else
+      {
         domain = Rect<1>(0, num_elements - 1);
-
-      IndexSpaceNode *index_node =
-        node->get_row_source()->as_index_space_node();
-      index_node->set_domain(domain, runtime->address_space);
-      if (req.partition.exists())
-        index_node->mark_index_space_ready();
+        index_node->set_domain(domain, runtime->address_space);
+        if (req.partition.exists())
+          index_node->mark_index_space_ready();
+      }
 
       // Update the corresponding instance manager for each output field
       FieldSpaceNode *fspace_node = node->get_column_source();
@@ -3619,6 +3642,17 @@ namespace Legion {
                                           IndividualManager::EXTERNAL_OWNED,
                                           reinterpret_cast<uintptr_t>(info.ptr));
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void OutputRegionImpl::handle_fianlize_output(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const FinalizeOutputArgs *finalize_args = (const FinalizeOutputArgs*)args;
+      OutputRegionImpl *region = finalize_args->region;
+      region->finalize(false);
+      if (region->remove_reference())
+        delete region;
     }
 
     //--------------------------------------------------------------------------
@@ -28337,6 +28371,11 @@ namespace Legion {
         case LG_FREE_EAGER_INSTANCE_TASK_ID:
           {
             MemoryManager::handle_free_eager_instance(args);
+            break;
+          }
+        case LG_FIANLIZE_OUTPUT_ID:
+          {
+            OutputRegionImpl::handle_fianlize_output(args);
             break;
           }
 #ifdef LEGION_MALLOC_INSTANCES
