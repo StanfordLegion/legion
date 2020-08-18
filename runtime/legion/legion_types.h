@@ -518,6 +518,7 @@ namespace Legion {
         "Defer Consensus Match",                                  \
         "Yield",                                                  \
         "Defer Trace Update",                                     \
+        "Finalize Output Region Instance",                        \
         "Retry Shutdown",                                         \
         "Remote Message",                                         \
       };
