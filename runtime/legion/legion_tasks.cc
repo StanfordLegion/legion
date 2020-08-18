@@ -4752,12 +4752,11 @@ namespace Legion {
 #endif
       // This is the normal equivalence set creation pathway for single tasks
       RegionNode *node = runtime->forest->get_node(regions[idx].region);
-      EquivalenceSet *result = new EquivalenceSet(runtime,
+      EquivalenceSet *result = new EquivalenceSet(runtime, 
           runtime->get_available_distributed_id(), runtime->address_space,
           runtime->address_space, node, true/*register now*/);
-      // Add a reference to this to keep it alive and thereby all the
-      // remote copies of this alive until it is no longer valid
-      result->add_base_resource_ref(CONTEXT_REF);
+      // Add a context ref that will be removed after this is registered
+      result->add_base_valid_ref(CONTEXT_REF);
       return result;
     }
 
@@ -7537,6 +7536,7 @@ namespace Legion {
     EquivalenceSet* ShardTask::create_initial_equivalence_set(unsigned idx)
     //--------------------------------------------------------------------------
     {
+      // No need to add a context ref here, the shard manager does that
       return shard_manager->get_initial_equivalence_set(idx);
     }
 

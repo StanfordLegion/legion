@@ -19,6 +19,7 @@
 #include "legion/legion_ops.h"
 #include "legion/legion_tasks.h"
 #include "legion/legion_trace.h"
+#include "legion/legion_context.h"
 
 namespace Legion {
   namespace Internal { 
@@ -2027,20 +2028,27 @@ namespace Legion {
      */
     class CollectiveMapping : public Collectable {
     public:
-      CollectiveMapping(const std::vector<AddressSpaceID> &spaces,
-                        AddressSpaceID local_space);
-      CollectiveMapping(const ShardMapping &shard_mapping,
-                        AddressSpaceID local_space);
+      CollectiveMapping(const std::vector<AddressSpaceID> &spaces);
+      CollectiveMapping(const ShardMapping &shard_mapping);
     public:
       inline AddressSpaceID operator[](unsigned idx) const
         { return unique_sorted_spaces[idx]; }
       inline size_t size(void) const { return unique_sorted_spaces.size(); }
       bool operator==(const CollectiveMapping &rhs) const;
     public:
-       
+      AddressSpaceID get_parent(const AddressSpaceID origin, 
+                                const AddressSpaceID local,
+                                const unsigned radix) const;
+      void get_children(const AddressSpaceID origin, 
+                        const AddressSpaceID local, const unsigned radix,
+                        std::vector<AddressSpaceID> &children) const;
+      bool contains(const AddressSpaceID space) const;
+    protected:
+      unsigned find_index(const AddressSpaceID space) const;
+      unsigned convert_to_offset(unsigned index, unsigned origin) const;
+      unsigned convert_to_index(unsigned offset, unsigned origin) const;
     protected:
       std::vector<AddressSpaceID> unique_sorted_spaces;
-      unsigned local_index;
     };
 
     /**

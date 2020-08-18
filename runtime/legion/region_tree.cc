@@ -16747,7 +16747,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::migrate_version_state(ContextID src, ContextID dst,
-                                  std::set<RtEvent> &applied_events, bool merge)
+                                  std::set<RtEvent> &applied_events, bool merge,
+                                  const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       VersionManager &src_manager = get_current_version_manager(src);
@@ -16764,10 +16765,10 @@ namespace Legion {
         dst_manager.swap(src_manager, to_traverse, to_untrack);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             to_untrack.begin(); it != to_untrack.end(); it++)
-        it->first->invalidate_trackers(it->second, merge, applied_events);
+        it->first->invalidate_trackers(it->second, applied_events, mapping);
       for (std::set<RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
-        (*it)->migrate_version_state(src, dst, applied_events, merge);
+        (*it)->migrate_version_state(src, dst, applied_events, merge, mapping);
     }
 
     //--------------------------------------------------------------------------
@@ -16959,8 +16960,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::pack_version_state(ContextID ctx, Serializer &rez,
-                       const size_t destination_count, const bool invalidate,
-                       const bool collective, std::set<RtEvent> &applied_events) 
+            const size_t destination_count, const bool invalidate,
+            std::set<RtEvent> &applied_events, const CollectiveMapping *mapping) 
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);  
@@ -16973,8 +16974,7 @@ namespace Legion {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_untrack.begin(); it != to_untrack.end(); it++)
         {
-          it->first->invalidate_trackers(it->second, collective,
-                                         applied_events);
+          it->first->invalidate_trackers(it->second, applied_events, mapping);
           if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
             delete it->first;
         }
@@ -16983,7 +16983,7 @@ namespace Legion {
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
         it->second->pack_version_state(ctx, rez, destination_count, 
-                            invalidate, collective, applied_events);
+                                       invalidate, applied_events, mapping);
         if (it->second->remove_base_resource_ref(VERSION_MANAGER_REF))
           delete it->second;
       }
@@ -18116,7 +18116,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::invalidate_refinement(ContextID ctx, const FieldMask &mask, 
-                  bool self, bool collective, std::set<RtEvent> &applied_events)
+                                   bool self, std::set<RtEvent> &applied_events, 
+                                   const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
@@ -18128,7 +18129,7 @@ namespace Legion {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_untrack.begin(); it != to_untrack.end(); it++)
         {
-          it->first->invalidate_trackers(it->second, collective,applied_events);
+          it->first->invalidate_trackers(it->second, applied_events, mapping);
           if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
             delete it->first;
         }
@@ -18140,7 +18141,7 @@ namespace Legion {
         assert(!it->first->is_region());
 #endif
         it->first->as_partition_node()->invalidate_refinement(ctx, it->second,
-                                                  collective, applied_events);
+                                                      applied_events, mapping);
         if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
@@ -19543,7 +19544,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PartitionNode::invalidate_refinement(ContextID ctx, 
-      const FieldMask &mask, bool collective, std::set<RtEvent> &applied_events)
+                                              const FieldMask &mask, 
+                                              std::set<RtEvent> &applied_events,
+                                              const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
@@ -19561,7 +19564,7 @@ namespace Legion {
         assert(it->first->is_region());
 #endif
         it->first->as_region_node()->invalidate_refinement(ctx, it->second,
-            true/*self*/, collective, applied_events);
+            true/*self*/, applied_events, mapping);
         if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
           delete it->first;
       }

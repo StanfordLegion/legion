@@ -479,8 +479,8 @@ namespace Legion {
                                       std::set<RtEvent> &applied) = 0;
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events,
-                            bool collective) = 0;
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            const CollectiveMapping *mapping) = 0;
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source) = 0;
@@ -1259,12 +1259,14 @@ namespace Legion {
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
       void invalidate_created_requirement_contexts(std::set<RtEvent> &applied,
-                                                   const bool collective);
+               size_t num_shards = 0, const CollectiveMapping *mapping = NULL);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events, bool collective);
-      void invalidate_region_tree_context(LogicalRegion handle, bool collective,
-                                             std::set<RtEvent> &applied_events);
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            const CollectiveMapping *mapping);
+      void invalidate_region_tree_context(LogicalRegion handle,
+                                      std::set<RtEvent> &applied_events,
+                                      const CollectiveMapping *mapping = NULL);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -1475,7 +1477,8 @@ namespace Legion {
     public:
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events, bool collective);
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            const CollectiveMapping *mapping);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask, const UniqueID opid, 
@@ -1754,10 +1757,12 @@ namespace Legion {
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events, bool collective);
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            const CollectiveMapping *mapping);
       void receive_replicate_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state, 
-                          std::set<RtEvent> &applied_events, bool collective);
+                          std::set<RtEvent> &applied_events, size_t num_shards,
+                          const CollectiveMapping *mapping = NULL);
       void handle_created_region_contexts(Deserializer &derez,
                                           std::set<RtEvent> &applied_events);
     public: 
@@ -2383,7 +2388,8 @@ namespace Legion {
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events, bool collective);
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            const CollectiveMapping *mapping);
       static void handle_created_region_contexts(Runtime *runtime, 
                                    Deserializer &derez, AddressSpaceID source);
     public:
@@ -2790,7 +2796,8 @@ namespace Legion {
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events, bool collective);
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            const CollectiveMapping *mapping);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -3204,7 +3211,8 @@ namespace Legion {
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events, bool collective);
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            const CollectiveMapping *mapping);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);

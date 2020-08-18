@@ -3568,14 +3568,17 @@ namespace Legion {
     public:
       void migrate_logical_state(ContextID src, ContextID dst, bool merge);
       void migrate_version_state(ContextID src, ContextID dst, 
-                                 std::set<RtEvent> &applied, bool merge);
+                                 std::set<RtEvent> &applied, bool merge,
+                                 const CollectiveMapping *mapping = NULL);
       void pack_logical_state(ContextID ctx, Serializer &rez, 
           const size_t destination_count, const bool invalidate);
       void unpack_logical_state(ContextID ctx, Deserializer &derez,
                                 AddressSpaceID source);
       void pack_version_state(ContextID ctx, Serializer &rez, 
-          const size_t destination_count, const bool invalidate,
-          const bool collective, std::set<RtEvent> &applied_events);
+                              const size_t destination_count, 
+                              const bool invalidate,
+                              std::set<RtEvent> &applied_events, 
+                              const CollectiveMapping *mapping = NULL);
       void unpack_version_state(ContextID ctx, Deserializer &derez, 
                                 AddressSpaceID source);
     public:
@@ -3835,8 +3838,9 @@ namespace Legion {
                                     std::set<RtEvent> &ready_events,
                                     bool downward_only);
       static void handle_deferred_compute_equivalence_sets(const void *args);
-      void invalidate_refinement(ContextID ctx, const FieldMask &mask,
-          bool self, bool collective, std::set<RtEvent> &applied_events);
+      void invalidate_refinement(ContextID ctx, const FieldMask &mask,bool self,
+                                 std::set<RtEvent> &applied_events, 
+                                 const CollectiveMapping *mapping = NULL);
       void record_refinement(ContextID ctx, EquivalenceSet *set, 
           const FieldMask &mask, std::set<RtEvent> &applied_events);
       void propagate_refinement(ContextID ctx, PartitionNode *child,
@@ -3950,7 +3954,8 @@ namespace Legion {
                                     std::set<RtEvent> &ready_events,
                                     bool downward_only);
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,
-                  bool collective, std::set<RtEvent> &applied_events);
+                                 std::set<RtEvent> &applied_events,
+                                 const CollectiveMapping *mapping);
       void propagate_refinement(ContextID ctx, RegionNode *child,
                                 const FieldMask &mask,
                                 std::set<RtEvent> &applied_events);

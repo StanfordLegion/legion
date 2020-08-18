@@ -14708,21 +14708,22 @@ namespace Legion {
                                    CollectiveMapping *mapping /*= NULL*/)
       : DistributedCollectable(rt,
           LEGION_DISTRIBUTED_HELP_ENCODE(id, EQUIVALENCE_SET_DC),
-          owner, reg_now), region_node(node), set_expr(node->row_source),
-        collective_mapping(mapping), logical_owner_space(logical),
-        replicated_state(mapping != NULL), migration_index(0), sample_count(0) 
+          owner, reg_now, mapping), region_node(node), 
+        set_expr(node->row_source), logical_owner_space(logical),
+        replicated_state(false), migration_index(0), sample_count(0),
+        init_collective_refs(false)
     //--------------------------------------------------------------------------
     {
       set_expr->add_expression_reference();
       region_node->add_nested_resource_ref(did);
-      if (collective_mapping != NULL)
-        collective_mapping->add_reference();
+#ifdef DEBUG_LEGION
+      active_once = true;
+#endif
     }
 
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(const EquivalenceSet &rhs)
-      : DistributedCollectable(rhs), region_node(NULL), set_expr(NULL),
-        collective_mapping(NULL)
+      : DistributedCollectable(rhs), region_node(NULL), set_expr(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -14748,9 +14749,6 @@ namespace Legion {
         delete set_expr;
       if (region_node->remove_nested_resource_ref(did))
         delete region_node;
-      if ((collective_mapping != NULL) && 
-          collective_mapping->remove_reference())
-        delete collective_mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -14760,6 +14758,172 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::notify_active(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(active_once);
+#endif
+      // Don't do anything if we're initializing the collective refs
+      if (init_collective_refs)
+        return;
+      // We don't send these if we don't have a mutator because that is our
+      // signal that we are doing parallel creation of this equivalence set
+      if ((collective_mapping != NULL) && !is_owner())
+      {
+        // Add references down the tree
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, 
+            runtime->legion_collective_radix, children);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          send_remote_gc_increment(*it, mutator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::notify_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(active_once);
+      active_once = false;
+      assert(!init_collective_refs);
+#endif
+      if ((collective_mapping != NULL) && !is_owner())
+      {
+        // Remove references down the tree
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, 
+            runtime->legion_collective_radix, children);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          send_remote_gc_decrement(*it, mutator);
+      }
+      // TODO: Invalidate our physical state data
+      
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Don't do anything if we're initializing the collective refs
+      if (init_collective_refs)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_remote_instances());
+#endif
+        return;
+      }
+      if (is_owner())
+      {
+        // We don't send these if we don't have a mutator because that is our
+        // signal that we are doing parallel creation of this equivalence set
+        if (collective_mapping != NULL)
+        {
+          // Add references down the tree
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, 
+              runtime->legion_collective_radix, children);
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            send_remote_gc_increment(*it, mutator);
+        }
+        if (has_remote_instances())
+        {
+          ValidityFunctor<true/*inc*/> functor(this, mutator);
+          map_over_remote_instances(functor);
+        }
+      }
+      else
+      {
+        if (collective_mapping != NULL)
+        {
+          // We don't send these if we don't have a mutator because that is our
+          // signal that we are doing parallel creation of this equivalence set
+          if (mutator != NULL)
+            send_remote_valid_increment(
+                collective_mapping->get_parent(owner_space, local_space,
+                  runtime->legion_collective_radix), mutator);
+        }
+        else
+          send_remote_valid_increment(owner_space, mutator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!init_collective_refs);
+#endif
+      if (is_owner())
+      {
+        if (collective_mapping != NULL)
+        {
+          // Remove references down the tree
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, 
+              runtime->legion_collective_radix, children);
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            send_remote_gc_decrement(*it, mutator);
+        }
+        if (has_remote_instances())
+        {
+          ValidityFunctor<false/*inc*/> functor(this, mutator);
+          map_over_remote_instances(functor);
+        }
+      }
+      else
+      {
+        if (collective_mapping != NULL)
+          send_remote_valid_decrement(
+              collective_mapping->get_parent(owner_space, local_space,
+                runtime->legion_collective_radix), mutator);
+        else
+          send_remote_valid_decrement(owner_space, mutator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::initialize_collective_references(unsigned local_valid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!init_collective_refs);
+      assert(collective_mapping != NULL);
+#endif
+      init_collective_refs = true;
+      // Add remote valid references for however many children we have
+      std::vector<AddressSpaceID> children;
+      collective_mapping->get_children(owner_space, local_space,
+          runtime->legion_collective_radix, children);
+      if (!children.empty())
+        add_base_valid_ref(REMOTE_DID_REF, NULL, children.size());
+      if (is_owner())
+      {
+#ifdef DEBUG_LEGION
+        assert(!children.empty());
+#endif
+        if (local_valid > 0) 
+          add_base_valid_ref(CONTEXT_REF, NULL, local_valid);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(local_valid > 0);
+#endif
+        // Add a base GC ref from our parent
+        add_base_gc_ref(REMOTE_DID_REF);
+        add_base_valid_ref(CONTEXT_REF, NULL, local_valid);
+      }
+      init_collective_refs = false;
     }
 
     //--------------------------------------------------------------------------
@@ -18464,6 +18628,31 @@ namespace Legion {
         recorded_trackers.erase(finder);
     }
 
+#if 0
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::invalidate_trackers(const FieldMask &mask,
+                                    std::set<RtEvent> &applied_events,
+                                    const CollectiveMapping *invalidate_mapping)
+    //--------------------------------------------------------------------------
+    {
+      // First send out any messages to remote nodes that need to be sent
+      
+
+      // Finally perform our invalidation here
+      // Just need to pull these out locally and remove 
+      FieldMaskSet<EqSetTracker> to_remove;
+      {
+        AutoLock eq(eq_lock);
+        if (recorded_trackers.empty() || 
+            (mask * recorded_trackers.get_valid_mask()))
+          return;
+        std::vector<EqSetTracker*> to_delete;
+        for (FieldMaskSet<EqSetTracker>::iterator it =
+            
+      }
+    }
+#endif
+
     /////////////////////////////////////////////////////////////
     // Pending Equivalence Set 
     /////////////////////////////////////////////////////////////
@@ -18841,6 +19030,34 @@ namespace Legion {
       assert(mask * disjoint_complete);
 #endif
       pending_equivalence_sets.insert(set, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::remove_equivalence_set(EquivalenceSet *set,
+                                                const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock m_lock(manager_lock);
+        FieldMaskSet<EquivalenceSet>::iterator finder = 
+          equivalence_sets.find(set);
+#ifdef DEBUG_LEGION
+        assert(finder != equivalence_sets.end());
+        assert(!(mask - finder->second));
+#endif
+        finder.filter(mask);
+        if (!finder->second)
+        {
+          equivalence_sets.erase(finder);
+          if (!set->remove_base_resource_ref(VERSION_MANAGER_REF))
+            return;
+        }
+        else
+          return;
+      }
+      // If we get here it's because we remove our reference on the set
+      // and it was deleted, so perform the deletion
+      delete set;
     }
 
     //--------------------------------------------------------------------------

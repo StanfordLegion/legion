@@ -8388,7 +8388,7 @@ namespace Legion {
         {
           const RegionRequirement &req = deletion_requirements[idx];
           parent_ctx->invalidate_region_tree_context(req.region, 
-              false/*collective*/, map_applied_conditions);
+                                                     map_applied_conditions);
         }
       }
       else if (kind == FIELD_DELETION)
@@ -9016,7 +9016,7 @@ namespace Legion {
           }
         }
         region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
-                                  false/*collective*/, map_applied_conditions);
+                                           map_applied_conditions);
         region_node->record_refinement(ctx, set, refinement_mask,
                                        map_applied_conditions);
         if (!map_applied_conditions.empty())
@@ -9809,7 +9809,7 @@ namespace Legion {
       // Now we can invalidate the previous refinement
       const ContextID ctx = parent_ctx->get_context().get_id();
       to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
-            false/*self*/, false/*collective*/, map_applied_conditions);
+                                       false/*self*/, map_applied_conditions);
       // Finally propagate the new refinements up from the partitions
       for (FieldMaskSet<PartitionNode>::const_iterator it = 
             make_from.begin(); it != make_from.end(); it++)

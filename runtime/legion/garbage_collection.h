@@ -294,7 +294,8 @@ namespace Legion {
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
                              AddressSpaceID owner_space,
-                             bool register_with_runtime = true);
+                             bool register_with_runtime = true,
+                             CollectiveMapping *mapping = NULL);
       DistributedCollectable(const DistributedCollectable &rhs);
       virtual ~DistributedCollectable(void);
     public:
@@ -387,10 +388,11 @@ namespace Legion {
                                  bool notify_remote = true);
     protected:
       void unregister_with_runtime(void) const;
-      RtEvent send_unregister_messages(VirtualChannelKind vc) const;
+      RtEvent send_unregister_messages(void) const;
+      void send_unregister_mapping(std::set<RtEvent> &done_events) const;
     public:
       // This for remote nodes only
-      void unregister_collectable(void);
+      void unregister_collectable(std::set<RtEvent> &done_events);
       static void handle_unregister_collectable(Runtime *runtime,
                                                 Deserializer &derez);
     public:
@@ -443,6 +445,7 @@ namespace Legion {
       const DistributedID did;
       const AddressSpaceID owner_space;
       const AddressSpaceID local_space;
+      CollectiveMapping *const collective_mapping;
     private: // derived users can't get the gc lock
       mutable LocalLock gc_lock;
     private: // derived users can't see the state information

@@ -2111,6 +2111,8 @@ namespace Legion {
                                           const FieldMask &mask) = 0;
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask) = 0;
+      virtual void remove_equivalence_set(EquivalenceSet *set,
+                                          const FieldMask &mask) = 0;
     };
 
     /**
@@ -2635,6 +2637,20 @@ namespace Legion {
     class EquivalenceSet : public DistributedCollectable,
                            public LegionHeapify<EquivalenceSet> {
     public:
+      template<bool INC>
+      class ValidityFunctor {
+      public:
+        ValidityFunctor(EquivalenceSet *s, ReferenceMutator *m)
+          : set(s), mutator(m) { }
+      public:
+        void apply(AddressSpaceID target)
+          { if (INC) set->send_remote_gc_increment(target, mutator);
+            else set->send_remote_gc_decrement(target, mutator); }
+      public:
+        EquivalenceSet *const set;
+        ReferenceMutator *const mutator;
+      };
+    public:
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space,
                      AddressSpaceID logical_owner,
@@ -2716,11 +2732,13 @@ namespace Legion {
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
     public:
+      void initialize_collective_references(unsigned local_valid_refs);
       void remove_update_guard(CopyFillGuard *guard);
       void record_tracker(EqSetTracker *tracker, const FieldMask &mask);
       void remove_tracker(EqSetTracker *tracker, const FieldMask &mask);
-      void invalidate_trackers(const FieldMask &mask, bool collective,
-                               std::set<RtEvent> &applied_events);
+      void invalidate_trackers(const FieldMask &mask,
+                               std::set<RtEvent> &applied_events,
+                               const CollectiveMapping *collective_mapping);
       void clone_from(EquivalenceSet *src, const FieldMask &src_mask,
                       std::set<RtEvent> &applied_events);
       void overwrite_from(EquivalenceSet *src, const FieldMask &src_mask,
@@ -2848,7 +2866,6 @@ namespace Legion {
     public:
       RegionNode *const region_node;
       IndexSpaceNode *const set_expr;
-      CollectiveMapping *const collective_mapping;
     protected:
       // This is the physical state of the equivalence set
       mutable LocalLock                                 eq_lock;
@@ -2900,6 +2917,13 @@ namespace Legion {
         user_samples[MIGRATION_EPOCHS];
       unsigned migration_index;
       unsigned sample_count;
+    protected:
+      bool init_collective_refs;
+#ifdef DEBUG_LEGION
+    protected:
+      // Make sure that each equivalence set only becomes active once
+      bool active_once;
+#endif
     };
 
     /**
@@ -2995,6 +3019,8 @@ namespace Legion {
       virtual void record_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set, 
+                                          const FieldMask &mask);
+      virtual void remove_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
       void finalize_equivalence_sets(RtUserEvent done_event);                           
     public:

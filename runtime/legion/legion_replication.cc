@@ -1184,11 +1184,16 @@ namespace Legion {
           clone_barrier.wait();
         }
         // Invalidate the old refinement
+        const CollectiveMapping &collective_mapping = 
+          repl_ctx->shard_manager->get_collective_mapping();
         region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
-          repl_ctx->shard_manager->is_total_sharding(), map_applied_conditions);
+                                   map_applied_conditions, &collective_mapping);
         // Register this refinement in the tree 
         region_node->record_refinement(ctx, set, refinement_mask, 
                                        map_applied_conditions);
+        // Remove the CONTEXT_REF on the set now that it is registered
+        if (set->remove_base_valid_ref(CONTEXT_REF))
+          assert(false); // should never actually hit this
         if (!map_applied_conditions.empty())
           Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
               Runtime::merge_events(map_applied_conditions));
@@ -1478,8 +1483,10 @@ namespace Legion {
       // Now go through and invalidate the current refinements for
       // the regions that we are updating
       const ContextID ctx = parent_ctx->get_context().get_id();
+      const CollectiveMapping &collective_mapping = 
+        repl_ctx->shard_manager->get_collective_mapping(); 
       to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
-            false/*self*/, true/*collective*/, map_applied_conditions);
+            false/*self*/, map_applied_conditions, &collective_mapping);
       if (make_from.size() != replicated_partitions.size())
       {
         // First make the equivalence sets for our sharded partitions
@@ -1524,6 +1531,9 @@ namespace Legion {
                 repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
                                                                     child, did);
               child->record_refinement(ctx, set, mask, map_applied_conditions);
+              // Remove the CONTEXT_REF on the set now that it is registered
+              if (set->remove_base_valid_ref(CONTEXT_REF))
+                assert(false); // should never actually hit this
             }
           }
           else
@@ -1540,6 +1550,9 @@ namespace Legion {
                 repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
                                                                     child, did);
               child->record_refinement(ctx, set, mask, map_applied_conditions);
+              // Remove the CONTEXT_REF on the set now that it is registered
+              if (set->remove_base_valid_ref(CONTEXT_REF))
+                assert(false); // should never actually hit this
             }
             delete itr;
           }
@@ -2792,13 +2805,14 @@ namespace Legion {
       if (kind == LOGICAL_REGION_DELETION)
       {
         std::set<RtEvent> preconditions;
-        const bool collective = repl_ctx->shard_manager->is_total_sharding();
+        const CollectiveMapping &collective_mapping = 
+          repl_ctx->shard_manager->get_collective_mapping();
         // Figure out the versioning context for this requirements
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
           const RegionRequirement &req = deletion_requirements[idx];
           parent_ctx->invalidate_region_tree_context(req.region, 
-                                         collective, preconditions);
+                             preconditions, &collective_mapping);
         }
         if (!preconditions.empty())
           complete_mapping(Runtime::merge_events(preconditions));
@@ -7054,44 +7068,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CollectiveMapping::CollectiveMapping(
-          const std::vector<AddressSpaceID> &spaces, AddressSpaceID local_space)
+                                      const std::vector<AddressSpaceID> &spaces)
     //--------------------------------------------------------------------------
     {
       std::set<AddressSpaceID> unique_spaces(spaces.begin(), spaces.end());
-#ifdef DEBUG_LEGION
-      assert(unique_spaces.find(local_space) != unique_spaces.end());
-#endif
-      unsigned index = 0;
-      unique_sorted_spaces.resize(unique_spaces.size());
-      for (std::set<AddressSpaceID>::const_iterator it =
-            unique_spaces.begin(); it != unique_spaces.end(); it++, index++)
-      {
-        unique_sorted_spaces[index] = *it;
-        if ((*it) == local_space)
-          local_index = index;
-      }
+      unique_sorted_spaces.insert(unique_sorted_spaces.end(),
+                                  unique_spaces.begin(), unique_spaces.end());
     }
 
     //--------------------------------------------------------------------------
-    CollectiveMapping::CollectiveMapping(const ShardMapping &shard_mapping,
-                                         AddressSpaceID local_space)
+    CollectiveMapping::CollectiveMapping(const ShardMapping &shard_mapping)
     //--------------------------------------------------------------------------
     {
       std::set<AddressSpaceID> unique_spaces;
       for (unsigned idx = 0; idx < shard_mapping.size(); idx++)
         unique_spaces.insert(shard_mapping[idx]);
-#ifdef DEBUG_LEGION
-      assert(unique_spaces.find(local_space) != unique_spaces.end());
-#endif
-      unsigned index = 0;
-      unique_sorted_spaces.resize(unique_spaces.size());
-      for (std::set<AddressSpaceID>::const_iterator it =
-            unique_spaces.begin(); it != unique_spaces.end(); it++, index++)
-      {
-        unique_sorted_spaces[index] = *it;
-        if ((*it) == local_space)
-          local_index = index;
-      }
+      unique_sorted_spaces.insert(unique_sorted_spaces.end(),
+                                  unique_spaces.begin(), unique_spaces.end());
     }
 
     //--------------------------------------------------------------------------
@@ -7104,6 +7097,114 @@ namespace Legion {
         if (unique_sorted_spaces[idx] != rhs[idx])
           return false;
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID CollectiveMapping::get_parent(const AddressSpaceID origin, 
+                         const AddressSpaceID local, const unsigned radix) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local);
+      const unsigned origin_index = find_index(origin);
+#ifdef DEBUG_LEGION
+      assert(local_index < unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      const unsigned offset = convert_to_offset(local_index, origin_index);
+      const unsigned index = convert_to_index(offset / radix, origin_index); 
+      return unique_sorted_spaces[index];
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveMapping::get_children(const AddressSpaceID origin,
+                               const AddressSpaceID local, const unsigned radix,
+                               std::vector<AddressSpaceID> &children) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local);
+      const unsigned origin_index = find_index(origin);
+#ifdef DEBUG_LEGION
+      assert(local_index < unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      const unsigned offset = radix * 
+        convert_to_offset(local_index, origin_index);
+      for (unsigned idx = 0; idx < radix; idx++)
+      {
+        const unsigned child_offset = offset + idx;
+        if (child_offset <= unique_sorted_spaces.size())
+        {
+          const unsigned index = convert_to_index(child_offset, origin_index);
+          children.push_back(unique_sorted_spaces[index]); 
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveMapping::contains(const AddressSpaceID space) const
+    //--------------------------------------------------------------------------
+    {
+      return (find_index(space) < unique_sorted_spaces.size()); 
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CollectiveMapping::find_index(const AddressSpaceID space) const
+    //--------------------------------------------------------------------------
+    {
+      // Binary search, will be fast
+      unsigned first = 0;
+      unsigned last = unique_sorted_spaces.size() - 1;
+      unsigned mid = 0;
+      while (first <= last)
+      {
+        mid = (first + last) / 2;
+        const AddressSpaceID midval = unique_sorted_spaces[mid];
+        if (space == midval)
+          return mid;
+        else if (space < midval)
+          last = mid - 1;
+        else if (midval < space)
+          first = mid + 1;
+        else
+          break;
+      }
+      return unique_sorted_spaces.size();
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CollectiveMapping::convert_to_offset(unsigned index, 
+                                                  unsigned origin_index) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      // All the offsets are done in 1-based indexing, hence the +1
+      if (index < origin_index)
+      {
+        // Modulus arithmetic here
+        return ((unique_sorted_spaces.size() - origin_index) + index + 1);
+      }
+      else
+        return ((index - origin_index) + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CollectiveMapping::convert_to_index(unsigned offset,
+                                                 unsigned origin_index) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(0 < offset); // offset should be strictly greater than zero
+      assert(offset <= unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      // convert back to zero-based indexing with -1
+      unsigned result = origin_index + offset - 1;
+      if (result >= unique_sorted_spaces.size())
+        result -= unique_sorted_spaces.size();
+      return result;
     }
 
     /////////////////////////////////////////////////////////////
@@ -7324,7 +7425,7 @@ namespace Legion {
 #endif
       address_spaces = new ShardMapping(spaces);
       address_spaces->add_reference();
-      collective_mapping = new CollectiveMapping(spaces,runtime->address_space);
+      collective_mapping = new CollectiveMapping(spaces);
       collective_mapping->add_reference();
     }
 
@@ -7389,8 +7490,7 @@ namespace Legion {
         (*address_spaces)[(*it)->shard_id] = target;
       }
       local_shards.clear();
-      collective_mapping = 
-        new CollectiveMapping(*address_spaces, runtime->address_space);
+      collective_mapping = new CollectiveMapping(*address_spaces);
       collective_mapping->add_reference();
       // Compute the unique shard spaces and make callback barrier
       // which has as many arrivers as unique shard spaces
@@ -7400,23 +7500,12 @@ namespace Legion {
       mapped_equivalence_sets.resize(virtual_mapped.size(), NULL);
       for (unsigned idx = 0; idx < virtual_mapped.size(); idx++)
       {
-        if (virtual_mapped[idx])
-          continue;
         // Make an equivalence set to contain the initial data
         RegionNode *node = 
           runtime->forest->get_node(original_task->regions[idx].region);
-        EquivalenceSet *result = new EquivalenceSet(runtime,
+        mapped_equivalence_sets[idx] = new EquivalenceSet(runtime,
             runtime->get_available_distributed_id(), runtime->address_space,
             runtime->address_space, node, true/*reg now*/, collective_mapping);
-        // Record all the remote nodes we're going to be sending this
-        // equivalence set to so we don't need to page it in
-        // No need for the lock here, nothing happening in parallel
-        for (std::set<AddressSpaceID>::const_iterator it = 
-              unique_shard_spaces.begin(); it != 
-              unique_shard_spaces.end(); it++)
-          if ((*it) != runtime->address_space)
-            result->update_remote_instances(*it);
-        mapped_equivalence_sets[idx] = result;
       }
       // Now either send the shards to the remote nodes or record them locally
       for (std::map<AddressSpaceID,std::vector<ShardTask*> >::const_iterator 
@@ -7432,6 +7521,10 @@ namespace Legion {
         else
           local_shards = it->second;
       }
+      // This adds a CONTEXT_REF for each local shard
+      for (unsigned idx = 0; idx < virtual_mapped.size(); idx++)
+        mapped_equivalence_sets[idx]->initialize_collective_references(
+                                                    local_shards.size());
       if (!local_shards.empty())
       {
         for (std::vector<ShardTask*>::const_iterator it = 
@@ -7509,20 +7602,18 @@ namespace Legion {
                 shard_mapping.begin(); it != shard_mapping.end(); it++)
             rez.serialize(*it);
         }
+        rez.serialize<size_t>(shards.size());
         rez.serialize<size_t>(mapped_equivalence_sets.size());
         for (std::vector<EquivalenceSet*>::const_iterator it = 
               mapped_equivalence_sets.begin(); it != 
               mapped_equivalence_sets.end(); it++)
         {
-          if ((*it) != NULL)
-          {
-            rez.serialize((*it)->did);
-            rez.serialize((*it)->region_node->handle);
-          }
-          else
-            rez.serialize<DistributedID>(0);
+#ifdef DEBUG_LEGION
+          assert((*it) != NULL);
+#endif
+          rez.serialize((*it)->did);
+          rez.serialize((*it)->region_node->handle);
         }
-        rez.serialize<size_t>(shards.size());
         for (std::vector<ShardTask*>::const_iterator it = 
               shards.begin(); it != shards.end(); it++)
         {
@@ -7549,8 +7640,7 @@ namespace Legion {
       address_spaces = new ShardMapping();
       address_spaces->add_reference();
       address_spaces->unpack_mapping(derez);
-      collective_mapping = 
-        new CollectiveMapping(*address_spaces, runtime->address_space);
+      collective_mapping = new CollectiveMapping(*address_spaces);
       collective_mapping->add_reference();
       if (control_replicated)
       {
@@ -7581,6 +7671,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < total_shards; idx++)
           derez.deserialize(shard_mapping[idx]);
       }
+      size_t num_shards;
+      derez.deserialize(num_shards);
       size_t num_equivalence_sets;
       derez.deserialize(num_equivalence_sets);
       mapped_equivalence_sets.resize(num_equivalence_sets);
@@ -7588,20 +7680,16 @@ namespace Legion {
       {
         DistributedID did;
         derez.deserialize(did);
-        if (did > 0)
-        {
-          LogicalRegion handle;
-          derez.deserialize(handle);
-          RegionNode *region_node = runtime->forest->get_node(handle);
-          mapped_equivalence_sets[idx] = new EquivalenceSet(runtime, did,
-              owner_space, owner_space, region_node, true/*register now*/,
-              collective_mapping);
-        }
-        else
-          mapped_equivalence_sets[idx] = NULL;
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        RegionNode *region_node = runtime->forest->get_node(handle);
+        mapped_equivalence_sets[idx] = new EquivalenceSet(runtime, did,
+            owner_space, owner_space, region_node, true/*register now*/,
+            collective_mapping);
+        // This adds a CONTEXT_REF for each local shard
+        mapped_equivalence_sets[idx]->initialize_collective_references(
+                                                            num_shards);
       }
-      size_t num_shards;
-      derez.deserialize(num_shards);
       local_shards.resize(num_shards);
       for (unsigned idx = 0; idx < num_shards; idx++)
       {
@@ -7669,6 +7757,8 @@ namespace Legion {
         // Didn't find it so make it
         result = new EquivalenceSet(runtime, did, owner_space, owner_space,
                       region_node, true/*register now*/, collective_mapping);
+        // This adds as many context refs as there are shards
+        result->initialize_collective_references(local_shards.size());
         // Record it for the shards that come later
         std::pair<EquivalenceSet*,size_t> &pending = 
           created_equivalence_sets[did];
@@ -7676,15 +7766,11 @@ namespace Legion {
         pending.second = local_shards.size() - 1;
       }
       else // Only one shard here on this node so just make it
+      {
         result = new EquivalenceSet(runtime, did, owner_space, owner_space,
                       region_node, true/*register now*/, collective_mapping);
-      // We made it so if we're the owner record all the remote locations
-      // of shards where we know that it also exists
-      if (result->is_owner())
-      {
-        const ShardMapping &mapping = *address_spaces; 
-        for (unsigned idx = 0; idx < mapping.size(); idx++)
-          result->update_remote_instances(mapping[idx]);
+        // This adds as many context refs as there are shards
+        result->initialize_collective_references(1/*local shard count*/);
       }
       return result;
     }
