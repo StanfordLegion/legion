@@ -363,6 +363,7 @@ namespace Realm {
     protected:
       // this will be removed soon
       // queue that contains all available free requests
+      Mutex available_req_mutex;
       std::queue<Request*> available_reqs;
     public:
       XferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
@@ -437,14 +438,19 @@ namespace Realm {
       }
 #endif
 
-      virtual bool request_available() const
+      virtual bool request_available()
       {
+	AutoLock<> al(available_req_mutex);
 	return !available_reqs.empty();
       }
 
       virtual Request* dequeue_request() {
-        Request* req = available_reqs.front();
-	available_reqs.pop();
+        Request* req;
+	{
+	  AutoLock<> al(available_req_mutex);
+	  req = available_reqs.front();
+	  available_reqs.pop();
+	}
 	req->is_read_done = false;
 	req->is_write_done = false;
 	// by default, an "active" request holds a reference on the xd
@@ -453,7 +459,10 @@ namespace Realm {
       }
 
       virtual void enqueue_request(Request* req) {
-        available_reqs.push(req);
+	{
+	  AutoLock<> al(available_req_mutex);
+	  available_reqs.push(req);
+	}
 	remove_reference();
       }
 
@@ -489,7 +498,7 @@ namespace Realm {
       void notify_request_write_done(Request* req);
       void flush();
 
-      virtual bool request_available() const;
+      virtual bool request_available();
       virtual Request* dequeue_request();
       virtual void enqueue_request(Request* req);
 
@@ -619,7 +628,7 @@ namespace Realm {
       void notify_request_write_done(Request* req);
       void flush();
 
-      virtual bool request_available() const;
+      virtual bool request_available();
       virtual Request* dequeue_request();
       virtual void enqueue_request(Request* req);
 

@@ -4232,7 +4232,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           FutureImpl *impl = futures[idx].impl; 
-          wait_on_events.insert(impl->subscribe());
+          wait_on_events.insert(impl->subscribe(false/*need local data*/));
         }
       }
       // Now add get all the other preconditions for the launch

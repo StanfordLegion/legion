@@ -2757,6 +2757,7 @@ namespace Legion {
     public:
       PartitionTracker& operator=(const PartitionTracker &rhs);
     public:
+      bool can_prune(void);
       bool remove_partition_reference(ReferenceMutator *mutator);
     private:
       PartitionNode *volatile partition;
@@ -2981,7 +2982,7 @@ namespace Legion {
       std::map<LegionColor,RtUserEvent> pending_child_map;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subspaces;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subspaces;
-      std::vector<PartitionTracker*> partition_trackers;
+      std::list<PartitionTracker*> partition_trackers;
     protected:
       // Support for remote disjoint events being stored
       RtUserEvent remote_disjoint_ready;
@@ -3794,7 +3795,7 @@ namespace Legion {
       IndexSpaceNode *const row_source;
     protected:
       std::map<LegionColor,PartitionNode*> color_map;
-      std::vector<PartitionTracker*> partition_trackers;
+      std::list<PartitionTracker*> partition_trackers;
 #ifdef DEBUG_LEGION
       bool currently_valid;
 #endif

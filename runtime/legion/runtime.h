@@ -252,11 +252,11 @@ namespace Legion {
       // at the boolean value of a future if it is set
       bool get_boolean_value(bool &valid);
       // Request that the value be made ready on this node
-      ApEvent subscribe(void);
+      ApEvent subscribe(bool need_local_data = true);
       // Request the value be made ready on this node for
       // internal use which means we can see the value before
       // the future actually completes
-      RtEvent subscribe_internal(void);
+      RtEvent subscribe_internal(bool need_local_data = true);
       // Set the task tree coordinates for this future
       void set_future_coordinates(
           std::vector<std::pair<size_t,DomainPoint> > &coordinates);
