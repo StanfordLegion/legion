@@ -250,6 +250,13 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
         clang_source_dir = os.path.join(llvm_dir, 'cfe-6.0.1.src')
         download(llvm_tarball, '%s/6.0.1/llvm-6.0.1.src.tar.xz' % mirror, 'b6d6c324f9c71494c0ccaf3dac1f16236d970002b42bb24a6c9e1634f7d0f4e2', insecure=insecure)
         download(clang_tarball, '%s/6.0.1/cfe-6.0.1.src.tar.xz' % mirror, '7c243f1485bddfdfedada3cd402ff4792ea82362ff91fbdac2dae67c6026b667', insecure=insecure)
+    elif llvm_version == '90':
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-9.0.0.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-9.0.0.src')
+        clang_tarball = os.path.join(llvm_dir, 'cfe-9.0.0.src.tar.xz')
+        clang_source_dir = os.path.join(llvm_dir, 'cfe-9.0.0.src')
+        download(llvm_tarball, '%s/9.0.0/llvm-9.0.0.src.tar.xz' % mirror, '7ef2527ba3da7603a41ce3592a8cd890f8d27ffa', insecure=insecure)
+        download(clang_tarball, '%s/9.0.0/cfe-9.0.0.src.tar.xz' % mirror, '6977cf7a802a053c57fa74138d3648b563e71e88', insecure=insecure)
     else:
         assert False
 
