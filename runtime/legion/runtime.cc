@@ -872,7 +872,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FutureImpl::subscribe(void)
+    ApEvent FutureImpl::subscribe(bool need_local_data)
     //--------------------------------------------------------------------------
     {
       if (!empty && (callback_functor == NULL))
@@ -898,14 +898,14 @@ namespace Legion {
             rez.serialize(did);
             runtime->send_future_subscription(owner_space, rez);
           }
-          else
+          else if (need_local_data)
             record_subscription(local_space, false/*need lock*/);
         }
         return subscription_event;
       }
       else
       {
-        if (callback_functor != NULL)
+        if ((callback_functor != NULL) && need_local_data)
           return invoke_callback();
         return future_complete;
       }
@@ -1001,13 +1001,20 @@ namespace Legion {
 #endif
       if (callback_functor != NULL)
       {
-        // If we still have a callback to perform do
-        // that now to get it in flight, it will send
-        // out any updates to subscribers
-        invoke_callback();
-        // Make sure these targets are all in the set of subscribers
-        // so that the callback will broadcast them later
-        subscribers.insert(targets.begin(), targets.end());
+        // Handle the special case where the only subscriber is the local
+        // node so we can lazily defer this until later and the user
+        // actually asks us for the result
+        if ((subscribers.size() > 1) ||
+            (subscribers.find(local_space) == subscribers.end()))
+        {
+          // If we still have a callback to perform do
+          // that now to get it in flight, it will send
+          // out any updates to subscribers
+          invoke_callback();
+          // Make sure these targets are all in the set of subscribers
+          // so that the callback will broadcast them later
+          subscribers.insert(targets.begin(), targets.end());
+        }
         return;
       }
       for (std::set<AddressSpaceID>::const_iterator it = 
