@@ -8132,7 +8132,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::finalize_output_regions(ShardMapping *mapping /*=NULL*/)
+    void IndexTask::finalize_output_regions(void)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
@@ -8147,7 +8147,7 @@ namespace Legion {
 
         if (!output_regions[idx].global_indexing)
           parent_node->construct_realm_index_space_from_union(
-              part_node, runtime->address_space, mapping);
+              part_node, runtime->address_space);
         else
         {
           typedef std::map<Point<1>,size_t> SizeMap;

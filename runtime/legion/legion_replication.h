@@ -1030,6 +1030,29 @@ namespace Legion {
     };
 
     /**
+     * \class OutputSizeExchange
+     * This class exchanges sizes of output subregions that are globally
+     * indexed.
+     */
+    class OutputSizeExchange : public AllGatherCollective<false> {
+    public:
+      typedef std::map<Point<1>,size_t> SizeMap;
+    public:
+      OutputSizeExchange(ReplicateContext *ctx, CollectiveIndexLocation loc);
+      OutputSizeExchange(const OutputSizeExchange &rhs);
+      virtual ~OutputSizeExchange(void);
+    public:
+      OutputSizeExchange& operator=(const OutputSizeExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void exchange_output_sizes(const std::map<unsigned,SizeMap> &local_sizes);
+    public:
+      std::map<unsigned,SizeMap> all_output_sizes;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases
@@ -1132,9 +1155,12 @@ namespace Legion {
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
     protected:
+      void finalize_output_regions(ShardMapping *mapping);
+    protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
       FutureExchange *reduction_collective;
+      OutputSizeExchange *output_size_collective;
     protected:
       std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
 #ifdef DEBUG_LEGION

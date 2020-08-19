@@ -546,6 +546,7 @@ namespace Legion {
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
       reduction_collective = NULL;
+      output_size_collective = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -567,6 +568,11 @@ namespace Legion {
       {
         delete reduction_collective;
         reduction_collective = NULL;
+      }
+      if (output_size_collective != NULL)
+      {
+        delete output_size_collective;
+        output_size_collective = NULL;
       }
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
@@ -875,6 +881,15 @@ namespace Legion {
       if (redop > 0)
         reduction_collective = 
           new FutureExchange(ctx, reduction_state_size, COLLECTIVE_LOC_53);
+      bool has_globally_indexed_output = false;
+      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+        if (output_regions[idx].global_indexing)
+        {
+          has_globally_indexed_output = true;
+          break;
+        }
+      if (has_globally_indexed_output)
+        output_size_collective = new OutputSizeExchange(ctx, COLLECTIVE_LOC_29);
     } 
 
     //--------------------------------------------------------------------------
@@ -1004,6 +1019,55 @@ namespace Legion {
       }
       else // The next shard is ourself, so we can do the normal thing
         IndexTask::record_intra_space_dependence(point, next, point_mapped);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::finalize_output_regions(ShardMapping *mapping)
+    //--------------------------------------------------------------------------
+    {
+      if (output_size_collective != NULL)
+        output_size_collective->exchange_output_sizes(all_output_sizes);
+
+      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+      {
+        const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
+        const IndexPartition &part =
+          output_regions[idx].partition.get_index_partition();
+        IndexSpaceNode *parent_node =
+          runtime->forest->get_node(ispace)->as_index_space_node();
+        IndexPartNode *part_node =
+          runtime->forest->get_node(part)->as_index_part_node();
+
+        if (!output_regions[idx].global_indexing)
+          parent_node->construct_realm_index_space_from_union(
+              part_node, runtime->address_space, mapping);
+        else
+        {
+          typedef std::map<Point<1>,size_t> SizeMap;
+          const SizeMap &output_sizes =
+            output_size_collective->all_output_sizes[idx];
+          const SizeMap &local_sizes = all_output_sizes[idx];
+          size_t sum = 0;
+          for (SizeMap::const_iterator it = output_sizes.begin();
+               it != output_sizes.end(); ++it)
+          {
+            size_t size = it->second;
+            if (local_sizes.find(it->first) != local_sizes.end())
+            {
+              LegionColor color =
+                part_node->color_space->linearize_color(
+                    &it->first, parent_node->type_tag);
+              IndexSpaceNode *child = part_node->get_child(color);
+              Rect<1> bounds(sum, sum + size - 1);
+              child->set_domain(bounds, runtime->address_space);
+              child->mark_index_space_ready();
+            }
+            sum += size;
+          }
+          parent_node->set_domain(
+              Rect<1>(0, sum - 1), runtime->address_space, mapping);
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -11928,6 +11992,90 @@ namespace Legion {
       unique_hashes[key] = local_shard;
       perform_collective_sync();
       return unique_hashes;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // OutputSizeExchange
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OutputSizeExchange::OutputSizeExchange(ReplicateContext *ctx,
+                                           CollectiveIndexLocation loc)
+      : AllGatherCollective<false>(loc, ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputSizeExchange::OutputSizeExchange(const OutputSizeExchange &rhs)
+      : AllGatherCollective<false>(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    OutputSizeExchange::~OutputSizeExchange(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputSizeExchange& OutputSizeExchange::operator=(
+                                                  const OutputSizeExchange &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputSizeExchange::pack_collective_stage(Serializer &rez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<unsigned,SizeMap>::iterator it = all_output_sizes.begin();
+           it != all_output_sizes.end(); ++it)
+      {
+        rez.serialize(it->second.size());
+        for (SizeMap::iterator sit = it->second.begin();
+             sit != it->second.end(); ++sit)
+        {
+          rez.serialize(sit->first);
+          rez.serialize(sit->second);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputSizeExchange::unpack_collective_stage(
+                                                 Deserializer &derez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<unsigned,SizeMap>::iterator it = all_output_sizes.begin();
+           it != all_output_sizes.end(); ++it)
+      {
+        size_t num_entries;
+        derez.deserialize(num_entries);
+        for (unsigned idx = 0; idx < num_entries; idx++)
+        {
+          Point<1> point;
+          size_t size;
+          derez.deserialize(point);
+          derez.deserialize(size);
+          it->second[point] = size;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputSizeExchange::exchange_output_sizes(
+                                  const std::map<unsigned,SizeMap> &local_sizes)
+    //--------------------------------------------------------------------------
+    {
+      all_output_sizes = local_sizes;
+      perform_collective_sync();
     }
 
     /////////////////////////////////////////////////////////////

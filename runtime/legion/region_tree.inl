@@ -2880,9 +2880,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::construct_realm_index_space_from_union(
-                                                       IndexPartNode *part_node,
-                                                       AddressSpaceID source,
-                                                       ShardMapping *mapping)
+                                                IndexPartNode *part_node,
+                                                AddressSpaceID source,
+                                                ShardMapping *mapping /*=NULL*/)
     //--------------------------------------------------------------------------
     {
       IndexSpaceExpression *expr = part_node->compute_union_expression();
