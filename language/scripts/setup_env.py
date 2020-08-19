@@ -221,7 +221,8 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
         pass # Hope this means it already exists
     assert(os.path.isdir(llvm_dir))
 
-    mirror = 'http://sapling.stanford.edu/~eslaught/llvm' # 'https://releases.llvm.org'
+    # mirror = 'http://sapling.stanford.edu/~eslaught/llvm'
+    mirror = 'https://releases.llvm.org'
     if llvm_version == '35':
         llvm_tarball = os.path.join(llvm_dir, 'llvm-3.5.2.src.tar.xz')
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.5.2.src')
