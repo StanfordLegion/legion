@@ -1688,7 +1688,7 @@ namespace Realm {
       {
       }
 
-      bool MemcpyXferDes::request_available() const
+      bool MemcpyXferDes::request_available()
       {
 	return !memcpy_req_in_use;
       }
@@ -2113,7 +2113,7 @@ namespace Realm {
 	hdf5_req.xd = this;
       }
 
-      bool HDF5XferDes::request_available() const
+      bool HDF5XferDes::request_available()
       {
 	return !req_in_use;
       }

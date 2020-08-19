@@ -8944,7 +8944,7 @@ namespace Legion {
       // The reason we would be here is if we were leaked
       if (!partition_trackers.empty())
       {
-        for (std::vector<PartitionTracker*>::const_iterator it = 
+        for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
           if ((*it)->remove_partition_reference(NULL))
             delete (*it);
@@ -9059,7 +9059,7 @@ namespace Legion {
       }
       if (!partition_trackers.empty())
       {
-        for (std::vector<PartitionTracker*>::const_iterator it = 
+        for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
           if ((*it)->remove_partition_reference(mutator))
             delete (*it);
@@ -9412,8 +9412,28 @@ namespace Legion {
     void IndexPartNode::add_tracker(PartitionTracker *tracker)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock);
-      partition_trackers.push_back(tracker);
+      std::vector<PartitionTracker*> to_prune;
+      {
+        AutoLock n_lock(node_lock);
+        // To avoid leaks, see if there are any other trackers we can prune
+        for (std::list<PartitionTracker*>::iterator it =
+              partition_trackers.begin(); it != 
+              partition_trackers.end(); /*nothing*/)
+        {
+          if ((*it)->can_prune())
+          {
+            to_prune.push_back(*it);
+            it = partition_trackers.erase(it);
+          }
+          else
+            it++;
+        }
+        partition_trackers.push_back(tracker);
+      }
+      for (std::vector<PartitionTracker*>::const_iterator it =
+            to_prune.begin(); it != to_prune.end(); it++)
+        if ((*it)->remove_reference())
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -17433,7 +17453,7 @@ namespace Legion {
       // The reason we would be here is if we were leaked
       if (!partition_trackers.empty())
       {
-        for (std::vector<PartitionTracker*>::const_iterator it = 
+        for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
           if ((*it)->remove_partition_reference(NULL))
             delete (*it);
@@ -17545,7 +17565,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(parent == NULL); // should only happen on the root
 #endif
-        for (std::vector<PartitionTracker*>::const_iterator it = 
+        for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
           if ((*it)->remove_partition_reference(mutator))
             delete (*it);
@@ -17634,8 +17654,28 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(parent == NULL); // should only happen on the root
 #endif
-      AutoLock n_lock(node_lock);
-      partition_trackers.push_back(tracker);
+      std::vector<PartitionTracker*> to_prune;
+      {
+        AutoLock n_lock(node_lock);
+        // To avoid leaks, see if there are any other trackers we can prune
+        for (std::list<PartitionTracker*>::iterator it =
+              partition_trackers.begin(); it != 
+              partition_trackers.end(); /*nothing*/)
+        {
+          if ((*it)->can_prune())
+          {
+            to_prune.push_back(*it);
+            it = partition_trackers.erase(it);
+          }
+          else
+            it++;
+        }
+        partition_trackers.push_back(tracker);
+      }
+      for (std::vector<PartitionTracker*>::const_iterator it =
+            to_prune.begin(); it != to_prune.end(); it++)
+        if ((*it)->remove_reference())
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -18875,6 +18915,17 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionTracker::can_prune(void)
+    //--------------------------------------------------------------------------
+    {
+      const int remainder = __sync_fetch_and_add(&references, 0); 
+#ifdef DEBUG_LEGION
+      assert((remainder == 1) || (remainder == 2));
+#endif
+      return (remainder == 1);
     }
 
     //--------------------------------------------------------------------------
