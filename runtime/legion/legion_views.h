@@ -785,7 +785,7 @@ namespace Legion {
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
-                                    bool check_empty = true);
+                                    bool symbolic = false);
       virtual RtEvent find_copy_preconditions(bool reading,
                                     ReductionOpID redop,
                                     const FieldMask &copy_mask,
