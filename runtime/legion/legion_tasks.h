@@ -1084,7 +1084,7 @@ namespace Legion {
       void activate_index_task(void);
       void deactivate_index_task(void);
     protected:
-      void finalize_output_regions(void);
+      void finalize_output_regions(ShardMapping *mapping = NULL);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }

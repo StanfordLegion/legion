@@ -2127,7 +2127,9 @@ namespace Legion {
     public:
       void mark_index_space_ready(void);
       virtual void construct_realm_index_space_from_union(
-                           IndexPartNode *part_node, AddressSpaceID source) = 0;
+                                                     IndexPartNode *part_node,
+                                                     AddressSpaceID source,
+                                                     ShardMapping *mapping) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;
@@ -2471,7 +2473,9 @@ namespace Legion {
       void compute_linearization_metadata(void);
     public:
       virtual void construct_realm_index_space_from_union(
-                               IndexPartNode *part_node, AddressSpaceID source);
+                                                       IndexPartNode *part_node,
+                                                       AddressSpaceID source,
+                                                       ShardMapping *mapping);
     protected:
       Realm::IndexSpace<DIM,T> realm_index_space;
     protected: // linearization meta-data, computed on demand

@@ -8086,6 +8086,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_DEACTIVATE_CALL);
+      finalize_output_regions();
       deactivate_index_task(); 
       runtime->free_index_task(this);
     }
@@ -8094,7 +8095,6 @@ namespace Legion {
     void IndexTask::deactivate_index_task(void)
     //--------------------------------------------------------------------------
     {
-      finalize_output_regions();
       deactivate_multi();
       privilege_paths.clear();
       if (!origin_mapped_slices.empty())
@@ -8132,7 +8132,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::finalize_output_regions(void)
+    void IndexTask::finalize_output_regions(ShardMapping *mapping /*=NULL*/)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
@@ -8147,7 +8147,7 @@ namespace Legion {
 
         if (!output_regions[idx].global_indexing)
           parent_node->construct_realm_index_space_from_union(
-              part_node, runtime->address_space);
+              part_node, runtime->address_space, mapping);
         else
         {
           typedef std::map<Point<1>,size_t> SizeMap;
@@ -8570,24 +8570,13 @@ namespace Legion {
 
         // Create a pending partition for the output region
         // using the launch domain as the color space
-        IndexPartition pid(runtime->get_unique_index_partition_id(),
-                           index_space.get_tree_id(),
-                           index_space.get_type_tag());
-
         IndexSpace color_space = launch_space;
-        size_t color_space_size =
-          runtime->forest->get_domain_volume(color_space);
-        const ApBarrier partition_ready(
-            Realm::Barrier::create_barrier(color_space_size));
-        DistributedID did = runtime->get_available_distributed_id();
-        RtEvent safe = runtime->forest->create_pending_partition(
-            parent_ctx, pid, index_space, color_space, LEGION_AUTO_GENERATE_ID,
-            LEGION_DISJOINT_COMPLETE_KIND, did, partition_ready,
-            partition_ready);
-        if (safe.exists())
-          safe.wait();
-
-        LogicalPartition partition(region.get_tree_id(), pid, req.field_space);
+        IndexPartition pid = parent_ctx->create_pending_partition(
+            index_space, color_space,
+            LEGION_DISJOINT_COMPLETE_KIND,
+            LEGION_AUTO_GENERATE_ID);
+        LogicalPartition partition =
+          runtime->forest->get_logical_partition(region, pid);
 
         // Set the region back to the output requirement so the caller
         // can use it for downstream tasks

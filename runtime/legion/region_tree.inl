@@ -2880,7 +2880,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::construct_realm_index_space_from_union(
-                                IndexPartNode *part_node, AddressSpaceID source)
+                                                       IndexPartNode *part_node,
+                                                       AddressSpaceID source,
+                                                       ShardMapping *mapping)
     //--------------------------------------------------------------------------
     {
       IndexSpaceExpression *expr = part_node->compute_union_expression();
@@ -2888,7 +2890,7 @@ namespace Legion {
       ApEvent ready = expr->get_expr_index_space(&realm_is, type_tag, true);
       if (ready.exists())
         ready.wait();
-      set_realm_index_space(source, realm_is);
+      set_realm_index_space(source, realm_is, mapping);
     }
 
     //--------------------------------------------------------------------------

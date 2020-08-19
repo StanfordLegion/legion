@@ -1751,6 +1751,8 @@ namespace Legion {
                                             TypeTag type_tag);
       virtual IndexSpace create_index_space(const Future &future, 
                                             TypeTag type_tag);
+      virtual IndexSpace create_index_space(ApEvent ready,
+                                            TypeTag type_tag);
       virtual IndexSpace union_index_spaces(
                            const std::vector<IndexSpace> &spaces);
       virtual IndexSpace intersect_index_spaces(

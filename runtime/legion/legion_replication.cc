@@ -555,6 +555,13 @@ namespace Legion {
     void ReplIndexTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      finalize_output_regions(&repl_ctx->shard_manager->get_mapping());
       deactivate_index_task();
       if (reduction_collective != NULL)
       {
