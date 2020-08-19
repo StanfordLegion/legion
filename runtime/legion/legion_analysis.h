@@ -2107,6 +2107,9 @@ namespace Legion {
     public:
       virtual ~EqSetTracker(void) { }
     public:
+      virtual void add_tracker_reference(unsigned cnt = 1) = 0;
+      virtual bool remove_tracker_reference(unsigned cnt = 1) = 0;
+    public:
       virtual void record_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask) = 0;
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
@@ -2650,6 +2653,32 @@ namespace Legion {
         EquivalenceSet *const set;
         ReferenceMutator *const mutator;
       };
+      class InvalidateFunctor {
+      public:
+        InvalidateFunctor(DistributedID did, const FieldMask &mask,
+                          std::set<RtEvent> &applied, AddressSpaceID origin,
+                          const CollectiveMapping *mapping, Runtime *runtime);
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        const DistributedID did;
+        const FieldMask &mask;
+        std::set<RtEvent> &applied;
+        const AddressSpaceID origin;
+        const CollectiveMapping *const invalidate_mapping;
+        Runtime *const runtime;
+      };
+    public:
+      struct DeferMakeOwnerArgs : public LgTaskArgs<DeferMakeOwnerArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_MAKE_OWNER_TASK_ID;
+      public:
+        DeferMakeOwnerArgs(EquivalenceSet *s)
+          : LgTaskArgs<DeferMakeOwnerArgs>(implicit_provenance), 
+            set(s) { }
+      public:
+        EquivalenceSet *const set;
+      };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space,
@@ -2738,11 +2767,12 @@ namespace Legion {
       void remove_tracker(EqSetTracker *tracker, const FieldMask &mask);
       void invalidate_trackers(const FieldMask &mask,
                                std::set<RtEvent> &applied_events,
+                               const AddressSpaceID origin_space,
                                const CollectiveMapping *collective_mapping);
       void clone_from(EquivalenceSet *src, const FieldMask &src_mask,
-                      std::set<RtEvent> &applied_events);
-      void overwrite_from(EquivalenceSet *src, const FieldMask &src_mask,
-                          std::set<RtEvent> &applied_events);
+            std::set<RtEvent> &applied_events, bool invalidate_overlap = false);
+      RtEvent make_owner(AddressSpaceID owner, 
+                         RtEvent precondition = RtEvent::NO_RT_EVENT);
     protected: 
       void defer_traversal(AutoTryLock &eq, PhysicalAnalysis &analysis,
                            const FieldMask &mask,
@@ -2847,8 +2877,13 @@ namespace Legion {
                               InstanceView *restricted_view,
                               ReferenceMutator &mutator);
     protected:
+      void send_equivalence_set(AddressSpaceID target);
       void check_for_migration(PhysicalAnalysis &analysis,
                                std::set<RtEvent> &applied_events);
+      void pack_migration(Serializer &rez, RtEvent done_migration);
+      void update_owner(const AddressSpaceID new_logical_owner);
+      void unpack_state(Deserializer &derez, AddressSpaceID source,
+                        std::set<RtEvent> &ready_events);
     public:
       static void handle_remote_references(const void *args);
       static void handle_make_owner(const void *args);
@@ -2863,6 +2898,8 @@ namespace Legion {
       static void handle_migration(Deserializer &derez, 
                                    Runtime *runtime, AddressSpaceID source);
       static void handle_owner_update(Deserializer &derez, Runtime *rt);
+      static void handle_make_owner(Deserializer &derez, Runtime *rt);
+      static void handle_invalidate_trackers(Deserializer &derez, Runtime *rt);
     public:
       RegionNode *const region_node;
       IndexSpaceNode *const set_expr;
@@ -3016,6 +3053,8 @@ namespace Legion {
                                        const UniqueID opid,
                                        const AddressSpaceID source,
                                        std::set<RtEvent> &ready);
+      virtual void add_tracker_reference(unsigned cnt = 1);
+      virtual bool remove_tracker_reference(unsigned cnt = 1);
       virtual void record_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set, 
@@ -3023,6 +3062,7 @@ namespace Legion {
       virtual void remove_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
       void finalize_equivalence_sets(RtUserEvent done_event);                           
+      void finalize_manager(void);
     public:
       // Call these from region nodes
       void initialize_versioning_analysis(EquivalenceSet *set,

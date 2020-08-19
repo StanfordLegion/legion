@@ -480,7 +480,7 @@ namespace Legion {
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
-                            const CollectiveMapping *mapping) = 0;
+                            InnerContext *source_context) = 0;
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source) = 0;
@@ -904,6 +904,9 @@ namespace Legion {
                     VersionManager *target, FieldMask mask,
                     const UniqueID opid, const AddressSpaceID source, 
                     RtUserEvent ready_event, std::set<RtEvent> &applied_events);
+      virtual void deduplicate_invalidate_trackers(
+                    const FieldMaskSet<EquivalenceSet> &to_untrack,
+                    std::set<RtEvent> &applied_events);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1259,14 +1262,13 @@ namespace Legion {
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
       void invalidate_created_requirement_contexts(std::set<RtEvent> &applied,
-               size_t num_shards = 0, const CollectiveMapping *mapping = NULL);
+                                                   size_t num_shards = 0);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
-                            const CollectiveMapping *mapping);
+                            InnerContext *source_context);
       void invalidate_region_tree_context(LogicalRegion handle,
-                                      std::set<RtEvent> &applied_events,
-                                      const CollectiveMapping *mapping = NULL);
+                                          std::set<RtEvent> &applied_events);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -1478,7 +1480,7 @@ namespace Legion {
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
-                            const CollectiveMapping *mapping);
+                            InnerContext *source_context);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask, const UniqueID opid, 
@@ -1758,11 +1760,11 @@ namespace Legion {
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
-                            const CollectiveMapping *mapping);
+                            InnerContext *source_context);
       void receive_replicate_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state, 
                           std::set<RtEvent> &applied_events, size_t num_shards,
-                          const CollectiveMapping *mapping = NULL);
+                          InnerContext *source_context);
       void handle_created_region_contexts(Deserializer &derez,
                                           std::set<RtEvent> &applied_events);
     public: 
@@ -2115,6 +2117,9 @@ namespace Legion {
                     VersionManager *target, FieldMask mask,
                     const UniqueID opid, const AddressSpaceID source, 
                     RtUserEvent ready_event, std::set<RtEvent> &applied_events);
+      virtual void deduplicate_invalidate_trackers(
+                    const FieldMaskSet<EquivalenceSet> &to_untrack,
+                    std::set<RtEvent> &applied_events);
     public:
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
@@ -2389,7 +2394,7 @@ namespace Legion {
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
-                            const CollectiveMapping *mapping);
+                            InnerContext *source_context);
       static void handle_created_region_contexts(Runtime *runtime, 
                                    Deserializer &derez, AddressSpaceID source);
     public:
@@ -2797,7 +2802,7 @@ namespace Legion {
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
-                            const CollectiveMapping *mapping);
+                            InnerContext *source_context);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -3212,7 +3217,7 @@ namespace Legion {
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
-                            const CollectiveMapping *mapping);
+                            InnerContext *source_context);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);

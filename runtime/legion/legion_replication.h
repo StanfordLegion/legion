@@ -2035,6 +2035,7 @@ namespace Legion {
         { return unique_sorted_spaces[idx]; }
       inline size_t size(void) const { return unique_sorted_spaces.size(); }
       bool operator==(const CollectiveMapping &rhs) const;
+      bool operator!=(const CollectiveMapping &rhs) const;
     public:
       AddressSpaceID get_parent(const AddressSpaceID origin, 
                                 const AddressSpaceID local,

@@ -362,11 +362,7 @@ namespace Legion {
       LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
       LG_REPLAY_SLICE_ID,
       LG_DELETE_TEMPLATE_ID,
-      LG_REFINEMENT_TASK_ID,
       LG_REMOTE_REF_TASK_ID,
-      LG_DEFER_RAY_TRACE_TASK_ID,
-      LG_DEFER_RAY_TRACE_FINISH_TASK_ID,
-      LG_DEFER_SUBSET_REQUEST_TASK_ID,
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_MERGE_OR_FORWARD_TASK_ID,
       LG_DEFER_EQ_RESPONSE_TASK_ID,
@@ -483,11 +479,7 @@ namespace Legion {
         "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
         "Delete Physical Template",                               \
-        "Refinement",                                             \
         "Remove Remote References",                               \
-        "Defer Ray Trace",                                        \
-        "Defer Ray Trace Finish",                                 \
-        "Defer Subset Request",                                   \
         "Defer Make Owner",                                       \
         "Defer Merge or Forward",                                 \
         "Defer Equivalence Set Response",                         \
@@ -832,12 +824,10 @@ namespace Legion {
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
       SEND_EQUIVALENCE_SET_REQUEST,
       SEND_EQUIVALENCE_SET_RESPONSE,
-      SEND_EQUIVALENCE_SET_SUBSET_REQUEST,
-      SEND_EQUIVALENCE_SET_SUBSET_RESPONSE,
-      SEND_EQUIVALENCE_SET_SUBSET_UPDATE,
+      SEND_EQUIVALENCE_SET_INVALIDATE_TRACKERS,
       SEND_EQUIVALENCE_SET_MIGRATION,
       SEND_EQUIVALENCE_SET_OWNER_UPDATE,
-      SEND_EQUIVALENCE_SET_REMOTE_REFINEMENT,
+      SEND_EQUIVALENCE_SET_MAKE_OWNER,
       SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES,
       SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INVALID,
       SEND_EQUIVALENCE_SET_REMOTE_UPDATES,
@@ -847,7 +837,6 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES,
       SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
-      SEND_EQUIVALENCE_SET_INVALIDATION,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_CREATE_REQUEST,
@@ -1035,12 +1024,10 @@ namespace Legion {
         "Compute Equivalence Sets Request",                           \
         "Send Equivalence Set Request",                               \
         "Send Equivalence Set Response",                              \
-        "Send Equivalence Set Subset Request",                        \
-        "Send Equivalence Set Subset Response",                       \
-        "Send Equivalence Set Subset Update",                         \
+        "Send Equivalence Set Invalidate Trackers",                   \
         "Send Equivalence Set Migration",                             \
         "Send Equivalence Set Owner Update",                          \
-        "Send Equivalence Set Remote Refinement",                     \
+        "Send Equivalence Set Make Owner",                            \
         "Send Equivalence Set Remote Request Instances",              \
         "Send Equivalence Set Remote Request Invalid",                \
         "Send Equivalence Set Remote Updates",                        \
@@ -1050,7 +1037,6 @@ namespace Legion {
         "Send Equivalence Set Remote Overwrites",                     \
         "Send Equivalence Set Remote Filters",                        \
         "Send Equivalence Set Remote Instances",                      \
-        "Send Equivalence Set Invalidation",                          \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Create Request",                               \

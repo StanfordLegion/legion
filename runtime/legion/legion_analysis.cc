@@ -14803,8 +14803,97 @@ namespace Legion {
               children.begin(); it != children.end(); it++)
           send_remote_gc_decrement(*it, mutator);
       }
-      // TODO: Invalidate our physical state data
-      
+      if (!total_valid_instances.empty())
+      {
+        for (FieldMaskSet<LogicalView>::const_iterator it =
+              total_valid_instances.begin(); it != 
+              total_valid_instances.end(); it++)
+          if (it->first->remove_nested_valid_ref(did, mutator))
+            delete it->first;
+        total_valid_instances.clear();
+      }
+      if (!partial_valid_instances.empty())
+      {
+        for (LegionMap<LogicalView*,
+              FieldMaskSet<IndexSpaceExpression> >::aligned::iterator pit =
+              partial_valid_instances.begin(); pit != 
+              partial_valid_instances.end(); pit++)
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
+                pit->second.begin(); it != pit->second.end(); it++)
+            if (it->first->remove_expression_reference())
+              delete it->first;
+          if (pit->first->remove_nested_valid_ref(did, mutator))
+            delete pit->first;
+          pit->second.clear();
+        }
+        partial_valid_instances.clear();
+        partial_valid_fields.clear();
+      }
+      if (!initialized_data.empty())
+      {
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              initialized_data.begin(); it != initialized_data.end(); it++)
+          if (it->first->remove_expression_reference())
+            delete it->first;
+        initialized_data.clear();
+      }
+      if (!reduction_instances.empty())
+      {
+        for (std::map<unsigned,std::list<std::pair<ReductionView*,
+              IndexSpaceExpression*> > >::iterator it =
+              reduction_instances.begin(); it != 
+              reduction_instances.end(); it++)
+        {
+          while (!it->second.empty())
+          {
+            std::pair<ReductionView*,IndexSpaceExpression*> &back = 
+              it->second.back();
+            if (back.first->remove_nested_valid_ref(did, mutator))
+              delete back.first;
+            if (back.second->remove_expression_reference())
+              delete back.second;
+            it->second.pop_back();
+          }
+        }
+        reduction_instances.clear();
+        reduction_fields.clear();
+      }
+      if (!restricted_instances.empty())
+      {
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::aligned::iterator rit =
+              restricted_instances.begin(); rit != 
+              restricted_instances.end(); rit++)
+        {
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+            if (it->first->remove_nested_valid_ref(did, mutator))
+              delete it->first;
+          if (rit->first->remove_expression_reference())
+            delete rit->first;
+          rit->second.clear();
+        }
+        restricted_instances.clear();
+        restricted_fields.clear();
+      }
+      if (!released_instances.empty())
+      {
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::aligned::iterator rit =
+              released_instances.begin(); rit != 
+              released_instances.end(); rit++)
+        {
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+            if (it->first->remove_nested_valid_ref(did, mutator))
+              delete it->first;
+          if (rit->first->remove_expression_reference())
+            delete rit->first;
+          rit->second.clear();
+        }
+        released_instances.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15822,7 +15911,6 @@ namespace Legion {
       check_for_migration(analysis, applied_events);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void EquivalenceSet::check_for_migration(PhysicalAnalysis &analysis,
                                              std::set<RtEvent> &applied_events)
@@ -15895,16 +15983,6 @@ namespace Legion {
         std::sort(current_samples.begin(), current_samples.end());
       // Increment this for the next pass
       migration_index = (migration_index + 1) % MIGRATION_EPOCHS;
-      // Don't do any migrations if we have any pending refinements
-      // or we have outstanding analyses that prevent it for now
-      if (!pending_refinements.empty() || !!refining_fields || 
-          (pending_analyses > 0))
-      {
-        // Reset the data structures for the next run
-        sample_count = 0;
-        user_samples[migration_index].clear();
-        return;
-      }
       std::vector<std::pair<AddressSpaceID,unsigned> > &next_samples = 
         user_samples[migration_index];
       if (MIGRATION_EPOCHS > 1)
@@ -16012,12 +16090,7 @@ namespace Legion {
       log_migration.info("Migrating Equivalence Set %llx from %d to %d",
           did, local_space, new_logical_owner);
       logical_owner_space = new_logical_owner;
-      // Add ourselves and remove the new owner from remote subsets
-      remote_subsets.insert(local_space);
-      remote_subsets.erase(logical_owner_space);
-      // We can switch our eq_state to being remote valid
-      eq_state = VALID_STATE;
-      RtUserEvent done_migration = Runtime::create_rt_user_event();
+      const RtUserEvent done_migration = Runtime::create_rt_user_event();
       // Do the migration
       Serializer rez;
       {
@@ -16030,7 +16103,6 @@ namespace Legion {
       applied_events.insert(done_migration);
 #endif // DISABLE_EQUIVALENCE_SET MIGRATION
     }
-#endif
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::defer_traversal(AutoTryLock &eq,
@@ -18604,6 +18676,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::remove_update_guard(CopyFillGuard *guard)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      // If we're no longer the logical owner then it's because we were
+      // migrated and there should be no guards so we're done
+      if (update_guards.empty())
+        return;
+      // We could get here when we're not the logical owner if we've unpacked
+      // ourselves but haven't become the owner yet, in which case we still
+      // need to prune ourselves out of the list
+      FieldMaskSet<CopyFillGuard>::iterator finder = update_guards.find(guard);
+      // It's also possible that the equivalence set is migrated away and
+      // then migrated back before this guard is removed in which case we
+      // won't find it in the update guards and can safely ignore it
+      if (finder == update_guards.end())
+        return;
+      const bool should_tighten = !!finder->second;
+      update_guards.erase(finder);
+      if (should_tighten)
+        update_guards.tighten_valid_mask();
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::record_tracker(EqSetTracker *tracker, 
                                         const FieldMask &mask)
     //--------------------------------------------------------------------------
@@ -18628,16 +18724,110 @@ namespace Legion {
         recorded_trackers.erase(finder);
     }
 
-#if 0
+    //--------------------------------------------------------------------------
+    EquivalenceSet::InvalidateFunctor::InvalidateFunctor(DistributedID id,
+              const FieldMask &m, std::set<RtEvent> &ap, AddressSpaceID o, 
+              const CollectiveMapping *mapping, Runtime *rt)
+      : did(id), mask(m), applied(ap), origin(o), invalidate_mapping(mapping),
+        runtime(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::InvalidateFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      if ((invalidate_mapping != NULL) && invalidate_mapping->contains(target))
+        return;
+      const RtUserEvent done_event = Runtime::create_rt_user_event();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(mask);
+        rez.serialize(origin);
+        rez.serialize(done_event);
+      }
+      runtime->send_equivalence_set_invalidate_trackers(target, rez);
+      applied.insert(done_event);
+    }
+
     //--------------------------------------------------------------------------
     void EquivalenceSet::invalidate_trackers(const FieldMask &mask,
                                     std::set<RtEvent> &applied_events,
+                                    const AddressSpaceID origin_space,
                                     const CollectiveMapping *invalidate_mapping)
     //--------------------------------------------------------------------------
     {
       // First send out any messages to remote nodes that need to be sent
-      
-
+      if (invalidate_mapping != NULL)
+      {
+        if (collective_mapping != NULL)
+        {
+          if ((invalidate_mapping != collective_mapping) &&
+              (*invalidate_mapping != *collective_mapping))
+          {
+#ifdef DEBUG_LEGION
+            assert(invalidate_mapping->contains(runtime->address_space));
+#endif
+            // If we're the first ones in the invalidate mapping
+            // Go through and compute the difference and send invalidate
+            // requests to all the ones that will not get it automatically
+            if ((*invalidate_mapping)[0] == runtime->address_space)
+            {
+              for (unsigned idx = 0; idx < collective_mapping->size(); idx++)
+              {
+                const AddressSpace target = (*collective_mapping)[idx];
+                if (invalidate_mapping->contains(target))
+                  continue;
+                const RtUserEvent done_event = Runtime::create_rt_user_event();
+                Serializer rez;
+                {
+                  RezCheck z(rez);
+                  rez.serialize(did);
+                  rez.serialize(mask);
+                  rez.serialize(origin_space);
+                  rez.serialize(done_event);
+                }
+                runtime->send_equivalence_set_invalidate_trackers(target, rez);
+                applied_events.insert(done_event);   
+              }
+            }
+          }
+        }
+      }
+      else
+      {
+        if (collective_mapping != NULL)
+        {
+          // Send it to each of the children
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(origin_space, local_space, 
+              runtime->legion_collective_radix, children);
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+          {
+            const RtUserEvent done_event = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(mask);
+              rez.serialize(origin_space);
+              rez.serialize(done_event);
+            }
+            runtime->send_equivalence_set_invalidate_trackers(*it, rez);
+            applied_events.insert(done_event);
+          }
+        }
+      }
+      if (has_remote_instances())
+      {
+        InvalidateFunctor functor(did, mask, applied_events, origin_space,
+                                  invalidate_mapping, runtime);
+        map_over_remote_instances(functor);
+      }
       // Finally perform our invalidation here
       // Just need to pull these out locally and remove 
       FieldMaskSet<EqSetTracker> to_remove;
@@ -18646,12 +18836,296 @@ namespace Legion {
         if (recorded_trackers.empty() || 
             (mask * recorded_trackers.get_valid_mask()))
           return;
-        std::vector<EqSetTracker*> to_delete;
-        for (FieldMaskSet<EqSetTracker>::iterator it =
-            
+        if (!(recorded_trackers.get_valid_mask() - mask))
+        {
+          // Mask dominates all trackers, so we can just grab them all
+          // Add reference to them all to keep them alive until we 
+          // can finish the removal
+          for (FieldMaskSet<EqSetTracker>::const_iterator it =
+                recorded_trackers.begin(); it != recorded_trackers.end(); it++)
+            it->first->add_tracker_reference();
+          to_remove.swap(recorded_trackers);
+        }
+        else
+        {
+          // Filter out specific trackers
+          std::vector<EqSetTracker*> to_delete;
+          for (FieldMaskSet<EqSetTracker>::iterator it =
+                recorded_trackers.begin(); it != recorded_trackers.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            if (to_remove.insert(it->first, overlap))
+              it->first->add_tracker_reference();
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+            for (std::vector<EqSetTracker*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+              recorded_trackers.erase(*it);
+            if (!recorded_trackers.empty())
+              recorded_trackers.tighten_valid_mask();
+          }
+        }
+      }
+      if (!to_remove.empty())
+      {
+        for (FieldMaskSet<EqSetTracker>::const_iterator it =
+              to_remove.begin(); it != to_remove.end(); it++)
+        {
+          it->first->remove_equivalence_set(this, it->second);
+          if (it->first->remove_tracker_reference())
+            delete it->first;
+        }
       }
     }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_invalidate_trackers(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready_event;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(did, ready_event);
+      FieldMask mask;
+      derez.deserialize(mask);
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      std::set<RtEvent> applied_events; 
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      set->invalidate_trackers(mask, applied_events, origin, NULL/*mapping*/);
+      if (!applied_events.empty())
+        Runtime::trigger_event(done_event,
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::send_equivalence_set(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      // We should have had a request for this already
+      assert(!has_remote_instance(target));
+      assert((collective_mapping == NULL) || 
+              !collective_mapping->contains(target));
 #endif
+      update_remote_instances(target);
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        // There be dragons here!
+        // In the case where we first make a new equivalence set on a
+        // remote node that is about to be the owner, we can't mark it
+        // as the owner until it receives all an unpack_state or 
+        // unpack_migration message which provides it valid meta-data
+        // Therefore we'll tell it that we're the owner which will 
+        // create a cycle in the forwarding graph. This won't matter for
+        // unpack_migration as it's going to overwrite the data in the
+        // equivalence set anyway, but for upack_state, we'll need to 
+        // recognize when to break the cycle. Effectively whenever we
+        // send an update to a remote node that we can tell has never
+        // been the owner before (and therefore can't have migrated)
+        // we know that we should just do the unpack there. This will
+        // break the cycle and allow forward progress. Analysis messages
+        // may go round and round a few times, but they have lower
+        // priority and therefore shouldn't create an livelock.
+        {
+          AutoLock eq(eq_lock,1,false/*exclusive*/);
+          if (target == logical_owner_space)
+            rez.serialize(local_space);
+          else
+            rez.serialize(logical_owner_space);
+        }
+        rez.serialize(region_node->handle);
+      }
+      runtime->send_equivalence_set_response(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_equivalence_set_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      EquivalenceSet *set = dynamic_cast<EquivalenceSet*>(dc);
+      assert(set != NULL);
+#else
+      EquivalenceSet *set = static_cast<EquivalenceSet*>(dc);
+#endif
+      set->send_equivalence_set(source);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_equivalence_set_response(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      AddressSpaceID logical_owner;
+      derez.deserialize(logical_owner);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      RegionNode *node = runtime->forest->get_node(handle);
+
+      void *location;
+      EquivalenceSet *set = NULL;
+      if (runtime->find_pending_collectable_location(did, location))
+        set = new(location) EquivalenceSet(runtime, did, source, logical_owner,
+                                           node, false/*register now*/);
+      else
+        set = new EquivalenceSet(runtime, did, source, logical_owner,
+                                 node, false/*register now*/);
+      // Once construction is complete then we do the registration
+      set->register_with_runtime(NULL/*no remote registration needed*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_owner(const AddressSpaceID new_logical_owner)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      // We should never be told that we're the new owner this way
+      assert(new_logical_owner != local_space);
+#endif
+      // If we are the owner then we know this update is stale so ignore it
+      if (!is_logical_owner())
+        logical_owner_space = new_logical_owner;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent EquivalenceSet::make_owner(AddressSpaceID new_owner, RtEvent pre)
+    //--------------------------------------------------------------------------
+    {
+      if (new_owner != local_space)
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(pre);
+          rez.serialize(done);
+        }
+        runtime->send_equivalence_set_make_owner(new_owner, rez);
+        return done;
+      }
+      if (pre.exists() && !pre.has_triggered())
+      {
+        const DeferMakeOwnerArgs args(this);
+        return runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_DEFERRED_PRIORITY, pre);
+      }
+      // If we make it here then we can finally mark ourselves the owner
+      AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      assert(logical_owner_space != local_space);
+#endif
+      logical_owner_space = local_space;
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_make_owner(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferMakeOwnerArgs *dargs = (const DeferMakeOwnerArgs*)args;
+      dargs->set->make_owner(dargs->set->local_space, RtEvent::NO_RT_EVENT);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_make_owner(Deserializer &derez,
+                                                      Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      RtEvent precondition;
+      derez.deserialize(precondition);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      if ((ready.exists() && !ready.has_triggered()) ||
+          (precondition.exists() && !precondition.has_triggered()))
+      {
+        const DeferMakeOwnerArgs args(set);
+        Runtime::trigger_event(done,
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
+              Runtime::merge_events(ready, precondition)));
+      }
+      else
+        Runtime::trigger_event(done, 
+            set->make_owner(set->local_space, precondition));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_owner_update(Deserializer &derez,
+                                                        Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      AddressSpaceID new_owner;
+      derez.deserialize(new_owner);
+      RtUserEvent done;
+      derez.deserialize(done);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      set->update_owner(new_owner);
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_migration(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      std::set<RtEvent> ready_events;
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      set->unpack_state(derez, source, ready_events);
+      // Check to see if we're ready or we need to defer this
+      RtEvent precondition;
+      if (!ready_events.empty())
+        precondition = set->make_owner(runtime->address_space, 
+            Runtime::merge_events(ready_events));
+      else
+        precondition = set->make_owner(runtime->address_space);
+      Runtime::trigger_event(done, precondition);
+    }
 
     /////////////////////////////////////////////////////////////
     // Pending Equivalence Set 
@@ -18738,12 +19212,15 @@ namespace Legion {
             runtime->get_available_distributed_id(), runtime->address_space,
             suggested_owner, region_node, true/*register now*/);
         new_set->add_base_valid_ref(CONTEXT_REF);
-        std::set<RtEvent> clone_events;
+        std::set<RtEvent> preconditions;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               previous_sets.begin(); it != previous_sets.end(); it++)
-          new_set->clone_from(it->first, it->second, clone_events);
-        if (!clone_events.empty())
-          clone_event = Runtime::merge_events(clone_events);
+          new_set->clone_from(it->first, it->second, preconditions);
+        if (!preconditions.empty())
+          clone_event = new_set->make_owner(suggested_owner, 
+              Runtime::merge_events(preconditions));
+        else
+          clone_event = new_set->make_owner(suggested_owner);
       }
       if (clone_event.exists())
       {
@@ -18824,24 +19301,10 @@ namespace Legion {
       assert(pending_equivalence_sets.empty());
       assert(waiting_infos.empty());
       assert(equivalence_sets_ready.empty());
+      assert(equivalence_sets.empty());
       assert(!disjoint_complete);
       assert(disjoint_complete_children.empty());
 #endif
-      // If we have any equivalence sets, tell them we are no longer valid
-      if (!equivalence_sets.empty())
-      {
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(it->first->region_node != node);
-#endif
-          it->first->remove_tracker(this, it->second);
-          if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-            delete it->first;
-        }
-        equivalence_sets.clear();
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -19006,6 +19469,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VersionManager::add_tracker_reference(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      node->add_base_resource_ref(VERSION_MANAGER_REF, cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    bool VersionManager::remove_tracker_reference(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      if (node->remove_base_resource_ref(VERSION_MANAGER_REF, cnt))
+        delete node;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void VersionManager::record_equivalence_set(EquivalenceSet *set,
                                                 const FieldMask &mask)
     //--------------------------------------------------------------------------
@@ -19147,6 +19626,39 @@ namespace Legion {
             Runtime::merge_events(done_preconditions));
       else
         Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::finalize_manager(void)
+    //--------------------------------------------------------------------------
+    {
+      // We need to remove any tracked equivalence sets that we have
+      FieldMaskSet<EquivalenceSet> to_remove;
+      {
+        AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+        // All these other resource should already be empty by the time
+        // we are being finalized
+        assert(pending_equivalence_sets.empty());
+        assert(waiting_infos.empty());
+        assert(equivalence_sets_ready.empty());
+        assert(!disjoint_complete);
+        assert(disjoint_complete_children.empty());
+#endif
+        if (equivalence_sets.empty())
+          return;
+        to_remove.swap(equivalence_sets);
+      }
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            to_remove.begin(); it != to_remove.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->first->region_node != node);
+#endif
+        it->first->remove_tracker(this, it->second);
+        if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+          delete it->first;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -19804,7 +20316,7 @@ namespace Legion {
         assert(it->first->region_node == node);
 #endif
         LocalReferenceMutator mutator;
-        it->first->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
+        it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
         it->first->send_remote_valid_decrement(source, NULL,
                                                mutator.get_done_event());
       }

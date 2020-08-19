@@ -3645,6 +3645,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::deduplicate_invalidate_trackers(
+                                 const FieldMaskSet<EquivalenceSet> &to_untrack,
+                                 std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            to_untrack.begin(); it != to_untrack.end(); it++)
+        it->first->invalidate_trackers(it->second, applied_events,
+            runtime->address_space, NULL/*no collective mapping*/);
+    }
+
+    //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_parent_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
@@ -8443,7 +8455,8 @@ namespace Legion {
             version_infos[idx1].get_equivalence_sets();
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
-            eq_set->clone_from(it->first, it->second, applied_events);
+            eq_set->clone_from(it->first, it->second, applied_events, 
+                               true/*invalidate source overlap*/);
         }
         // Now initialize our logical and physical contexts
         region_node->initialize_disjoint_complete_tree(ctx, user_mask);
@@ -8475,7 +8488,7 @@ namespace Legion {
         const FieldMask close_mask = 
           node->column_source->get_field_mask(regions[idx].privilege_fields);
         node->invalidate_refinement(tree_context.get_id(), close_mask,
-                                    true/*self*/, applied);
+                                    true/*self*/, applied, this);
       }
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(applied);
@@ -8488,8 +8501,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::invalidate_created_requirement_contexts(
-                           std::set<RtEvent> &applied_events, size_t num_shards,
-                           const CollectiveMapping *mapping)
+                           std::set<RtEvent> &applied_events, size_t num_shards)
     //--------------------------------------------------------------------------
     {
       std::set<LogicalRegion> invalidated_regions, return_regions;
@@ -8529,7 +8541,7 @@ namespace Legion {
             runtime->forest->invalidate_current_context(tree_context,
                                           false/*users only*/, node);
             node->invalidate_refinement(tree_context.get_id(), all_ones_mask,
-                                      true/*self*/, applied_events, mapping);
+                                        true/*self*/, applied_events, this);
             invalidated_regions.insert(it->second.region);
           }
         }
@@ -8543,7 +8555,7 @@ namespace Legion {
           created_states[index++] = runtime->forest->get_node(*it);
         InnerContext *parent_ctx = find_parent_context();   
         parent_ctx->receive_created_region_contexts(tree_context,
-            created_states, applied_events, num_shards, mapping);
+            created_states, applied_events, num_shards, this);
       }
     }
 
@@ -8551,7 +8563,7 @@ namespace Legion {
     void InnerContext::receive_created_region_contexts(
           RegionTreeContext ctx, const std::vector<RegionNode*> &created_states,
           std::set<RtEvent> &applied_events, size_t num_shards,
-          const CollectiveMapping *mapping)
+          InnerContext *source_context)
     //--------------------------------------------------------------------------
     {
       const ContextID src_ctx = ctx.get_id();
@@ -8561,14 +8573,14 @@ namespace Legion {
             created_states.begin(); it != created_states.end(); it++)
       {
         (*it)->migrate_logical_state(src_ctx, dst_ctx, merge);
-        (*it)->migrate_version_state(src_ctx, dst_ctx, 
-                                     applied_events, merge, mapping);
+        (*it)->migrate_version_state(src_ctx, dst_ctx, applied_events, 
+                                     merge, source_context);
       }
     }
 
     //--------------------------------------------------------------------------
     void InnerContext::invalidate_region_tree_context(LogicalRegion handle,
-            std::set<RtEvent> &applied_events, const CollectiveMapping *mapping)
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       RegionNode *node = runtime->forest->get_node(handle);
@@ -8576,7 +8588,7 @@ namespace Legion {
                                           false/*users only*/, node);
       const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
       node->invalidate_refinement(tree_context.get_id(), all_ones_mask, 
-                                  true/*self*/, applied_events, mapping);
+                                  true/*self*/, applied_events, this);
     }
 
     //--------------------------------------------------------------------------
@@ -9767,7 +9779,7 @@ namespace Legion {
     void TopLevelContext::receive_created_region_contexts(RegionTreeContext ctx,
                  const std::vector<RegionNode*> &created_states,
                  std::set<RtEvent> &applied_events, size_t num_shards,
-                 const CollectiveMapping *mapping)
+                 InnerContext *source_context)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -10742,8 +10754,6 @@ namespace Legion {
       // that we kept those things in our context
       DETAILED_PROFILER(runtime, INVALIDATE_REGION_TREE_CONTEXTS_CALL);
       // Invalidate all our region contexts
-      const CollectiveMapping &mapping = 
-        shard_manager->get_collective_mapping();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (IS_NO_ACCESS(regions[idx]))
@@ -10756,10 +10766,10 @@ namespace Legion {
         const FieldMask close_mask = 
           node->column_source->get_field_mask(regions[idx].privilege_fields);
         node->invalidate_refinement(tree_context.get_id(), close_mask,
-                                    true/*self*/, applied, &mapping);
+                                    true/*self*/, applied, this);
       }
       if (!created_requirements.empty())
-        invalidate_created_requirement_contexts(applied,total_shards,&mapping); 
+        invalidate_created_requirement_contexts(applied, total_shards); 
       // Cannot clear our instance top view references until we are deleted 
       // as we might still need to help out our other sibling shards
       
@@ -10771,7 +10781,7 @@ namespace Legion {
     void ReplicateContext::receive_created_region_contexts(
            RegionTreeContext ctx, const std::vector<RegionNode*> &created_state,
            std::set<RtEvent> &applied_events, size_t num_shards,
-           const CollectiveMapping *mapping)
+           InnerContext *source_context)
     //--------------------------------------------------------------------------
     {
       // If we have the same number of shards flowing back then we can just 
@@ -10781,7 +10791,7 @@ namespace Legion {
       if (num_shards == total_shards)
       {
         InnerContext::receive_created_region_contexts(ctx, created_state,
-            applied_events, 0/*no merge*/, mapping);
+                          applied_events, 0/*no merge*/, source_context);
         return;
       }
       // If we make it down here then we're doing the broadcast to everyone
@@ -10797,23 +10807,23 @@ namespace Legion {
         (*it)->pack_logical_state(ctx.get_id(), rez, 
             destination_count, false/*invalidate*/);
         (*it)->pack_version_state(ctx.get_id(), rez, destination_count, 
-                          false/*invalidate*/, applied_events, mapping);
+                  false/*invalidate*/, applied_events, source_context);
       }
       shard_manager->broadcast_created_region_contexts(owner_shard, rez,
                                                        applied_events);
       receive_replicate_created_region_contexts(ctx, created_state, 
-                                applied_events, num_shards, mapping);
+                        applied_events, num_shards, source_context);
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::receive_replicate_created_region_contexts(
            RegionTreeContext ctx, const std::vector<RegionNode*> &created_state,
            std::set<RtEvent> &applied_events, size_t num_shards,
-           const CollectiveMapping *mapping)
+           InnerContext *source_context)
     //--------------------------------------------------------------------------
     {
       InnerContext::receive_created_region_contexts(ctx, created_state,
-                                  applied_events, num_shards, mapping);
+                            applied_events, num_shards, source_context);
     }
 
     //--------------------------------------------------------------------------
@@ -16803,7 +16813,7 @@ namespace Legion {
         created_states[idx] = node;
       }
       receive_replicate_created_region_contexts(ctx, created_states,
-                                                applied_events, num_shards);
+                                  applied_events, num_shards, NULL);
       runtime->free_region_tree_context(ctx);
     }
 
@@ -17928,7 +17938,7 @@ namespace Legion {
       IndexPartNode *index_part = region->parent->row_source;
       // See if we can find its shard owner the easy way or the hard way
       ShardID target_shard;
-        const LegionColor color = region->get_color();
+      const LegionColor color = region->get_color();
       if (index_part->total_children != index_part->max_linearized_color)
       {
         // Have to do this the hard way
@@ -17957,6 +17967,52 @@ namespace Legion {
       else // we're the owner so just handle this here
         return InnerContext::finalize_disjoint_complete_sets(region, target,
                     request_mask, opid, source, ready_event, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::deduplicate_invalidate_trackers(
+                                 const FieldMaskSet<EquivalenceSet> &to_untrack,
+                                 std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      // check to see if we're the first shard on this node
+      const bool first_local_shard = 
+        shard_manager->is_first_local_shard(owner_shard);
+      const CollectiveMapping &collective_mapping = 
+        shard_manager->get_collective_mapping();
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            to_untrack.begin(); it != to_untrack.end(); it++)
+      {
+        if (it->first->collective_mapping != NULL)
+        {
+          // This was an equivalence set that was made by all shards
+          // so we can invalidate it from just the first shards on
+          // each node with the collective manager map
+          if (first_local_shard)
+            it->first->invalidate_trackers(it->second, applied_events,
+                runtime->address_space, &collective_mapping);
+        }
+        else
+        {
+          // This was an equivalence set that was made on just one shard
+          RegionNode *region = it->first->region_node;
+          const LegionColor color = region->get_color();
+          IndexPartNode *index_part = region->parent->row_source;
+          ShardID target_shard;
+          if (index_part->total_children != index_part->max_linearized_color)
+          {
+            // Have to do this the hard way
+            const size_t index_offset = 
+              index_part->color_space->compute_color_offset(color);
+            target_shard = index_offset % total_shards;
+          }
+          else // This is the easy way, we can just linearize the color 
+            target_shard = color % total_shards;
+          if (target_shard == owner_shard->shard_id)
+            it->first->invalidate_trackers(it->second, applied_events,
+                  runtime->address_space, NULL/*collective manager*/);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -18391,7 +18447,7 @@ namespace Legion {
     void RemoteContext::receive_created_region_contexts(RegionTreeContext ctx,
                            const std::vector<RegionNode*> &created_state,
                            std::set<RtEvent> &applied_events, size_t num_shards,
-                           const CollectiveMapping *mapping)
+                           InnerContext *source_context)
     //--------------------------------------------------------------------------
     {
       const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -18408,7 +18464,7 @@ namespace Legion {
           (*it)->pack_logical_state(ctx.get_id(), rez, 
                                     1/*count*/, true/*invalidate*/);
           (*it)->pack_version_state(ctx.get_id(), rez, 1/*count*/, 
-                      true/*invalidate*/, applied_events, mapping);
+                true/*invalidate*/, applied_events, source_context);
         }
         rez.serialize(done_event);
       }
@@ -18446,7 +18502,7 @@ namespace Legion {
 
       InnerContext *context = runtime->find_context(ctx_uid);
       context->receive_created_region_contexts(ctx, created_state, 
-                      applied_events, num_shards, NULL/*mapping*/);
+              applied_events, num_shards, NULL/*source context*/);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
@@ -20448,7 +20504,7 @@ namespace Legion {
     void LeafContext::receive_created_region_contexts(RegionTreeContext ctx,
                            const std::vector<RegionNode*> &created_states,
                            std::set<RtEvent> &applied_events, size_t num_shards,
-                           const CollectiveMapping *mapping)
+                           InnerContext *source_context)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -21906,7 +21962,7 @@ namespace Legion {
     void InlineContext::receive_created_region_contexts(RegionTreeContext ctx,
                            const std::vector<RegionNode*> &created_states,
                            std::set<RtEvent> &applied_events, size_t num_shards,
-                           const CollectiveMapping *mapping)
+                           InnerContext *source_context)
     //--------------------------------------------------------------------------
     {
       assert(false);

@@ -3569,7 +3569,7 @@ namespace Legion {
       void migrate_logical_state(ContextID src, ContextID dst, bool merge);
       void migrate_version_state(ContextID src, ContextID dst, 
                                  std::set<RtEvent> &applied, bool merge,
-                                 const CollectiveMapping *mapping = NULL);
+                                 InnerContext *source_context);
       void pack_logical_state(ContextID ctx, Serializer &rez, 
           const size_t destination_count, const bool invalidate);
       void unpack_logical_state(ContextID ctx, Deserializer &derez,
@@ -3578,7 +3578,7 @@ namespace Legion {
                               const size_t destination_count, 
                               const bool invalidate,
                               std::set<RtEvent> &applied_events, 
-                              const CollectiveMapping *mapping = NULL);
+                              InnerContext *source_context);
       void unpack_version_state(ContextID ctx, Deserializer &derez, 
                                 AddressSpaceID source);
     public:
@@ -3840,7 +3840,7 @@ namespace Legion {
       static void handle_deferred_compute_equivalence_sets(const void *args);
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,bool self,
                                  std::set<RtEvent> &applied_events, 
-                                 const CollectiveMapping *mapping = NULL);
+                                 InnerContext *source_context);
       void record_refinement(ContextID ctx, EquivalenceSet *set, 
           const FieldMask &mask, std::set<RtEvent> &applied_events);
       void propagate_refinement(ContextID ctx, PartitionNode *child,
@@ -3955,7 +3955,7 @@ namespace Legion {
                                     bool downward_only);
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,
                                  std::set<RtEvent> &applied_events,
-                                 const CollectiveMapping *mapping);
+                                 InnerContext *source_context);
       void propagate_refinement(ContextID ctx, RegionNode *child,
                                 const FieldMask &mask,
                                 std::set<RtEvent> &applied_events);

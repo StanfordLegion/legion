@@ -9016,7 +9016,7 @@ namespace Legion {
           }
         }
         region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
-                                           map_applied_conditions);
+                                           map_applied_conditions, parent_ctx);
         region_node->record_refinement(ctx, set, refinement_mask,
                                        map_applied_conditions);
         if (!map_applied_conditions.empty())
@@ -9598,8 +9598,8 @@ namespace Legion {
                 src_it->first->region_node->row_source);
           if (overlap_expr->is_empty())
             continue;
-          dst_it->first->overwrite_from(src_it->first, overlap, 
-                                        map_applied_conditions);
+          dst_it->first->clone_from(src_it->first, overlap, 
+                                    map_applied_conditions);
         }
       }
       if (!map_applied_conditions.empty())
@@ -9809,7 +9809,7 @@ namespace Legion {
       // Now we can invalidate the previous refinement
       const ContextID ctx = parent_ctx->get_context().get_id();
       to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
-                                       false/*self*/, map_applied_conditions);
+                     false/*self*/, map_applied_conditions, parent_ctx);
       // Finally propagate the new refinements up from the partitions
       for (FieldMaskSet<PartitionNode>::const_iterator it = 
             make_from.begin(); it != make_from.end(); it++)

@@ -1184,10 +1184,8 @@ namespace Legion {
           clone_barrier.wait();
         }
         // Invalidate the old refinement
-        const CollectiveMapping &collective_mapping = 
-          repl_ctx->shard_manager->get_collective_mapping();
         region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
-                                   map_applied_conditions, &collective_mapping);
+                                             map_applied_conditions, repl_ctx);
         // Register this refinement in the tree 
         region_node->record_refinement(ctx, set, refinement_mask, 
                                        map_applied_conditions);
@@ -1483,10 +1481,8 @@ namespace Legion {
       // Now go through and invalidate the current refinements for
       // the regions that we are updating
       const ContextID ctx = parent_ctx->get_context().get_id();
-      const CollectiveMapping &collective_mapping = 
-        repl_ctx->shard_manager->get_collective_mapping(); 
       to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
-            false/*self*/, map_applied_conditions, &collective_mapping);
+                      false/*self*/, map_applied_conditions, repl_ctx);
       if (make_from.size() != replicated_partitions.size())
       {
         // First make the equivalence sets for our sharded partitions
@@ -2805,14 +2801,11 @@ namespace Legion {
       if (kind == LOGICAL_REGION_DELETION)
       {
         std::set<RtEvent> preconditions;
-        const CollectiveMapping &collective_mapping = 
-          repl_ctx->shard_manager->get_collective_mapping();
         // Figure out the versioning context for this requirements
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
           const RegionRequirement &req = deletion_requirements[idx];
-          parent_ctx->invalidate_region_tree_context(req.region, 
-                             preconditions, &collective_mapping);
+          repl_ctx->invalidate_region_tree_context(req.region, preconditions);
         }
         if (!preconditions.empty())
           complete_mapping(Runtime::merge_events(preconditions));
@@ -7097,6 +7090,13 @@ namespace Legion {
         if (unique_sorted_spaces[idx] != rhs[idx])
           return false;
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveMapping::operator!=(const CollectiveMapping &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return !((*this) == rhs);
     }
 
     //--------------------------------------------------------------------------
