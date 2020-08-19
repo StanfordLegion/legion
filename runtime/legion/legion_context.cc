@@ -8554,7 +8554,7 @@ namespace Legion {
             IS_SIMULT(regions[idx]) || IS_REDUCE(regions[idx]);
           runtime->forest->initialize_current_context(tree_context,
               clone_requirements[idx], restricted, physical_instances[idx],
-              unmap_events[idx], this, idx, top_views, applied_events, true);
+              unmap_events[idx], this, idx, top_views, applied_events, false);
 #ifdef DEBUG_LEGION
           assert(!physical_instances[idx].empty());
 #endif
