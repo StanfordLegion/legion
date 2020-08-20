@@ -2769,8 +2769,9 @@ namespace Legion {
                                std::set<RtEvent> &applied_events,
                                const AddressSpaceID origin_space,
                                const CollectiveMapping *collective_mapping);
-      void clone_from(EquivalenceSet *src, const FieldMask &src_mask,
-            std::set<RtEvent> &applied_events, bool invalidate_overlap = false);
+      void clone_from(EquivalenceSet *src, const FieldMask &clone_mask,
+                      std::set<RtEvent> &applied_events, 
+                      bool invalidate_overlap = false);
       RtEvent make_owner(AddressSpaceID owner, 
                          RtEvent precondition = RtEvent::NO_RT_EVENT);
     protected: 
@@ -3094,7 +3095,8 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events);
       void invalidate_refinement(const FieldMask &mask, bool invalidate_self,
                                  FieldMaskSet<RegionTreeNode> &to_traverse,
-                                 FieldMaskSet<EquivalenceSet> &to_untrack);
+                                 FieldMaskSet<EquivalenceSet> &to_untrack,
+                                 std::vector<EquivalenceSet*> &to_release);
       void merge(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
                  FieldMaskSet<EquivalenceSet> &to_untrack);
       void swap(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,

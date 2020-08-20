@@ -1040,7 +1040,6 @@ namespace Legion {
     {
       activate_close();
       mapped_barrier = RtBarrier::NO_RT_BARRIER;
-      clone_barrier = RtBarrier::NO_RT_BARRIER;
       did_collective = NULL;
     }
 
@@ -1051,7 +1050,6 @@ namespace Legion {
       deactivate_close();
       if (did_collective != NULL)
         delete did_collective;
-      local_valid_sets.clear();
       runtime->free_repl_merge_close_op(this);
     }
 
@@ -1091,17 +1089,6 @@ namespace Legion {
         {
           const DistributedID did = runtime->get_available_distributed_id();
           did_collective->broadcast(did);
-        }
-        if (!refinement_overwrite)
-        {
-#ifdef DEBUG_LEGION
-          assert(!clone_barrier.exists());
-#endif
-          // We know that the clone barrier and he mapped barrier will
-          // need to trigger in order, so get another generation of the
-          // previous mapped barrier
-          clone_barrier = mapped_barrier;
-          mapped_barrier = repl_ctx->get_second_gen_close_barrier();
         }
       }
     }
@@ -1164,28 +1151,11 @@ namespace Legion {
             version_info.get_equivalence_sets();
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 previous_sets.begin(); it != previous_sets.end(); it++)
-          {
             set->clone_from(it->first, it->second, map_applied_conditions);
-            // This is really tricky! We know that one shard is holding a
-            // reference to each of these equivalence sets, so see if it is.
-            // No shard is going to attempt to remove their reference until
-            // everybody has mapped so we know that there are no races with
-            // the cloning operations.
-            if (it->first->check_valid_and_increment(CONTEXT_REF))
-              local_valid_sets.push_back(it->first);
-          }
-#ifdef DEBUG_LEGION
-          assert(clone_barrier.exists());
-#endif
-          // Make sure everyone is done adding their references before
-          // we remove the valid references being held in the contexts
-          // by any of the shards
-          Runtime::phase_barrier_arrive(clone_barrier, 1/*count*/);
-          clone_barrier.wait();
         }
         // Invalidate the old refinement
         region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
-                                             map_applied_conditions, repl_ctx);
+                                 map_applied_conditions, to_release, repl_ctx);
         // Register this refinement in the tree 
         region_node->record_refinement(ctx, set, refinement_mask, 
                                        map_applied_conditions);
@@ -1203,26 +1173,6 @@ namespace Legion {
       // Then complete the mapping once the barrier has triggered
       complete_mapping(mapped_barrier);
       complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplMergeCloseOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!local_valid_sets.empty())
-      {
-        for (std::vector<EquivalenceSet*>::const_iterator it = 
-              local_valid_sets.begin(); it != local_valid_sets.end(); it++)
-          if ((*it)->remove_base_valid_ref(CONTEXT_REF))
-            delete (*it);
-        local_valid_sets.clear();
-      }
-#ifdef LEGION_SPY
-      // Still need this to record that this operation is done for LegionSpy
-      LegionSpy::log_operation_events(unique_op_id, 
-          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-#endif
-      complete_operation();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1266,7 +1216,6 @@ namespace Legion {
     {
       activate_refinement();
       mapped_barrier = RtBarrier::NO_RT_BARRIER;
-      reference_barrier = RtBarrier::NO_RT_BARRIER;
     }
 
     //--------------------------------------------------------------------------
@@ -1337,17 +1286,6 @@ namespace Legion {
             collective_dids[idx]->broadcast(did);
           }
         }
-      }
-      if (replicated_partitions.size() != make_from.size())
-      {
-#ifdef DEBUG_LEGION
-        assert(!reference_barrier.exists());
-#endif
-        // We know that the clone barrier and he mapped barrier will
-        // need to trigger in order, so get another generation of the
-        // previous mapped barrier
-        reference_barrier = mapped_barrier;
-        mapped_barrier = repl_ctx->get_second_gen_refinement_barrier();
       }
     }
 
@@ -1456,9 +1394,6 @@ namespace Legion {
       // invalidate the old refinements
       if (!sharded_region_version_infos.empty())
       {
-#ifdef DEBUG_LEGION
-        assert(reference_barrier.exists());
-#endif
         std::set<RtEvent> references_added;
         for (LegionMap<RegionNode*,VersionInfo>::aligned::iterator it =
               sharded_region_version_infos.begin(); it !=
@@ -1469,20 +1404,12 @@ namespace Legion {
           // Context takes ownership at this point
           parent_ctx->record_pending_disjoint_complete_set(pending);
         }
-        // Make sure all the references have been added to the previous
-        // versions across the machine before we allow any to be invalidated
-        if (!references_added.empty())
-          Runtime::phase_barrier_arrive(reference_barrier, 1/*count*/,
-              Runtime::merge_events(references_added));
-        else
-          Runtime::phase_barrier_arrive(reference_barrier, 1/*count*/);
-        reference_barrier.wait();
       }
       // Now go through and invalidate the current refinements for
       // the regions that we are updating
       const ContextID ctx = parent_ctx->get_context().get_id();
       to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
-                      false/*self*/, map_applied_conditions, repl_ctx);
+          false/*self*/, map_applied_conditions, to_release, repl_ctx);
       if (make_from.size() != replicated_partitions.size())
       {
         // First make the equivalence sets for our sharded partitions
@@ -2805,7 +2732,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
           const RegionRequirement &req = deletion_requirements[idx];
-          repl_ctx->invalidate_region_tree_context(req.region, preconditions);
+          repl_ctx->invalidate_region_tree_context(req.region, 
+                                    preconditions, to_release);
         }
         if (!preconditions.empty())
           complete_mapping(Runtime::merge_events(preconditions));
@@ -3018,6 +2946,14 @@ namespace Legion {
                regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
             runtime->forest->destroy_logical_region(*it, applied);
         }
+      }
+      if (!to_release.empty())
+      {
+        for (std::vector<EquivalenceSet*>::const_iterator it =
+              to_release.begin(); it != to_release.end(); it++)
+          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+            delete (*it);
+        to_release.clear();
       }
 #ifdef LEGION_SPY
       // Still have to do this for legion spy
@@ -7224,7 +7160,7 @@ namespace Legion {
         trigger_local_commit(0), trigger_remote_commit(0), 
         remote_constituents(0), semantic_attach_counter(0), 
         local_future_result(NULL), local_future_size(0), 
-        local_future_set(false), startup_barrier(bar) 
+        local_future_set(false), shard_task_barrier(bar) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7237,9 +7173,9 @@ namespace Legion {
       if (control_replicated && (owner_space == runtime->address_space))
       {
 #ifdef DEBUG_LEGION
-        assert(!startup_barrier.exists());
+        assert(!shard_task_barrier.exists());
 #endif
-        startup_barrier = 
+        shard_task_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         pending_partition_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
@@ -7309,7 +7245,7 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       else if (control_replicated)
-        assert(startup_barrier.exists());
+        assert(shard_task_barrier.exists());
 #endif
     }
 
@@ -7339,7 +7275,7 @@ namespace Legion {
       {
         if (control_replicated)
         {
-          startup_barrier.destroy_barrier();
+          shard_task_barrier.destroy_barrier();
           pending_partition_barrier.destroy_barrier();
           creation_barrier.destroy_barrier();
           deletion_ready_barrier.destroy_barrier();
@@ -7548,7 +7484,7 @@ namespace Legion {
         rez.serialize(total_shards);
         rez.serialize(control_replicated);
         rez.serialize(top_level_task);
-        rez.serialize(startup_barrier);
+        rez.serialize(shard_task_barrier);
         address_spaces->pack_mapping(rez);
         if (control_replicated)
         {
@@ -7773,16 +7709,6 @@ namespace Legion {
         result->initialize_collective_references(1/*local shard count*/);
       }
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::complete_startup_initialization(void) const
-    //--------------------------------------------------------------------------
-    {
-      // Do our arrival
-      Runtime::phase_barrier_arrive(startup_barrier, 1/*count*/);
-      // Then wait for everyone else to be ready
-      startup_barrier.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -8573,11 +8499,11 @@ namespace Legion {
       derez.deserialize(control_repl);
       bool top_level_task;
       derez.deserialize(top_level_task);
-      RtBarrier startup_barrier;
-      derez.deserialize(startup_barrier);
+      RtBarrier shard_task_barrier;
+      derez.deserialize(shard_task_barrier);
       ShardManager *manager = 
         new ShardManager(runtime, repl_id, control_repl, top_level_task,
-                total_shards, source, NULL/*original*/, startup_barrier);
+                total_shards, source, NULL/*original*/, shard_task_barrier);
       manager->unpack_shards_and_launch(derez);
     }
 

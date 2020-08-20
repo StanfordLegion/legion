@@ -1027,10 +1027,12 @@ namespace Legion {
                                              AddressSpaceID source);
       void initialize_implicit_task(InnerContext *context, TaskID tid,
                                     MapperID mid, Processor proxy);
+      void complete_startup_initialization(void);
     public:
       const ShardID shard_id;
     protected:
       UniqueID remote_owner_uid;
+      RtBarrier shard_barrier;
     };
 
     /**

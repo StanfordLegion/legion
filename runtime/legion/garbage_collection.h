@@ -65,7 +65,7 @@ namespace Legion {
       REMOTE_DID_REF = 7,
       PENDING_COLLECTIVE_REF = 8,
       MEMORY_MANAGER_REF = 9,
-      COMPOSITE_NODE_REF = 10,
+      PENDING_REFINEMENT_REF = 10,
       COMPOSITE_HANDLE_REF = 11,
       REMOTE_CREATE_REF = 12,
       INSTANCE_MAPPER_REF = 13,
@@ -107,7 +107,7 @@ namespace Legion {
       "Remote Distributed ID Reference",            \
       "Pending Collective Reference",               \
       "Memory Manager Reference",                   \
-      "Composite Node Reference",                   \
+      "Pending Refinement Reference",               \
       "Composite Handle Reference",                 \
       "Remote Creation Reference",                  \
       "Instance Mapper Reference",                  \

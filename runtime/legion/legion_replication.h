@@ -1169,11 +1169,9 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
-      virtual void trigger_complete(void);
     protected:
-      RtBarrier mapped_barrier, clone_barrier;
+      RtBarrier mapped_barrier;
       ValueBroadcast<DistributedID> *did_collective;
-      std::vector<EquivalenceSet*> local_valid_sets;
     };
 
     /**
@@ -1197,7 +1195,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
     protected:
-      RtBarrier mapped_barrier, reference_barrier;
+      RtBarrier mapped_barrier;
       std::vector<ValueBroadcast<DistributedID>*> collective_dids;
       // Note that this data structure ensures that we do things
       // for these partitions in a order that is consistent across
@@ -2090,12 +2088,14 @@ namespace Legion {
       ShardManager(Runtime *rt, ReplicationID repl_id, 
                    bool control, bool top, size_t total_shards,
                    AddressSpaceID owner_space, SingleTask *original = NULL,
-                   RtBarrier startup_barrier = RtBarrier::NO_RT_BARRIER);
+                   RtBarrier shard_task_barrier = RtBarrier::NO_RT_BARRIER);
       ShardManager(const ShardManager &rhs);
       ~ShardManager(void);
     public:
       ShardManager& operator=(const ShardManager &rhs);
     public:
+      inline RtBarrier get_shard_task_barrier(void) const
+        { return shard_task_barrier; }
       inline ApBarrier get_pending_partition_barrier(void) const
         { return pending_partition_barrier; }
       inline RtBarrier get_creation_barrier(void) const
@@ -2166,7 +2166,6 @@ namespace Legion {
       EquivalenceSet* get_initial_equivalence_set(unsigned idx) const;
       EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
                                                            DistributedID did);
-      void complete_startup_initialization(void) const;
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
     public:
@@ -2283,7 +2282,7 @@ namespace Legion {
       bool        local_future_set;
       std::set<RtEvent> mapping_preconditions;
     protected:
-      RtBarrier startup_barrier;
+      RtBarrier shard_task_barrier;
       ApBarrier pending_partition_barrier;
       RtBarrier creation_barrier;
       RtBarrier deletion_ready_barrier;

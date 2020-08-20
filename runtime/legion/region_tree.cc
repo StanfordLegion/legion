@@ -18181,13 +18181,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::invalidate_refinement(ContextID ctx, const FieldMask &mask, 
                                    bool self, std::set<RtEvent> &applied_events, 
+                                   std::vector<EquivalenceSet*> &to_release,
                                    InnerContext *source_context)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
-      manager.invalidate_refinement(mask, self, to_traverse, to_untrack);
+      manager.invalidate_refinement(mask, self, to_traverse, 
+                                    to_untrack, to_release);
       if (!to_untrack.empty())
       {
         if (source_context == NULL)
@@ -18219,7 +18221,7 @@ namespace Legion {
         assert(!it->first->is_region());
 #endif
         it->first->as_partition_node()->invalidate_refinement(ctx, it->second,
-                                              applied_events, source_context);
+                                  applied_events, to_release, source_context);
         if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
@@ -19633,16 +19635,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PartitionNode::invalidate_refinement(ContextID ctx, 
-                                              const FieldMask &mask, 
-                                              std::set<RtEvent> &applied_events,
-                                              InnerContext *source_context)
+                                       const FieldMask &mask, 
+                                       std::set<RtEvent> &applied_events,
+                                       std::vector<EquivalenceSet*> &to_release,
+                                       InnerContext *source_context)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
       manager.invalidate_refinement(mask, true/*delete self*/, 
-                                    to_traverse, to_untrack);
+                                    to_traverse, to_untrack, to_release);
 #ifdef DEBUG_LEGION
       assert(to_untrack.empty());
 #endif
@@ -19653,7 +19656,7 @@ namespace Legion {
         assert(it->first->is_region());
 #endif
         it->first->as_region_node()->invalidate_refinement(ctx, it->second,
-            true/*self*/, applied_events, source_context);
+                  true/*self*/, applied_events, to_release, source_context);
         if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
           delete it->first;
       }

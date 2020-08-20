@@ -5912,6 +5912,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_TRIGGER_COMMIT_CALL);
+      if (execution_context != NULL)
+        execution_context->free_region_tree_context();
       if (is_remote())
       {
         Serializer rez;
@@ -6802,6 +6804,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_TASK_COMMIT_CALL);
+      if (execution_context != NULL)
+        execution_context->free_region_tree_context();
       if (profiling_reported.exists())
         finalize_single_task_profiling();
       // A little strange here, but we don't directly commit this
@@ -7188,6 +7192,7 @@ namespace Legion {
       target_proc = proc;
       current_proc = proc;
       shard_manager = manager;
+      shard_barrier = shard_manager->get_shard_task_barrier();
       if (manager->original_task != NULL)
         remote_owner_uid = 
           manager->original_task->get_context()->get_unique_id();
@@ -7374,11 +7379,16 @@ namespace Legion {
       shard_manager->trigger_task_complete(true/*local*/);
       // See if we need to trigger that our children are complete
       const bool need_commit = execution_context->attempt_children_commit();
-      // Mark that this operation is complete
+      // Mark that this operation is complete, we'll only complete this
+      // operation once all the shards are complete to ensure that all
+      // equivalence sets are remove from the tree contexts before they
+      // are recycled and we make it available for reuse
       if (!preconditions.empty())
-        complete_operation(Runtime::merge_events(preconditions));
+        Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/,
+            Runtime::merge_events(preconditions));
       else
-        complete_operation();
+        Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
+      complete_operation(shard_barrier);
       if (need_commit)
         trigger_children_committed();
     }
@@ -7387,6 +7397,7 @@ namespace Legion {
     void ShardTask::trigger_task_commit(void)
     //--------------------------------------------------------------------------
     {
+      execution_context->free_region_tree_context();
       // Commit this operation
       // Dont' deactivate ourselves, the shard manager will do that for us
       commit_operation(false/*deactivate*/, profiling_reported);
@@ -7518,7 +7529,7 @@ namespace Legion {
         // Save the execution context early since we'll need it
         execution_context = repl_ctx;
         // Wait until all the other shards are ready too
-        shard_manager->complete_startup_initialization();
+        complete_startup_initialization();
         // Hold a reference during this to prevent collectives 
         // from deleting the context prematurely
         repl_ctx->add_reference();
@@ -7553,13 +7564,26 @@ namespace Legion {
       // Save the execution context early since we'll need it
       execution_context = repl_ctx;
       // Wait until all the other shards are ready too
-      shard_manager->complete_startup_initialization();
+      complete_startup_initialization();
       // Hold a reference during this to prevent collectives 
       // from deleting the context prematurely
       repl_ctx->add_reference();
       // The replicate contexts all need to sync up to exchange resources 
       repl_ctx->exchange_common_resources();
       return repl_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::complete_startup_initialization(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_barrier.exists());
+#endif
+      Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
+      shard_barrier.wait();
+      // Advance this for when we get to completion
+      Runtime::advance_barrier(shard_barrier);
     }
 
     //--------------------------------------------------------------------------

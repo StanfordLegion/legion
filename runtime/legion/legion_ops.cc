@@ -8251,6 +8251,7 @@ namespace Legion {
       deletion_requirements.clear();
       version_infos.clear();
       map_applied_conditions.clear();
+      to_release.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -8388,7 +8389,7 @@ namespace Legion {
         {
           const RegionRequirement &req = deletion_requirements[idx];
           parent_ctx->invalidate_region_tree_context(req.region, 
-                                                     map_applied_conditions);
+                             map_applied_conditions, to_release);
         }
       }
       else if (kind == FIELD_DELETION)
@@ -8502,6 +8503,14 @@ namespace Legion {
         for (std::vector<LogicalRegion>::const_iterator it =
               regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
           runtime->forest->destroy_logical_region(*it, preconditions);
+      }
+      if (!to_release.empty())
+      {
+        for (std::vector<EquivalenceSet*>::const_iterator it =
+              to_release.begin(); it != to_release.end(); it++)
+          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+            delete (*it);
+        to_release.clear();
       }
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
@@ -8923,6 +8932,7 @@ namespace Legion {
       deactivate_close();
       close_mask.clear();
       version_info.clear();
+      to_release.clear();
       refinement_mask.clear();
       runtime->free_merge_close_op(this);
     }
@@ -9004,19 +9014,17 @@ namespace Legion {
         {
           const FieldMaskSet<EquivalenceSet> &previous_sets = 
             version_info.get_equivalence_sets();
+          // Note that we'll explicitly get back any of these previous sets
+          // that are going to be released from the call to invalidate the
+          // refinement. We'll hold on to their references until we get to
+          // the complete stage to make sure they are not collected before
+          // the clone operation is finished.
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 previous_sets.begin(); it != previous_sets.end(); it++)
-          {
             set->clone_from(it->first, it->second, map_applied_conditions);
-            // Also add valid references here to make sure that the previous
-            // sets are not collected until these clones are done. We know
-            // we're already holding valid references to them here on this
-            // node so there is no need for a mutator
-            it->first->add_base_valid_ref(CONTEXT_REF);
-          }
         }
         region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
-                                           map_applied_conditions, parent_ctx);
+                               map_applied_conditions, to_release, parent_ctx);
         region_node->record_refinement(ctx, set, refinement_mask,
                                        map_applied_conditions);
         if (!map_applied_conditions.empty())
@@ -9033,15 +9041,13 @@ namespace Legion {
     void MergeCloseOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      if (!!refinement_mask && !refinement_overwrite)
+      if (!to_release.empty())
       {
-        // Remove the references to the previous equivalence sets we added
-        const FieldMaskSet<EquivalenceSet> &previous_sets = 
-          version_info.get_equivalence_sets();
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              previous_sets.begin(); it != previous_sets.end(); it++)
-          if (it->first->remove_base_valid_ref(CONTEXT_REF))
-            delete it->first;
+        for (std::vector<EquivalenceSet*>::const_iterator it =
+              to_release.begin(); it != to_release.end(); it++)
+          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+            delete (*it);
+        to_release.clear();
       }
 #ifdef LEGION_SPY
       // Still need this to record that this operation is done for LegionSpy
@@ -9696,6 +9702,7 @@ namespace Legion {
       deactivate_internal();
       version_info.clear();
       make_from.clear();
+      to_release.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -9809,7 +9816,7 @@ namespace Legion {
       // Now we can invalidate the previous refinement
       const ContextID ctx = parent_ctx->get_context().get_id();
       to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
-                     false/*self*/, map_applied_conditions, parent_ctx);
+         false/*self*/, map_applied_conditions, to_release, parent_ctx);
       // Finally propagate the new refinements up from the partitions
       for (FieldMaskSet<PartitionNode>::const_iterator it = 
             make_from.begin(); it != make_from.end(); it++)
@@ -9852,6 +9859,14 @@ namespace Legion {
     void RefinementOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
+      if (!to_release.empty())
+      {
+        for (std::vector<EquivalenceSet*>::const_iterator it =
+              to_release.begin(); it != to_release.end(); it++)
+          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+            delete (*it);
+        to_release.clear();
+      }
 #ifdef LEGION_SPY
       // Still need this to record that this operation is done for LegionSpy
       LegionSpy::log_operation_events(unique_op_id, 

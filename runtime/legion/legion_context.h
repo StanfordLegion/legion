@@ -481,6 +481,9 @@ namespace Legion {
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
                             InnerContext *source_context) = 0;
+      // This is called once all the effects from 
+      // invalidate_region_tree_contexts have been applied 
+      virtual void free_region_tree_context(void) = 0;
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source) = 0;
@@ -1268,7 +1271,9 @@ namespace Legion {
                             std::set<RtEvent> &applied_events,size_t num_shards,
                             InnerContext *source_context);
       void invalidate_region_tree_context(LogicalRegion handle,
-                                          std::set<RtEvent> &applied_events);
+                                      std::set<RtEvent> &applied_events,
+                                      std::vector<EquivalenceSet*> &to_release);
+      virtual void free_region_tree_context(void);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -1450,6 +1455,10 @@ namespace Legion {
       mutable LocalLock     fill_view_lock;            
       std::list<FillView*>  fill_view_cache;
       static const size_t MAX_FILL_VIEW_CACHE_SIZE = 64;
+    protected:
+      // Equivalence sets that were invalidated by 
+      // invalidate_region_tree_contexts and need to be released
+      std::vector<EquivalenceSet*> invalidated_refinements;
     };
 
     /**
@@ -2397,6 +2406,7 @@ namespace Legion {
                             InnerContext *source_context);
       static void handle_created_region_contexts(Runtime *runtime, 
                                    Deserializer &derez, AddressSpaceID source);
+      virtual void free_region_tree_context(void);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
     public:
@@ -2803,6 +2813,7 @@ namespace Legion {
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
                             InnerContext *source_context);
+      virtual void free_region_tree_context(void);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -3218,6 +3229,7 @@ namespace Legion {
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
                             InnerContext *source_context);
+      virtual void free_region_tree_context(void);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);

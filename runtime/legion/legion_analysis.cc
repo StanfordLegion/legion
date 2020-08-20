@@ -145,7 +145,6 @@ namespace Legion {
       rez.serialize(index);
       rez.serialize<bool>(copy_user);
       rez.serialize<bool>(covers);
-
     }
 
     //--------------------------------------------------------------------------
@@ -18998,6 +18997,17 @@ namespace Legion {
       set->register_with_runtime(NULL/*no remote registration needed*/);
     }
 
+#if 0
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::clone_from(EquivalenceSet *src, const FieldMask &mask,
+                                    std::set<RtEvent> &applied_events,
+                                    bool invalidate_overlap)
+    //--------------------------------------------------------------------------
+    {
+
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void EquivalenceSet::update_owner(const AddressSpaceID new_logical_owner)
     //--------------------------------------------------------------------------
@@ -19136,7 +19146,7 @@ namespace Legion {
       : region_node(node), new_set(NULL)
     //--------------------------------------------------------------------------
     {
-      region_node->add_base_resource_ref(CONTEXT_REF);
+      region_node->add_base_resource_ref(PENDING_REFINEMENT_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -19153,13 +19163,14 @@ namespace Legion {
     PendingEquivalenceSet::~PendingEquivalenceSet(void)
     //--------------------------------------------------------------------------
     {
-      if ((new_set != NULL) && new_set->remove_base_valid_ref(CONTEXT_REF))
+      if ((new_set != NULL) && 
+          new_set->remove_base_valid_ref(PENDING_REFINEMENT_REF))
         delete new_set;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             previous_sets.begin(); it != previous_sets.end(); it++)
-        if (it->first->remove_base_valid_ref(CONTEXT_REF))
+        if (it->first->remove_base_valid_ref(PENDING_REFINEMENT_REF))
           delete it->first;
-      if (region_node->remove_base_resource_ref(CONTEXT_REF))
+      if (region_node->remove_base_resource_ref(PENDING_REFINEMENT_REF))
         delete region_node;
     }
 
@@ -19181,7 +19192,7 @@ namespace Legion {
       if (previous_sets.insert(set, mask))
       {
         WrapperReferenceMutator mutator(applied_events);
-        set->add_base_valid_ref(CONTEXT_REF, &mutator);
+        set->add_base_valid_ref(PENDING_REFINEMENT_REF, &mutator);
       }
     }
 
@@ -19197,7 +19208,7 @@ namespace Legion {
       WrapperReferenceMutator mutator(applied_events);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             previous_sets.begin(); it != previous_sets.end(); it++)
-        it->first->add_base_valid_ref(CONTEXT_REF, &mutator);
+        it->first->add_base_valid_ref(PENDING_REFINEMENT_REF, &mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -19211,7 +19222,7 @@ namespace Legion {
         new_set = new EquivalenceSet(runtime, 
             runtime->get_available_distributed_id(), runtime->address_space,
             suggested_owner, region_node, true/*register now*/);
-        new_set->add_base_valid_ref(CONTEXT_REF);
+        new_set->add_base_valid_ref(PENDING_REFINEMENT_REF);
         std::set<RtEvent> preconditions;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               previous_sets.begin(); it != previous_sets.end(); it++)
@@ -19253,7 +19264,7 @@ namespace Legion {
               to_delete.begin(); it != to_delete.end(); it++)
         {
           previous_sets.erase(*it);
-          if ((*it)->remove_base_valid_ref(CONTEXT_REF))
+          if ((*it)->remove_base_valid_ref(PENDING_REFINEMENT_REF))
             delete (*it);
         }
         previous_sets.tighten_valid_mask();
@@ -19266,7 +19277,7 @@ namespace Legion {
       {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               previous_sets.begin(); it != previous_sets.end(); it++)
-          if (it->first->remove_base_valid_ref(CONTEXT_REF))
+          if (it->first->remove_base_valid_ref(PENDING_REFINEMENT_REF))
             delete it->first;
         previous_sets.clear();
         return true;
@@ -19966,7 +19977,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::invalidate_refinement(const FieldMask &mask, bool self,
                                       FieldMaskSet<RegionTreeNode> &to_traverse,
-                                      FieldMaskSet<EquivalenceSet> &to_untrack)
+                                      FieldMaskSet<EquivalenceSet> &to_untrack,
+                                      std::vector<EquivalenceSet*> &to_release)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);     
@@ -19997,8 +20009,8 @@ namespace Legion {
           if (!it->second)
           {
             to_delete.push_back(it->first);
-            // Remove the valid reference
-            it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
+            // Record this to be released once all the effects are applied
+            to_release.push_back(it->first);
           }
         }
         if (!to_delete.empty())

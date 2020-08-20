@@ -3841,6 +3841,7 @@ namespace Legion {
       static void handle_deferred_compute_equivalence_sets(const void *args);
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,bool self,
                                  std::set<RtEvent> &applied_events, 
+                                 std::vector<EquivalenceSet*> &to_release,
                                  InnerContext *source_context);
       void record_refinement(ContextID ctx, EquivalenceSet *set, 
           const FieldMask &mask, std::set<RtEvent> &applied_events);
@@ -3956,6 +3957,7 @@ namespace Legion {
                                     bool downward_only);
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,
                                  std::set<RtEvent> &applied_events,
+                                 std::vector<EquivalenceSet*> &to_release,
                                  InnerContext *source_context);
       void propagate_refinement(ContextID ctx, RegionNode *child,
                                 const FieldMask &mask,

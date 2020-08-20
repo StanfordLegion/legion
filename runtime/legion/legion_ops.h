@@ -1704,6 +1704,7 @@ namespace Legion {
       std::vector<RegionRequirement> deletion_requirements;
       LegionVector<VersionInfo>::aligned version_infos;
       std::set<RtEvent> map_applied_conditions;
+      std::vector<EquivalenceSet*> to_release;
     }; 
 
     /**
@@ -1844,6 +1845,7 @@ namespace Legion {
     protected:
       FieldMask close_mask;
       VersionInfo version_info;
+      std::vector<EquivalenceSet*> to_release;
       FieldMask refinement_mask;
       bool refinement_overwrite;
     };
@@ -1998,6 +2000,8 @@ namespace Legion {
       VersionInfo version_info;
       // New partitions from which to make refinements
       FieldMaskSet<PartitionNode> make_from;
+      // Equivalence sets that need to be released at completion
+      std::vector<EquivalenceSet*> to_release;
     };
 
     /**

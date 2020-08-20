@@ -2780,6 +2780,7 @@ namespace Legion {
       assert(outstanding_subtasks == 0);
       assert(pending_subtasks == 0);
       assert(pending_frames == 0);
+      assert(invalidated_refinements.empty());
 #endif
       if (!remote_context)
         runtime->unregister_local_context(context_uid);
@@ -8488,13 +8489,30 @@ namespace Legion {
         const FieldMask close_mask = 
           node->column_source->get_field_mask(regions[idx].privilege_fields);
         node->invalidate_refinement(tree_context.get_id(), close_mask,
-                                    true/*self*/, applied, this);
+                true/*self*/, applied, invalidated_refinements, this);
       }
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(applied);
       // Clean up our instance top views
       if (!instance_top_views.empty())
         clear_instance_top_views();
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::free_region_tree_context(void)
+    //--------------------------------------------------------------------------
+    {
+      // We can release any invalidated views that we were waiting for the
+      // applied effects to be performed before releasing the references
+      if (!invalidated_refinements.empty())
+      {
+        for (std::vector<EquivalenceSet*>::const_iterator it =
+              invalidated_refinements.begin(); it != 
+              invalidated_refinements.end(); it++)
+          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+            delete (*it);
+        invalidated_refinements.clear();
+      }
       // Now we can free our region tree context
       runtime->free_region_tree_context(tree_context);
     }
@@ -8541,7 +8559,7 @@ namespace Legion {
             runtime->forest->invalidate_current_context(tree_context,
                                           false/*users only*/, node);
             node->invalidate_refinement(tree_context.get_id(), all_ones_mask,
-                                        true/*self*/, applied_events, this);
+                true/*self*/, applied_events, invalidated_refinements, this);
             invalidated_regions.insert(it->second.region);
           }
         }
@@ -8580,7 +8598,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::invalidate_region_tree_context(LogicalRegion handle,
-                                              std::set<RtEvent> &applied_events)
+     std::set<RtEvent> &applied_events,std::vector<EquivalenceSet*> &to_release)
     //--------------------------------------------------------------------------
     {
       RegionNode *node = runtime->forest->get_node(handle);
@@ -8588,7 +8606,7 @@ namespace Legion {
                                           false/*users only*/, node);
       const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
       node->invalidate_refinement(tree_context.get_id(), all_ones_mask, 
-                                  true/*self*/, applied_events, this);
+                        true/*self*/, applied_events, to_release, this);
     }
 
     //--------------------------------------------------------------------------
@@ -10766,15 +10784,12 @@ namespace Legion {
         const FieldMask close_mask = 
           node->column_source->get_field_mask(regions[idx].privilege_fields);
         node->invalidate_refinement(tree_context.get_id(), close_mask,
-                                    true/*self*/, applied, this);
+                true/*self*/, applied, invalidated_refinements, this);
       }
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(applied, total_shards); 
       // Cannot clear our instance top view references until we are deleted 
       // as we might still need to help out our other sibling shards
-      
-      // Now we can free our region tree context
-      runtime->free_region_tree_context(tree_context);
     }
 
     //--------------------------------------------------------------------------
@@ -18474,6 +18489,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteContext::free_region_tree_context(void)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void RemoteContext::handle_created_region_contexts(
                    Runtime *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -20511,6 +20534,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::free_region_tree_context(void)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do 
+    }
+
+    //--------------------------------------------------------------------------
     InstanceView* LeafContext::create_instance_top_view(
                                 PhysicalManager *manager, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -21963,6 +21993,13 @@ namespace Legion {
                            const std::vector<RegionNode*> &created_states,
                            std::set<RtEvent> &applied_events, size_t num_shards,
                            InnerContext *source_context)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::free_region_tree_context(void)
     //--------------------------------------------------------------------------
     {
       assert(false);
