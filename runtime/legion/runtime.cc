@@ -1158,7 +1158,7 @@ namespace Legion {
               rez.serialize(did);
               runtime->send_future_subscription(owner_space, rez);
             }
-            else if (need_local_data)
+            else
               record_subscription(local_space, false/*need lock*/);
           }
         }
