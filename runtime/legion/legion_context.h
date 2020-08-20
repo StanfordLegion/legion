@@ -494,6 +494,8 @@ namespace Legion {
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                         Realm::InstanceLayoutGeneric *layout);
       virtual void destroy_task_local_instance(PhysicalInstance instance);
+      virtual uintptr_t escape_task_local_instance(PhysicalInstance instance);
+      virtual void release_escaped_instances(void);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                     PhysicalInstance inst, FutureFunctor *callback_functor) = 0;
       virtual void post_end_task(const void *res, size_t res_size, 
@@ -699,6 +701,7 @@ namespace Legion {
 #else
       std::set<PhysicalInstance> task_local_instances;
 #endif
+      std::set<PhysicalInstance> escaped_local_instances;
     protected:
       RtEvent pending_done;
       bool task_executed;

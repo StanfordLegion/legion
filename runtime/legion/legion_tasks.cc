@@ -8564,17 +8564,20 @@ namespace Legion {
         IndexSpace index_space =
           parent_ctx->create_index_space(get_completion_event(), type_tag);
 
-        // Create the output region
-        LogicalRegion region = parent_ctx->create_logical_region(
-            runtime->forest, index_space, req.field_space, false);
-
         // Create a pending partition for the output region
         // using the launch domain as the color space
         IndexSpace color_space = launch_space;
+        fprintf(stderr, "Color space: (%x, %x)\n",
+            color_space.get_id(), color_space.get_tree_id());
         IndexPartition pid = parent_ctx->create_pending_partition(
             index_space, color_space,
             LEGION_DISJOINT_COMPLETE_KIND,
             LEGION_AUTO_GENERATE_ID);
+
+        // Create the output region and partition
+        LogicalRegion region = parent_ctx->create_logical_region(
+            runtime->forest, index_space, req.field_space, false);
+
         LogicalPartition partition =
           runtime->forest->get_logical_partition(region, pid);
 
@@ -11026,10 +11029,9 @@ namespace Legion {
            out_idx < output_regions.size(); ++out_idx, ++idx)
       {
         ProjectionFunction *function =
-          runtime->find_projection_function(
-              output_regions[out_idx].projection);
-        function->project_points(
-            output_regions[out_idx], idx, runtime, index_domain, points);
+          runtime->find_projection_function(output_regions[out_idx].projection);
+        function->project_points(output_regions[out_idx], idx, runtime,
+                                 index_domain, points);
       }
       // Update the no access regions
       for (unsigned idx = 0; idx < num_points; idx++)

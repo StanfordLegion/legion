@@ -2961,6 +2961,7 @@ namespace Legion {
     public:
       void destroy();
     protected:
+      friend class OutputRegion;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
 #ifdef BOUNDS_CHECKS
@@ -2988,6 +2989,12 @@ namespace Legion {
       void return_data(size_t num_elements,
                        std::map<FieldID,void*> ptrs,
                        std::map<FieldID,size_t> *alignments = NULL);
+      template<typename T>
+      void return_data(FieldID field_id, DeferredBuffer<T,1> &buffer);
+    private:
+      void return_data(FieldID field_id,
+                       Realm::RegionInstance instance,
+                       size_t field_size);
     };
 
     //==========================================================================

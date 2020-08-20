@@ -1744,16 +1744,34 @@ namespace Legion {
       log_garbage.spew("Deleting physical instance " IDFMT " in memory " 
                        IDFMT "", instance.id, memory_manager->memory.id);
 #ifndef DISABLE_GC
+      std::vector<PhysicalInstance::DestroyedField> serdez_fields;
+      layout->compute_destroyed_fields(serdez_fields);
+
+#ifndef LEGION_MALLOC_INSTANCES
       // If this is an owned external instance, deallocate it manually
       if (kind == EXTERNAL_OWNED)
+      {
         memory_manager->free_external_allocation(
             external_pointer, instance_footprint);
-      std::vector<PhysicalInstance::DestroyedField> serdez_fields;
-      layout->compute_destroyed_fields(serdez_fields); 
-      if (!serdez_fields.empty())
-        instance.destroy(serdez_fields, deferred_event);
+        if (!serdez_fields.empty())
+          instance.destroy(serdez_fields, deferred_event);
+        else
+          instance.destroy(deferred_event);
+      }
+      // If this is an eager allocation, return it back to the eager pool
+      else if (kind == EAGER)
+        // FIXME: Deferred deallocation of an eager allocation is
+        //        now cauasing hang due to a reference cycle
+        //memory_manager->free_eager_instance(instance, deferred_event);
+        memory_manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
       else
-        instance.destroy(deferred_event);
+#endif
+      {
+        if (!serdez_fields.empty())
+          instance.destroy(serdez_fields, deferred_event);
+        else
+          instance.destroy(deferred_event);
+      }
 #ifdef LEGION_MALLOC_INSTANCES
       if (!is_external_instance())
         memory_manager->free_legion_instance(this, deferred_event);
@@ -1801,16 +1819,32 @@ namespace Legion {
       log_garbage.spew("Force deleting physical instance " IDFMT " in memory "
                        IDFMT "", instance.id, memory_manager->memory.id);
 #ifndef DISABLE_GC
+
+#ifndef LEGION_MALLOC_INSTANCES
+      std::vector<PhysicalInstance::DestroyedField> serdez_fields;
+      layout->compute_destroyed_fields(serdez_fields);
+
       // If this is an owned external instance, deallocate it manually
       if (kind == EXTERNAL_OWNED)
+      {
         memory_manager->free_external_allocation(
             external_pointer, instance_footprint);
-      std::vector<PhysicalInstance::DestroyedField> serdez_fields;
-      layout->compute_destroyed_fields(serdez_fields); 
-      if (!serdez_fields.empty())
-        instance.destroy(serdez_fields);
+        if (!serdez_fields.empty())
+          instance.destroy(serdez_fields);
+        else
+          instance.destroy();
+      }
+      // If this is an eager allocation, return it back to the eager pool
+      else if (kind == EAGER)
+        memory_manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
       else
-        instance.destroy();
+#endif
+      {
+        if (!serdez_fields.empty())
+          instance.destroy(serdez_fields);
+        else
+          instance.destroy();
+      }
 #ifdef LEGION_MALLOC_INSTANCES
       if (!is_external_instance())
         memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);

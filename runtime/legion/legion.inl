@@ -15449,6 +15449,7 @@ namespace Legion {
     public:
       void destroy();
     protected:
+      friend class OutputRegion;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<FT,N,T> accessor;
     };
@@ -15516,6 +15517,7 @@ namespace Legion {
     public:
       void destroy();
     protected:
+      friend class OutputRegion;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<FT,N,T> accessor;
       DomainT<N,T> bounds;
@@ -16968,6 +16970,15 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime();
       runtime->destroy_task_local_instance(instance);
       instance = Realm::RegionInstance::NO_INST;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void OutputRegion::return_data(
+                                  FieldID field_id, DeferredBuffer<T,1> &buffer)
+    //--------------------------------------------------------------------------
+    {
+      return_data(field_id, buffer.instance, sizeof(T));
     }
 
     //--------------------------------------------------------------------------

@@ -3463,8 +3463,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void OutputRegionImpl::return_data(size_t new_num_elements,
                                        FieldID field_id,
-                                       void *ptr,
-                                       size_t alignment)
+                                       uintptr_t ptr,
+                                       size_t alignment,
+                                       bool eager_pool /*= false */)
     //--------------------------------------------------------------------------
     {
       std::map<FieldID,ExternalInstanceInfo>::iterator finder =
@@ -3494,6 +3495,7 @@ namespace Legion {
         num_elements = new_num_elements;
 
       ExternalInstanceInfo &info = returned_instances[field_id];
+      info.eager_pool = eager_pool;
       info.ptr = ptr;
       info.alignment = alignment;
     }
@@ -3505,6 +3507,32 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // TODO: Implement this function
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::return_data(FieldID field_id,
+                                       PhysicalInstance instance,
+                                       size_t field_size)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *fspace_node = runtime->forest->get_node(req.field_space);
+      size_t alloc_size = fspace_node->get_field_size(field_id);
+
+      if (alloc_size != field_size)
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
+          "Field %u of output region %u of task %s (UID: %lld) has a type of "
+          "size %zd, but the returned deferred buffer is allocaited with a "
+          "type of size %zd.",
+          field_id, index, context->owner_task->get_task_name(),
+          context->owner_task->get_unique_op_id(), alloc_size, field_size);
+
+
+      uintptr_t ptr = context->escape_task_local_instance(instance);
+      const Realm::InstanceLayout<1,coord_t> *layout =
+        reinterpret_cast<const Realm::InstanceLayout<1,coord_t>*>(
+            instance.get_layout());
+      return_data(layout->space.bounds.volume(), field_id, ptr,
+                  layout->alignment_reqd, true);
     }
 
     //--------------------------------------------------------------------------
@@ -3631,16 +3659,19 @@ namespace Legion {
         Realm::RegionInstance instance;
         Realm::ProfilingRequestSet no_requests;
         RtEvent wait_on(Realm::RegionInstance::create_external(
-          instance, manager->get_memory(), reinterpret_cast<uintptr_t>(info.ptr),
-          layout, no_requests));
+          instance, manager->get_memory(), info.ptr, layout, no_requests));
         if (wait_on.exists())
           wait_on.wait();
 #ifdef DEBUG_LEGION
         assert(instance.exists());
 #endif
         manager->update_physical_instance(instance,
-                                          IndividualManager::EXTERNAL_OWNED,
-                                          reinterpret_cast<uintptr_t>(info.ptr));
+                                          info.eager_pool
+                                          ? IndividualManager::EAGER
+                                          : IndividualManager::EXTERNAL_OWNED,
+                                          info.ptr);
+        if (info.eager_pool)
+          manager->memory_manager->link_eager_instance(instance, info.ptr);
       }
     }
 
@@ -8558,6 +8589,51 @@ namespace Legion {
         }
         instance.destroy();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::link_eager_instance(
+                                       PhysicalInstance instance, uintptr_t ptr)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock lock(manager_lock);
+      std::map<uintptr_t,size_t>::iterator finder =
+        unlinked_allocations.find(ptr);
+#ifdef DEBUG_LEGION
+      assert(finder != unlinked_allocations.end());
+#endif
+      log_eager.debug("link instance " IDFMT " (%p, %zd) on memory " IDFMT,
+                      instance.id, reinterpret_cast<void*>(ptr),
+                      finder->second, memory.id);
+      eager_instances[instance] = std::make_pair(finder->first, finder->second);
+      unlinked_allocations.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    uintptr_t MemoryManager::unlink_eager_instance(PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      // Note that this function removes the instance from the manager without
+      // deallocating it. It's the caller's responsibility to link
+      // the allocation back in the memory manager
+      AutoLock lock(manager_lock);
+      std::map<PhysicalInstance,std::pair<uintptr_t,size_t> >::iterator
+        finder = eager_instances.find(instance);
+#ifdef DEBUG_LEGION
+      assert(finder != eager_instances.end());
+#endif
+      eager_instances.erase(finder);
+      uintptr_t ptr = finder->second.first;
+      size_t allocation_id = finder->second.second;
+      log_eager.debug("unlink instance " IDFMT " (%p, %zd) on memory " IDFMT,
+                      instance.id, reinterpret_cast<void*>(ptr),
+                      allocation_id, memory.id);
+
+#ifdef DEBUG_LEGION
+      assert(unlinked_allocations.find(ptr) == unlinked_allocations.end());
+#endif
+      unlinked_allocations[ptr] = allocation_id;
+      return ptr;
     }
 
     //--------------------------------------------------------------------------

@@ -652,11 +652,15 @@ namespace Legion {
     public:
       void return_data(size_t num_elements,
                        FieldID field_id,
-                       void *ptr,
-                       size_t alignment);
+                       uintptr_t ptr,
+                       size_t alignment,
+                       bool eager_pool = false);
       void return_data(size_t num_elements,
                        std::map<FieldID,void*> ptrs,
                        std::map<FieldID,size_t> *alignments);
+      void return_data(FieldID field_id,
+                       PhysicalInstance instance,
+                       size_t field_size);
     private:
       struct FinalizeOutputArgs : public LgTaskArgs<FinalizeOutputArgs> {
       public:
@@ -681,7 +685,8 @@ namespace Legion {
       TaskContext *const context;
     private:
       struct ExternalInstanceInfo {
-        void *ptr;
+        bool eager_pool;
+        uintptr_t ptr;
         size_t alignment;
       };
     private:
@@ -1246,6 +1251,8 @@ namespace Legion {
       RtEvent create_eager_instance(PhysicalInstance &instance,
                                     Realm::InstanceLayoutGeneric *layout);
       void free_eager_instance(PhysicalInstance instance, RtEvent defer);
+      void link_eager_instance(PhysicalInstance instance, uintptr_t ptr);
+      uintptr_t unlink_eager_instance(PhysicalInstance instance);
       static void handle_free_eager_instance(const void *args);
     public:
       void free_external_allocation(uintptr_t ptr, size_t size);
@@ -1282,8 +1289,10 @@ namespace Legion {
       void *eager_allocator;
       // Allocation counter
       size_t next_allocation_id;
-      // Map each eager instance to its allocation id
+      // Map each eager instance to its pointer and allocation id
       std::map<PhysicalInstance,std::pair<uintptr_t,size_t> > eager_instances;
+      // Map unlinked eager allocation to its allocation id
+      std::map<uintptr_t,size_t> unlinked_allocations;
     protected:
       // Lock for controlling access to the data
       // structures in this memory manager

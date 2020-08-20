@@ -2384,6 +2384,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    uintptr_t TaskContext::escape_task_local_instance(PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_MALLOC_INSTANCES
+      uintptr_t ptr = 0;
+      std::vector<std::pair<PhysicalInstance,uintptr_t> > new_instances;
+      for (std::vector<std::pair<PhysicalInstance,uintptr_t> >::iterator it =
+           task_local_instances.begin(); it !=
+           task_local_instances.end(); ++it)
+        if (it->first == instance)
+          ptr = it->second;
+        else
+          new_instances.push_back(*it);
+
+#ifdef DEBUG_LEGION
+      assert(ptr != 0);
+#endif
+      task_local_instances.swap(new_instances);
+      escaped_local_instances.insert(instance);
+      return ptr;
+#else
+      std::set<PhysicalInstance>::iterator finder =
+        task_local_instances.find(instance);
+#ifdef DEBUG_LEGION
+      assert(finder != task_local_instances.end());
+#endif
+      task_local_instances.erase(finder);
+      escaped_local_instances.insert(instance);
+
+      MemoryManager *manager = runtime->find_memory_manager(
+          instance.get_location());
+      return manager->unlink_eager_instance(instance);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::release_escaped_instances(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<PhysicalInstance>::iterator it =
+           escaped_local_instances.begin(); it !=
+           escaped_local_instances.end(); ++it)
+        it->destroy();
+      escaped_local_instances.clear();
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::begin_misspeculation(void)
     //--------------------------------------------------------------------------
     {
@@ -9028,6 +9075,8 @@ namespace Legion {
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
       }
+      if (!escaped_local_instances.empty())
+        release_escaped_instances();
       if (!task_local_instances.empty())
         release_task_local_instances(deferred_result_instance);
       // Safe to cast to a single task here because this will never
@@ -20494,6 +20543,8 @@ namespace Legion {
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
       }
+      if (!escaped_local_instances.empty())
+        release_escaped_instances();
       if (!task_local_instances.empty())
         release_task_local_instances(deferred_result_instance);
       // Unmap any physical regions that we mapped

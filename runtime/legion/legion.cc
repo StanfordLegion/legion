@@ -2616,7 +2616,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->return_data(num_elements, field_id, ptr, alignment);
+      impl->return_data(
+          num_elements, field_id, reinterpret_cast<uintptr_t>(ptr), alignment);
     }
 
     //--------------------------------------------------------------------------
@@ -2629,6 +2630,18 @@ namespace Legion {
       assert(impl != NULL);
 #endif
       impl->return_data(num_elements, ptrs, alignments);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::return_data(FieldID field_id,
+                                   Realm::RegionInstance instance,
+                                   size_t field_size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->return_data(field_id, instance, field_size);
     }
 
     /////////////////////////////////////////////////////////////
