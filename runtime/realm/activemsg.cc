@@ -168,6 +168,120 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class IncomingMessageManager::MessageBlock
+  //
+
+  /*static*/ IncomingMessageManager::MessageBlock *IncomingMessageManager::MessageBlock::new_block(size_t _total_size)
+  {
+    void *ptr = malloc(_total_size);
+    assert(ptr != 0);
+    MessageBlock *block = new(ptr) MessageBlock;
+    block->total_size = _total_size;
+    block->next_free = 0;
+    block->reset();
+    log_amhandler.info() << "creating message block: " << block;
+    return block;
+  }
+
+  /*static*/ void IncomingMessageManager::MessageBlock::free_block(MessageBlock *block)
+  {
+    while(block) {
+      log_amhandler.info() << "freeing message block: " << block;
+      MessageBlock *next = block->next_free;
+      block->~MessageBlock();
+      free(block);
+      block = next;
+    }
+  }
+
+  void IncomingMessageManager::MessageBlock::reset()
+  {
+    size_used = sizeof(MessageBlock);
+    size_used = (size_used + 15) & ~size_t(15); // 16B alignment
+    use_count.store(1);
+  }
+
+  IncomingMessageManager::Message *IncomingMessageManager::MessageBlock::append_message(size_t hdr_bytes_needed,
+					size_t payload_bytes_needed)
+  {
+    size_t msg_ofs = size_used;
+    size_t new_used = msg_ofs + sizeof(Message);
+    new_used = (new_used + 15) & ~size_t(15); // 16B alignment
+
+    size_t hdr_ofs;
+    if(hdr_bytes_needed > 0) {
+      hdr_ofs = new_used;
+      new_used += hdr_bytes_needed;
+      new_used = (new_used + 15) & ~size_t(15); // 16B alignment
+    } else
+      hdr_ofs = 0;
+
+    size_t payload_ofs;
+    if(payload_bytes_needed > 0) {
+      payload_ofs = new_used;
+      new_used += payload_bytes_needed;
+      new_used = (new_used + 15) & ~size_t(15); // 16B alignment
+    } else
+      payload_ofs = 0;
+
+    // does it fit?
+    if(new_used <= total_size) {
+      use_count.fetch_add(1);
+      size_used = new_used;
+
+      uintptr_t base = reinterpret_cast<uintptr_t>(this);
+      Message *msg = reinterpret_cast<Message *>(base + msg_ofs);
+      msg->block = this;
+      msg->hdr = ((hdr_ofs > 0) ?
+		    reinterpret_cast<void *>(base + hdr_ofs) :
+		    0);
+      msg->payload = ((payload_ofs > 0) ?
+		        reinterpret_cast<void *>(base + payload_ofs) :
+		        0);
+      return msg;
+    } else {
+      // would it have ever fit?
+      assert((new_used - size_used) <= (total_size - sizeof(MessageBlock)));
+
+      // return failure - caller will find a new block
+      return 0;
+    }
+  }
+
+  void IncomingMessageManager::MessageBlock::recycle_message(IncomingMessageManager::Message *msg,
+							     IncomingMessageManager *manager)
+  {
+    // first, free any hdr/payload pointer we were borrowing
+    if(msg->hdr_needs_free)
+      free(msg->hdr);
+    if(msg->payload_needs_free)
+      free(msg->payload);
+
+    // now decrement our use_count
+    unsigned prev_count = use_count.fetch_sub(1);
+
+    // if it was 1 (now 0), take the manager's lock and add ourselves to
+    //  the available list (or delete if there's already enough)
+    if(prev_count == 1) {
+      bool delete_me = false;
+      {
+	AutoLock<> al(manager->mutex);
+	if(manager->num_available_blocks < manager->cfg_max_available_blocks) {
+	  reset();
+	  next_free = manager->available_blocks;
+	  manager->available_blocks = this;
+	  manager->num_available_blocks++;
+	} else
+	  delete_me = true;
+      }
+
+      if(delete_me)
+	free_block(this);
+    }
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class IncomingMessageManager
   //
 
@@ -188,6 +302,10 @@ namespace Realm {
     , drain_pending(false)
     , condvar(mutex)
     , drain_condvar(mutex)
+    , available_blocks(0)
+    , num_available_blocks(0)
+    , cfg_max_available_blocks(10)
+    , cfg_message_block_size(1048576 - 32) // 1MB - space for heap metadata
   {
     heads = new Message *[nodes];
     tails = new Message **[nodes];
@@ -205,6 +323,8 @@ namespace Realm {
 					     Realm::CoreReservationParameters());
     else
       core_rsrv = 0;
+
+    current_block = MessageBlock::new_block(cfg_message_block_size);
   }
 
   IncomingMessageManager::~IncomingMessageManager(void)
@@ -214,16 +334,10 @@ namespace Realm {
     delete[] tails;
     delete[] in_handler;
     delete[] todo_list;
-  }
 
-  // like strdup, but works on arbitrary byte arrays
-  static void *bytedup(const void *data, size_t datalen)
-  {
-    if(datalen == 0) return 0;
-    void *dst = malloc(datalen);
-    assert(dst != 0);
-    memcpy(dst, data, datalen);
-    return dst;
+    MessageBlock::free_block(current_block);
+    if(available_blocks)
+      MessageBlock::free_block(available_blocks);
   }
 
   bool IncomingMessageManager::add_incoming_message(NodeID sender,
@@ -265,25 +379,84 @@ namespace Realm {
     }
 
     // can't handle inline - need to create a Message object for it
-    // TODO: recycle these!
-    Message *msg = new Message;
-    msg->next_msg = 0;
-    msg->sender = sender;
-    msg->handler = handler;
-    msg->hdr = ((hdr_mode == PAYLOAD_COPY) ?
-		  bytedup(hdr, hdr_size) :
-		  const_cast<void *>(hdr));
-    msg->hdr_size = hdr_size;
-    msg->hdr_needs_free = (hdr_mode != PAYLOAD_KEEP);
-    msg->payload = ((payload_mode == PAYLOAD_COPY) ?
-		      bytedup(payload, payload_size) :
-		      const_cast<void *>(payload));
-    msg->payload_size = payload_size;
-    msg->payload_needs_free = (payload_mode != PAYLOAD_KEEP);
-    msg->callback_fnptr = callback_fnptr;
-    msg->callback_data = callback_data;
-	  
+
     mutex.lock();
+
+    Message *msg = 0;
+    size_t hdr_bytes_needed = ((hdr_mode == PAYLOAD_COPY) ?
+			         hdr_size : 0);
+    size_t payload_bytes_needed = ((payload_mode == PAYLOAD_COPY) ?
+				     payload_size : 0);
+    while(true) {
+      // try to stick this message in the current block
+      msg = current_block->append_message(hdr_bytes_needed,
+					  payload_bytes_needed);
+      if(msg != 0) break;
+
+      // do we have a new block we can use?
+      if((available_blocks != 0) ||
+	 (current_block->use_count.load() == 1)) {
+	// first release our hold on the current block
+	unsigned prev_count = current_block->use_count.fetch_sub(1);
+
+	if(prev_count == 1) {
+	  // in the (highly unlikely) case that all of its messages have
+	  //  been deleted, we can just reset it and reuse it
+	  current_block->reset();
+	  log_amhandler.debug() << "reusing message block: " << current_block;
+	} else {
+	  assert(available_blocks != 0);
+	  current_block = available_blocks;
+	  available_blocks = available_blocks->next_free;
+	  current_block->next_free = 0;
+	  num_available_blocks--;
+	  log_amhandler.debug() << "switching to message block: " << current_block;
+	}
+
+	// either way, this must now succeed
+	msg = current_block->append_message(hdr_bytes_needed,
+					    payload_bytes_needed);
+	assert(msg != 0);
+	break;
+      }
+
+      // no available blocks - drop the mutex while we allocate a new one
+      mutex.unlock();
+      MessageBlock *block = MessageBlock::new_block(cfg_message_block_size);
+      mutex.lock();
+      // we don't know what changed while we weren't holding the lock,
+      //  so just stick this on the available list and restart
+      block->next_free = available_blocks;
+      available_blocks = block;
+      num_available_blocks++;
+    }
+
+    // fill in message structure
+    // TODO: let go of lock if copying a large payload?
+    {
+      msg->next_msg = 0;
+      msg->sender = sender;
+      msg->handler = handler;
+      msg->callback_fnptr = callback_fnptr;
+      msg->callback_data = callback_data;
+
+      if(hdr_mode == PAYLOAD_COPY)
+	memcpy(msg->hdr, hdr, hdr_size);
+      else
+	msg->hdr = const_cast<void *>(hdr);
+      msg->hdr_size = hdr_size;
+      msg->hdr_needs_free = (hdr_mode == PAYLOAD_FREE);
+
+      if(payload_size > 0) {
+	if(payload_mode == PAYLOAD_COPY)
+	  memcpy(msg->payload, payload, payload_size);
+	else
+	  msg->payload = const_cast<void *>(payload);
+      }
+      msg->payload_size = payload_size;
+      msg->payload_needs_free = (payload_mode == PAYLOAD_FREE);
+    }
+
     if(heads[sender]) {
       // tack this on to the existing list
       assert(tails[sender]);
@@ -550,8 +723,9 @@ namespace Realm {
 				     count++, // how many messages we handle in a batch
 				     start_time, CurrentTime());
 #endif
-      // TODO: recycle!
-      delete current_msg;
+      // recycle message
+      current_msg->block->recycle_message(current_msg, this);
+
       current_msg = next_msg;
 
       // do we need to stop early?

@@ -508,21 +508,22 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FieldAllocatorImpl::FieldAllocatorImpl(FieldSpace space, TaskContext *ctx,
+    FieldAllocatorImpl::FieldAllocatorImpl(FieldSpaceNode *n, TaskContext *ctx,
                                            RtEvent ready)
-      : field_space(space), context(ctx), ready_event(ready)
+      : field_space(n->handle), node(n), context(ctx), ready_event(ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(field_space.exists());
+      assert(node != NULL);
       assert(context != NULL);
 #endif
       context->add_reference();
+      node->add_base_resource_ref(FIELD_ALLOCATOR_REF);
     }
 
     //--------------------------------------------------------------------------
     FieldAllocatorImpl::FieldAllocatorImpl(const FieldAllocatorImpl &rhs)
-      : field_space(rhs.field_space), context(rhs.context), 
+      : field_space(rhs.field_space), node(rhs.node), context(rhs.context), 
         ready_event(rhs.ready_event)
     //--------------------------------------------------------------------------
     {
@@ -534,9 +535,11 @@ namespace Legion {
     FieldAllocatorImpl::~FieldAllocatorImpl(void)
     //--------------------------------------------------------------------------
     {
-      context->destroy_field_allocator(field_space);
+      context->destroy_field_allocator(node);
       if (context->remove_reference())
         delete context;
+      if (node->remove_base_resource_ref(FIELD_ALLOCATOR_REF))
+        delete node;
     }
 
     //--------------------------------------------------------------------------

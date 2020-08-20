@@ -253,7 +253,10 @@ namespace Realm {
     void handler_thread_loop(void);
 
   protected:
+    struct MessageBlock;
+
     struct Message {
+      MessageBlock *block;
       Message *next_msg;
       NodeID sender;
       ActiveMessageHandlerTable::HandlerEntry *handler;
@@ -265,6 +268,24 @@ namespace Realm {
       bool payload_needs_free;
       CallbackFnptr callback_fnptr;
       CallbackData callback_data;
+    };
+
+    struct MessageBlock {
+      static MessageBlock *new_block(size_t _total_size);
+      static void free_block(MessageBlock *block);
+
+      void reset();
+
+      // called with message manager lock held
+      Message *append_message(size_t hdr_bytes_needed,
+			      size_t payload_bytes_needed);
+
+      // called _without_ message manager lock held
+      void recycle_message(Message *msg, IncomingMessageManager *manager);
+
+      size_t total_size, size_used;
+      atomic<unsigned> use_count;
+      MessageBlock *next_free;
     };
 
     int get_messages(Message *& head, Message **& tail, bool wait);
@@ -284,6 +305,10 @@ namespace Realm {
     Realm::CondVar condvar, drain_condvar;
     Realm::CoreReservation *core_rsrv;
     std::vector<Realm::Thread *> handler_threads;
+    MessageBlock *current_block;
+    MessageBlock *available_blocks;
+    size_t num_available_blocks;
+    size_t cfg_max_available_blocks, cfg_message_block_size;
   };
 
 }; // namespace Realm

@@ -358,12 +358,6 @@ namespace Legion {
                                    ShardMapping *shard_mapping = NULL);
       void destroy_field_space(FieldSpace handle, std::set<RtEvent> &applied,
                                const bool total_sharding_collective = false);
-      RtEvent create_field_space_allocator(FieldSpace handle, 
-                                        bool sharded_owner_context = false,
-                                        bool owner_shard = false);
-      void destroy_field_space_allocator(FieldSpace handle,
-                                         bool sharded_owner_context = false,
-                                         bool owner_shard = false);
       // Return true if local is set to true and we actually performed the 
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.

@@ -502,31 +502,32 @@ namespace Legion {
           return finder->second;
       }
       // Didn't find it, so have to make, retake the lock in exclusive mode
+      FieldSpaceNode *node = runtime->forest->get_node(handle);
       AutoLock priv_lock(privilege_lock);
       // Check to see if we lost the race
       std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator finder = 
         field_allocators.find(handle);
       if (finder != field_allocators.end())
         return finder->second;
-      // Otherwise we can make it
-      const RtEvent ready = 
-        runtime->forest->create_field_space_allocator(handle);
       // Don't have one so make a new one
-      FieldAllocatorImpl *result = new FieldAllocatorImpl(handle, this, ready);
+      const RtEvent ready = node->create_allocator(runtime->address_space);
+      FieldAllocatorImpl *result = new FieldAllocatorImpl(node, this, ready);
       // Save it for later
       field_allocators[handle] = result;
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::destroy_field_allocator(FieldSpace handle)
+    void TaskContext::destroy_field_allocator(FieldSpaceNode *node)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      runtime->forest->destroy_field_space_allocator(handle);
+      const RtEvent ready = node->destroy_allocator(runtime->address_space);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
       AutoLock priv_lock(privilege_lock);
       std::map<FieldSpace,FieldAllocatorImpl*>::iterator finder = 
-        field_allocators.find(handle);
+        field_allocators.find(node->handle);
 #ifdef DEBUG_LEGION
       assert(finder != field_allocators.end());
 #endif
@@ -959,32 +960,44 @@ namespace Legion {
               "in task tree rooted by %s", it->first.id, get_task_name())
         deleted_index_partitions.clear();
       }
-      // If we're not supposed to be reporting leaks then we're done
-      if (!runtime->report_leaks)
-        return;
+      // Now we go through and delete anything that the user leaked
       if (!created_regions.empty())
       {
         for (std::map<LogicalRegion,unsigned>::const_iterator it = 
               created_regions.begin(); it != created_regions.end(); it++)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-              "Logical region (%x,%x,%x) was leaked out of task tree rooted "
-              "by task %s", it->first.index_space.id, it->first.field_space.id, 
-              it->first.tree_id, get_task_name())
+          if (runtime->report_leaks)
+            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+                "Logical region (%x,%x,%x) was leaked out of task tree rooted "
+                "by task %s", it->first.index_space.id, 
+                it->first.field_space.id, it->first.tree_id, get_task_name())
           runtime->forest->destroy_logical_region(it->first, preconditions);
         }
         created_regions.clear();
       }
       if (!created_fields.empty())
       {
+        std::map<FieldSpace,FieldAllocatorImpl*> leak_allocators;
         for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator 
               it = created_fields.begin(); it != created_fields.end(); it++)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-              "Field %d of field space %x was leaked out of task tree rooted "
-              "by task %s", it->second, it->first.id, get_task_name())
+          if (runtime->report_leaks)
+            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+                "Field %d of field space %x was leaked out of task tree rooted "
+                "by task %s", it->second, it->first.id, get_task_name())
+          if (leak_allocators.find(it->first) == leak_allocators.end())
+          {
+            FieldAllocatorImpl *allocator = 
+              create_field_allocator(it->first, true/*unordered*/);
+            allocator->add_reference();
+            leak_allocators[it->first] = allocator;
+          }
           runtime->forest->free_field(it->first, it->second, preconditions);
         }
+        for (std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator it =
+              leak_allocators.begin(); it != leak_allocators.end(); it++)
+          if (it->second->remove_reference())
+            delete it->second;
         created_fields.clear();
       }
       if (!created_field_spaces.empty())
@@ -993,12 +1006,27 @@ namespace Legion {
               created_field_spaces.begin(); it != 
               created_field_spaces.end(); it++)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-              "Field space %x was leaked out of task tree rooted by task %s",
-              it->first.id, get_task_name())
+          if (runtime->report_leaks)
+            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+                "Field space %x was leaked out of task tree rooted by task %s",
+                it->first.id, get_task_name())
           runtime->forest->destroy_field_space(it->first, preconditions);
         }
         created_field_spaces.clear();
+      }
+      if (!created_index_partitions.empty())
+      {
+        for (std::map<IndexPartition,unsigned>::const_iterator it =
+              created_index_partitions.begin(); it != 
+              created_index_partitions.end(); it++)
+        {
+          if (runtime->report_leaks)
+            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+                "Index partition %x was leaked out of task tree rooted by "
+                "task %s", it->first.id, get_task_name())
+          runtime->forest->destroy_index_partition(it->first, preconditions);
+        }
+        created_index_partitions.clear();
       }
       if (!created_index_spaces.empty())
       {
@@ -1006,9 +1034,10 @@ namespace Legion {
               created_index_spaces.begin(); it !=
               created_index_spaces.end(); it++)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-              "Index space %x was leaked out of task tree rooted by task %s",
-              it->first.id, get_task_name());
+          if (runtime->report_leaks)
+            REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+                "Index space %x was leaked out of task tree rooted by task %s",
+                it->first.id, get_task_name())
           runtime->forest->destroy_index_space(it->first, preconditions);
         }
         created_index_spaces.clear();
@@ -14825,6 +14854,7 @@ namespace Legion {
         if (finder != field_allocators.end())
           return finder->second;
       }
+      FieldSpaceNode *node = runtime->forest->get_node(handle);
       // Didn't find it, so have to make, retake the lock in exclusive mode
       AutoLock priv_lock(privilege_lock);
       // Check to see if we lost the race
@@ -14854,11 +14884,10 @@ namespace Legion {
         {
           // This next part is unsafe to perform in a control replicated
           // context if we are unordered, so just make a fresh allocator
-          const RtEvent ready = 
-            runtime->forest->create_field_space_allocator(handle);
+          const RtEvent ready = node->create_allocator(runtime->address_space);
           // Don't have one so make a new one
           FieldAllocatorImpl *result = 
-            new FieldAllocatorImpl(handle, NULL, ready);
+            new FieldAllocatorImpl(node, NULL, ready);
           // DO NOT SAVE THIS!
           return result;
         }
@@ -14877,17 +14906,18 @@ namespace Legion {
       field_allocator_owner_shards[handle] = owner;
       RtEvent ready;
       if (owner.second)
-        ready = runtime->forest->create_field_space_allocator(handle,
-            true/*sharded context*/, (owner.first == owner_shard->shard_id));
+        ready = node->create_allocator(runtime->address_space, 
+            RtUserEvent::NO_RT_USER_EVENT, true/*sharded context*/, 
+            (owner.first == owner_shard->shard_id));
       // Don't have one so make a new one
-      FieldAllocatorImpl *result = new FieldAllocatorImpl(handle, this, ready);
+      FieldAllocatorImpl *result = new FieldAllocatorImpl(node, this, ready);
       // Save it for later
       field_allocators[handle] = result;
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::destroy_field_allocator(FieldSpace handle)
+    void ReplicateContext::destroy_field_allocator(FieldSpaceNode *node)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -14895,7 +14925,7 @@ namespace Legion {
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_FIELD_ALLOCATOR);
-        hasher.hash(handle);
+        hasher.hash(node->handle);
         verify_replicable(hasher, "destroy_field_allocator");
       }
       bool found = false;
@@ -14904,13 +14934,13 @@ namespace Legion {
         AutoLock priv_lock(privilege_lock);
         // Check to see if we still have one
         std::map<FieldSpace,FieldAllocatorImpl*>::iterator finder = 
-          field_allocators.find(handle);
+          field_allocators.find(node->handle);
         if (finder != field_allocators.end())
         {
           found = true;
           field_allocators.erase(finder);
           std::map<FieldSpace,std::pair<ShardID,bool> >::iterator owner_finder =
-            field_allocator_owner_shards.find(handle);
+            field_allocator_owner_shards.find(node->handle);
 #ifdef DEBUG_LEGION
           assert(owner_finder != field_allocator_owner_shards.end());
 #endif
@@ -14919,14 +14949,19 @@ namespace Legion {
           field_allocator_owner_shards.erase(owner_finder);
         }
       }
-      if (found)
+      if (found && result.second)
       {
-        if (result.second)
-          runtime->forest->destroy_field_space_allocator(handle, 
+        const RtEvent ready = node->destroy_allocator(runtime->address_space,
               true/*sharded*/, (result.first == owner_shard->shard_id));
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
       }
-      else
-        runtime->forest->destroy_field_space_allocator(handle);
+      else if (!found)
+      {
+        const RtEvent ready = node->destroy_allocator(runtime->address_space);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -21142,10 +21177,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::destroy_field_allocator(FieldSpace handle)
+    void InlineContext::destroy_field_allocator(FieldSpaceNode *node)
     //--------------------------------------------------------------------------
     {
-      enclosing->destroy_field_allocator(handle);
+      enclosing->destroy_field_allocator(node);
     }
 
     //--------------------------------------------------------------------------
