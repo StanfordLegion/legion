@@ -307,8 +307,6 @@ namespace Legion {
                                          std::set<RtEvent> *applied = NULL);
       void destroy_field_space(FieldSpace handle,
                                std::set<RtEvent> &preconditions);
-      RtEvent create_field_space_allocator(FieldSpace handle);
-      void destroy_field_space_allocator(FieldSpace handle);
       // Return true if local is set to true and we actually performed the 
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.

@@ -314,7 +314,7 @@ namespace Legion {
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered) = 0;
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
-      virtual void destroy_field_allocator(FieldSpace handle);
+      virtual void destroy_field_allocator(FieldSpaceNode *node);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const = 0;
@@ -2069,7 +2069,7 @@ namespace Legion {
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
-      virtual void destroy_field_allocator(FieldSpace handle);
+      virtual void destroy_field_allocator(FieldSpaceNode *node);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const;

@@ -139,7 +139,8 @@ namespace Legion {
      */
     class FieldAllocatorImpl : public Collectable {
     public:
-      FieldAllocatorImpl(FieldSpace space, TaskContext *context, RtEvent ready);
+      FieldAllocatorImpl(FieldSpaceNode *node, 
+                         TaskContext *context, RtEvent ready);
       FieldAllocatorImpl(const FieldAllocatorImpl &rhs);
       ~FieldAllocatorImpl(void);
     public:
@@ -163,7 +164,8 @@ namespace Legion {
                            CustomSerdezID serdez_id, bool local);
       void free_fields(const std::set<FieldID> &to_free, const bool unordered);
     public:
-      const FieldSpace field_space;
+      FieldSpace field_space;
+      FieldSpaceNode *const node;
       TaskContext *const context;
       const RtEvent ready_event;
     };

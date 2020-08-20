@@ -1027,24 +1027,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent RegionTreeForest::create_field_space_allocator(FieldSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode *node = get_node(handle);
-      return node->create_allocator(runtime->address_space);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::destroy_field_space_allocator(FieldSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode *node = get_node(handle);
-      const RtEvent ready = node->destroy_allocator(runtime->address_space);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-    }
-
-    //--------------------------------------------------------------------------
     bool RegionTreeForest::allocate_field(FieldSpace handle, size_t field_size,
                                           FieldID fid, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
@@ -12597,6 +12579,12 @@ namespace Legion {
       derez.deserialize(ready_event);
 
       FieldSpaceNode *node = forest->get_node(handle);
+      // Add a reference to this node to keep it alive until we get the
+      // corresponding free operation from the remote node
+#ifdef DEBUG_LEGION
+      assert(node->is_owner());
+#endif
+      node->add_base_resource_ref(FIELD_ALLOCATOR_REF);
       node->create_allocator(source, ready_event);
     }
 
@@ -12666,6 +12654,9 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
+      // Remove the reference that we added when we originally got the request
+      if (node->remove_base_resource_ref(FIELD_ALLOCATOR_REF))
+        delete node;
     }
 
     //--------------------------------------------------------------------------

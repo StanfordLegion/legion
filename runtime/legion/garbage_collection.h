@@ -66,7 +66,7 @@ namespace Legion {
       PENDING_COLLECTIVE_REF = 8,
       MEMORY_MANAGER_REF = 9,
       COMPOSITE_NODE_REF = 10,
-      COMPOSITE_HANDLE_REF = 11,
+      FIELD_ALLOCATOR_REF = 11,
       REMOTE_CREATE_REF = 12,
       INSTANCE_MAPPER_REF = 13,
       APPLICATION_REF = 14,
@@ -106,7 +106,7 @@ namespace Legion {
       "Pending Collective Reference",               \
       "Memory Manager Reference",                   \
       "Composite Node Reference",                   \
-      "Composite Handle Reference",                 \
+      "Field Allocator Reference",                  \
       "Remote Creation Reference",                  \
       "Instance Mapper Reference",                  \
       "Application Reference",                      \
