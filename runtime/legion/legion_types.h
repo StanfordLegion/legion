@@ -513,6 +513,7 @@ namespace Legion {
         "Defer Reduction Manager Registration",                   \
         "Defer Verify Partition",                                 \
         "Defer Release Acquired Instances",                       \
+        "Free Eager Instance",                                    \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Defer Consensus Match",                                  \
