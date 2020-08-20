@@ -763,11 +763,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::check_unbound_output_regions(void)
+    void TaskContext::finalize_output_regions(void)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
       {
+        // Check if the task returned data for all the output fields
+        // before we fianlize this output region.
         OutputRegion &output_region = output_regions[idx];
         FieldID unbound_field = 0;
         if (!output_region.impl->is_complete(unbound_field))
@@ -2402,7 +2404,6 @@ namespace Legion {
       assert(ptr != 0);
 #endif
       task_local_instances.swap(new_instances);
-      escaped_local_instances.insert(instance);
       return ptr;
 #else
       std::set<PhysicalInstance>::iterator finder =
@@ -2410,24 +2411,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != task_local_instances.end());
 #endif
+      // Remove the instance from the set of task local instances
       task_local_instances.erase(finder);
-      escaped_local_instances.insert(instance);
 
       MemoryManager *manager = runtime->find_memory_manager(
           instance.get_location());
+      // We also need to unlink the instance from the manager
+      // as we need to register the allocation with a different
+      // instance name later.
       return manager->unlink_eager_instance(instance);
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::release_escaped_instances(void)
-    //--------------------------------------------------------------------------
-    {
-      for (std::set<PhysicalInstance>::iterator it =
-           escaped_local_instances.begin(); it !=
-           escaped_local_instances.end(); ++it)
-        it->destroy();
-      escaped_local_instances.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -9075,8 +9068,6 @@ namespace Legion {
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
       }
-      if (!escaped_local_instances.empty())
-        release_escaped_instances();
       if (!task_local_instances.empty())
         release_task_local_instances(deferred_result_instance);
       // Safe to cast to a single task here because this will never
@@ -9170,8 +9161,9 @@ namespace Legion {
           add_to_dependence_queue(close_op);
         }
       }
-      // Check if there is any unbound output region
-      check_unbound_output_regions();
+      // Finalize output regions by setting realm instances created during
+      // task execution to the output regions' physical managers
+      finalize_output_regions();
       // Check to see if we have any unordered operations that we need to inject
       {
         AutoLock d_lock(dependence_lock);
@@ -20543,8 +20535,6 @@ namespace Legion {
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
       }
-      if (!escaped_local_instances.empty())
-        release_escaped_instances();
       if (!task_local_instances.empty())
         release_task_local_instances(deferred_result_instance);
       // Unmap any physical regions that we mapped
@@ -20554,8 +20544,9 @@ namespace Legion {
         if (it->is_mapped())
           it->impl->unmap_region();
       }
-      // Check if there is any unbound output region
-      check_unbound_output_regions();
+      // Finalize output regions by setting realm instances created during
+      // task execution to the output regions' physical managers
+      finalize_output_regions();
       if (!execution_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(execution_events);

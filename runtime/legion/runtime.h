@@ -694,6 +694,7 @@ namespace Legion {
       OutputRequirement req;
       InstanceSet instance_set;
       size_t num_elements;
+      // Output data batched during task execution
       std::map<FieldID,ExternalInstanceInfo> returned_instances;
     };
 

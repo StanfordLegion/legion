@@ -3228,10 +3228,11 @@ namespace Legion {
       for (std::set<FieldID>::iterator it = req.privilege_fields.begin();
            it != req.privilege_fields.end(); ++it)
       {
-        // Create a layout description for a single field
+        // Create a layout description with a single field
         std::vector<FieldID> fields(1, *it);
         constraints.field_constraint = FieldConstraint(fields, false, false);
 
+        // Create a physical manager that is not bound to any instance
         PhysicalManager *manager =
           memory_manager->create_unbound_instance(req.region,
                                                   constraints,
@@ -3244,7 +3245,8 @@ namespace Legion {
         instance_set.add_instance(
             InstanceRef(manager, manager->layout->allocated_fields));
 
-        // Add the manager to the map of acquired instances
+        // Add the manager to the map of acquired instances so that
+        // later we can release it properly
         acquired_instances->insert(std::make_pair(manager, 1));
       }
     }
@@ -5484,8 +5486,10 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
+      // If the task has any output requirements, we create fresh region names
+      // return them back to the user
       if (outputs != NULL)
-        initialize_output_regions(*outputs);
+        create_output_regions(*outputs);
       if (!launcher.futures.empty())
       {
         // Only allow non-empty futures on the way in
@@ -5620,7 +5624,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::initialize_output_regions(
+    void IndividualTask::create_output_regions(
                                         std::vector<OutputRequirement> &outputs)
     //--------------------------------------------------------------------------
     {
@@ -5630,12 +5634,12 @@ namespace Legion {
         OutputRequirement &req = *it;
 
         // Create a deferred index space
-        // When this is an individual task, the index space is always 1D.
+        // For an individual task, the index space is always 1D.
         IndexSpace index_space = parent_ctx->create_index_space(
             get_completion_event(),
             Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
 
-        // Create the output region
+        // Create an output region
         LogicalRegion region = parent_ctx->create_logical_region(
             runtime->forest, index_space, req.field_space, false);
 
@@ -5645,7 +5649,7 @@ namespace Legion {
         req.parent = region;
         req.privilege = WRITE_DISCARD;
 
-        // Store the output requiremen in the task
+        // Store the output requirement in the task
         output_regions.push_back(req);
       }
     }
@@ -8086,6 +8090,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_DEACTIVATE_CALL);
+      // We need to finalize sizes of output regions, and also of subregions
+      // when global indexing is requested.
       finalize_output_regions();
       deactivate_index_task(); 
       runtime->free_index_task(this);
@@ -8146,10 +8152,15 @@ namespace Legion {
           runtime->forest->get_node(part)->as_index_part_node();
 
         if (!output_regions[idx].global_indexing)
+          // For locally indexed output regions, sizes of subregions are already
+          // set when they are fianlized by the point tasks. So we only need to
+          // initialize the root index space by taking a union of subspaces.
           parent_node->construct_realm_index_space_from_union(
               part_node, runtime->address_space);
         else
         {
+          // For globally indexed output regions, we need a prefix sum to get
+          // the right size for each subregion.
           typedef std::map<Point<1>,size_t> SizeMap;
           const SizeMap &output_sizes = all_output_sizes[idx];
           size_t sum = 0;
@@ -8183,8 +8194,10 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
+      // If the task has any output requirements, we create fresh region and
+      // partition names and return them back to the user
       if (outputs != NULL)
-        initialize_output_regions(*outputs, launch_sp);
+        create_output_regions(*outputs, launch_sp);
       if (!launcher.futures.empty())
       {
         // Only allow non-empty futures on the way in
@@ -8274,8 +8287,10 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
+      // If the task has any output requirements, we create fresh region and
+      // partition names and return them back to the user
       if (outputs != NULL)
-        initialize_output_regions(*outputs, launch_sp);
+        create_output_regions(*outputs, launch_sp);
       if (!launcher.futures.empty())
       {
         // Only allow non-empty futures on the way in
@@ -8512,27 +8527,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::initialize_output_regions(
+    void IndexTask::create_output_regions(
                std::vector<OutputRequirement> &outputs, IndexSpace launch_space)
     //--------------------------------------------------------------------------
     {
-      if (launch_space.get_dim() + 1 > LEGION_MAX_DIM)
-        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_DOMAIN,
-          "Dimensionality of output regions of task %s (UID: %lld) "
-          "exceeded LEGION_MAX_DIM. You may rebuild your code with a "
-          "bigger LEGION_MAX_DIM value or reduce dimensionality of "
-          "the launch domain.", get_task_name(), get_unique_op_id());
-
       for (std::vector<OutputRequirement>::iterator it = outputs.begin();
            it != outputs.end(); ++it)
       {
         OutputRequirement &req = *it;
 
-        // Create a deferred index space
         TypeTag type_tag;
 
         if (req.global_indexing)
         {
+          // When global indexing is used for the output region,
+          // we require the launch domain to be 1-D in order to avoid
+          // ambiguity in ordering of the subregions.
           if (launch_space.get_dim() > 1)
             REPORT_LEGION_ERROR(ERROR_INVALID_GLOBAL_INDEXING,
               "Any index task requesting global indexing on an output region "
@@ -8544,8 +8554,18 @@ namespace Legion {
         }
         else
         {
-          // When local indexing is requested, create an (N+1)-D index space
-          // for an N-D launch domain
+          // When local indexing is used for the output region,
+          // we create an (N+1)-D index space when the launch domain is N-D.
+
+          // Before creating the index space, we make sure that
+          // the dimensionality (N+1) does not exceed LEGION_MAX_DIM.
+          if (launch_space.get_dim() + 1 > LEGION_MAX_DIM)
+            REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_DOMAIN,
+              "Dimensionality of output regions of task %s (UID: %lld) "
+              "exceeded LEGION_MAX_DIM. You may rebuild your code with a "
+              "bigger LEGION_MAX_DIM value or reduce dimensionality of "
+              "the launch domain.", get_task_name(), get_unique_op_id());
+
           switch (launch_space.get_dim() + 1)
           {
 #define DIMFUNC(DIM) \
@@ -8561,11 +8581,11 @@ namespace Legion {
           }
         }
 
+        // Create a deferred index space
         IndexSpace index_space =
           parent_ctx->create_index_space(get_completion_event(), type_tag);
 
-        // Create a pending partition for the output region
-        // using the launch domain as the color space
+        // Create a pending partition using the launch domain as the color space
         IndexSpace color_space = launch_space;
         fprintf(stderr, "Color space: (%x, %x)\n",
             color_space.get_id(), color_space.get_tree_id());
@@ -8574,21 +8594,21 @@ namespace Legion {
             LEGION_DISJOINT_COMPLETE_KIND,
             LEGION_AUTO_GENERATE_ID);
 
-        // Create the output region and partition
+        // Create an output region and a partition
         LogicalRegion region = parent_ctx->create_logical_region(
             runtime->forest, index_space, req.field_space, false);
 
         LogicalPartition partition =
           runtime->forest->get_logical_partition(region, pid);
 
-        // Set the region back to the output requirement so the caller
-        // can use it for downstream tasks
+        // Set the region and partition back to the output requirement
+        // so the caller can use it for downstream tasks
         req.partition = partition;
         req.parent = region;
         req.privilege = WRITE_DISCARD;
         req.handle_type = LEGION_PARTITION_PROJECTION;
 
-        // Store the output requiremen in the task
+        // Store the output requirement in the task
         output_regions.push_back(req);
       }
     }

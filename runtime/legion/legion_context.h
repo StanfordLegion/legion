@@ -495,7 +495,6 @@ namespace Legion {
                                         Realm::InstanceLayoutGeneric *layout);
       virtual void destroy_task_local_instance(PhysicalInstance instance);
       virtual uintptr_t escape_task_local_instance(PhysicalInstance instance);
-      virtual void release_escaped_instances(void);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                     PhysicalInstance inst, FutureFunctor *callback_functor) = 0;
       virtual void post_end_task(const void *res, size_t res_size, 
@@ -613,7 +612,7 @@ namespace Legion {
           MapperID mid, MappingTagID tag, ApUserEvent unmap_event,
           bool virtual_mapped, const InstanceSet &physical_instances);
       void add_output_region(const OutputRequirement &req, InstanceSet instances);
-      void check_unbound_output_regions(void);
+      void finalize_output_regions(void);
       void initialize_overhead_tracker(void);
       void unmap_all_regions(void); 
       inline void begin_runtime_call(void);
@@ -701,7 +700,6 @@ namespace Legion {
 #else
       std::set<PhysicalInstance> task_local_instances;
 #endif
-      std::set<PhysicalInstance> escaped_local_instances;
     protected:
       RtEvent pending_done;
       bool task_executed;

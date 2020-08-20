@@ -3494,6 +3494,8 @@ namespace Legion {
       else
         num_elements = new_num_elements;
 
+      // Here we simply queue up the output data, rather than eagerly
+      // creating and setting an instance to the output region.
       ExternalInstanceInfo &info = returned_instances[field_id];
       info.eager_pool = eager_pool;
       info.ptr = ptr;
@@ -3527,10 +3529,16 @@ namespace Legion {
           context->owner_task->get_unique_op_id(), alloc_size, field_size);
 
 
+      // The realm instance backing a deferred buffer is currently tagged as
+      // a task local instance, so we need to tell the runtime that the instance
+      // now escapes the context.
       uintptr_t ptr = context->escape_task_local_instance(instance);
+
+      // This is safe to do as we require the deferred buffer to be 1-D.
       const Realm::InstanceLayout<1,coord_t> *layout =
         reinterpret_cast<const Realm::InstanceLayout<1,coord_t>*>(
             instance.get_layout());
+
       return_data(layout->space.bounds.volume(), field_id, ptr,
                   layout->alignment_reqd, true);
     }
@@ -3543,6 +3551,8 @@ namespace Legion {
       IndexSpaceNode *index_node =
         node->get_row_source()->as_index_space_node();
 
+      // Subregions of a globally indexed output region cannot be finalized in
+      // the first round because their sizes are yet to be determined.
       if (defer && req.partition.exists() && req.global_indexing)
       {
         add_reference();
@@ -3573,11 +3583,13 @@ namespace Legion {
           domain.rect_data[domain.dim] = num_elements - 1;
 
           index_node->set_domain(domain, runtime->address_space);
-          if (req.partition.exists())
-            index_node->mark_index_space_ready();
+          index_node->mark_index_space_ready();
         }
         else
         {
+          // For a globally indexed output region, the domain has
+          // already been initialized once we reached here, so
+          // we just retrieve it.
           ApEvent ready = ApEvent::NO_AP_EVENT;
           domain = index_node->get_domain(ready, true);
           if (ready.exists())
@@ -3588,13 +3600,12 @@ namespace Legion {
       {
         domain = Rect<1>(0, num_elements - 1);
         index_node->set_domain(domain, runtime->address_space);
-        if (req.partition.exists())
-          index_node->mark_index_space_ready();
       }
 
-      // Update the corresponding instance manager for each output field
       FieldSpaceNode *fspace_node = node->get_column_source();
 
+      // Create a Realm instance and update the physical manager
+      // for each output field
       for (std::map<FieldID,ExternalInstanceInfo>::iterator it =
            returned_instances.begin(); it !=
            returned_instances.end(); ++it)
@@ -3605,7 +3616,8 @@ namespace Legion {
         std::set<FieldID> fields; fields.insert(field_id);
         FieldMask mask = fspace_node->get_field_mask(fields);
 
-        // Find an instance ref
+        // Find the right physical manager by checking against
+        // the field mask of the instance ref
         IndividualManager *manager = NULL;
         for (unsigned idx = 0; idx < instance_set.size(); ++idx)
         {
@@ -3620,7 +3632,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(manager != NULL);
 #endif
-        // Create a Realm layout;
+        // Create a Realm layout
         std::map<Realm::FieldID,size_t> field_sizes;
         field_sizes[field_id] = field_size;
         Realm::InstanceLayoutConstraints constraints(field_sizes,
@@ -3656,6 +3668,7 @@ namespace Legion {
         layout->bytes_used =
           (num_elements * field_size + alignment - 1) / alignment * alignment;
 
+        // Create an external Realm instance
         Realm::RegionInstance instance;
         Realm::ProfilingRequestSet no_requests;
         RtEvent wait_on(Realm::RegionInstance::create_external(
@@ -3665,11 +3678,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(instance.exists());
 #endif
+        // Finally we set the instance to the physical manager
         manager->update_physical_instance(instance,
                                           info.eager_pool
                                           ? IndividualManager::EAGER
                                           : IndividualManager::EXTERNAL_OWNED,
                                           info.ptr);
+
+        // If this is an allocation drawn from the eager pool,
+        // we need to link the pointer back to the memory manager with a
+        // new instance name so that the manager can keep track of this
+        // instance.
         if (info.eager_pool)
           manager->memory_manager->link_eager_instance(instance, info.ptr);
       }

@@ -562,6 +562,8 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
+      // We need to finalize sizes of output regions, and also of subregions
+      // when global indexing is requested.
       finalize_output_regions(&repl_ctx->shard_manager->get_mapping());
       deactivate_index_task();
       if (reduction_collective != NULL)
@@ -1025,9 +1027,6 @@ namespace Legion {
     void ReplIndexTask::finalize_output_regions(ShardMapping *mapping)
     //--------------------------------------------------------------------------
     {
-      if (output_size_collective != NULL)
-        output_size_collective->exchange_output_sizes(all_output_sizes);
-
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
       {
         const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
@@ -1039,10 +1038,22 @@ namespace Legion {
           runtime->forest->get_node(part)->as_index_part_node();
 
         if (!output_regions[idx].global_indexing)
+          // For locally indexed output regions, sizes of subregions are already
+          // set when they are fianlized by the point tasks. So we only need to
+          // initialize the root index space by taking a union of subspaces.
           parent_node->construct_realm_index_space_from_union(
               part_node, runtime->address_space, mapping);
         else
         {
+          // For globally indexed output regions, we need a prefix sum to get
+          // the right size for each subregion.
+#ifdef DEBUG_LEGION
+          assert(output_size_collective != NULL);
+#endif
+          // Before doing the prefix sum, we need to gather sizes from
+          // all the other shards, since we need a global prefix sum.
+          output_size_collective->exchange_output_sizes(all_output_sizes);
+
           typedef std::map<Point<1>,size_t> SizeMap;
           const SizeMap &output_sizes =
             output_size_collective->all_output_sizes[idx];
@@ -1052,6 +1063,7 @@ namespace Legion {
                it != output_sizes.end(); ++it)
           {
             size_t size = it->second;
+            // Make sure we initialize nodes owned by this shard.
             if (local_sizes.find(it->first) != local_sizes.end())
             {
               LegionColor color =

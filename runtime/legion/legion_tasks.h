@@ -760,7 +760,7 @@ namespace Legion {
                                  bool do_registration);
       void perform_base_dependence_analysis(void);
     protected:
-      void initialize_output_regions(std::vector<OutputRequirement> &outputs);
+      void create_output_regions(std::vector<OutputRequirement> &outputs);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
@@ -1075,8 +1075,8 @@ namespace Legion {
                                  bool do_registration);
       void perform_base_dependence_analysis(void);
     protected:
-      void initialize_output_regions(std::vector<OutputRequirement> &outputs,
-                                     IndexSpace launch_space);
+      void create_output_regions(std::vector<OutputRequirement> &outputs,
+                                 IndexSpace launch_space);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
