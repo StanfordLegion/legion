@@ -900,12 +900,17 @@ namespace Legion {
             REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
                 "Field %d of field space %x was leaked out of task tree rooted "
                 "by task %s", it->second, it->first.id, get_task_name())
-          if (leak_allocators.find(it->first) == leak_allocators.end())
+          std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator finder =
+              leak_allocators.find(it->first);
+          if (finder == leak_allocators.end())
           {
             FieldAllocatorImpl *allocator = create_field_allocator(it->first);
             allocator->add_reference();
             leak_allocators[it->first] = allocator;
+            allocator->ready_event.wait();
           }
+          else
+            finder->second->ready_event.wait();
           runtime->forest->free_field(it->first, it->second, preconditions);
         }
         for (std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator it =
