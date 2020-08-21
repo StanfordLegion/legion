@@ -14858,7 +14858,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication && !unordered)
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_FIELD_ALLOCATOR);
@@ -14873,6 +14873,16 @@ namespace Legion {
           return finder->second;
       }
       FieldSpaceNode *node = runtime->forest->get_node(handle);
+      if (unordered)
+      {
+        // This next part is unsafe to perform in a control replicated
+        // context if we are unordered, so just make a fresh allocator
+        const RtEvent ready = node->create_allocator(runtime->address_space);
+        // Don't have one so make a new one
+        FieldAllocatorImpl *result = new FieldAllocatorImpl(node, this, ready);
+        // DO NOT SAVE THIS!
+        return result;
+      }
       // Didn't find it, so have to make, retake the lock in exclusive mode
       AutoLock priv_lock(privilege_lock);
       // Check to see if we lost the race
@@ -14897,18 +14907,7 @@ namespace Legion {
       }
       // Pick a shard to be the owner if we don't have a local shard
       if (!found)
-      {
-        if (unordered)
-        {
-          // This next part is unsafe to perform in a control replicated
-          // context if we are unordered, so just make a fresh allocator
-          const RtEvent ready = node->create_allocator(runtime->address_space);
-          // Don't have one so make a new one
-          FieldAllocatorImpl *result = 
-            new FieldAllocatorImpl(node, NULL, ready);
-          // DO NOT SAVE THIS!
-          return result;
-        }
+      { 
         owner.first = field_allocator_shard++;
         if (field_allocator_shard == total_shards)
           field_allocator_shard = 0;
