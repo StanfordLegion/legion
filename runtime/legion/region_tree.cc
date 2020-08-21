@@ -11393,16 +11393,20 @@ namespace Legion {
                         it++; // skip deleting local fields
                     }
                   }
-                  rez.serialize(unallocated_indexes);
-                  unallocated_indexes.clear();
-                  rez.serialize<size_t>(available_indexes.size());
-                  for (std::list<std::pair<unsigned,RtEvent> >::const_iterator
-                        it = available_indexes.begin(); it !=
-                        available_indexes.end(); it++)
+                  if (full_update || 
+                      (allocation_state != FIELD_ALLOC_COLLECTIVE)) 
                   {
-                    rez.serialize(it->first);
-                    rez.serialize(it->second);
+                    rez.serialize(unallocated_indexes);
+                    rez.serialize<size_t>(available_indexes.size());
+                    for (std::list<std::pair<unsigned,RtEvent> >::const_iterator
+                          it = available_indexes.begin(); it !=
+                          available_indexes.end(); it++)
+                    {
+                      rez.serialize(it->first);
+                      rez.serialize(it->second);
+                    }
                   }
+                  unallocated_indexes.clear();
                   available_indexes.clear();
                   rez.serialize(ready_event);
                 }
@@ -14139,9 +14143,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!is_owner());
       assert((allocation_state == FIELD_ALLOC_INVALID) || 
-              (allocation_state == FIELD_ALLOC_READ_ONLY));
-      assert(!unallocated_indexes);
-      assert(available_indexes.empty());
+              (allocation_state == FIELD_ALLOC_READ_ONLY) ||
+              (allocation_state == FIELD_ALLOC_COLLECTIVE)); 
       assert(outstanding_allocators == 0);
 #endif
       if (allocation_state == FIELD_ALLOC_INVALID)
@@ -14155,15 +14158,22 @@ namespace Legion {
           derez.deserialize(field_infos[fid]);
         }
       }
-      derez.deserialize(unallocated_indexes);
-      size_t num_indexes;
-      derez.deserialize(num_indexes);
-      for (unsigned idx = 0; idx < num_indexes; idx++)
+      if (allocation_state != FIELD_ALLOC_COLLECTIVE)
       {
-        std::pair<unsigned,RtEvent> index;
-        derez.deserialize(index.first);
-        derez.deserialize(index.second);
-        available_indexes.push_back(index);
+#ifdef DEBUG_LEGION
+        assert(!unallocated_indexes);
+        assert(available_indexes.empty());
+#endif
+        derez.deserialize(unallocated_indexes);
+        size_t num_indexes;
+        derez.deserialize(num_indexes);
+        for (unsigned idx = 0; idx < num_indexes; idx++)
+        {
+          std::pair<unsigned,RtEvent> index;
+          derez.deserialize(index.first);
+          derez.deserialize(index.second);
+          available_indexes.push_back(index);
+        }
       }
       // Make that we now have this in exclusive mode
       outstanding_allocators = 1;
