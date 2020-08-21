@@ -8587,8 +8587,6 @@ namespace Legion {
 
         // Create a pending partition using the launch domain as the color space
         IndexSpace color_space = launch_space;
-        fprintf(stderr, "Color space: (%x, %x)\n",
-            color_space.get_id(), color_space.get_tree_id());
         IndexPartition pid = parent_ctx->create_pending_partition(
             index_space, color_space,
             LEGION_DISJOINT_COMPLETE_KIND,
