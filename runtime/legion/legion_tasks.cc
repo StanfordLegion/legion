@@ -2399,6 +2399,11 @@ namespace Legion {
     void SingleTask::shard_off(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      // Still need this to record that this operation is done for LegionSpy
+      LegionSpy::log_operation_events(unique_op_id, 
+          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
       // Do the stuff to record that this is mapped and executed
       complete_mapping(mapped_precondition);
       complete_execution();

@@ -3154,6 +3154,7 @@ namespace Legion {
                                     const DomainPoint &key);
       virtual unsigned find_parent_index(unsigned idx);
       virtual bool is_partition_op(void) const { return true; }
+      virtual void select_partition_projection(void);
     public:
       virtual PartitionKind get_partition_kind(void) const;
       virtual UniqueID get_unique_id(void) const;
@@ -3209,7 +3210,6 @@ namespace Legion {
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
-      void select_partition_projection(void);
       bool invoke_mapper(InstanceSet &mapped_instances,
                          std::vector<PhysicalManager*> &source_instances);
       void activate_dependent_op(void);
