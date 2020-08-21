@@ -1438,7 +1438,7 @@ namespace Legion {
       COLLECTIVE_LOC_19 = 19,
       COLLECTIVE_LOC_20 = 20,
       COLLECTIVE_LOC_21 = 21, 
-      //COLLECTIVE_LOC_22 = 22, 
+      COLLECTIVE_LOC_22 = 22, 
       //COLLECTIVE_LOC_23 = 23,
       //COLLECTIVE_LOC_24 = 24,
       //COLLECTIVE_LOC_25 = 25,

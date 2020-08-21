@@ -3501,8 +3501,43 @@ namespace Legion {
     void ReplDependentPartitionOp::select_partition_projection(void)
     //--------------------------------------------------------------------------
     {
-      // TODO: put in a check here that all the shards pick the same partition
-      DependentPartitionOp::select_partition_projection();
+      if (!runtime->unsafe_mapper)
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+        assert(sharding_function == NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        // Check here that all the shards pick the same partition
+        requirement.partition = LogicalPartition::NO_PART;   
+        DependentPartitionOp::select_partition_projection();
+        ValueBroadcast<LogicalPartition> part_check(
+         repl_ctx->get_next_collective_index(COLLECTIVE_LOC_22,true/*logical*/),
+         repl_ctx, 0/*origin shard*/);
+        if (repl_ctx->owner_shard->shard_id > 0)
+        {
+          const LogicalPartition chosen_part = part_check.get_value();
+          if (chosen_part != requirement.partition)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invocation of "
+                      "'select_partition_projection' on mapper %s for "
+                      "depedent partitioning operation launched in %s "
+                      "(UID %lld). Mapper selected a logical partition "
+                      "on shard %d that is different than the logical "
+                      "partition selected by shard 0. All shards must "
+                      "select the same logical partition.",
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id(), 
+                      repl_ctx->owner_shard->shard_id)
+        }
+        else
+          part_check.broadcast(requirement.partition);
+      }
+      else
+        DependentPartitionOp::select_partition_projection();
     }
 
     //--------------------------------------------------------------------------
