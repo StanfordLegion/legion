@@ -1155,7 +1155,7 @@ namespace Legion {
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
     protected:
-      void finalize_output_regions(ShardMapping *mapping);
+      virtual void finalize_output_regions(void);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;

@@ -8090,9 +8090,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_DEACTIVATE_CALL);
-      // We need to finalize sizes of output regions, and also of subregions
-      // when global indexing is requested.
-      finalize_output_regions();
       deactivate_index_task(); 
       runtime->free_index_task(this);
     }
@@ -8101,6 +8098,9 @@ namespace Legion {
     void IndexTask::deactivate_index_task(void)
     //--------------------------------------------------------------------------
     {
+      // We need to finalize sizes of output regions, and also of subregions
+      // when global indexing is requested.
+      finalize_output_regions();
       deactivate_multi();
       privilege_paths.clear();
       if (!origin_mapped_slices.empty())

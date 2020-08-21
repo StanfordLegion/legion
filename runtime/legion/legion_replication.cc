@@ -556,15 +556,6 @@ namespace Legion {
     void ReplIndexTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      // We need to finalize sizes of output regions, and also of subregions
-      // when global indexing is requested.
-      finalize_output_regions(&repl_ctx->shard_manager->get_mapping());
       deactivate_index_task();
       if (reduction_collective != NULL)
       {
@@ -1024,9 +1015,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexTask::finalize_output_regions(ShardMapping *mapping)
+    void ReplIndexTask::finalize_output_regions(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      ShardMapping *shard_mapping = &repl_ctx->shard_manager->get_mapping();
       RegionTreeForest *forest = runtime->forest;
 
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
@@ -1044,7 +1042,7 @@ namespace Legion {
           // set when they are fianlized by the point tasks. So we only need to
           // initialize the root index space by taking a union of subspaces.
           parent_node->construct_realm_index_space_from_union(
-              part_node, runtime->address_space, mapping);
+              part_node, runtime->address_space, shard_mapping);
         else
         {
           // For globally indexed output regions, we need a prefix sum to get
@@ -1076,7 +1074,7 @@ namespace Legion {
             sum += size;
           }
           parent_node->set_domain(
-              Rect<1>(0, sum - 1), runtime->address_space, mapping);
+              Rect<1>(0, sum - 1), runtime->address_space, shard_mapping);
         }
       }
     }
