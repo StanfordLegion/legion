@@ -6238,6 +6238,7 @@ namespace Legion {
 #endif
       // Pretend like we executed the task
       execution_context->begin_misspeculation();
+      execution_context->force_finalize_output_regions();
       if (predicate_false_future.impl != NULL)
       {
         // Wait for the future to be ready
@@ -7201,6 +7202,7 @@ namespace Legion {
 #endif
       // Pretend like we executed the task
       execution_context->begin_misspeculation();
+      execution_context->force_finalize_output_regions();
       size_t result_size;
       const void *result = slice_owner->get_predicate_false_result(result_size);
       execution_context->end_misspeculation(result, result_size);
@@ -8122,10 +8124,6 @@ namespace Legion {
     void IndexTask::deactivate_index_task(void)
     //--------------------------------------------------------------------------
     {
-      // We need to finalize sizes of output regions, and also of subregions
-      // when global indexing is requested.
-      if (speculation_state != RESOLVE_FALSE_STATE)
-        finalize_output_regions();
       deactivate_multi();
       privilege_paths.clear();
       if (!origin_mapped_slices.empty())
@@ -9316,6 +9314,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_COMMIT_CALL);
+      // We need to finalize sizes of output regions, and also of subregions
+      // when global indexing is requested.
+      finalize_output_regions();
       if (profiling_reported.exists())
       {
         if (outstanding_profiling_requests > 0)
