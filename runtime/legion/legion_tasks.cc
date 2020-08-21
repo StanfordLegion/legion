@@ -8141,15 +8141,16 @@ namespace Legion {
     void IndexTask::finalize_output_regions(void)
     //--------------------------------------------------------------------------
     {
+      RegionTreeForest *forest = runtime->forest;
+
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
       {
         const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
         const IndexPartition &part =
           output_regions[idx].partition.get_index_partition();
         IndexSpaceNode *parent_node =
-          runtime->forest->get_node(ispace)->as_index_space_node();
-        IndexPartNode *part_node =
-          runtime->forest->get_node(part)->as_index_part_node();
+          forest->get_node(ispace)->as_index_space_node();
+        IndexPartNode *part_node = forest->get_node(part)->as_index_part_node();
 
         if (!output_regions[idx].global_indexing)
           // For locally indexed output regions, sizes of subregions are already
@@ -8168,13 +8169,10 @@ namespace Legion {
                it != output_sizes.end(); ++it)
           {
             size_t size = it->second;
-            LegionColor color =
-              part_node->color_space->linearize_color(
-                  &it->first, parent_node->type_tag);
-            IndexSpaceNode *child = part_node->get_child(color);
-            Rect<1> bounds(sum, sum + size - 1);
-            child->set_domain(bounds, runtime->address_space);
-            child->mark_index_space_ready();
+            IndexSpace child = forest->get_index_subspace(
+                part, &it->first, NT_TemplateHelper::encode_tag<1,coord_t>());
+            forest->set_pending_space_domain(
+                child, Rect<1>(sum, sum + size - 1), runtime->address_space);
             sum += size;
           }
           parent_node->set_domain(Rect<1>(0, sum - 1), runtime->address_space);

@@ -3582,13 +3582,13 @@ namespace Legion {
           domain.rect_data[0] = 0;
           domain.rect_data[domain.dim] = num_elements - 1;
 
-          index_node->set_domain(domain, runtime->address_space);
-          index_node->mark_index_space_ready();
+          runtime->forest->set_pending_space_domain(
+              index_node->handle, domain, runtime->address_space);
         }
         else
         {
           // For a globally indexed output region, the domain has
-          // already been initialized once we reached here, so
+          // already been initialized once we reach here, so
           // we just retrieve it.
           ApEvent ready = ApEvent::NO_AP_EVENT;
           domain = index_node->get_domain(ready, true);

@@ -1080,6 +1080,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::set_pending_space_domain(IndexSpace target,
+                                                    Domain domain,
+                                                    AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      // This method is called only by the shard that owns the target subspace
+      IndexSpaceNode *child_node = get_node(target);
+      if (child_node->set_domain(domain, source))
+        assert(false);
+      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+                         const_cast<ApEvent*>(&child_node->index_space_ready)));
+      if (space_ready.has_triggered())
+        REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
+                            "Invalid pending child!\n")
+      Runtime::trigger_event(NULL, space_ready);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition RegionTreeForest::get_index_partition(IndexSpace parent,
                                                          Color color)
     //--------------------------------------------------------------------------
@@ -8965,18 +8983,6 @@ namespace Legion {
       IndexSpaceExpression *diff = 
         context->subtract_index_spaces(rhs->get_union_expression(), this);
       return diff->is_empty();
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::mark_index_space_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      ApUserEvent ready = *(reinterpret_cast<ApUserEvent*>(
-                         const_cast<ApEvent*>(&index_space_ready)));
-#ifdef DEBUG_LEGION
-      assert(!ready.has_triggered());
-#endif
-      Runtime::trigger_event(NULL, ready);
     }
 
     /////////////////////////////////////////////////////////////

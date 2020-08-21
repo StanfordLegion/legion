@@ -327,6 +327,10 @@ namespace Legion {
                                     const std::vector<IndexSpace> &handles,
                                     ShardID shard = 0, size_t total_shards = 1);
     public:
+      void set_pending_space_domain(IndexSpace target,
+                                    Domain domain,
+                                    AddressSpaceID source);
+    public:
       IndexPartition get_index_partition(IndexSpace parent, Color color); 
       bool has_index_subspace(IndexPartition parent,
                               const void *realm_color, TypeTag type_tag);
@@ -2125,7 +2129,6 @@ namespace Legion {
                                             IndexSpace shard_space) = 0;
       virtual void destroy_shard_domain(const Domain &domain) = 0;
     public:
-      void mark_index_space_ready(void);
       virtual void construct_realm_index_space_from_union(
                                               IndexPartNode *part_node,
                                               AddressSpaceID source,
