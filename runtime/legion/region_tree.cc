@@ -1082,11 +1082,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::set_pending_space_domain(IndexSpace target,
                                                     Domain domain,
-                                                    AddressSpaceID source)
+                                                    AddressSpaceID source,
+                                                    ShardID shard,
+                                                    size_t total_shards)
     //--------------------------------------------------------------------------
     {
-      // This method is called only by the shard that owns the target subspace
       IndexSpaceNode *child_node = get_node(target);
+
+      if ((total_shards > 1) && ((child_node->color % total_shards) != shard))
+        return;
+
       if (child_node->set_domain(domain, source))
         assert(false);
       ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(

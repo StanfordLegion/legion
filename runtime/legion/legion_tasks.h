@@ -765,6 +765,7 @@ namespace Legion {
       void perform_base_dependence_analysis(void);
     protected:
       void create_output_regions(std::vector<OutputRequirement> &outputs);
+      virtual void force_finalize_output_regions(void);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
@@ -1094,6 +1095,7 @@ namespace Legion {
       void deactivate_index_task(void);
     protected:
       virtual void finalize_output_regions(void);
+      virtual void force_finalize_output_regions(void);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }

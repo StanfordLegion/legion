@@ -270,6 +270,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplIndividualTask::force_finalize_output_regions(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      ShardMapping *shard_mapping = &repl_ctx->shard_manager->get_mapping();
+      RegionTreeForest *forest = runtime->forest;
+      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+      {
+        const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
+        IndexSpaceNode *node= forest->get_node(ispace)->as_index_space_node();
+        node->set_domain(Rect<1>(0, -1), runtime->address_space, shard_mapping);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndividualTask::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
@@ -855,6 +875,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
         sharding_collective->elide_collective();
+      if (output_size_collective != NULL)
+        output_size_collective->elide_collective();
 #endif
       // Now continue through and do the base case
       IndexTask::resolve_false(speculated, launched);
@@ -1064,6 +1086,8 @@ namespace Legion {
             {
               IndexSpace child = forest->get_index_subspace(
                   pid, &it->first, NT_TemplateHelper::encode_tag<1,coord_t>());
+              // We don't need to pass the shard id and the number of shards
+              // as we know that we call this only from the owner shard
               forest->set_pending_space_domain(
                   child, Rect<1>(sum, sum + size - 1), runtime->address_space);
             }
@@ -1073,6 +1097,73 @@ namespace Legion {
                              runtime->address_space,
                              shard_mapping);
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::force_finalize_output_regions(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      ShardMapping *shard_mapping = &repl_ctx->shard_manager->get_mapping();
+      RegionTreeForest *forest = runtime->forest;
+
+      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+      {
+        const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
+        const IndexPartition &pid =
+          output_regions[idx].partition.get_index_partition();
+        IndexSpaceNode *parent= forest->get_node(ispace)->as_index_space_node();
+
+        Domain empty;
+        switch (parent->get_num_dims())
+        {
+#define DIMFUNC(DIM)                                 \
+          case DIM:                                  \
+          {                                          \
+            empty.dim = DIM;                         \
+            for (unsigned idx = 0; idx < DIM; ++idx) \
+            {                                        \
+              empty.rect_data[idx] = 0;              \
+              empty.rect_data[idx + DIM] = -1;       \
+            }                                        \
+            break;                                   \
+          }
+          LEGION_FOREACH_N(DIMFUNC)
+          default:
+            assert(false);
+        }
+#undef DIMFUNC
+        for (Domain::DomainPointIterator itr(index_domain); itr; ++itr)
+        {
+          IndexSpace child;
+          switch (index_domain.get_dim())
+          {
+#define DIMFUNC(DIM)                                                     \
+            case DIM:                                                    \
+            {                                                            \
+              Point<DIM> p = *itr;                                       \
+              child = forest->get_index_subspace(                        \
+                  pid, &p,NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+              break;                                                     \
+            }
+            LEGION_FOREACH_N(DIMFUNC)
+            default:
+              assert(false);
+          }
+#undef DIMFUNC
+          forest->set_pending_space_domain(
+              child, empty, runtime->address_space,
+              repl_ctx->owner_shard->shard_id,
+              repl_ctx->shard_manager->total_shards);
+
+        }
+        parent->set_domain(empty, runtime->address_space, shard_mapping);
       }
     }
 

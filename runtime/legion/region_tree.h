@@ -329,7 +329,9 @@ namespace Legion {
     public:
       void set_pending_space_domain(IndexSpace target,
                                     Domain domain,
-                                    AddressSpaceID source);
+                                    AddressSpaceID source,
+                                    ShardID shard = 0,
+                                    size_t total_shards = 1);
     public:
       IndexPartition get_index_partition(IndexSpace parent, Color color); 
       bool has_index_subspace(IndexPartition parent,

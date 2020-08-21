@@ -5667,6 +5667,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::force_finalize_output_regions(void)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeForest *forest = runtime->forest;
+      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+      {
+        const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
+        IndexSpaceNode *node = forest->get_node(ispace)->as_index_space_node();
+        node->set_domain(Rect<1>(0, -1), runtime->address_space);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
@@ -5872,6 +5885,7 @@ namespace Legion {
           result.impl->set_result(NULL, 0, false/*own*/);
       }
       // Then clean up this task instance
+      force_finalize_output_regions();
       complete_mapping();
       complete_execution(execution_condition);
       resolve_speculation();
@@ -8110,7 +8124,8 @@ namespace Legion {
     {
       // We need to finalize sizes of output regions, and also of subregions
       // when global indexing is requested.
-      finalize_output_regions();
+      if (speculation_state != RESOLVE_FALSE_STATE)
+        finalize_output_regions();
       deactivate_multi();
       privilege_paths.clear();
       if (!origin_mapped_slices.empty())
@@ -8185,6 +8200,62 @@ namespace Legion {
           }
           parent->set_domain(Rect<1>(0, sum - 1), runtime->address_space);
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::force_finalize_output_regions(void)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeForest *forest = runtime->forest;
+      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+      {
+        const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
+        const IndexPartition &pid =
+          output_regions[idx].partition.get_index_partition();
+        IndexSpaceNode *parent= forest->get_node(ispace)->as_index_space_node();
+
+        Domain empty;
+        switch (parent->get_num_dims())
+        {
+#define DIMFUNC(DIM)                                 \
+          case DIM:                                  \
+          {                                          \
+            empty.dim = DIM;                         \
+            for (unsigned idx = 0; idx < DIM; ++idx) \
+            {                                        \
+              empty.rect_data[idx] = 0;              \
+              empty.rect_data[idx + DIM] = -1;       \
+            }                                        \
+            break;                                   \
+          }
+          LEGION_FOREACH_N(DIMFUNC)
+          default:
+            assert(false);
+        }
+#undef DIMFUNC
+        for (Domain::DomainPointIterator itr(index_domain); itr; ++itr)
+        {
+          IndexSpace child;
+          switch (index_domain.get_dim())
+          {
+#define DIMFUNC(DIM)                                                     \
+            case DIM:                                                    \
+            {                                                            \
+              Point<DIM> p = *itr;                                       \
+              child = forest->get_index_subspace(                        \
+                  pid, &p,NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+              break;                                                     \
+            }
+            LEGION_FOREACH_N(DIMFUNC)
+            default:
+              assert(false);
+          }
+#undef DIMFUNC
+          forest->set_pending_space_domain(
+              child, empty, runtime->address_space);
+        }
+        parent->set_domain(empty, runtime->address_space);
       }
     }
 
@@ -8800,6 +8871,7 @@ namespace Legion {
         }
       }
       // Then clean up this task execution
+      force_finalize_output_regions();
       complete_mapping();
       complete_execution(execution_condition);
       resolve_speculation();
