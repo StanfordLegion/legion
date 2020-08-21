@@ -29,6 +29,7 @@ program = pt.Program("module")
 
 # Global variables
 from pygion import _max_dim
+
 LEGION_MAX_DIM = _max_dim
 MAX_DOMAIN_DIM = 2 * LEGION_MAX_DIM
 DIM = 1
@@ -44,8 +45,7 @@ coord_t = pt.Int64_t  # long long
 legion_index_space_id_t = pt.Int32_t  # unsigned int
 realm_id_t = pt.Int64_t  # unsigned long long
 
-# Add void type in Types
-legion_runtime_t = pt.PointerType(pt.Int64_t)
+legion_runtime_t = pt.PointerType(pt.Int8_t)
 
 legion_index_partition_t = pt.StructType(
     {
@@ -77,9 +77,7 @@ legion_domain_t = pt.StructType(
     }
 )
 
-legion_point_1d_array = pt.ArrayType(coord_t, DIM)
-
-legion_point_1d_t = pt.StructType({"x": legion_point_1d_array})
+legion_point_1d_t = pt.Int64_t
 
 legion_index_space_t = pt.StructType(
     {
@@ -99,48 +97,31 @@ legion_logical_region_t = pt.StructType(
 
 # Define functions:
 program.add_func_decl(
-    "legion_domain_point_get_point_1d", (pt.PointerType(legion_domain_point_t),), legion_point_1d_t,
-    attributes=('byval',),
+    "legion_domain_point_get_point_1d",
+    (pt.PointerType(legion_domain_point_t),),
+    legion_point_1d_t,
+    attributes=(("byval",),),
 )
+
 program.add_func_decl(
-    "legion_domain_point_from_point_1d", (pt.PointerType(legion_point_1d_t),), legion_domain_point_t,
-    attributes=('byval',),
+    "legion_domain_point_from_point_1d",
+    (pt.PointerType(legion_domain_point_t), legion_point_1d_t,),
+    (),
+    attributes=(("sret",), None),
 )
 program.add_func_decl(
     "legion_logical_partition_get_logical_subregion_by_color_domain_point",
-    (legion_runtime_t, pt.PointerType(legion_logical_partition_t), pt.PointerType(legion_domain_point_t),),
-    legion_logical_region_t,
-    attributes=(None, 'byval', 'byval',),
+    (
+        pt.PointerType(legion_logical_region_t),
+        legion_runtime_t,
+        pt.PointerType(legion_logical_partition_t),
+        pt.PointerType(legion_domain_point_t),
+    ),
+    (),
+    attributes=(("sret",), None, ("byval",), ("byval",),),
 )
-program.add_func_decl(
-    "legion_projection_functor_logical_partition_print_arguments",
-    (legion_runtime_t, pt.PointerType(legion_logical_partition_t), pt.PointerType(legion_domain_point_t), pt.PointerType(legion_domain_t),),
-    pt.Int64_t,
-    attributes=(None, 'byval', 'byval', 'byval',),
-)
-program.add_func_decl(
-    "legion_projection_functor_logical_partition_print_arguments_1",
-    (legion_runtime_t,),
-    pt.Int64_t,
-)
-program.add_func_decl(
-    "legion_projection_functor_logical_partition_print_arguments_2",
-    (pt.PointerType(legion_logical_partition_t),),
-    pt.Int64_t,
-    attributes=('byval',),
-)
-program.add_func_decl(
-    "legion_projection_functor_logical_partition_print_arguments_3",
-    (pt.PointerType(legion_domain_point_t),),
-    pt.Int64_t,
-    attributes=('byval',),
-)
-program.add_func_decl(
-    "legion_projection_functor_logical_partition_print_arguments_4",
-    (pt.PointerType(legion_domain_t),),
-    pt.Int64_t,
-    attributes=('byval',),
-)
+program.add_func_decl("malloc", (pt.Int32_t,), pt.PointerType(legion_domain_point_t))
+program.add_func_decl("free", (pt.PointerType(legion_domain_point_t),), ())
 
 # Define variables:
 runtime = pt.Symbol(legion_runtime_t, "runtime")
@@ -148,70 +129,62 @@ parent_ptr = pt.Symbol(pt.PointerType(legion_logical_partition_t), "parent_ptr")
 point_ptr = pt.Symbol(pt.PointerType(legion_domain_point_t), "point_ptr")
 domain_ptr = pt.Symbol(pt.PointerType(legion_domain_t), "domain_ptr")
 point1d = pt.Symbol(legion_point_1d_t, "point1d")
-point1d_x = pt.Symbol(legion_point_1d_array, "point1d_x")
-x = pt.Symbol(coord_t, "x")
-x_plus_1 = pt.Symbol(coord_t, "x_plus_1")
 point1d_x_plus_1 = pt.Symbol(legion_point_1d_t, "point1d_x_plus_1")
-domain_point_x_plus_1 = pt.Symbol(legion_domain_point_t, "domain_point_x_plus_1")
-result = pt.Symbol(legion_logical_region_t, "result")
-point1d_x_plus_1_x = pt.Symbol(pt.ArrayType(coord_t, DIM), "point1d_x_plus_1_x")
+domain_point_x_plus_1_ptr = pt.Symbol(
+    pt.PointerType(legion_domain_point_t), "point1d_x_plus_1_ptr"
+)
+result_ptr = pt.Symbol(pt.PointerType(legion_logical_region_t), "result_ptr")
+
+target_machine = program.get_target_machine()
 
 program.add_func(
     "proj_functor",
-    (runtime, parent_ptr, point_ptr, domain_ptr,),
-    legion_logical_region_t,
+    (result_ptr, runtime, parent_ptr, point_ptr, domain_ptr,),
+    (),
     pt.Block(
         [
-            pt.Call(
-                "legion_projection_functor_logical_partition_print_arguments", [pt.Var(runtime), pt.Var(parent_ptr), pt.Var(point_ptr), pt.Var(domain_ptr)]
-            ),
-            pt.Call(
-                "legion_projection_functor_logical_partition_print_arguments_1", [pt.Var(runtime)]
-            ),
-            pt.Call(
-                "legion_projection_functor_logical_partition_print_arguments_2", [pt.Var(parent_ptr)]
-            ),
-            pt.Call(
-                "legion_projection_functor_logical_partition_print_arguments_3", [pt.Var(point_ptr)]
-            ),
-            pt.Call(
-                "legion_projection_functor_logical_partition_print_arguments_4", [pt.Var(domain_ptr)]
-            ),
             pt.DefineVar(
-                point1d, pt.Call("legion_domain_point_get_point_1d", [pt.Var(point_ptr)])
-            ),
-            pt.DefineVar(point1d_x, pt.GetElement(pt.Var(point1d), name="x"),),
-            pt.DefineVar(x, pt.GetElement(pt.Var(point1d_x), idx=0)),
-            pt.DefineVar(x_plus_1, pt.Add(pt.Var(x), pt.Int64(1))),
-            pt.DefineVar(point1d_x_plus_1_x),
-            pt.Assign(
-                pt.Var(point1d_x_plus_1_x),
-                pt.SetElement(pt.Var(point1d_x_plus_1_x), pt.Var(x_plus_1), 0),
-            ),
-            pt.DefineVar(point1d_x_plus_1),
-            pt.Assign(
-                pt.Var(point1d_x_plus_1),
-                pt.SetElement(
-                    pt.Var(point1d_x_plus_1), pt.Var(point1d_x_plus_1_x), name="x"
+                point1d,
+                pt.Call(
+                    "legion_domain_point_get_point_1d",
+                    [pt.Var(point_ptr),],
+                    attributes=("byval",),
                 ),
             ),
-            # pt.DefineVar(
-            #     domain_point_x_plus_1,
-            #     pt.Call(
-            #         "legion_domain_point_from_point_1d", [pt.Var(point1d_x_plus_1)]
-            #     ),
-            # ),
+            pt.DefineVar(point1d_x_plus_1, pt.Add(pt.Var(point1d), pt.Int64(1))),
             pt.DefineVar(
-                result,
-                # pt.Call(
-                #     "legion_logical_partition_get_logical_subregion_by_color_domain_point",
-                #     [pt.Var(runtime), pt.Deref(pt.Var(parent_ptr)), pt.Var(domain_point_x_plus_1)],
-                # ),
+                domain_point_x_plus_1_ptr,
+                pt.Call(
+                    "malloc",
+                    [
+                        pt.Int32(
+                            legion_domain_point_t.llvm_type().get_abi_size(
+                                target_machine.target_data
+                            )
+                        ),
+                    ],
+                ),
             ),
-            pt.Return(pt.Var(result)),
+            pt.Call(
+                "legion_domain_point_from_point_1d",
+                [pt.Var(domain_point_x_plus_1_ptr), pt.Var(point1d_x_plus_1),],
+                attributes=("sret",),
+            ),
+            pt.Call(
+                "legion_logical_partition_get_logical_subregion_by_color_domain_point",
+                [
+                    pt.Var(result_ptr),
+                    pt.Var(runtime),
+                    pt.Var(parent_ptr),
+                    pt.Var(domain_point_x_plus_1_ptr),
+                ],
+                attributes=("sret", None, "byval", "byval"),
+            ),
+            pt.Call("free", [pt.Var(domain_point_x_plus_1_ptr),]),
+            pt.Return(()),
         ]
     ),
-    attributes=(None, "byval", "byval", "byval"),
+    attributes=(("noalias", "sret"), None, ("byval",), ("byval",), ("byval",)),
 )
 
 
@@ -227,22 +200,31 @@ c.legion_runtime_register_projection_functor(
     _my.ctx.runtime,
     100,
     False,
-    1,
+    0,
     ffi.NULL,
-    ffi.cast("legion_projection_functor_logical_partition_t", proj_functor))
+    ffi.cast("legion_projection_functor_logical_partition_t", proj_functor),
+)
+
 
 @task(privileges=[R])
 def hello(R, i):
     print("hello from point %s (region %s)" % (i, R.ispace.bounds))
+    print(R.x)
+
+f = proj_functor(ID + 1)
 
 @task
 def main():
-    R = Region([10], {'x': pygion.float64})
+    # f = ProjectionFunctor(ID + 1)
+    R = Region([10], {"x": pygion.float64})
     P = Partition.equal(R, [4])
-    pygion.fill(R, 'x', 0)
+    for i in range(4):
+        print("python region %s is %s %s %s" % (i, P[i].handle[0].tree_id, P[i].handle[0].index_space.tid, P[i].handle[0].index_space.id))
+    pygion.fill(R, "x", 0)
 
-    for i in IndexLaunch([4]):
-        hello(P[i], i)
+    for i in IndexLaunch([3]):
+        hello(P[i+1], i)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

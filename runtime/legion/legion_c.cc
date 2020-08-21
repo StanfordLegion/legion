@@ -6939,7 +6939,10 @@ legion_task_preamble(
 				regions,
 				ctx,
 				runtime);
-
+  printf("num logical regions %lu\n", regions->size());
+  for (size_t i = 0; i < regions->size(); i++) {
+   printf("region %lu is %ld %ld %ld\n", i, (*regions)[i].get_logical_region().get_tree_id(), (*regions)[i].get_logical_region().get_index_space().get_tree_id(), (*regions)[i].get_logical_region().get_index_space().get_id());
+  }
   CContext *cctx = new CContext(ctx, *regions);
   *taskptr = CObjectWrapper::wrap_const(task);
   *regionptr = cctx->regions();
