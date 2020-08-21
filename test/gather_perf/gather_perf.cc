@@ -33,6 +33,7 @@ Logger log_app("app");
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
+  INIT_AFFINITY_TASK_ID,
   INIT_OWNED_TASK_ID,
   INIT_GHOST_TASK_ID,
   CHECK_GHOST_TASK_ID,
@@ -109,6 +110,34 @@ enum {
   PFID_IJ_TO_I,
   PFID_IJ_TO_J,
   PFID_IJ_TO_I_PREIMAGE_BY_RANK_J,
+};
+
+// shards N things onto M shard in coarse subgroups
+class CoarseShardingFunctor : public ShardingFunctor {
+public:
+  virtual ShardID shard(const DomainPoint &point,
+			const Domain &full_space,
+			const size_t total_shards)
+  {
+    //log_app.print() << "shard: " << point << " " << full_space << " " << total_shards;
+    int cur_point = point[0];
+    int num_points = full_space.get_volume();
+    int points_per_shard = (num_points + total_shards - 1) / total_shards;
+    return (cur_point / points_per_shard);
+  }
+};
+
+enum {
+  SHARD_ID_COARSE = 2000,
+};
+
+namespace TestConfig {
+  int num_pieces = 4;
+  int num_owned_per_piece = 8;
+  int num_ghost_per_piece = 16;
+  int gather_mode = 1;
+  int random_seed = 12345;
+  int replicate = 1;
 };
 
 class InitOwnedTask {
@@ -351,31 +380,58 @@ public:
   }
 };
 
-void initialize_affinity_matrix(Runtime *runtime, Context ctx,
-				LogicalRegion lr_affinity,
-				int num_pieces)
-{
-  // affinity matrix starts out as all zeros
-  runtime->fill_field<int>(ctx, lr_affinity, lr_affinity,
-			   FID_AFFINITY, 0);
+class InitAffinityTask {
+public:
+  struct InitArgs {
+    int num_pieces;
+  };
 
-  // inline mapping
-  InlineLauncher il(RegionRequirement(lr_affinity, READ_WRITE, EXCLUSIVE,
-				      lr_affinity)
-		    .add_field(FID_AFFINITY));
-  PhysicalRegion pr = runtime->map_region(ctx, il);
-  pr.wait_until_valid(true /*silence*/);
+  static void init_matrix(Runtime *runtime, Context ctx,
+			  LogicalRegion lr_affinity,
+			  int num_pieces)
+  {
+    // affinity matrix starts out as all zeros
+    runtime->fill_field<int>(ctx, lr_affinity, lr_affinity,
+			     FID_AFFINITY, 0);
 
-  FieldAccessor<READ_WRITE, int, 2, coord_t, Realm::AffineAccessor<int,2,coord_t> > acc(pr, FID_AFFINITY);
+    InitArgs args;
+    args.num_pieces = num_pieces;
 
-  // simple 1-D ring affinity for now
-  for(int i = 0; i < num_pieces; i++) {
-    acc[i][(i + 1) % num_pieces] = 1;
-    acc[i][(i + num_pieces - 1) % num_pieces] = 1;
+    TaskLauncher tl(INIT_AFFINITY_TASK_ID,
+		    TaskArgument(&args, sizeof(args)));
+
+    tl.add_region_requirement(RegionRequirement(lr_affinity,
+						READ_WRITE, EXCLUSIVE,
+						lr_affinity)
+			      .add_field(FID_AFFINITY));
+
+    runtime->execute_task(ctx, tl);
   }
 
-  runtime->unmap_region(ctx, pr);
-}
+  static void register_tasks()
+  {
+    TaskVariantRegistrar registrar(INIT_AFFINITY_TASK_ID, "init_affinity");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
+    Runtime::preregister_task_variant<InitAffinityTask::task_body>(registrar, "init_affinity");
+  }
+
+  //protected:
+  static void task_body(const Task *task,
+			const std::vector<PhysicalRegion> &regions,
+			Context ctx, Runtime *runtime)
+  {
+    const InitArgs& args = *static_cast<const InitArgs *>(task->args);
+
+    FieldAccessor<READ_WRITE, int, 2, coord_t, Realm::AffineAccessor<int,2,coord_t> > acc(regions[0], FID_AFFINITY);
+
+    // simple 1-D ring affinity for now
+    for(int i = 0; i < args.num_pieces; i++) {
+      acc[i][(i + 1) % args.num_pieces] = 1;
+      acc[i][(i + args.num_pieces - 1) % args.num_pieces] = 1;
+    }
+  }
+};
 
 void do_gather_copy(Runtime *runtime, Context ctx,
 		    int mode,
@@ -583,33 +639,13 @@ void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, Runtime *runtime)
 {
-  int num_pieces = 4;
-  int num_owned_per_piece = 8;
-  int num_ghost_per_piece = 16;
-  int gather_mode = 1;
-  int random_seed = 12345;
-
-  {
-    const InputArgs &command_args = Runtime::get_input_args();
-
-    Realm::CommandLineParser clp;
-    clp.add_option_int("-p", num_pieces);
-    clp.add_option_int("-o", num_owned_per_piece);
-    clp.add_option_int("-g", num_ghost_per_piece);
-    clp.add_option_int("-m", gather_mode);
-    clp.add_option_int("-s", random_seed);
-
-    bool ok = clp.parse_command_line(command_args.argc,
-				     const_cast<const char **>(command_args.argv));
-    assert(ok);
-  }
-
   // construct the affinity matrix
   IndexSpace is_affinity;
   FieldSpace fs_affinity;
   LogicalRegion lr_affinity;
   {
-    Rect<2> domain(Point<2>(0, 0), Point<2>(num_pieces - 1, num_pieces - 1));
+    Rect<2> domain(Point<2>(0, 0), Point<2>(TestConfig::num_pieces - 1,
+					    TestConfig::num_pieces - 1));
     is_affinity = runtime->create_index_space(ctx, domain);
 
     std::vector<size_t> sizes(1, sizeof(int));
@@ -621,12 +657,12 @@ void top_level_task(const Task *task,
   }
 
   // initialize affinity matrix inline
-  initialize_affinity_matrix(runtime, ctx, lr_affinity, num_pieces);
+  InitAffinityTask::init_matrix(runtime, ctx, lr_affinity, TestConfig::num_pieces);
 
   // create the index space we'll to name pieces
   IndexSpace is_pieces;
   {
-    Rect<1> domain(0, num_pieces - 1);
+    Rect<1> domain(0, TestConfig::num_pieces - 1);
     is_pieces = runtime->create_index_space(ctx, domain);
   }
 
@@ -636,7 +672,8 @@ void top_level_task(const Task *task,
   LogicalRegion lr_owned;
   LogicalPartition lp_owned;
   {
-    Rect<1> domain(0, num_pieces * num_owned_per_piece - 1);
+    Rect<1> domain(0,
+		   TestConfig::num_pieces * TestConfig::num_owned_per_piece - 1);
     is_owned = runtime->create_index_space(ctx, domain);
 
     std::vector<size_t> sizes(1, sizeof(int));
@@ -647,7 +684,7 @@ void top_level_task(const Task *task,
 
     IndexPartition ip_owned = runtime->create_partition_by_blockify(ctx,
 								    is_owned,
-								    num_owned_per_piece);
+								    TestConfig::num_owned_per_piece);
     lp_owned = runtime->get_logical_partition(ctx, lr_owned, ip_owned);
   }
 
@@ -657,7 +694,8 @@ void top_level_task(const Task *task,
   LogicalRegion lr_ghost;
   LogicalPartition lp_ghost;
   {
-    Rect<1> domain(0, num_pieces * num_ghost_per_piece - 1);
+    Rect<1> domain(0,
+		   TestConfig::num_pieces * TestConfig::num_ghost_per_piece - 1);
     is_ghost = runtime->create_index_space(ctx, domain);
 
     std::vector<size_t> sizes;
@@ -672,14 +710,14 @@ void top_level_task(const Task *task,
 
     IndexPartition ip_ghost = runtime->create_partition_by_blockify(ctx,
 								    is_ghost,
-								    num_ghost_per_piece);
+								    TestConfig::num_ghost_per_piece);
     lp_ghost = runtime->get_logical_partition(ctx, lr_ghost, ip_ghost);
   }
 
   InitGhostPointersTask::init_pointers(runtime, ctx,
 				       is_pieces, lr_affinity,
 				       lr_ghost, lp_ghost, lp_owned,
-				       random_seed);
+				       TestConfig::random_seed);
 
   // compute some dependent partitions that can hopefully be used to make
   //  gather copies more efficient
@@ -725,7 +763,7 @@ void top_level_task(const Task *task,
     std::vector<Point<2,coord_t> > points;
 
     // iterate over destinations first
-    for(int j = 0; j < num_pieces; j++) {
+    for(int j = 0; j < TestConfig::num_pieces; j++) {
       IndexSpace is_dst = runtime->get_index_subspace(ctx,
 						      lp_owned.get_index_partition(),
 						      j);
@@ -734,7 +772,7 @@ void top_level_task(const Task *task,
 								PID_OWNED_IMAGE_PER_RANK);
 
       // now iterate over each source and test for non-emptiness
-      for(int i = 0; i < num_pieces; i++) {
+      for(int i = 0; i < TestConfig::num_pieces; i++) {
 	IndexSpace is_src_in_dst = runtime->get_index_subspace(ctx,
 							       ip_per_rank,
 							       i);
@@ -820,7 +858,7 @@ void top_level_task(const Task *task,
   InitOwnedTask::init_owned(runtime, ctx, is_pieces,
 			    lr_owned, lp_owned, 5);
 
-  do_gather_copy(runtime, ctx, gather_mode,
+  do_gather_copy(runtime, ctx, TestConfig::gather_mode,
 		 is_pieces, is_affinity, is_interference,
 		 lr_owned, lp_owned, lp_owned_image, lp_owned_image_bloated,
 		 lr_ghost, lp_ghost);
@@ -839,8 +877,9 @@ void top_level_task(const Task *task,
 
 class GatherMapper : public Mapping::NullMapper {
 public:
-  GatherMapper(Mapping::MapperRuntime *_rt, Machine _machine)
+  GatherMapper(Mapping::MapperRuntime *_rt, Machine _machine, bool _replicate)
     : NullMapper(_rt, _machine)
+    , replicate(_replicate)
   {
     Machine::MemoryQuery mq(machine);
     mq.only_kind(Memory::SYSTEM_MEM);
@@ -883,6 +922,10 @@ public:
   void select_task_options(const Mapping::MapperContext ctx,
 			   const Task& task, TaskOptions& output)
   {
+    // top level task should be replicated, if requested
+    if(replicate && (task.task_id == TOP_LEVEL_TASK_ID))
+      output.replicate = true;
+
     // we're going to do all mapping from node 0
     output.map_locally = true;
   }
@@ -911,12 +954,21 @@ public:
 	break;
       }
 
+    case INIT_AFFINITY_TASK_ID:
     case INIT_OWNED_TASK_ID:
     case INIT_GHOST_TASK_ID:
     case CHECK_GHOST_TASK_ID:
       {
-	int index_point = task.index_point[0];
-	int num_points = task.index_domain.get_volume();
+	int index_point, num_points;
+	// WAR: in master branch, a point task launch does not have a valid
+	//  task.index_domain?
+	if(task.is_index_space) {
+	  index_point = task.index_point[0];
+	  num_points = task.index_domain.get_volume();
+	} else {
+	  index_point = 0;
+	  num_points = 1;
+	}
 	//log_app.print() << "map task: id=" << task.task_id << " pt=" << index_point << " num=" << num_points;
 	int points_per_mem = 1 + (num_points - 1) / memories.size();
 	int mem_idx = index_point / points_per_mem;
@@ -941,6 +993,28 @@ public:
     runtime->find_valid_variants(ctx, task.task_id, valid_variants, p.kind());
     assert(!valid_variants.empty());
     output.chosen_variant = valid_variants[0];
+  }
+
+  void map_replicate_task(const Mapping::MapperContext ctx,
+			  const Task& task, const MapTaskInput& input,
+			  const MapTaskOutput& default_output,
+			  MapReplicateTaskOutput& output)
+  {
+    // only the top-level task should end up here
+    assert(task.task_id == TOP_LEVEL_TASK_ID);
+
+    // TODO: maybe need to keep a separate 'control_procs' list?
+    output.task_mappings.resize(procs.size(), default_output);
+    output.control_replication_map = procs;
+
+    std::vector<VariantID> valid_variants;
+    runtime->find_valid_variants(ctx, task.task_id, valid_variants, procs[0].kind());
+    assert(!valid_variants.empty());
+
+    for(size_t i = 0; i < procs.size(); i++) {
+      output.task_mappings[i].target_procs.push_back(procs[i]);
+      output.task_mappings[i].chosen_variant = valid_variants[0];
+    }
   }
 
   void configure_context(const Mapping::MapperContext ctx,
@@ -1049,6 +1123,42 @@ public:
     //  images for the O(1) and O(N) copies)
   }
 
+  void select_sharding_functor(const Mapping::MapperContext ctx,
+			       const Task& task,
+			       const SelectShardingFunctorInput& input,
+			       SelectShardingFunctorOutput& output)
+  {
+    // same sharding function for everything
+    output.chosen_functor = SHARD_ID_COARSE;
+  }
+
+  void select_sharding_functor(const Mapping::MapperContext ctx,
+			       const Copy& copy,
+			       const SelectShardingFunctorInput& input,
+			       SelectShardingFunctorOutput& output)
+  {
+    // same sharding function for everything
+    output.chosen_functor = SHARD_ID_COARSE;
+  }
+
+  void select_sharding_functor(const Mapping::MapperContext ctx,
+			       const Fill& fill,
+			       const SelectShardingFunctorInput& input,
+			       SelectShardingFunctorOutput& output)
+  {
+    // same sharding function for everything
+    output.chosen_functor = SHARD_ID_COARSE;
+  }
+
+  void select_sharding_functor(const Mapping::MapperContext ctx,
+			       const Partition& partition,
+			       const SelectShardingFunctorInput& input,
+			       SelectShardingFunctorOutput& output)
+  {
+    // same sharding function for everything
+    output.chosen_functor = SHARD_ID_COARSE;
+  }
+
 protected:
   Mapping::PhysicalInstance choose_instance(const Mapping::MapperContext ctx,
 					    int piece_index, int num_pieces,
@@ -1085,6 +1195,7 @@ protected:
   // track a bunch of things for each piece
   std::vector<Memory> memories;
   std::vector<Processor> procs;
+  bool replicate;
 };
 
 void mapper_registration(Machine machine, Runtime *rt,
@@ -1094,19 +1205,38 @@ void mapper_registration(Machine machine, Runtime *rt,
       it != local_procs.end();
       ++it)
     rt->replace_default_mapper(new GatherMapper(rt->get_mapper_runtime(),
-						machine), *it);
+						machine,
+						TestConfig::replicate), *it);
 }
 
 int main(int argc, char **argv)
 {
+  Runtime::initialize(&argc, &argv);
+
+  {
+    Realm::CommandLineParser clp;
+    clp.add_option_int("-p", TestConfig::num_pieces);
+    clp.add_option_int("-o", TestConfig::num_owned_per_piece);
+    clp.add_option_int("-g", TestConfig::num_ghost_per_piece);
+    clp.add_option_int("-m", TestConfig::gather_mode);
+    clp.add_option_int("-s", TestConfig::random_seed);
+    clp.add_option_int("-r", TestConfig::replicate);
+
+    bool ok = clp.parse_command_line(argc,
+				     const_cast<const char **>(argv));
+    assert(ok);
+  }
+
   Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
 
   {
     TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_replicable(true);
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
 
+  InitAffinityTask::register_tasks();
   InitOwnedTask::register_tasks();
   InitGhostPointersTask::register_tasks();
   CheckGhostDataTask::register_tasks();
@@ -1119,6 +1249,9 @@ int main(int argc, char **argv)
 					  new ProjectionTwoLevel(0,
 								 PID_GHOST_PREIMAGE_PER_RANK,
 								 1));
+
+  Runtime::preregister_sharding_functor(SHARD_ID_COARSE,
+					new CoarseShardingFunctor);
 
   Runtime::add_registration_callback(mapper_registration);
 
