@@ -8146,18 +8146,16 @@ namespace Legion {
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
       {
         const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
-        const IndexPartition &part =
+        const IndexPartition &pid =
           output_regions[idx].partition.get_index_partition();
-        IndexSpaceNode *parent_node =
-          forest->get_node(ispace)->as_index_space_node();
-        IndexPartNode *part_node = forest->get_node(part)->as_index_part_node();
+        IndexSpaceNode *parent= forest->get_node(ispace)->as_index_space_node();
+        IndexPartNode *part = forest->get_node(pid)->as_index_part_node();
 
         if (!output_regions[idx].global_indexing)
           // For locally indexed output regions, sizes of subregions are already
           // set when they are fianlized by the point tasks. So we only need to
           // initialize the root index space by taking a union of subspaces.
-          parent_node->construct_realm_index_space_from_union(
-              part_node, runtime->address_space);
+          parent->compute_domain_from_union(part, runtime->address_space);
         else
         {
           // For globally indexed output regions, we need a prefix sum to get
@@ -8170,12 +8168,12 @@ namespace Legion {
           {
             size_t size = it->second;
             IndexSpace child = forest->get_index_subspace(
-                part, &it->first, NT_TemplateHelper::encode_tag<1,coord_t>());
+                pid, &it->first, NT_TemplateHelper::encode_tag<1,coord_t>());
             forest->set_pending_space_domain(
                 child, Rect<1>(sum, sum + size - 1), runtime->address_space);
             sum += size;
           }
-          parent_node->set_domain(Rect<1>(0, sum - 1), runtime->address_space);
+          parent->set_domain(Rect<1>(0, sum - 1), runtime->address_space);
         }
       }
     }

@@ -2220,8 +2220,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::set_realm_index_space(AddressSpaceID source, 
-                   const Realm::IndexSpace<DIM,T> &value, ShardMapping *mapping)
+    bool IndexSpaceNodeT<DIM,T>::set_realm_index_space(AddressSpaceID source,
+                                          const Realm::IndexSpace<DIM,T> &value,
+                                                       ShardMapping *mapping,
+                                                       RtEvent ready_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2238,7 +2240,7 @@ namespace Legion {
       if (owner_space != context->runtime->address_space)
       {
         // We're not the owner so we can trigger the event without the lock
-        Runtime::trigger_event(realm_index_space_set);
+        Runtime::trigger_event(realm_index_space_set, ready_event);
         // We're not the owner, if this is not from the owner then
         // send a message there telling the owner that it is set
         if ((source != owner_space) && (mapping == NULL))
@@ -2257,7 +2259,7 @@ namespace Legion {
         // Hold the lock while walking over the node set
         AutoLock n_lock(node_lock);
         // Now we can trigger the event while holding the lock
-        Runtime::trigger_event(realm_index_space_set);
+        Runtime::trigger_event(realm_index_space_set, ready_event);
         if (has_remote_instances())
         {
           // We're the owner, send messages to everyone else that we've 
@@ -2879,18 +2881,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::construct_realm_index_space_from_union(
-                                                IndexPartNode *part_node,
+    void IndexSpaceNodeT<DIM,T>::compute_domain_from_union(
+                                                IndexPartNode *child,
                                                 AddressSpaceID source,
                                                 ShardMapping *mapping /*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceExpression *expr = part_node->compute_union_expression();
+      IndexSpaceExpression *expr = child->compute_union_expression();
       Realm::IndexSpace<DIM,T> realm_is;
       ApEvent ready = expr->get_expr_index_space(&realm_is, type_tag, true);
-      if (ready.exists())
-        ready.wait();
-      set_realm_index_space(source, realm_is, mapping);
+      set_realm_index_space(source, realm_is, mapping,
+                            Runtime::protect_event(ready));
     }
 
     //--------------------------------------------------------------------------

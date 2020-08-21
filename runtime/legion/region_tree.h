@@ -2129,10 +2129,9 @@ namespace Legion {
                                             IndexSpace shard_space) = 0;
       virtual void destroy_shard_domain(const Domain &domain) = 0;
     public:
-      virtual void construct_realm_index_space_from_union(
-                                              IndexPartNode *part_node,
-                                              AddressSpaceID source,
-                                              ShardMapping *mapping = NULL) = 0;
+      virtual void compute_domain_from_union(IndexPartNode *part_node,
+                                             AddressSpaceID source,
+                                             ShardMapping *mapping = NULL) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;
@@ -2175,8 +2174,9 @@ namespace Legion {
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &result,
 				    bool need_tight_result);
       bool set_realm_index_space(AddressSpaceID source,
-				 const Realm::IndexSpace<DIM,T> &value,
-                                 ShardMapping *shard_mapping = NULL);
+                                 const Realm::IndexSpace<DIM,T> &value,
+                                 ShardMapping *shard_mapping = NULL,
+                                 RtEvent ready_event = RtEvent::NO_RT_EVENT);
     public:
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
@@ -2475,10 +2475,9 @@ namespace Legion {
     protected:
       void compute_linearization_metadata(void);
     public:
-      virtual void construct_realm_index_space_from_union(
-                                                  IndexPartNode *part_node,
-                                                  AddressSpaceID source,
-                                                  ShardMapping *mapping = NULL);
+      virtual void compute_domain_from_union(IndexPartNode *part_node,
+                                             AddressSpaceID source,
+                                             ShardMapping *mapping = NULL);
     protected:
       Realm::IndexSpace<DIM,T> realm_index_space;
     protected: // linearization meta-data, computed on demand
