@@ -516,10 +516,14 @@ namespace Legion {
       PhysicalInstance instance;
       // Event that needs to trigger before we can start using
       // this physical instance.
-      const ApEvent use_event; 
+      ApUserEvent use_event;
       InstanceKind kind;
       // Keep the pointer for owned external instances
       uintptr_t external_pointer;
+      // Completion event of the task that sets a realm instance
+      // to this manager. Valid only when the kind is UNBOUND
+      // initially, otherwise NO_AP_EVENT.
+      const ApEvent producer_event;
     };
 
     /**

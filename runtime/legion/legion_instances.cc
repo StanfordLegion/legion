@@ -1156,10 +1156,22 @@ namespace Legion {
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
           instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow),
         memory_manager(memory), instance(inst),
-        use_event(k != UNBOUND ? fetch_metadata(inst, u_event) : u_event),
-        kind(k), external_pointer(0)
+        use_event(Realm::UserEvent::create_user_event()),
+        kind(k), external_pointer(0),
+        producer_event(k == UNBOUND ? u_event : ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
+      // If the manager was initialized with a valid Realm instance,
+      // trigger the use event with the ready event of the instance metadata
+      if (kind != UNBOUND)
+      {
+#ifdef DEBUG_LEGION
+        assert(instance.exists());
+#endif
+        Runtime::trigger_event(
+            NULL, use_event, fetch_metadata(instance, u_event));
+      }
+
       if (!is_owner() && !shadow_instance)
       {
         // Register it with the memory manager, the memory manager
@@ -1328,16 +1340,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (kind != UNBOUND)
-      {
-#ifdef DEBUG_LEGION
-        assert(user != use_event);
-#endif
         return use_event;
-      }
       else
         // If the user is the one that is going to bind an instance
         // to this manager, return a no event
-        return user == use_event ? ApEvent::NO_AP_EVENT : use_event;
+        return user == producer_event ? ApEvent::NO_AP_EVENT : use_event;
     }
 
     //--------------------------------------------------------------------------
@@ -2097,9 +2104,6 @@ namespace Legion {
         assert(kind != EXTERNAL_OWNED || external_pointer != 0);
 #endif
 
-        ApEvent ready(
-            instance.fetch_metadata(Processor::get_executing_processor()));
-        ready.wait();
         update_instance_footprint(instance.get_layout()->bytes_used);
 
         if (runtime->legion_spy_enabled)
@@ -2109,6 +2113,9 @@ namespace Legion {
             field_space_node->handle, tree_id, redop);
           layout->log_instance_layout(unique_event);
         }
+
+        Runtime::trigger_event(
+            NULL, use_event, fetch_metadata(instance, producer_event));
       }
     }
 
