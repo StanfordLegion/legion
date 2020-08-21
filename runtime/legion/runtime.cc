@@ -3498,7 +3498,8 @@ namespace Legion {
       // creating and setting an instance to the output region.
       ExternalInstanceInfo &info = returned_instances[field_id];
       info.eager_pool = eager_pool;
-      info.ptr = ptr;
+      // Sanitize the pointer when the size is 0
+      info.ptr = num_elements != 0 ? ptr : 0;
       info.alignment = alignment;
     }
 

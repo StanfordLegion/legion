@@ -1157,7 +1157,7 @@ namespace Legion {
           instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow),
         memory_manager(memory), instance(inst),
         use_event(Realm::UserEvent::create_user_event()),
-        kind(k), external_pointer(0),
+        kind(k), external_pointer(-1UL),
         producer_event(k == UNBOUND ? u_event : ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -2101,7 +2101,7 @@ namespace Legion {
         kind = new_kind;
         external_pointer = new_pointer;
 #ifdef DEBUG_LEGION
-        assert(kind != EXTERNAL_OWNED || external_pointer != 0);
+        assert(kind != EXTERNAL_OWNED || external_pointer != -1UL);
 #endif
 
         update_instance_footprint(instance.get_layout()->bytes_used);
