@@ -362,12 +362,6 @@ namespace Legion {
                                    ShardMapping *shard_mapping = NULL);
       void destroy_field_space(FieldSpace handle, std::set<RtEvent> &applied,
                                const bool total_sharding_collective = false);
-      RtEvent create_field_space_allocator(FieldSpace handle, 
-                                        bool sharded_owner_context = false,
-                                        bool owner_shard = false);
-      void destroy_field_space_allocator(FieldSpace handle,
-                                         bool sharded_owner_context = false,
-                                         bool owner_shard = false);
       // Return true if local is set to true and we actually performed the 
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.
@@ -2772,6 +2766,7 @@ namespace Legion {
     public:
       PartitionTracker& operator=(const PartitionTracker &rhs);
     public:
+      bool can_prune(void);
       bool remove_partition_reference(ReferenceMutator *mutator);
     private:
       PartitionNode *volatile partition;
@@ -2997,7 +2992,7 @@ namespace Legion {
       std::map<LegionColor,RtUserEvent> pending_child_map;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subspaces;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subspaces;
-      std::vector<PartitionTracker*> partition_trackers;
+      std::list<PartitionTracker*> partition_trackers;
     protected:
       // Support for remote disjoint events being stored
       RtUserEvent remote_disjoint_ready;
@@ -3811,7 +3806,7 @@ namespace Legion {
       IndexSpaceNode *const row_source;
     protected:
       std::map<LegionColor,PartitionNode*> color_map;
-      std::vector<PartitionTracker*> partition_trackers;
+      std::list<PartitionTracker*> partition_trackers;
 #ifdef DEBUG_LEGION
       bool currently_valid;
 #endif

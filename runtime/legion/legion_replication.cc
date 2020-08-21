@@ -367,11 +367,8 @@ namespace Legion {
         // mapped and executed this copy already
         // Before we do this though we have to get the version state
         // names for any writes so we can update our local state
-        RtEvent local_done = mapped_collective->get_local_event();
-        complete_mapping(local_done);
-        complete_execution();
-        trigger_children_complete();
-        trigger_children_committed();
+        const RtEvent local_done = mapped_collective->get_local_event();
+        shard_off(local_done);
       }
       else // We own it, so it goes on the ready queue
       {
@@ -3183,6 +3180,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::select_partition_projection(void)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: put in a check here that all the shards pick the same partition
+      DependentPartitionOp::select_partition_projection();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
@@ -3259,8 +3264,6 @@ namespace Legion {
             delete launch_space;
           launch_space = runtime->forest->get_node(local_space);
           add_launch_space_reference(launch_space);
-          // Update the index domain to match the launch space
-          launch_space->get_launch_space_domain(index_domain);
           DependentPartitionOp::trigger_ready();
         }
       }
@@ -7233,7 +7236,7 @@ namespace Legion {
         else
         {
           original_task->handle_future(local_future_result, local_future_size, 
-                                       true/*owned*/, NULL/*functor*/);
+                           true/*owned*/, NULL/*functor*/, Processor::NO_PROC);
           local_future_result = NULL;
           local_future_size = 0;
           original_task->complete_execution();

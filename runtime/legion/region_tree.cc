@@ -1327,28 +1327,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent RegionTreeForest::create_field_space_allocator(FieldSpace handle,
-                                   bool sharded_owner_context, bool owner_shard)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode *node = get_node(handle);
-      return node->create_allocator(runtime->address_space,
-             RtUserEvent::NO_RT_USER_EVENT, sharded_owner_context, owner_shard);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::destroy_field_space_allocator(FieldSpace handle,
-                                   bool sharded_owner_context, bool owner_shard)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode *node = get_node(handle);
-      const RtEvent ready = node->destroy_allocator(runtime->address_space,
-                                        sharded_owner_context, owner_shard);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent RegionTreeForest::allocate_field(FieldSpace handle, 
                                              size_t field_size, FieldID fid, 
                                              CustomSerdezID serdez_id,
@@ -9079,7 +9057,7 @@ namespace Legion {
       // The reason we would be here is if we were leaked
       if (!partition_trackers.empty())
       {
-        for (std::vector<PartitionTracker*>::const_iterator it = 
+        for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
           if ((*it)->remove_partition_reference(NULL))
             delete (*it);
@@ -9194,7 +9172,7 @@ namespace Legion {
       }
       if (!partition_trackers.empty())
       {
-        for (std::vector<PartitionTracker*>::const_iterator it = 
+        for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
           if ((*it)->remove_partition_reference(mutator))
             delete (*it);
@@ -9547,8 +9525,28 @@ namespace Legion {
     void IndexPartNode::add_tracker(PartitionTracker *tracker)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock);
-      partition_trackers.push_back(tracker);
+      std::vector<PartitionTracker*> to_prune;
+      {
+        AutoLock n_lock(node_lock);
+        // To avoid leaks, see if there are any other trackers we can prune
+        for (std::list<PartitionTracker*>::iterator it =
+              partition_trackers.begin(); it != 
+              partition_trackers.end(); /*nothing*/)
+        {
+          if ((*it)->can_prune())
+          {
+            to_prune.push_back(*it);
+            it = partition_trackers.erase(it);
+          }
+          else
+            it++;
+        }
+        partition_trackers.push_back(tracker);
+      }
+      for (std::vector<PartitionTracker*>::const_iterator it =
+            to_prune.begin(); it != to_prune.end(); it++)
+        if ((*it)->remove_reference())
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -11427,16 +11425,20 @@ namespace Legion {
                         it++; // skip deleting local fields
                     }
                   }
-                  rez.serialize(unallocated_indexes);
-                  unallocated_indexes.clear();
-                  rez.serialize<size_t>(available_indexes.size());
-                  for (std::list<std::pair<unsigned,RtEvent> >::const_iterator
-                        it = available_indexes.begin(); it !=
-                        available_indexes.end(); it++)
+                  if (full_update || 
+                      (allocation_state != FIELD_ALLOC_COLLECTIVE)) 
                   {
-                    rez.serialize(it->first);
-                    rez.serialize(it->second);
+                    rez.serialize(unallocated_indexes);
+                    rez.serialize<size_t>(available_indexes.size());
+                    for (std::list<std::pair<unsigned,RtEvent> >::const_iterator
+                          it = available_indexes.begin(); it !=
+                          available_indexes.end(); it++)
+                    {
+                      rez.serialize(it->first);
+                      rez.serialize(it->second);
+                    }
                   }
+                  unallocated_indexes.clear();
                   available_indexes.clear();
                   rez.serialize(ready_event);
                 }
@@ -13588,6 +13590,12 @@ namespace Legion {
       derez.deserialize(ready_event);
 
       FieldSpaceNode *node = forest->get_node(handle);
+      // Add a reference to this node to keep it alive until we get the
+      // corresponding free operation from the remote node
+#ifdef DEBUG_LEGION
+      assert(node->is_owner());
+#endif
+      node->add_base_resource_ref(FIELD_ALLOCATOR_REF);
       node->create_allocator(source, ready_event);
     }
 
@@ -13661,6 +13669,9 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
+      // Remove the reference that we added when we originally got the request
+      if (node->remove_base_resource_ref(FIELD_ALLOCATOR_REF))
+        delete node;
     }
 
     //--------------------------------------------------------------------------
@@ -14164,9 +14175,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!is_owner());
       assert((allocation_state == FIELD_ALLOC_INVALID) || 
-              (allocation_state == FIELD_ALLOC_READ_ONLY));
-      assert(!unallocated_indexes);
-      assert(available_indexes.empty());
+              (allocation_state == FIELD_ALLOC_READ_ONLY) ||
+              (allocation_state == FIELD_ALLOC_COLLECTIVE)); 
       assert(outstanding_allocators == 0);
 #endif
       if (allocation_state == FIELD_ALLOC_INVALID)
@@ -14180,15 +14190,22 @@ namespace Legion {
           derez.deserialize(field_infos[fid]);
         }
       }
-      derez.deserialize(unallocated_indexes);
-      size_t num_indexes;
-      derez.deserialize(num_indexes);
-      for (unsigned idx = 0; idx < num_indexes; idx++)
+      if (allocation_state != FIELD_ALLOC_COLLECTIVE)
       {
-        std::pair<unsigned,RtEvent> index;
-        derez.deserialize(index.first);
-        derez.deserialize(index.second);
-        available_indexes.push_back(index);
+#ifdef DEBUG_LEGION
+        assert(!unallocated_indexes);
+        assert(available_indexes.empty());
+#endif
+        derez.deserialize(unallocated_indexes);
+        size_t num_indexes;
+        derez.deserialize(num_indexes);
+        for (unsigned idx = 0; idx < num_indexes; idx++)
+        {
+          std::pair<unsigned,RtEvent> index;
+          derez.deserialize(index.first);
+          derez.deserialize(index.second);
+          available_indexes.push_back(index);
+        }
       }
       // Make that we now have this in exclusive mode
       outstanding_allocators = 1;
@@ -17116,7 +17133,7 @@ namespace Legion {
       // The reason we would be here is if we were leaked
       if (!partition_trackers.empty())
       {
-        for (std::vector<PartitionTracker*>::const_iterator it = 
+        for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
           if ((*it)->remove_partition_reference(NULL))
             delete (*it);
@@ -17229,7 +17246,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(parent == NULL); // should only happen on the root
 #endif
-        for (std::vector<PartitionTracker*>::const_iterator it = 
+        for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
           if ((*it)->remove_partition_reference(mutator))
             delete (*it);
@@ -17315,8 +17332,28 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(parent == NULL); // should only happen on the root
 #endif
-      AutoLock n_lock(node_lock);
-      partition_trackers.push_back(tracker);
+      std::vector<PartitionTracker*> to_prune;
+      {
+        AutoLock n_lock(node_lock);
+        // To avoid leaks, see if there are any other trackers we can prune
+        for (std::list<PartitionTracker*>::iterator it =
+              partition_trackers.begin(); it != 
+              partition_trackers.end(); /*nothing*/)
+        {
+          if ((*it)->can_prune())
+          {
+            to_prune.push_back(*it);
+            it = partition_trackers.erase(it);
+          }
+          else
+            it++;
+        }
+        partition_trackers.push_back(tracker);
+      }
+      for (std::vector<PartitionTracker*>::const_iterator it =
+            to_prune.begin(); it != to_prune.end(); it++)
+        if ((*it)->remove_reference())
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -18338,6 +18375,17 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionTracker::can_prune(void)
+    //--------------------------------------------------------------------------
+    {
+      const int remainder = __sync_fetch_and_add(&references, 0); 
+#ifdef DEBUG_LEGION
+      assert((remainder == 1) || (remainder == 2));
+#endif
+      return (remainder == 1);
     }
 
     //--------------------------------------------------------------------------

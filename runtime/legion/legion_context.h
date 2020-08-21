@@ -340,7 +340,7 @@ namespace Legion {
                                           const bool unordered) = 0;
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle,
                                                          bool unordered);
-      virtual void destroy_field_allocator(FieldSpace handle);
+      virtual void destroy_field_allocator(FieldSpaceNode *node);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const = 0;
@@ -1928,6 +1928,7 @@ namespace Legion {
       virtual FieldSpace create_field_space(const std::vector<Future> &sizes,
                                         std::vector<FieldID> &resulting_fields,
                                         CustomSerdezID serdez_id);
+      FieldSpace create_replicated_field_space(ShardID *creator_shard = NULL);
       virtual void create_shared_ownership(FieldSpace handle);
       virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual FieldID allocate_field(FieldSpace space, size_t field_size,
@@ -1959,7 +1960,7 @@ namespace Legion {
     public:
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle,
                                                          bool unordered);
-      virtual void destroy_field_allocator(FieldSpace handle);
+      virtual void destroy_field_allocator(FieldSpaceNode *node);
     public:
       virtual void insert_unordered_ops(AutoLock &d_lock, const bool end_task,
                                         const bool progress);
@@ -3027,7 +3028,7 @@ namespace Legion {
                                           const bool unordered);
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle,
                                                          bool unordered);
-      virtual void destroy_field_allocator(FieldSpace handle);
+      virtual void destroy_field_allocator(FieldSpaceNode *node);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const;

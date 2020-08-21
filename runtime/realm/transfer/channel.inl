@@ -134,6 +134,19 @@ namespace Realm {
 		 (amsg << priority));
       assert(ok);
       amsg.commit();
+
+      // normally ownership of input and output iterators would be taken
+      //  by the local XferDes we create, but here we sent a copy, so delete
+      //  the originals
+      for(std::vector<XferDesPortInfo>::const_iterator it = inputs_info.begin();
+	  it != inputs_info.end();
+	  ++it)
+	delete it->iter;
+
+      for(std::vector<XferDesPortInfo>::const_iterator it = outputs_info.begin();
+	  it != outputs_info.end();
+	  ++it)
+	delete it->iter;
     }
   }
   
