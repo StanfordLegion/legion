@@ -1767,10 +1767,7 @@ namespace Legion {
       }
       // If this is an eager allocation, return it back to the eager pool
       else if (kind == EAGER)
-        // FIXME: Deferred deallocation of an eager allocation is
-        //        now cauasing hang due to a reference cycle
-        //memory_manager->free_eager_instance(instance, deferred_event);
-        memory_manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
+        memory_manager->free_eager_instance(instance, deferred_event);
       else
 #endif
       {
