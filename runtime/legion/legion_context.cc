@@ -15310,7 +15310,12 @@ namespace Legion {
         return InnerContext::execute_task(launcher, outputs);
       ReplIndividualTask *task = 
         runtime->get_available_repl_individual_task();
-      Future result = task->initialize_task(this, launcher);
+      Future result = task->initialize_task(this,
+                                            launcher,
+                                            true /*track*/,
+                                            false /*top_level*/,
+                                            false /*implicit_top_level*/,
+                                            outputs);
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_task.debug("Registering new single task with unique id %lld "
