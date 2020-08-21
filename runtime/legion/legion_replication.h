@@ -1536,6 +1536,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);  
       virtual void finalize_mapping(void);
+      virtual void select_partition_projection(void);
     protected:
       void select_sharding_function(void);
     protected:
