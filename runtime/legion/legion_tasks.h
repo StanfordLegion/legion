@@ -270,6 +270,8 @@ namespace Legion {
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
+      virtual std::map<PhysicalManager*,unsigned>*
+                                            get_acquired_instances_ref(void);
     public:
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
@@ -345,6 +347,8 @@ namespace Legion {
       std::map<Reservation,bool/*exclusive*/>   atomic_locks;
       // Post condition effects for copies out
       std::set<ApEvent>                         effects_postconditions;
+      // Set of acquired instances for this task
+      std::map<PhysicalManager*,unsigned/*ref count*/> acquired_instances;
     protected:
       std::vector<unsigned>                     parent_req_indexes;
     protected:
@@ -719,9 +723,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual std::map<PhysicalManager*,unsigned>*
-                                       get_acquired_instances_ref(void);
+      virtual void report_interfering_requirements(unsigned idx1,unsigned idx2); 
     public:
       virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
@@ -795,9 +797,7 @@ namespace Legion {
       // Whether we have to do intra-task alias analysis
       bool need_intra_task_alias_analysis;
     protected:
-      std::map<AddressSpaceID,RemoteTask*> remote_instances;
-    protected:
-      std::map<PhysicalManager*,unsigned/*ref count*/> acquired_instances;
+      std::map<AddressSpaceID,RemoteTask*> remote_instances; 
     };
 
     /**
@@ -848,8 +848,6 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual void perform_inlining(TaskContext *enclosing);
-      virtual std::map<PhysicalManager*,unsigned>*
-                                       get_acquired_instances_ref(void);
     public:
       virtual void handle_future(const void *res, size_t res_size,
                                  bool owned, FutureFunctor *functor,
@@ -969,8 +967,6 @@ namespace Legion {
                                    bool owned, FutureFunctor *functor);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
-      virtual std::map<PhysicalManager*,unsigned>*
-                                       get_acquired_instances_ref(void);
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
@@ -1128,8 +1124,6 @@ namespace Legion {
       void enumerate_points(void);
       const void* get_predicate_false_result(size_t &result_size);
     public:
-      virtual std::map<PhysicalManager*,unsigned>*
-                                     get_acquired_instances_ref(void);
       void check_target_processors(void) const;
       void update_target_processor(void);
       void expand_replay_slices(std::list<SliceTask*> &slices);
@@ -1143,7 +1137,8 @@ namespace Legion {
       void return_privileges(TaskContext *point_context,
                              std::set<RtEvent> &preconditions);
       void record_child_mapped(RtEvent child_mapped,
-                               ApEvent restrict_postcondition);
+          ApEvent restrict_postcondition,
+          std::map<PhysicalManager*,unsigned> &child_acquired);
       void record_child_complete(RtEvent child_complete);
       void record_child_committed(RtEvent commit_precondition =
                                   RtEvent::NO_RT_EVENT);
