@@ -3564,6 +3564,14 @@ namespace Legion {
       else
         num_elements = new_num_elements;
 
+      if (req.privilege_fields.find(field_id) == req.privilege_fields.end())
+      {
+          REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_FIELD,
+            "Output region %u of task %s (UID: %lld) does not have privilege "
+            "on field %u.", index, context->owner_task->get_task_name(),
+            context->owner_task->get_unique_op_id(), field_id);
+      }
+
       // Here we simply queue up the output data, rather than eagerly
       // creating and setting an instance to the output region.
       ExternalInstanceInfo &info = returned_instances[field_id];
