@@ -7868,7 +7868,7 @@ namespace Legion {
     void CreationOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      deactivate_operation();
       futures.clear();
       fields.clear();
       runtime->free_creation_op(this);
