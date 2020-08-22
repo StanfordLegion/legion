@@ -655,6 +655,8 @@ namespace Legion {
       effects_postconditions.clear();
       parent_req_indexes.clear();
       version_infos.clear();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
     }
 
     //--------------------------------------------------------------------------
@@ -1237,6 +1239,14 @@ namespace Legion {
       if ((info != NULL) && info->recording)
         info->record_op_sync_event(result);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>* 
+                                        TaskOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
@@ -1989,6 +1999,21 @@ namespace Legion {
     RemoteTaskOp::~RemoteTaskOp(void)
     //--------------------------------------------------------------------------
     {
+      if (args != NULL)
+      {
+        if (arg_manager != NULL)
+        {
+          // If the arg manager is not NULL then we delete the
+          // argument manager and just zero out the arguments
+          if (arg_manager->remove_reference())
+            delete (arg_manager);
+          arg_manager = NULL;
+        }
+        else
+          legion_free(TASK_ARGS_ALLOC, args, arglen);
+      }
+      if (local_args != NULL)
+        free(local_args);
     }
 
     //--------------------------------------------------------------------------
@@ -5322,8 +5347,6 @@ namespace Legion {
       result = Future();
       predicate_false_future = Future();
       privilege_paths.clear();
-      if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances); 
     }
 
     //--------------------------------------------------------------------------
@@ -5610,15 +5633,7 @@ namespace Legion {
                       get_unique_id(), parent_ctx->get_task_name(), 
                       parent_ctx->get_unique_id())
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
-                                IndividualTask::get_acquired_instances_ref(void)
-    //--------------------------------------------------------------------------
-    {
-      return &acquired_instances;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndividualTask::resolve_false(bool speculated, bool launched)
@@ -6682,7 +6697,8 @@ namespace Legion {
         deferred_effects = Runtime::create_ap_user_event(NULL);
         effects_condition = deferred_effects;
       }
-      slice_owner->record_child_mapped(applied_condition, effects_condition);
+      slice_owner->record_child_mapped(applied_condition, effects_condition,
+                                       acquired_instances);
       complete_mapping(applied_condition);
       return RtEvent::NO_RT_EVENT;
     }
@@ -6692,7 +6708,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       slice_owner->record_child_mapped(mapped_precondition, 
-                                       ApEvent::NO_AP_EVENT);
+                 ApEvent::NO_AP_EVENT, acquired_instances);
       SingleTask::shard_off(mapped_precondition);
     }
 
@@ -6755,14 +6771,6 @@ namespace Legion {
     {
       // Should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
-                                     PointTask::get_acquired_instances_ref(void)
-    //--------------------------------------------------------------------------
-    {
-      return slice_owner->get_acquired_instances_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -6863,7 +6871,7 @@ namespace Legion {
       assert(is_origin_mapped());
 #endif
       slice_owner->record_child_mapped(deferred_complete_mapping,
-                                       deferred_effects);
+                                       deferred_effects, acquired_instances);
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependence(completion_event, point_termination);
 #endif
@@ -7063,7 +7071,8 @@ namespace Legion {
         assert(!deferred_effects.exists());
 #endif
         deferred_effects = Runtime::create_ap_user_event(NULL);
-        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,deferred_effects);
+        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,
+                        deferred_effects, acquired_instances);
         // This is the remote case, pack it up and ship it over
         // Update our target_proc so that the sending code is correct 
         Serializer rez;
@@ -7095,7 +7104,8 @@ namespace Legion {
         if (is_remote())
           Runtime::trigger_event(NULL, deferred_effects, postcondition);
         else
-          slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT, postcondition);
+          slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT, 
+                              postcondition, acquired_instances);
       }
     }
 
@@ -7930,8 +7940,6 @@ namespace Legion {
           free(profiling_info[idx].buffer);
         profiling_info.clear();
       }
-      if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
 #ifdef DEBUG_LEGION
       interfering_requirements.clear();
       point_requirements.clear();
@@ -9120,14 +9128,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
-                                     IndexTask::get_acquired_instances_ref(void)
-    //--------------------------------------------------------------------------
-    {
-      return &acquired_instances;
-    }
-
-    //--------------------------------------------------------------------------
     SliceTask* IndexTask::clone_as_slice_task(IndexSpace is, Processor p,
                                               bool recurse, bool stealable)
     //--------------------------------------------------------------------------
@@ -10029,8 +10029,6 @@ namespace Legion {
       points.clear(); 
       if (remote_trace_info != NULL)
         delete remote_trace_info;
-      if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
 #ifdef DEBUG_LEGION
       assert(local_regions.empty());
       assert(local_fields.empty());
@@ -10068,14 +10066,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Slices are already done with early mapping 
-    }
-
-    //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
-                                     SliceTask::get_acquired_instances_ref(void)
-    //--------------------------------------------------------------------------
-    {
-      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
@@ -10696,7 +10686,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::record_child_mapped(RtEvent child_complete,
-                                        ApEvent effects_done)
+      ApEvent effects_done, std::map<PhysicalManager*,unsigned> &child_acquired)
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
@@ -10706,6 +10696,26 @@ namespace Legion {
           map_applied_conditions.insert(child_complete);
         if (effects_done.exists())
           effects_postconditions.insert(effects_done);
+        if (!child_acquired.empty())
+        {
+          if (!acquired_instances.empty())
+          {
+            while (!child_acquired.empty())
+            {
+              std::map<PhysicalManager*,unsigned>::iterator next =
+                child_acquired.begin();
+              std::map<PhysicalManager*,unsigned>::iterator finder = 
+                acquired_instances.find(next->first);
+              if (finder == acquired_instances.end())
+                acquired_instances.insert(*next);
+              else
+                finder->second += next->second;
+              child_acquired.erase(next);
+            }
+          }
+          else
+            acquired_instances.swap(child_acquired);
+        }
 #ifdef DEBUG_LEGION
         assert(num_unmapped_points > 0);
 #endif

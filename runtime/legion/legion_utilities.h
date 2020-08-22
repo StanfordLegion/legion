@@ -1657,6 +1657,17 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
+    template<>
+    inline void Murmur3Hasher::hash<Domain>(const Domain &value)
+    //-------------------------------------------------------------------------
+    {
+      hash(value.is_id);
+      hash(value.dim);
+      for (int i = 0; i < 2*value.dim; i++)
+        hash(value.rect_data[i]);
+    }
+
+    //-------------------------------------------------------------------------
     inline void Murmur3Hasher::hash(const void *value, size_t size)
     //-------------------------------------------------------------------------
     {

@@ -554,7 +554,9 @@ namespace Realm {
 	for(size_t i = 0; i < count; i++) {
 	  CHECK_CU( cuMemcpy2DAsync(&copy_info, stream->get_stream()) );
 	  copy_info.srcDevice += src_delta;
+	  copy_info.srcHost = reinterpret_cast<const void *>(copy_info.srcDevice);
 	  copy_info.dstDevice += dst_delta;
+	  copy_info.dstHost = reinterpret_cast<void *>(copy_info.dstDevice);
 	}
       }
 
