@@ -1738,6 +1738,14 @@ namespace Legion {
                                             TypeTag type_tag);
       virtual IndexSpace create_index_space(const Future &future, 
                                             TypeTag type_tag);
+      virtual IndexSpace create_index_space(
+                           const std::vector<DomainPoint> &points);
+      virtual IndexSpace create_index_space(
+                           const std::vector<Domain> &rects);
+    protected:
+      IndexSpace create_index_space_replicated(const Domain &bounds,
+                                               TypeTag type_tag);
+    public:
       virtual IndexSpace union_index_spaces(
                            const std::vector<IndexSpace> &spaces);
       virtual IndexSpace intersect_index_spaces(
