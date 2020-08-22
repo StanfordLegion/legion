@@ -39,8 +39,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Operation::Operation(Runtime *rt)
       : runtime(rt), gen(0), unique_op_id(0), context_index(0), 
-        outstanding_mapping_references(0), hardened(false), parent_ctx(NULL), 
-        mapping_tracker(NULL), commit_tracker(NULL)
+        outstanding_mapping_references(0), activated(false), hardened(false), 
+        parent_ctx(NULL), mapping_tracker(NULL), commit_tracker(NULL)
     //--------------------------------------------------------------------------
     {
       if (!runtime->resilient_mode)
@@ -64,10 +64,14 @@ namespace Legion {
     void Operation::activate_operation(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!activated);
+#endif
       // Get a new unique ID for this operation
       unique_op_id = runtime->get_unique_operation_id();
       context_index = 0;
       outstanding_mapping_references = 0;
+      activated = true;
       prepipelined = false;
       mapped = false;
       executed = false;
@@ -105,6 +109,10 @@ namespace Legion {
     void Operation::deactivate_operation(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(activated);
+#endif
+      activated = false;
       // Generation is bumped when we committed
       incoming.clear();
       outgoing.clear();
