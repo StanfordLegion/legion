@@ -1986,6 +1986,21 @@ namespace Legion {
     RemoteTaskOp::~RemoteTaskOp(void)
     //--------------------------------------------------------------------------
     {
+      if (args != NULL)
+      {
+        if (arg_manager != NULL)
+        {
+          // If the arg manager is not NULL then we delete the
+          // argument manager and just zero out the arguments
+          if (arg_manager->remove_reference())
+            delete (arg_manager);
+          arg_manager = NULL;
+        }
+        else
+          legion_free(TASK_ARGS_ALLOC, args, arglen);
+      }
+      if (local_args != NULL)
+        free(local_args);
     }
 
     //--------------------------------------------------------------------------
