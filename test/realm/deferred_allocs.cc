@@ -182,12 +182,14 @@ void directed_test_memory(const TestConfig& config, Memory m, Processor p,
 								       1000000000);
 	if(!triggered) {
 	  log_app.fatal() << "alloc #" << amt << " inst=" << ii.inst
-			  << " want=success got=hang";
+			  << " want=success got=hang"
+			  << " test=" << name << " (" << testdesc << ")";
 	  abort();
 	}
 	if(poisoned) {
 	  log_app.fatal() << "alloc #" << amt << " inst=" << ii.inst
-			  << " want=success got=failed";
+			  << " want=success got=failed"
+			  << " test=" << name << " (" << testdesc << ")";
 	  abort();
 	}
 	ii.state = InstanceInfo::ALLOCED;
@@ -209,12 +211,14 @@ void directed_test_memory(const TestConfig& config, Memory m, Processor p,
 								       1000000000);
 	if(!triggered) {
 	  log_app.fatal() << "alloc #" << amt << " inst=" << ii.inst
-			  << " want=failed got=hang";
+			  << " want=failed got=hang"
+			  << " test=" << name << " (" << testdesc << ")";
 	  abort();
 	}
 	if(!poisoned) {
 	  log_app.fatal() << "alloc #" << amt << " inst=" << ii.inst
-			  << " want=failed got=success";
+			  << " want=failed got=success"
+			  << " test=" << name << " (" << testdesc << ")";
 	  abort();
 	}
 	ii.state = InstanceInfo::ALLOC_FAILED;
@@ -233,7 +237,8 @@ void directed_test_memory(const TestConfig& config, Memory m, Processor p,
 	bool triggered = ii.create_event.external_timedwait_faultaware(poisoned, 10000000);
 	if(triggered) {
 	  log_app.fatal() << "alloc #" << amt << " inst=" << ii.inst
-			  << " want=notready got=" << (poisoned ? "failed" : "success");
+			  << " want=notready got=" << (poisoned ? "failed" : "success")
+			  << " test=" << name << " (" << testdesc << ")";
 	  abort();
 	}
 	break;
