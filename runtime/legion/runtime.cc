@@ -3576,10 +3576,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void OutputRegionImpl::return_data(size_t num_elements,
                                        std::map<FieldID,void*> ptrs,
-                                       std::map<FieldID,size_t> *alignments)
+                                       std::map<FieldID,size_t> *_alignments)
     //--------------------------------------------------------------------------
     {
-      // TODO: Implement this function
+      std::map<FieldID,size_t> dummy_alignments;
+      std::map<FieldID,size_t> &alignments =
+        _alignments != NULL ?  *_alignments : dummy_alignments;
+
+      for (std::map<FieldID,void*>::iterator it = ptrs.begin();
+           it != ptrs.end(); ++it)
+      {
+        std::map<FieldID,size_t>::iterator finder = alignments.find(it->first);
+        size_t alignment = finder != alignments.end() ? finder->second : 0;
+        return_data(num_elements,
+                    it->first,
+                    reinterpret_cast<uintptr_t>(it->second),
+                    alignment,
+                    false);
+      }
     }
 
     //--------------------------------------------------------------------------
