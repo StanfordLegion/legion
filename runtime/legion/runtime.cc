@@ -24187,7 +24187,7 @@ namespace Legion {
     void Runtime::free_repl_begin_op(ReplTraceBeginOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(summary_op_lock);
+      AutoLock t_lock(begin_op_lock);
       release_operation<false>(available_repl_begin_ops, op);
     }
 
