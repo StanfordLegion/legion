@@ -13,7 +13,6 @@
  * limitations under the License.
  */
 
-#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
