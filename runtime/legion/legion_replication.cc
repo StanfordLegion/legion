@@ -7055,6 +7055,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveMapping::CollectiveMapping(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      unique_sorted_spaces.resize(num_spaces);
+      for (unsigned idx = 0; idx < num_spaces; idx++)
+        derez.deserialize(unique_sorted_spaces[idx]);
+    }
+
+    //--------------------------------------------------------------------------
     bool CollectiveMapping::operator==(const CollectiveMapping &rhs) const
     //--------------------------------------------------------------------------
     {
@@ -7119,6 +7130,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (find_index(space) < unique_sorted_spaces.size()); 
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveMapping::pack(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(unique_sorted_spaces.size());
+      for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
+        rez.serialize(unique_sorted_spaces[idx]);
     }
 
     //--------------------------------------------------------------------------

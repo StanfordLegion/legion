@@ -1545,11 +1545,13 @@ namespace Legion {
     public:
       // Local physical analysis
       PhysicalAnalysis(Runtime *rt, Operation *op, unsigned index,
-                       IndexSpaceExpression *expr, bool on_heap);
+                       IndexSpaceExpression *expr, bool on_heap,
+                       CollectiveMapping *mapping = NULL);
       // Remote physical analysis
       PhysicalAnalysis(Runtime *rt, AddressSpaceID source, AddressSpaceID prev,
                        Operation *op, unsigned index, 
-                       IndexSpaceExpression *expr, bool on_heap);
+                       IndexSpaceExpression *expr, bool on_heap,
+                       CollectiveMapping *mapping = NULL);
       PhysicalAnalysis(const PhysicalAnalysis &rhs);
       virtual ~PhysicalAnalysis(void);
     public:
@@ -1557,6 +1559,10 @@ namespace Legion {
         { return !remote_sets.empty(); }
       inline void record_parallel_traversals(void)
         { parallel_traversals = true; } 
+      inline bool is_replicated(void) const 
+        { return (collective_mapping != NULL); }
+      inline CollectiveMapping* get_replicated_mapping(void) const
+        { return collective_mapping; }
     public:
       void traverse(EquivalenceSet *set, const FieldMask &mask, 
                     std::set<RtEvent> &deferral_events,
@@ -1612,6 +1618,7 @@ namespace Legion {
       const AddressSpaceID original_source;
       Runtime *const runtime;
       IndexSpaceExpression *const analysis_expr;
+      CollectiveMapping *const collective_mapping;
       Operation *const op;
       const unsigned index;
       const bool owns_op;
@@ -2668,6 +2675,21 @@ namespace Legion {
         const CollectiveMapping *const invalidate_mapping;
         Runtime *const runtime;
       };
+      class InvalidateReplicatedFunctor {
+      public:
+        InvalidateReplicatedFunctor(DistributedID did, const FieldMask &mask,
+                                  AddressSpaceID origin, AddressSpaceID to_skip,
+                                  Runtime *runtime, std::set<RtEvent> &applied);
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        const DistributedID did;
+        const FieldMask &mask;
+        const AddressSpaceID origin;
+        const AddressSpaceID to_skip;
+        Runtime *const runtime;
+        std::set<RtEvent> &applied;
+      };
     public:
       struct DeferMakeOwnerArgs : public LgTaskArgs<DeferMakeOwnerArgs> {
       public:
@@ -2685,7 +2707,8 @@ namespace Legion {
                      AddressSpaceID logical_owner,
                      RegionNode *region_node,
                      bool register_now, 
-                     CollectiveMapping *mapping = NULL);
+                     CollectiveMapping *mapping = NULL,
+                     const FieldMask *replicated = NULL);
       EquivalenceSet(const EquivalenceSet &rhs);
       virtual ~EquivalenceSet(void);
     public:
@@ -2694,6 +2717,8 @@ namespace Legion {
       // Must be called while holding the lock
       inline bool is_logical_owner(void) const
         { return (local_space == logical_owner_space); }
+      inline bool has_replicated_fields(const FieldMask &mask) const
+        { return !(mask - replicated_states.get_valid_mask()); }
     public:
       // From distributed collectable
       virtual void notify_active(ReferenceMutator *mutator);
@@ -2790,7 +2815,12 @@ namespace Legion {
                   continuation_pre.id, deferral_event.id));
         return continuation_pre;
       }
-      bool is_remote_analysis(PhysicalAnalysis &analysis,const FieldMask &mask);
+      bool is_remote_analysis(PhysicalAnalysis &analysis,
+                              const FieldMask &mask, 
+                              std::set<RtEvent> &deferral_events,
+                              std::set<RtEvent> &applied_events,
+                              const bool exclusive,
+                              const bool immutable = false);
     protected:
       template<typename T>
       void check_for_uninitialized_data(T &analysis, IndexSpaceExpression *expr,
@@ -2885,6 +2915,13 @@ namespace Legion {
       void update_owner(const AddressSpaceID new_logical_owner);
       void unpack_state(Deserializer &derez, AddressSpaceID source,
                         std::set<RtEvent> &ready_events);
+      void broadcast_replicated_state_invalidations(const FieldMask &mask,
+                const AddressSpaceID origin, std::set<RtEvent> &applied_events);
+      void make_replicated_state(CollectiveMapping *mapping,
+                                 FieldMask mask, const AddressSpaceID source,
+                                 std::set<RtEvent> &deferral_events,
+                                 std::set<RtEvent> &applied_events);
+      void unpack_replicated_states(Deserializer &derez);
     public:
       static void handle_remote_references(const void *args);
       static void handle_make_owner(const void *args);
@@ -2937,7 +2974,8 @@ namespace Legion {
       // In control replicated cases, we allow equivalence sets to have
       // replicated state as long as their is a total sharding that updates
       // all the equivalence sets across the machine collectively.
-      bool                                              replicated_state;
+      FieldMaskSet<CollectiveMapping>                   replicated_states;
+      FieldMaskSet<PendingMapping>                      pending_states;
     protected:
       // Which EqSetTracker objects on this node are
       // tracking this equivalence set and need to be invalidated

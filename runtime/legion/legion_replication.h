@@ -2029,6 +2029,7 @@ namespace Legion {
     public:
       CollectiveMapping(const std::vector<AddressSpaceID> &spaces);
       CollectiveMapping(const ShardMapping &shard_mapping);
+      CollectiveMapping(Deserializer &derez);
     public:
       inline AddressSpaceID operator[](unsigned idx) const
         { return unique_sorted_spaces[idx]; }
@@ -2043,6 +2044,8 @@ namespace Legion {
                         const AddressSpaceID local, const unsigned radix,
                         std::vector<AddressSpaceID> &children) const;
       bool contains(const AddressSpaceID space) const;
+    public:
+      void pack(Serializer &rez) const;
     protected:
       unsigned find_index(const AddressSpaceID space) const;
       unsigned convert_to_offset(unsigned index, unsigned origin) const;
