@@ -11366,9 +11366,9 @@ namespace Legion {
       }
       else
       {
-        index_owner->return_slice_complete(points.size(),complete_precondition);
         if (!all_output_sizes.empty())
           index_owner->return_output_sizes(all_output_sizes);
+        index_owner->return_slice_complete(points.size(),complete_precondition);
       }
       complete_operation();
     }

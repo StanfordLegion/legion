@@ -826,6 +826,11 @@ namespace Legion {
         // Otherwise we fall through and we can just do our exchange
         reduction_collective->reduce_futures(this);
       }
+      if (output_size_collective != NULL)
+        // We need to gather output region sizes from all the other shards
+        // to determine the sizes of globally indexed output regions
+        output_size_collective->exchange_output_sizes(all_output_sizes);
+
       // Then we do the base class thing
       IndexTask::trigger_task_complete(deferred);
     }
@@ -1065,13 +1070,6 @@ namespace Legion {
         {
           // For globally indexed output regions, we need a prefix sum to get
           // the right size for each subregion.
-#ifdef DEBUG_LEGION
-          assert(output_size_collective != NULL);
-#endif
-          // Before doing the prefix sum, we need to gather sizes from
-          // all the other shards, since we need a global prefix sum.
-          output_size_collective->exchange_output_sizes(all_output_sizes);
-
           typedef std::map<Point<1>,size_t> SizeMap;
           const SizeMap &output_sizes =
             output_size_collective->all_output_sizes[idx];
@@ -12167,6 +12165,10 @@ namespace Legion {
           size_t size;
           derez.deserialize(point);
           derez.deserialize(size);
+#ifdef DEBUG_LEGION
+          assert(it->second.find(point) == it->second.end() ||
+                 it->second.find(point)->second == size);
+#endif
           it->second[point] = size;
         }
       }
@@ -12177,7 +12179,10 @@ namespace Legion {
                                   const std::map<unsigned,SizeMap> &local_sizes)
     //--------------------------------------------------------------------------
     {
-      all_output_sizes = local_sizes;
+      {
+        AutoLock c_lock(collective_lock);
+        all_output_sizes = local_sizes;
+      }
       perform_collective_sync();
     }
 
