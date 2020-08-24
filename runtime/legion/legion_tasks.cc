@@ -3991,11 +3991,12 @@ namespace Legion {
         }
 #endif
         // After we've got our results, apply the state to the region tree
-        if (!regions.empty())
+        size_t region_count = get_region_count();
+        if (region_count > 0)
         {
           const bool track_effects = 
             (!atomic_locks.empty() || !arrive_barriers.empty());
-          if (regions.size() == 1)
+          if (regions.size() == 1 && output_regions.empty())
           {
             if (early_mapped_regions.empty() && 
                 !no_access_regions[0] && !virtual_mapped[0])
@@ -4024,9 +4025,9 @@ namespace Legion {
           {
             std::vector<unsigned> performed_regions;
             std::set<RtEvent> registration_postconditions;
-            std::vector<UpdateAnalysis*> analyses(regions.size(), NULL);
-            std::vector<ApEvent> effects(regions.size(), ApEvent::NO_AP_EVENT);
-            std::vector<RtEvent> reg_pre(regions.size(), RtEvent::NO_RT_EVENT);
+            std::vector<UpdateAnalysis*> analyses(region_count, NULL);
+            std::vector<ApEvent> effects(region_count, ApEvent::NO_AP_EVENT);
+            std::vector<RtEvent> reg_pre(region_count, RtEvent::NO_RT_EVENT);
             for (unsigned idx = 0; idx < regions.size(); idx++)
             {
               if (early_mapped_regions.find(idx) != early_mapped_regions.end())
@@ -4059,6 +4060,29 @@ namespace Legion {
 #endif
                                           track_effects, record_valid);
             }
+            for (unsigned out_idx = 0, idx = regions.size();
+                 out_idx < output_regions.size(); ++out_idx, ++idx)
+            {
+              VersionInfo &local_info = get_version_info(idx);
+              performed_regions.push_back(idx);
+              const bool record_valid = (untracked_valid_regions.find(idx) ==
+                                         untracked_valid_regions.end());
+              // Register output instances to the region tree
+              reg_pre[idx] = runtime->forest->physical_perform_updates(
+                                          output_regions[out_idx], local_info,
+                                          this, idx, init_precondition,
+                                          local_termination_event,
+                                          output_instances[out_idx],
+                                          PhysicalTraceInfo(trace_info, idx),
+                                          map_applied_conditions,
+                                          analyses[idx],
+#ifdef DEBUG_LEGION
+                                          get_logging_name(),
+                                          unique_op_id,
+#endif
+                                          track_effects, record_valid);
+            }
+
             for (std::vector<unsigned>::const_iterator it = 
                  performed_regions.begin(); it != performed_regions.end(); it++)
             {
@@ -4067,19 +4091,28 @@ namespace Legion {
               // it here as we know that we won't block
               if (reg_pre[*it].exists() || analyses[*it]->has_output_updates())
               {
+                InstanceSet &targets = *it < regions.size()
+                  ? physical_instances[*it]
+                  : output_instances[*it - regions.size()];
                 const RtEvent registration_post = 
                   runtime->forest->defer_physical_perform_registration(
-                                          reg_pre[*it], analyses[*it],
-                                          physical_instances[*it],
+                                          reg_pre[*it], analyses[*it], targets,
                                           map_applied_conditions, effects[*it],
-                                          PhysicalTraceInfo(trace_info, *it));
+                                          PhysicalTraceInfo(trace_info, *it),
+                                          *it >= regions.size());
                 registration_postconditions.insert(registration_post);
               }
               else
+              {
+                InstanceSet &targets = *it < regions.size()
+                  ? physical_instances[*it]
+                  : output_instances[*it - regions.size()];
                 effects[*it] = runtime->forest->physical_perform_registration(
-                                          analyses[*it],physical_instances[*it],
+                                          analyses[*it], targets,
                                           PhysicalTraceInfo(trace_info, *it),
-                                          map_applied_conditions);
+                                          map_applied_conditions,
+                                          *it >= regions.size());
+              }
             }
             // Wait for all the registrations to be done
             if (!registration_postconditions.empty())
@@ -4108,65 +4141,15 @@ namespace Legion {
               if (effects[*it].exists())
                 effects_postconditions.insert(effects[*it]);
 #ifdef DEBUG_LEGION
-              dump_physical_state(&regions[*it], *it);
+              RegionRequirement *req = *it < regions.size() ?
+                &regions[*it] : &output_regions[*it - regions.size()];
+              dump_physical_state(req, *it);
 #endif
             }
           }
           if (perform_postmap)
             perform_post_mapping(trace_info);
         } // if (!regions.empty())
-
-        if (!output_regions.empty())
-        {
-          std::vector<unsigned> performed_regions;
-          std::vector<UpdateAnalysis*> analyses(output_regions.size(), NULL);
-          std::vector<ApEvent> effects(
-              output_regions.size(), ApEvent::NO_AP_EVENT);
-          std::vector<RtEvent> reg_pre(
-              output_regions.size(), RtEvent::NO_RT_EVENT);
-          unsigned offset = regions.size();
-          for (unsigned idx = 0; idx < output_regions.size(); idx++)
-          {
-            VersionInfo &local_info = get_version_info(offset + idx);
-            performed_regions.push_back(idx);
-            // Register output instances to the region tree
-            reg_pre[idx] = runtime->forest->physical_perform_updates(
-                                        output_regions[idx], local_info,
-                                        this, offset + idx, init_precondition,
-                                        local_termination_event,
-                                        output_instances[idx],
-                                        PhysicalTraceInfo(trace_info,
-                                                          offset + idx),
-                                        map_applied_conditions,
-                                        analyses[idx],
-#ifdef DEBUG_LEGION
-                                        get_logging_name(),
-                                        unique_op_id,
-#endif
-                                        false /*track_effects*/);
-          }
-          for (std::vector<unsigned>::const_iterator it =
-               performed_regions.begin(); it != performed_regions.end(); it++)
-          {
-#ifdef DEBUG_LEGION
-            // Output regions do not have any preconditions or output updates
-            assert(!(reg_pre[*it].exists() ||
-                     analyses[*it]->has_output_updates()));
-#endif
-            effects[*it] = runtime->forest->physical_perform_registration(
-                                      analyses[*it], output_instances[*it],
-                                      PhysicalTraceInfo(trace_info,
-                                                        offset + *it),
-                                      map_applied_conditions,
-                                      true /*symbolic*/);
-          }
-          for (std::vector<unsigned>::const_iterator it =
-               performed_regions.begin(); it != performed_regions.end(); it++)
-          {
-            if (effects[*it].exists())
-              effects_postconditions.insert(effects[*it]);
-          }
-        } // if (!output_regions.empty())
       }
       else // third invocation
       {
@@ -4183,7 +4166,9 @@ namespace Legion {
           if ((*(defer_args->effects))[*it].exists())
             effects_postconditions.insert((*(defer_args->effects))[*it]);
 #ifdef DEBUG_LEGION
-          dump_physical_state(&regions[*it], *it);
+          RegionRequirement *req = *it < regions.size() ?
+            &regions[*it] : &output_regions[*it - regions.size()];
+          dump_physical_state(req, *it);
 #endif
         }
         delete defer_args->performed_regions;

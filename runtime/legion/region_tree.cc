@@ -2334,13 +2334,15 @@ namespace Legion {
     RtEvent RegionTreeForest::defer_physical_perform_registration(RtEvent pre,
                          UpdateAnalysis *analysis, InstanceSet &targets,
                          std::set<RtEvent> &map_applied_events,
-                         ApEvent &result, const PhysicalTraceInfo &info)
+                         ApEvent &result, const PhysicalTraceInfo &info,
+                         bool symbolic)
     //--------------------------------------------------------------------------
     {
       RtUserEvent map_applied_done = Runtime::create_rt_user_event();
       map_applied_events.insert(map_applied_done);
       DeferPhysicalRegistrationArgs args(analysis->op->get_unique_op_id(),
-                             analysis, targets, map_applied_done, result, info);
+                             analysis, targets, map_applied_done, result, info,
+                             symbolic);
       return runtime->issue_runtime_meta_task(args, 
                     LG_LATENCY_WORK_PRIORITY, pre);
     }
@@ -2353,7 +2355,7 @@ namespace Legion {
         (const DeferPhysicalRegistrationArgs*)args;
       std::set<RtEvent> applied_events;
       dargs->result = physical_perform_registration(dargs->analysis, 
-                        dargs->targets, *dargs, applied_events);
+                        dargs->targets, *dargs, applied_events, dargs->symbolic);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->map_applied_done,
             Runtime::merge_events(applied_events));
