@@ -3383,14 +3383,12 @@ namespace Legion {
     public:
       inline FieldSpaceNode* get_column_source(void) const 
       { return column_source; }
-      void find_remote_instances(NodeSet &target_instances);
     public:
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;
       RtEvent initialized;
       const RtEvent tree_initialized; // top level tree initialization
     public:
-      NodeSet remote_instances;
       bool registered;
 #ifdef DEBUG_LEGION
     protected:

@@ -13444,7 +13444,6 @@ namespace Legion {
     RegionTreeNode::~RegionTreeNode(void)
     //--------------------------------------------------------------------------
     {
-      remote_instances.clear();
       for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
             semantic_info.begin(); it != semantic_info.end(); it++)
       {
@@ -16121,14 +16120,6 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::find_remote_instances(NodeSet &target_instances)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      target_instances = remote_instances;
-    }
-
     /////////////////////////////////////////////////////////////
     // Region Node 
     /////////////////////////////////////////////////////////////
@@ -16614,10 +16605,10 @@ namespace Legion {
       bool continue_up = false;
       {
         AutoLock n_lock(node_lock); 
-        if (!remote_instances.contains(target))
+        if (!has_remote_instance(target))
         {
           continue_up = true;
-          remote_instances.add(target);
+          update_remote_instances(target);
         }
       }
       if (continue_up)
@@ -17816,10 +17807,10 @@ namespace Legion {
       bool continue_up = false;
       {
         AutoLock n_lock(node_lock); 
-        if (!remote_instances.contains(target))
+        if (!has_remote_instance(target))
         {
           continue_up = true;
-          remote_instances.add(target);
+          update_remote_instances(target);
         }
       }
       if (continue_up)

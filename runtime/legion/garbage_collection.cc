@@ -159,8 +159,13 @@ namespace Legion {
       assert(valid_references == 0);
       assert(resource_references == 0);
 #endif
-      if (is_owner() && registered_with_runtime)
-        unregister_with_runtime();
+      if (is_owner())
+      {
+        if (registered_with_runtime)
+          unregister_with_runtime();
+        else
+          runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
+      }
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
