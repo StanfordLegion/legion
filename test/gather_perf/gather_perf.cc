@@ -131,6 +131,10 @@ enum {
   SHARD_ID_COARSE = 2000,
 };
 
+enum {
+  TRACE_ID_COPY = 3000,
+};
+
 namespace TestConfig {
   int num_pieces = 4;
   int num_owned_per_piece = 8;
@@ -138,6 +142,10 @@ namespace TestConfig {
   int gather_mode = 1;
   int random_seed = 12345;
   int replicate = 1;
+  int num_iterations = 1;
+  // code to enable tracing exists, but tracing doesn't like use of fences
+  int use_tracing = 0;
+  char affinity_pattern[256] = "1d";
 };
 
 class InitOwnedTask {
@@ -425,11 +433,97 @@ public:
 
     FieldAccessor<READ_WRITE, int, 2, coord_t, Realm::AffineAccessor<int,2,coord_t> > acc(regions[0], FID_AFFINITY);
 
-    // simple 1-D ring affinity for now
-    for(int i = 0; i < args.num_pieces; i++) {
-      acc[i][(i + 1) % args.num_pieces] = 1;
-      acc[i][(i + args.num_pieces - 1) % args.num_pieces] = 1;
+    if(!strcmp(TestConfig::affinity_pattern, "all")) {
+      // all-pairs connectivity
+      for(int i = 0; i < args.num_pieces; i++)
+	for(int j = 0; j < args.num_pieces; j++)
+	  if(i != j)
+	    acc[i][j] = 1;
+      return;
     }
+
+    if(!strncmp(TestConfig::affinity_pattern, "1d", 2)) {
+      // simple 1-D ring affinity
+      int order = 1;
+      if(TestConfig::affinity_pattern[2] != 0) {
+	int count = sscanf(TestConfig::affinity_pattern+2, ":%d", &order);
+	if(count != 1) {
+	  log_app.fatal() << "affinity syntax: expected '1d[:n]', got '"
+			  << TestConfig::affinity_pattern << "'";
+	  abort();
+	}
+      }
+      for(int i = 0; i < args.num_pieces; i++)
+	for(int j = 1; j <= order; j++) {
+	  acc[i][(i + j) % args.num_pieces] = 1;
+	  acc[i][(i + args.num_pieces - j) % args.num_pieces] = 1;
+	}
+      return;
+    }
+
+    if(!strncmp(TestConfig::affinity_pattern, "2d", 2)) {
+      int x, y, pts;
+      int count = sscanf(TestConfig::affinity_pattern+2, ":%dx%d:%d",
+			 &x, &y, &pts);
+      if(count != 3) {
+	log_app.fatal() << "affinity syntax: expected '2d:{x}x{y}:{pts}', got '"
+			<< TestConfig::affinity_pattern << "'";
+	abort();
+      }
+      if((x * y) != args.num_pieces) {
+	log_app.fatal() << "affinity error: 2d grid size mismatch: "
+			<< x << " x " << y << " != " << args.num_pieces;
+	abort();
+      }
+      if((pts != 4) && (pts != 8)) {
+	log_app.fatal() << "affinity error: 2d points must be 4 or 8, got: "
+			<< pts;
+	abort();
+      }
+      const int stencil_2d[][3] = { { -1, 0, 10 }, { 1, 0, 10 },
+				    { 0, -1, 10 }, { 0, 1, 10 },
+				    { -1, -1, 1 }, { -1, 1, 1 },
+				    { 1, -1, 1 }, { 1, 1, 1 } };
+      for(int j = 0; j < y; j++)
+	for(int i = 0; i < x; i++) {
+	  int src = i + (j * x);
+	  for(int k = 0; k < pts; k++) {
+	    int i2 = (i + x + stencil_2d[k][0]) % x;
+	    int j2 = (j + y + stencil_2d[k][1]) % y;
+	    int dst = i2 + (j2 * x);
+	    acc[src][dst] = stencil_2d[k][2];
+	  }
+	}
+      return;
+    }
+
+    if(!strncmp(TestConfig::affinity_pattern, "file:", 5)) {
+      FILE *f = fopen(TestConfig::affinity_pattern+5, "r");
+      if(!f) {
+	log_app.fatal() << "affinity error: cannot read '" << (TestConfig::affinity_pattern+5) << "'";
+	abort();
+      }
+      char line[80];
+      while(fgets(line, 80, f)) {
+	int src, dst, amt;
+	int count = sscanf(line, "%d %d %d", &src, &dst, &amt);
+	if(count != 3) continue;
+	if((src < 0) || (src >= args.num_pieces) ||
+	   (dst < 0) || (dst >= args.num_pieces)) {
+	  log_app.fatal() << "affinity error: indices out of bounds in '" << line << "'";
+	  abort();
+	}
+	if(amt > 0)
+	  acc[src][dst] = amt;
+      }
+      fclose(f);
+
+      return;
+    }
+
+    log_app.fatal() << "affinity syntax: unrecognized pattern: '"
+		    << TestConfig::affinity_pattern << "'";
+    abort();
   }
 };
 
@@ -631,6 +725,35 @@ void do_gather_copy(Runtime *runtime, Context ctx,
       break;
     }
 
+    case 7: {
+      // for i,j in is_interference:
+      //   ghost[i]{preimage[j]} = ptr[i]->owned[j]
+      IndexCopyLauncher icl(is_interference);
+
+      icl.add_copy_requirements(RegionRequirement(lp_owned,
+						  PFID_IJ_TO_J,
+						  READ_ONLY, EXCLUSIVE,
+						  lr_owned)
+				.add_field(FID_OWNED_VAL),
+				RegionRequirement(lp_ghost,
+						  PFID_IJ_TO_I,
+						  READ_WRITE, SIMULTANEOUS,
+						  lr_ghost)
+				.add_field(FID_GHOST_VAL));
+
+      icl.add_src_indirect_field(FID_GHOST_PTR,
+				 RegionRequirement(lp_ghost,
+						   PFID_IJ_TO_I,
+						   READ_ONLY, EXCLUSIVE,
+						   lr_ghost),
+				 false /*!range*/);
+      icl.possible_src_indirect_out_of_range = true;
+      icl.collective_src_indirect_points = false;
+
+      runtime->issue_copy_operation(ctx, icl);
+      break;
+    }
+
     default: assert(0);
   }
 }
@@ -647,13 +770,17 @@ void top_level_task(const Task *task,
     Rect<2> domain(Point<2>(0, 0), Point<2>(TestConfig::num_pieces - 1,
 					    TestConfig::num_pieces - 1));
     is_affinity = runtime->create_index_space(ctx, domain);
+    runtime->attach_name(is_affinity, "is_affinity");
 
     std::vector<size_t> sizes(1, sizeof(int));
     std::vector<FieldID> ids(1, FID_AFFINITY);
     fs_affinity = runtime->create_field_space(ctx, sizes, ids);
+    runtime->attach_name(fs_affinity, "fs_affinity");
+    runtime->attach_name(fs_affinity, FID_AFFINITY, "affinity");
 
     lr_affinity = runtime->create_logical_region(ctx,
 						 is_affinity, fs_affinity);
+    runtime->attach_name(lr_affinity, "lr_affinity");
   }
 
   // initialize affinity matrix inline
@@ -675,17 +802,23 @@ void top_level_task(const Task *task,
     Rect<1> domain(0,
 		   TestConfig::num_pieces * TestConfig::num_owned_per_piece - 1);
     is_owned = runtime->create_index_space(ctx, domain);
+    runtime->attach_name(is_owned, "is_owned");
 
     std::vector<size_t> sizes(1, sizeof(int));
     std::vector<FieldID> ids(1, FID_OWNED_VAL);
     fs_owned = runtime->create_field_space(ctx, sizes, ids);
+    runtime->attach_name(fs_owned, "fs_owned");
+    runtime->attach_name(fs_owned, FID_OWNED_VAL, "owned_val");
 
     lr_owned = runtime->create_logical_region(ctx, is_owned, fs_owned);
+    runtime->attach_name(lr_owned, "lr_owned");
 
     IndexPartition ip_owned = runtime->create_partition_by_blockify(ctx,
 								    is_owned,
 								    TestConfig::num_owned_per_piece);
+    runtime->attach_name(ip_owned, "ip_owned");
     lp_owned = runtime->get_logical_partition(ctx, lr_owned, ip_owned);
+    runtime->attach_name(lp_owned, "lp_owned");
   }
 
   // create and partition ghost region
@@ -697,6 +830,7 @@ void top_level_task(const Task *task,
     Rect<1> domain(0,
 		   TestConfig::num_pieces * TestConfig::num_ghost_per_piece - 1);
     is_ghost = runtime->create_index_space(ctx, domain);
+    runtime->attach_name(is_ghost, "is_ghost");
 
     std::vector<size_t> sizes;
     std::vector<FieldID> ids;
@@ -705,13 +839,19 @@ void top_level_task(const Task *task,
     ids.push_back(FID_GHOST_VAL);
     sizes.push_back(sizeof(int));
     fs_ghost = runtime->create_field_space(ctx, sizes, ids);
+    runtime->attach_name(fs_ghost, "fs_ghost");
+    runtime->attach_name(fs_ghost, FID_GHOST_PTR, "ghost_ptr");
+    runtime->attach_name(fs_ghost, FID_GHOST_VAL, "ghost_val");
 
     lr_ghost = runtime->create_logical_region(ctx, is_ghost, fs_ghost);
+    runtime->attach_name(lr_ghost, "lr_ghost");
 
     IndexPartition ip_ghost = runtime->create_partition_by_blockify(ctx,
 								    is_ghost,
 								    TestConfig::num_ghost_per_piece);
+    runtime->attach_name(ip_ghost, "ip_ghost");
     lp_ghost = runtime->get_logical_partition(ctx, lr_ghost, ip_ghost);
+    runtime->attach_name(lp_ghost, "lp_ghost");
   }
 
   InitGhostPointersTask::init_pointers(runtime, ctx,
@@ -721,8 +861,28 @@ void top_level_task(const Task *task,
 
   // compute some dependent partitions that can hopefully be used to make
   //  gather copies more efficient
-  LogicalPartition lp_owned_image;
-  {
+
+  Future f_dpstart = runtime->get_current_time(ctx,
+					       runtime->issue_execution_fence(ctx));
+
+  // we have a bunch of different gather modes, and they rely on different
+  //  dependent partitions - since we're timing this and all, only compute
+  //  the ones we actually need
+  // names match the slides, '+' means a depedent partition is used directly
+  //  in the gather, while '-' means it is a necessary intermediate
+  //
+  // gather mode       preimage  pmg  image  img  bloated  blt  is_interference
+  //    0
+  //    1
+  //    2                               +
+  //    3                               -     -      +                -
+  //    4                  -      +
+  //    5
+  //    6                  -      +     -     -                       +
+  //    7                               -     -                       +
+  LogicalPartition lp_owned_image = LogicalPartition::NO_PART;
+
+  if(((1 << TestConfig::gather_mode) & 0x00cc) != 0) {  // 2, 3, 6, 7
     // compute the image of lp_ghost[i] in lr_owned
     IndexPartition ip = runtime->create_partition_by_image(ctx,
 							   is_owned,
@@ -735,12 +895,14 @@ void top_level_task(const Task *task,
 							   //  let you say that
 							   //LEGION_ALIASED_INCOMPLETE_KIND);
 							   LEGION_COMPUTE_KIND);
+    runtime->attach_name(ip, "ip_image");
     lp_owned_image = runtime->get_logical_partition(ctx, lr_owned, ip);
+    runtime->attach_name(lp_owned_image, "lp_image");
   }
 
-  // now the pairwise intersection of lp_owned[j] with lp_owned_image[i],
-  //  as a subspace of lp_owned[j]
-  {
+  if(((1 << TestConfig::gather_mode) & 0x00c8) != 0) {  // 3, 6, 7
+    // now the pairwise intersection of lp_owned[j] with lp_owned_image[i],
+    //  as a subspace of lp_owned[j]
     std::map<IndexSpace,IndexPartition> dummy; // don't want names now
     runtime->create_cross_product_partitions(ctx,
 					     lp_owned.get_index_partition(),
@@ -754,8 +916,9 @@ void top_level_task(const Task *task,
 					     PID_OWNED_IMAGE_PER_RANK);
   }
 
-  IndexSpace is_interference;
-  {
+  IndexSpace is_interference = IndexSpace::NO_SPACE;
+
+  if(((1 << TestConfig::gather_mode) & 0x00c8) != 0) {  // 3, 6, 7
     // TODO: once implemented, use actual interference test
     // a sparse 2d space lights up the (src,dst) pairs that move data in
     //  the gather (i.e. the intersection of lp_owned_image with lp_owned)
@@ -788,10 +951,12 @@ void top_level_task(const Task *task,
     }
 
     is_interference = runtime->create_index_space(ctx, points);
+    runtime->attach_name(is_interference, "is_interference");
   }
 
-  LogicalPartition lp_owned_image_bloated;
-  {
+  LogicalPartition lp_owned_image_bloated = LogicalPartition::NO_PART;
+
+  if(((1 << TestConfig::gather_mode) & 0x0008) != 0) {  // 3
     // use the interference matrix to define an over-approximation of the
     //  image that includes every index in a destination rank if any index
     //  is included in the image
@@ -814,12 +979,14 @@ void top_level_task(const Task *task,
 							runtime->get_index_space_domain(ctx, is_pieces),
 							mdc,
 							false /*!disjoint*/);
+    runtime->attach_name(ip, "ip_bloated");
     lp_owned_image_bloated = runtime->get_logical_partition(ctx, lr_owned, ip);
+    runtime->attach_name(lp_owned_image_bloated, "lp_bloated");
   }
     
-  // now the pairwise intersection of lp_owned[j] with lp_owned_image_bloated[i],
-  //  as a subspace of lp_owned[j]
-  {
+  if(((1 << TestConfig::gather_mode) & 0x0000) != 0) {  // none yet!
+    // now the pairwise intersection of lp_owned[j] with lp_owned_image_bloated[i],
+    //  as a subspace of lp_owned[j]
     std::map<IndexSpace,IndexPartition> dummy; // don't want names now
     runtime->create_cross_product_partitions(ctx,
 					     lp_owned.get_index_partition(),
@@ -829,8 +996,9 @@ void top_level_task(const Task *task,
 					     PID_OWNED_IMAGE_BLOATED_PER_RANK);
   }
   
-  LogicalPartition lp_ghost_preimage;
-  {
+  LogicalPartition lp_ghost_preimage = LogicalPartition::NO_PART;
+
+  if(((1 << TestConfig::gather_mode) & 0x0050) != 0) {  // 4, 6
     // compute the preimage of lp_owned[j] in lr_ghost
     //  we know it'll be disjoint but not complete
     IndexPartition ip = runtime->create_partition_by_preimage(ctx,
@@ -840,12 +1008,14 @@ void top_level_task(const Task *task,
 							      FID_GHOST_PTR,
 							      is_pieces,
 							      LEGION_DISJOINT_COMPLETE_KIND);
+    runtime->attach_name(ip, "ip_preimage");
     lp_ghost_preimage = runtime->get_logical_partition(ctx, lr_ghost, ip);
+    runtime->attach_name(lp_ghost_preimage, "lp_preimage");
   }
 
-  // now the pairwise intersection of lp_ghost[i] with lp_ghost_preimage[j],
-  //  as a subspace of lp_ghost[i]
-  {
+  if(((1 << TestConfig::gather_mode) & 0x0050) != 0) {  // 4, 6
+    // now the pairwise intersection of lp_ghost[i] with lp_ghost_preimage[j],
+    //  as a subspace of lp_ghost[i]
     std::map<IndexSpace,IndexPartition> dummy; // don't want names now
     runtime->create_cross_product_partitions(ctx,
 					     lp_ghost.get_index_partition(),
@@ -855,19 +1025,54 @@ void top_level_task(const Task *task,
 					     PID_GHOST_PREIMAGE_PER_RANK);
   }
 
-  InitOwnedTask::init_owned(runtime, ctx, is_pieces,
-			    lr_owned, lp_owned, 5);
+  Future f_dpend = runtime->get_current_time(ctx,
+					     runtime->issue_execution_fence(ctx));
 
-  do_gather_copy(runtime, ctx, TestConfig::gather_mode,
-		 is_pieces, is_affinity, is_interference,
-		 lr_owned, lp_owned, lp_owned_image, lp_owned_image_bloated,
-		 lr_ghost, lp_ghost);
+  // now that we've issued all the necessary deppart ops, time how long they
+  //  took
+  double t_dpstart = f_dpstart.get_result<double>(true /*silence_warnings*/);
+  double t_dpend = f_dpend.get_result<double>(true /*silence_warnings*/);
 
-  int errors = CheckGhostDataTask::check_data(runtime, ctx, is_pieces,
-				 lr_ghost, lp_ghost, 5);
-  if(errors > 0) {
-    log_app.error() << errors << " errors detected!";
-    runtime->set_return_code(1);
+  log_app.print() << "partitioning: start=" << t_dpstart << " end=" << t_dpend << " elapsed=" << (t_dpend - t_dpstart);
+
+  for(int i = 0; i < TestConfig::num_iterations; i++) {
+    if(TestConfig::use_tracing)
+      runtime->begin_trace(ctx, TRACE_ID_COPY);
+
+    InitOwnedTask::init_owned(runtime, ctx, is_pieces,
+			      lr_owned, lp_owned, 5 + i);
+
+    Future f_cpstart = runtime->get_current_time(ctx,
+						 runtime->issue_execution_fence(ctx));
+
+    do_gather_copy(runtime, ctx, TestConfig::gather_mode,
+		   is_pieces, is_affinity, is_interference,
+		   lr_owned, lp_owned, lp_owned_image, lp_owned_image_bloated,
+		   lr_ghost, lp_ghost);
+
+    Future f_cpend = runtime->get_current_time(ctx,
+					       runtime->issue_execution_fence(ctx));
+
+    int errors = CheckGhostDataTask::check_data(runtime, ctx, is_pieces,
+						lr_ghost, lp_ghost, 5 + i);
+    if(errors > 0) {
+      log_app.error() << "copy iter " << i << ": " << errors << " errors detected!";
+      runtime->set_return_code(1);
+      break;
+    }
+
+    if(TestConfig::use_tracing)
+      runtime->end_trace(ctx, TRACE_ID_COPY);
+
+    double t_cpstart = f_cpstart.get_result<double>(true /*silence_warnings*/);
+    double t_cpend = f_cpend.get_result<double>(true /*silence_warnings*/);
+
+    // compute the aggregate bandwidth of the gather
+    double agg_bw = (TestConfig::num_pieces *
+		     TestConfig::num_ghost_per_piece *
+		     sizeof(int) * 1e-9 /
+		     (t_cpend - t_cpstart));
+    log_app.print() << "copy iter " << i << ": start=" << t_cpstart << " end=" << t_cpend << " elapsed=" << (t_cpend - t_cpstart) << " agg_bw=" << agg_bw << " GB/s";
   }
 
   runtime->destroy_logical_region(ctx, lr_affinity);
@@ -1114,6 +1319,15 @@ public:
     }
   }
 
+  void select_task_sources(const Mapping::MapperContext ctx,
+			   const Task& task,
+			   const SelectTaskSrcInput& input,
+			   SelectTaskSrcOutput& output)
+  {
+    // let the runtime decide (this just occurs when we broadcast the
+    //  affinity matrix at startup)
+  }
+
   void select_copy_sources(const Mapping::MapperContext ctx,
 			   const Copy& copy,
 			   const SelectCopySrcInput& input,
@@ -1157,6 +1371,14 @@ public:
   {
     // same sharding function for everything
     output.chosen_functor = SHARD_ID_COARSE;
+  }
+
+  void memoize_operation(const Mapping::MapperContext ctx,
+			 const Mappable& mappable, const MemoizeInput& input,
+			 MemoizeOutput& output)
+  {
+    // memoize all the things
+    output.memoize = true;
   }
 
 protected:
@@ -1221,6 +1443,9 @@ int main(int argc, char **argv)
     clp.add_option_int("-m", TestConfig::gather_mode);
     clp.add_option_int("-s", TestConfig::random_seed);
     clp.add_option_int("-r", TestConfig::replicate);
+    clp.add_option_int("-i", TestConfig::num_iterations);
+    clp.add_option_int("-t", TestConfig::use_tracing);
+    clp.add_option_string("-a", TestConfig::affinity_pattern, 256);
 
     bool ok = clp.parse_command_line(argc,
 				     const_cast<const char **>(argv));
