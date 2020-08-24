@@ -2169,7 +2169,7 @@ namespace Legion {
                         RtEvent precondition = RtEvent::NO_RT_EVENT) const;
       EquivalenceSet* get_initial_equivalence_set(unsigned idx) const;
       EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
-                                                           DistributedID did);
+                                  const FieldMask &mask, DistributedID did);
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
     public:

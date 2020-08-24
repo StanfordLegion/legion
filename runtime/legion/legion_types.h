@@ -364,6 +364,7 @@ namespace Legion {
       LG_DELETE_TEMPLATE_ID,
       LG_REMOTE_REF_TASK_ID,
       LG_DEFER_MAKE_OWNER_TASK_ID,
+      LG_DEFER_PENDING_REPLICATION_TASK_ID,
       LG_DEFER_MERGE_OR_FORWARD_TASK_ID,
       LG_DEFER_EQ_RESPONSE_TASK_ID,
       LG_DEFER_REMOVE_EQ_REF_TASK_ID,
@@ -480,7 +481,8 @@ namespace Legion {
         "Replay Physical Trace",                                  \
         "Delete Physical Template",                               \
         "Remove Remote References",                               \
-        "Defer Make Owner",                                       \
+        "Defer Equivalence Set Make Owner",                       \
+        "Defer Pending Equivalence Set Replication",              \
         "Defer Merge or Forward",                                 \
         "Defer Equivalence Set Response",                         \
         "Defer Remove Equivalence Set Expression References",     \
@@ -825,6 +827,9 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REQUEST,
       SEND_EQUIVALENCE_SET_RESPONSE,
       SEND_EQUIVALENCE_SET_INVALIDATE_TRACKERS,
+      SEND_EQUIVALENCE_SET_REPLICATION_REQUEST,
+      SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE,
+      SEND_EQUIVALENCE_SET_REPLICATION_UPDATE,
       SEND_EQUIVALENCE_SET_MIGRATION,
       SEND_EQUIVALENCE_SET_OWNER_UPDATE,
       SEND_EQUIVALENCE_SET_MAKE_OWNER,
@@ -1025,6 +1030,9 @@ namespace Legion {
         "Send Equivalence Set Request",                               \
         "Send Equivalence Set Response",                              \
         "Send Equivalence Set Invalidate Trackers",                   \
+        "Send Equivalence Set Replication Request",                   \
+        "Send Equivalence Set Replication Response",                  \
+        "Send Equivalence Set Replication Update",                    \
         "Send Equivalence Set Migration",                             \
         "Send Equivalence Set Owner Update",                          \
         "Send Equivalence Set Make Owner",                            \

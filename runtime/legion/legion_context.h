@@ -1778,6 +1778,7 @@ namespace Legion {
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
                             InnerContext *source_context);
+      virtual void free_region_tree_context(void);
       void receive_replicate_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state, 
                           std::set<RtEvent> &applied_events, size_t num_shards,

@@ -2675,11 +2675,12 @@ namespace Legion {
         const CollectiveMapping *const invalidate_mapping;
         Runtime *const runtime;
       };
-      class InvalidateReplicatedFunctor {
+      class UpdateReplicatedFunctor {
       public:
-        InvalidateReplicatedFunctor(DistributedID did, const FieldMask &mask,
-                                  AddressSpaceID origin, AddressSpaceID to_skip,
-                                  Runtime *runtime, std::set<RtEvent> &applied);
+        UpdateReplicatedFunctor(DistributedID did, const FieldMask &mask,
+                                const CollectiveMapping *mapping, 
+                                AddressSpaceID origin, AddressSpaceID to_skip,
+                                Runtime *runtime, std::set<RtEvent> &applied);
       public:
         void apply(AddressSpaceID target);
       public:
@@ -2687,8 +2688,20 @@ namespace Legion {
         const FieldMask &mask;
         const AddressSpaceID origin;
         const AddressSpaceID to_skip;
+        const CollectiveMapping *mapping;
         Runtime *const runtime;
         std::set<RtEvent> &applied;
+      };
+    public:
+      struct PendingReplication {
+      public:
+        PendingReplication(CollectiveMapping *mapping, unsigned notifications);
+        ~PendingReplication(void);
+      public:
+        CollectiveMapping *const mapping;
+        const RtUserEvent ready_event;
+        std::set<RtEvent> preconditions;
+        unsigned remaining_notifications;
       };
     public:
       struct DeferMakeOwnerArgs : public LgTaskArgs<DeferMakeOwnerArgs> {
@@ -2700,6 +2713,18 @@ namespace Legion {
             set(s) { }
       public:
         EquivalenceSet *const set;
+      };
+      struct DeferPendingReplicationArgs : 
+        public LgTaskArgs<DeferPendingReplicationArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_PENDING_REPLICATION_TASK_ID;
+      public:
+        DeferPendingReplicationArgs(EquivalenceSet *s, PendingReplication *p,
+                                    const FieldMask &m);
+      public:
+        EquivalenceSet *const set;
+        PendingReplication *const pending;
+        FieldMask *const mask;
       };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
@@ -2719,6 +2744,8 @@ namespace Legion {
         { return (local_space == logical_owner_space); }
       inline bool has_replicated_fields(const FieldMask &mask) const
         { return !(mask - replicated_states.get_valid_mask()); }
+      inline const FieldMask& get_replicated_fields(void) const
+        { return replicated_states.get_valid_mask(); }
     public:
       // From distributed collectable
       virtual void notify_active(ReferenceMutator *mutator);
@@ -2915,19 +2942,27 @@ namespace Legion {
       void update_owner(const AddressSpaceID new_logical_owner);
       void unpack_state(Deserializer &derez, AddressSpaceID source,
                         std::set<RtEvent> &ready_events);
-      void broadcast_replicated_state_invalidations(const FieldMask &mask,
-                const AddressSpaceID origin, std::set<RtEvent> &applied_events);
+      void broadcast_replicated_state_updates(const FieldMask &mask,
+              CollectiveMapping *mapping, const AddressSpaceID origin,
+              std::set<RtEvent> &applied_events, const bool need_lock = false);
       void make_replicated_state(CollectiveMapping *mapping,
                                  FieldMask mask, const AddressSpaceID source,
-                                 std::set<RtEvent> &deferral_events,
-                                 std::set<RtEvent> &applied_events);
+                                 std::set<RtEvent> &deferral_events);
+      void process_replication_request(const FieldMask &mask, 
+                CollectiveMapping *mapping, PendingReplication *target, 
+                const AddressSpaceID source);
       void unpack_replicated_states(Deserializer &derez);
+      void update_replicated_state(CollectiveMapping *mapping, 
+                                   const FieldMask &mask);
+      void finalize_pending_replication(PendingReplication *pending,
+         const FieldMask &mask, const bool first, const bool need_lock = false);
     public:
       static void handle_remote_references(const void *args);
       static void handle_make_owner(const void *args);
       static void handle_merge_or_forward(const void *args);
       static void handle_deferred_response(const void *args, Runtime *runtime);
       static void handle_deferred_remove_refs(const void *args);
+      static void handle_pending_replication(const void *args);
     public:
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
@@ -2938,6 +2973,9 @@ namespace Legion {
       static void handle_owner_update(Deserializer &derez, Runtime *rt);
       static void handle_make_owner(Deserializer &derez, Runtime *rt);
       static void handle_invalidate_trackers(Deserializer &derez, Runtime *rt);
+      static void handle_replication_request(Deserializer &derez, Runtime *rt);
+      static void handle_replication_response(Deserializer &derez, Runtime *rt);
+      static void handle_replication_update(Deserializer &derez, Runtime *rt);
     public:
       RegionNode *const region_node;
       IndexSpaceNode *const set_expr;
@@ -2975,7 +3013,7 @@ namespace Legion {
       // replicated state as long as their is a total sharding that updates
       // all the equivalence sets across the machine collectively.
       FieldMaskSet<CollectiveMapping>                   replicated_states;
-      FieldMaskSet<PendingMapping>                      pending_states;
+      FieldMaskSet<PendingReplication>                  pending_states;
     protected:
       // Which EqSetTracker objects on this node are
       // tracking this equivalence set and need to be invalidated

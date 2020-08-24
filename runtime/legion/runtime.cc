@@ -9730,6 +9730,21 @@ namespace Legion {
               runtime->handle_equivalence_set_invalidate_trackers(derez);
               break;
             }
+          case SEND_EQUIVALENCE_SET_REPLICATION_REQUEST:
+            {
+              runtime->handle_equivalence_set_replication_request(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE:
+            {
+              runtime->handle_equivalence_set_replication_response(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_REPLICATION_UPDATE:
+            {
+              runtime->handle_equivalence_set_replication_update(derez);
+              break;
+            }
           case SEND_EQUIVALENCE_SET_MIGRATION:
             {
               runtime->handle_equivalence_set_migration(derez,
@@ -19381,6 +19396,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_replication_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_REPLICATION_REQUEST, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_replication_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_replication_update(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_REPLICATION_UPDATE, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_migration(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
@@ -21211,6 +21256,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EquivalenceSet::handle_invalidate_trackers(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_replication_request(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_replication_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_replication_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_replication_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_replication_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_replication_update(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -27763,6 +27831,11 @@ namespace Legion {
         case LG_DEFER_MAKE_OWNER_TASK_ID:
           {
             EquivalenceSet::handle_make_owner(args);
+            break;
+          }
+        case LG_DEFER_PENDING_REPLICATION_TASK_ID:
+          {
+            EquivalenceSet::handle_pending_replication(args);
             break;
           }
         case LG_DEFER_MERGE_OR_FORWARD_TASK_ID:

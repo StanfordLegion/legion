@@ -16175,22 +16175,15 @@ namespace Legion {
             if ((it->first != mapping) && ((*it->first) != (*mapping)))
             {
               // Mappings are not the same so see if we can make them the same
-              if (exclusive)
-              {
-                // We're exclusive, so we can change the mapping
-                make_replicated_state(mapping, overlap, local_space, 
-                          exclusive_deferral_events, applied_events);
-                replicated |= overlap;
-                // Don't filter yet, that will happen once it is safe
-              }
-              else
+              // If we're exclusive we'll be able to modify them later
+              if (!exclusive)
               {
                 // Not exclusive so we can't change them
                 // If we're the owner, we send out invalidations
                 if (is_logical_owner())
                 {
-                  broadcast_replicated_state_invalidations(overlap, local_space,
-                                                           applied_events);
+                  broadcast_replicated_state_updates(overlap, NULL, local_space,
+                                                     applied_events);
                   it.filter(overlap);
                   if (!it->second)
                     to_delete.push_back(it->first);
@@ -16247,7 +16240,7 @@ namespace Legion {
           {
             const FieldMask unreplicated = mask - replicated;
             make_replicated_state(mapping, unreplicated, local_space,
-                                  exclusive_deferral_events, applied_events);
+                                  exclusive_deferral_events);
           }
         }
         // If we have any exclusive deferral events to defer the analysis
@@ -16280,8 +16273,8 @@ namespace Legion {
               const FieldMask overlap = it->second & mask;
               if (!overlap)
                 continue;
-              broadcast_replicated_state_invalidations(overlap, local_space,
-                                                       applied_events);
+              broadcast_replicated_state_updates(overlap, NULL, local_space,
+                                                 applied_events);
               it.filter(overlap);
               if (!it->second)
                 to_delete.push_back(it->first);
@@ -16342,18 +16335,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet::InvalidateReplicatedFunctor::InvalidateReplicatedFunctor(
+    EquivalenceSet::UpdateReplicatedFunctor::UpdateReplicatedFunctor(
                                   DistributedID id, const FieldMask &m,
+                                  const CollectiveMapping *map,
                                   AddressSpaceID orig, AddressSpaceID skip,
                                   Runtime *rt, std::set<RtEvent> &ap)
-      : did(id), mask(m), origin(orig), to_skip(skip), runtime(rt), applied(ap)
+      : did(id), mask(m), origin(orig), to_skip(skip), mapping(map), 
+        runtime(rt), applied(ap)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::InvalidateReplicatedFunctor::apply(
-                                                          AddressSpaceID target)
+    void EquivalenceSet::UpdateReplicatedFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       if (target == to_skip)
@@ -16364,24 +16358,36 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(mask);
+        if (mapping != NULL)
+          mapping->pack(rez);
+        else
+          rez.serialize<size_t>(0);
         rez.serialize(origin);
-        rez.serialize(done);
+        rez.serialize(done_event);
       }
-      runtime->send_equivalence_set_broadcast_invalidations(rez, target);
+      runtime->send_equivalence_set_replication_update(target, rez);
       applied.insert(done_event);
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::broadcast_replicated_state_invalidations(
-                             const FieldMask &mask, const AddressSpaceID origin,
-                             std::set<RtEvent> &applied_events)
+    void EquivalenceSet::broadcast_replicated_state_updates(
+                 const FieldMask &mask, CollectiveMapping *mapping,
+                 const AddressSpaceID origin, std::set<RtEvent> &applied_events,
+                 const bool need_lock)
     //--------------------------------------------------------------------------
     {
+      if (need_lock)
+      {
+        AutoLock eq(eq_lock);
+        broadcast_replicated_state_updates(mask, mapping, origin, 
+                                           applied_events, false/*need lock*/);
+        return;
+      }
       // If we're the owner, send messages to all the remote instances
       if (is_owner() && has_remote_instances())
       {
-        InvalidateReplicatedFunctor functor(did, mask, local_space, origin,
-                                            runtime, applied_events);
+        UpdateReplicatedFunctor functor(did, mask, mapping, local_space, origin,
+                                        runtime, applied_events);
         map_over_remote_instances(functor);
       }
       if (collective_mapping != NULL)
@@ -16399,10 +16405,14 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(mask);
+            if (mapping != NULL)
+              mapping->pack(rez);
+            else
+              rez.serialize<size_t>(0);
             rez.serialize(origin);
-            rez.serialize(done);
+            rez.serialize(done_event);
           }
-          runtime->send_equivalence_set_broadcast_invalidations(rez, *it);
+          runtime->send_equivalence_set_replication_update(*it, rez);
           applied_events.insert(done_event);
         }
       }
@@ -16418,21 +16428,103 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(mask);
+          if (mapping != NULL)
+            mapping->pack(rez);
+          else
+            rez.serialize<size_t>(0);
           rez.serialize(origin);
-          rez.serialize(done);
+          rez.serialize(done_event);
         }
-        runtime->send_equivalence_set_broadcast_invalidations(rez, owner_space);
+        runtime->send_equivalence_set_replication_update(owner_space, rez);
         applied_events.insert(done_event);
       }
-      // Once we get down here then we can just do our local invalidations
+      // Once we get down here then we can just do our local updates 
+      update_replicated_state(mapping, mask);
+    }
 
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_replicated_state(CollectiveMapping *mapping,
+                                                 const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      // Remove any conflicting mappings and record any local invalidations
+      // we need to do here
+      FieldMask invalidate_mask;
+      if (!replicated_states.empty() && 
+          !(mask * replicated_states.get_valid_mask()))
+      {
+        std::vector<CollectiveMapping*> to_delete;
+        for (FieldMaskSet<CollectiveMapping>::iterator it =
+              replicated_states.begin(); it != replicated_states.end(); it++)
+        {
+          const FieldMask overlap = mask & it->second;
+          if (!overlap)
+            continue;
+          if (it->first->contains(local_space))
+            invalidate_mask |= overlap;
+          it.filter(overlap);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        for (std::vector<CollectiveMapping*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          replicated_states.erase(*it);
+          if ((*it)->remove_reference())
+            delete (*it);
+        }
+        if (!replicated_states.empty())
+          replicated_states.tighten_valid_mask();
+      }
+      // If we're not included in the mapping then add it now, if we are 
+      // included then we'll be added automatically by the requesters
+      if (mapping != NULL)
+      {
+        if (mapping->contains(local_space))
+        {
+          // If the fields are still going to be valid in the new state
+          // then we don't need to invalidate them
+          if (!!invalidate_mask)
+            invalidate_mask.clear();
+        }
+        else
+        {
+          if (replicated_states.insert(mapping, mask))
+            mapping->add_reference();
+        }
+      }
+      // If we don't have any local fields to invalidate then return
+      if (!invalidate_mask)
+        return;
+      // TODO: Invalidate any meta data for these fields that is no longer valid
+
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::PendingReplication::PendingReplication(CollectiveMapping *m,
+                                                         unsigned notifications)
+      : mapping(m), ready_event(Runtime::create_rt_user_event()),
+        remaining_notifications(notifications)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapping != NULL); 
+#endif
+      mapping->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::PendingReplication::~PendingReplication(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapping->remove_reference())
+        delete mapping;
     }
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::make_replicated_state(CollectiveMapping *mapping,
                                     FieldMask mask, const AddressSpaceID source,
-                                    std::set<RtEvent> &deferral_events,
-                                    std::set<RtEvent> &applied_events)
+                                    std::set<RtEvent> &deferral_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -16442,25 +16534,55 @@ namespace Legion {
       {
         // For the first notification, send any invalidations out to 
         // instances which are not contained in the new set
-        FieldMask send_state;
-        for (FieldMaskSet<PendingMapping>::const_iterator it =
+        std::vector<PendingReplication*> to_finalize;
+        for (FieldMaskSet<PendingReplication>::iterator it =
               pending_states.begin(); it != pending_states.end(); it++)
         {
-          const FieldMask overlap = it->second & mask;
-          if (!overlap)
+          if (mask * it->second)
             continue;
 #ifdef DEBUG_LEGION
+          // should overlap on all fields
+          assert(!(it->second - mask));
           assert((*it->first->mapping) == *mapping);
 #endif
-          deferral_events.insert(it->first->deferral);
-          applied_events.insert(it->first->applied);
-          mask -= overlap;
+          deferral_events.insert(it->first->ready_event);
+          // Check to see if this is the last notification for this
+          // pending replication state, if so we can finalize it
+          if (--it->first->remaining_notifications == 0)
+            to_finalize.push_back(it->first);
+          mask -= it->second;
           if (!mask)
             break;
         }
-
-        // Then send back any state that the remote copy needs
-
+        // Finalize any that are ready to be done
+        if (!to_finalize.empty())
+        {
+          for (std::vector<PendingReplication*>::const_iterator it =
+                to_finalize.begin(); it != to_finalize.end(); it++)
+          {
+            FieldMaskSet<PendingReplication>::iterator finder =
+              pending_states.find(*it);
+#ifdef DEBUG_LEGION
+            assert(finder != pending_states.end());
+#endif
+            finalize_pending_replication(finder->first, finder->second,
+                                         true/*first call*/);
+            pending_states.erase(finder);
+          }
+          if (!pending_states.empty())
+            pending_states.tighten_valid_mask();
+        }
+        // If we still have fields, then start a new pending request
+        if (!!mask)
+        {
+          PendingReplication *pending = 
+            new PendingReplication(mapping, mapping->size() - 1);
+          // Send updates to all the nodes not in the mapping
+          broadcast_replicated_state_updates(mask, mapping, local_space,
+                                             pending->preconditions);
+          pending_states.insert(pending, mask);
+          deferral_events.insert(pending->ready_event);
+        }
       }
       else
       {
@@ -16468,40 +16590,141 @@ namespace Legion {
         assert(source == local_space);
 #endif
         // First deduplicate requests
-        for (FieldMaskSet<PendingMapping>::const_iterator it =
+        for (FieldMaskSet<PendingReplication>::const_iterator it =
               pending_states.begin(); it != pending_states.end(); it++)
         {
-          const FieldMask overlap = it->second & mask;
-          if (!overlap)
+          if (it->second * mask)
             continue;
 #ifdef DEBUG_LEGION
-          assert((*it->first->mapping) == *mapping);
+          // should overlap on all fields
+          assert(!(it->second - mask));
+          assert((it->first->mapping == mapping) || 
+                  ((*it->first->mapping) == *mapping));
 #endif
-          deferral_events.insert(it->first->deferral);
-          applied_events.insert(it->first->applied);
-          mask -= overlap;
+          deferral_events.insert(it->first->ready_event);
+          mask -= it->second;
           if (!mask)
-            break;
+            return;
         }
+#ifdef DEBUG_LEGION
+        assert(!!mask);
+#endif
         // Then sending a notification to the logical owner with a
         // request for any valid fields that we need for this copy
-        if (!!mask)
+        PendingReplication *pending = 
+            new PendingReplication(mapping, 1/*notification from owner*/);
+        Serializer rez;
         {
-          PendingMapping *pending = new PendingMapping(mapping);
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(mask);
-            rez.serialize(pending);
-            rez.serialize(local_space);
-          }
-          runtime->send_equivalence_set_make_replicted(rez, logical_owner);
-          deferral_events.insert(pending->deferral);
-          applied_events.insert(pending->applied);
-          pending_states.insert(pending, mask);
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(mask);
+          mapping->pack(rez);
+          rez.serialize(pending);
+          rez.serialize(local_space);
+        }
+        runtime->send_equivalence_set_replication_request(logical_owner_space,
+                                                          rez);
+        deferral_events.insert(pending->ready_event);
+        pending_states.insert(pending, mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::process_replication_request(const FieldMask &mask,
+                         CollectiveMapping *mapping, PendingReplication *target,
+                         const AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      // If we're not the logical owner, keep forwarding this on until
+      // we get to the logical owner
+      if (!is_logical_owner())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(mask);
+          mapping->pack(rez);
+          rez.serialize(target);
+          rez.serialize(source);
+        }
+        runtime->send_equivalence_set_replication_request(logical_owner_space,
+                                                          rez);
+        return;
+      }
+      std::set<RtEvent> deferral_events;
+      make_replicated_state(mapping, mask, source, deferral_events);
+      RtEvent ready_event;
+      if (!deferral_events.empty())
+        ready_event = Runtime::merge_events(deferral_events);
+      // Then send the response back to the source
+      // TODO: pack the meta-data for cloning
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(mask);
+        rez.serialize(target);
+        rez.serialize(ready_event);
+      }
+      runtime->send_equivalence_set_replication_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::DeferPendingReplicationArgs::DeferPendingReplicationArgs(
+                   EquivalenceSet *s, PendingReplication *p, const FieldMask &m)
+      : LgTaskArgs<DeferPendingReplicationArgs>(implicit_provenance),
+        set(s), pending(p), mask(new FieldMask(m))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::finalize_pending_replication(
+                             PendingReplication *pending, const FieldMask &mask,
+                             const bool first, const bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_lock)
+      {
+        AutoLock eq(eq_lock);
+        finalize_pending_replication(pending, mask, first, false/*need lock*/);
+        return;
+      }
+      if (first)
+      {
+        if (!pending->preconditions.empty())
+          Runtime::trigger_event(pending->ready_event,
+              Runtime::merge_events(pending->preconditions));
+        else
+          Runtime::trigger_event(pending->ready_event);
+        if (!pending->ready_event.has_triggered())
+        {
+          // Need to defer adding this until it is ready
+          DeferPendingReplicationArgs args(this, pending, mask);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, pending->ready_event);
+          return;
         }
       }
+#ifdef DEBUG
+      assert(mask * replicated_states.get_valid_mask());
+#endif
+      if (replicated_states.insert(pending->mapping, mask))
+        pending->mapping->add_reference();
+      delete pending;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_pending_replication(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferPendingReplicationArgs *dargs = 
+        (const DeferPendingReplicationArgs*)args;
+      dargs->set->finalize_pending_replication(dargs->pending, *(dargs->mask),
+          false/*first*/, true/*need lock*/);
+      delete (dargs->mask);
     }
 
     //--------------------------------------------------------------------------
@@ -19288,6 +19511,93 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_replication_request(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready_event;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(did, ready_event);
+      FieldMask mask;
+      derez.deserialize(mask);
+      CollectiveMapping *mapping = new CollectiveMapping(derez);
+      mapping->add_reference();
+      PendingReplication *target;
+      derez.deserialize(target);
+      AddressSpaceID source;
+      derez.deserialize(source);
+
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      set->process_replication_request(mask, mapping, target, source);
+      if (mapping->remove_reference())
+        delete mapping;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_replication_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready_event;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(did, ready_event);
+      FieldMask mask;
+      derez.deserialize(mask);
+      PendingReplication *target;
+      derez.deserialize(target);
+      RtEvent precondition;
+      derez.deserialize(precondition);
+
+      if (precondition.exists())
+        target->preconditions.insert(precondition);
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      set->finalize_pending_replication(target, mask, true/*first*/, 
+                                        true/*need lock*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_replication_update(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready_event;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(did, ready_event);
+      FieldMask mask;
+      derez.deserialize(mask);
+      CollectiveMapping *mapping = new CollectiveMapping(derez);
+      mapping->add_reference();
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      std::set<RtEvent> applied_events;
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      set->broadcast_replicated_state_updates(mask, (mapping->size() > 0) ? 
+          mapping : NULL, origin, applied_events, true/*need lock*/);
+      if (!applied_events.empty())
+        Runtime::trigger_event(done_event, 
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done_event);
+      if (mapping->remove_reference())
+        delete mapping;
     }
 
     //--------------------------------------------------------------------------
