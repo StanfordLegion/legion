@@ -1079,7 +1079,7 @@ namespace Legion {
           typedef std::map<Point<1>,size_t> SizeMap;
           const SizeMap &output_sizes = all_output_sizes[idx];
           const SizeMap &local_sizes = local_output_sizes[idx];
-          size_t sum = 0;
+          coord_t sum = 0;
           for (SizeMap::const_iterator it = output_sizes.begin();
                it != output_sizes.end(); ++it)
           {
