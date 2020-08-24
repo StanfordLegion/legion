@@ -1007,8 +1007,8 @@ namespace Legion {
         // Handle the special case where the only subscriber is the local
         // node so we can lazily defer this until later and the user
         // actually asks us for the result
-        if ((subscribers.size() > 1) ||
-            (subscribers.find(local_space) == subscribers.end()))
+        if (!targets.empty() && ((targets.size() > 1) ||
+              (targets.find(local_space) == targets.end())))
         {
           // If we still have a callback to perform do
           // that now to get it in flight, it will send
