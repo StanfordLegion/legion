@@ -1527,10 +1527,11 @@ namespace Legion {
       struct LRBroadcast {
       public:
         LRBroadcast(void) : tid(0), double_buffer(0) { }
-        LRBroadcast(RegionTreeID t, bool db) :
-          tid(t), double_buffer(db) { }
+        LRBroadcast(RegionTreeID t, DistributedID d, bool db) :
+          tid(t), did(d), double_buffer(db) { }
       public:
         RegionTreeID tid;
+        DistributedID did;
         bool double_buffer;
       };
       struct IntraSpaceDeps {

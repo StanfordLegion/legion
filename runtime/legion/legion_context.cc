@@ -727,7 +727,8 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_region(index_space.id, field_space.id, tid);
 
-      forest->create_logical_region(region);
+      const DistributedID did = runtime->get_available_distributed_id(); 
+      forest->create_logical_region(region, did);
       // Register the creation of a top-level region with the context
       register_region_creation(region, task_local);
       return region;
@@ -10034,6 +10035,7 @@ namespace Legion {
         {
           const LRBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_region_tree(value.tid);
+          runtime->free_distributed_id(value.did);
         }
         else
         {
@@ -14788,8 +14790,8 @@ namespace Legion {
         std::set<RtEvent> applied;
         // Have to register this before doing the broadcast
         RegionNode *node = 
-          forest->create_logical_region(handle, false/*notify remote*/,
-                                        creation_barrier, &applied);
+          forest->create_logical_region(handle, value.did,
+              false/*notify remote*/, creation_barrier, &applied);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
@@ -14824,8 +14826,8 @@ namespace Legion {
         assert(handle.exists());
 #endif
         std::set<RtEvent> applied;
-        forest->create_logical_region(handle, false/*notify remote*/, 
-                                      creation_barrier, &applied);
+        forest->create_logical_region(handle, value.did,
+            false/*notify remote*/, creation_barrier, &applied);
         // Signal that we are done our creation
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -14862,7 +14864,8 @@ namespace Legion {
           // Do our arrival on this generation, should be the last one
           ValueBroadcast<LRBroadcast> *collective = 
             new ValueBroadcast<LRBroadcast>(this, COLLECTIVE_LOC_34);
-          collective->broadcast(LRBroadcast(tid, double_next));
+          collective->broadcast(LRBroadcast(tid, 
+                runtime->get_available_distributed_id(), double_next));
           pending_region_trees.push_back(
               std::pair<ValueBroadcast<LRBroadcast>*,bool>(collective, true));
         }
