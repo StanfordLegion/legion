@@ -826,7 +826,8 @@ namespace Legion {
         // Otherwise we fall through and we can just do our exchange
         reduction_collective->reduce_futures(this);
       }
-      if (output_size_collective != NULL)
+      if ((output_size_collective != NULL) &&
+          ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
         // We need to gather output region sizes from all the other shards
         // to determine the sizes of globally indexed output regions
         output_size_collective->exchange_output_sizes(all_output_sizes);
