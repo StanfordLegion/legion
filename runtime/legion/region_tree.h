@@ -412,7 +412,7 @@ namespace Legion {
       void get_field_space_fields(FieldSpace handle, 
                                   std::vector<FieldID> &fields);
     public:
-      RegionNode* create_logical_region(LogicalRegion handle,
+      RegionNode* create_logical_region(LogicalRegion handle, DistributedID did,
                                     const bool notify_remote = true,
                                     RtEvent initialized = RtEvent::NO_RT_EVENT,
                                     std::set<RtEvent> *applied = NULL);
@@ -732,7 +732,8 @@ namespace Legion {
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
                                   RtEvent initialized, Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par,
-                                  RtEvent init,const bool notify_remote = true,
+                                  RtEvent initialized, DistributedID did,
+                                  const bool notify_remote = true,
                                   std::set<RtEvent> *applied = NULL);
       PartitionNode*  create_node(LogicalPartition p, RegionNode *par,
                                   std::set<RtEvent> *applied = NULL);
@@ -3425,7 +3426,8 @@ namespace Legion {
     class RegionTreeNode : public DistributedCollectable {
     public:
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column,
-                     RtEvent initialized, RtEvent tree_init);
+                     RtEvent initialized, RtEvent tree_init, 
+                     DistributedID did = 0);
       virtual ~RegionTreeNode(void);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
@@ -3646,14 +3648,12 @@ namespace Legion {
       inline FieldSpaceNode* get_column_source(void) const 
         { return column_source; }
       void update_creation_set(const ShardMapping &mapping);
-      void find_remote_instances(NodeSet &target_instances);
     public:
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;
       RtEvent initialized;
       const RtEvent tree_initialized; // top level tree initialization
     public:
-      NodeSet remote_instances;
       bool registered;
 #ifdef DEBUG_LEGION
     protected:
@@ -3720,8 +3720,8 @@ namespace Legion {
       };
     public:
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
-                 FieldSpaceNode *col_src, RegionTreeForest *ctx, 
-                 RtEvent initialized, RtEvent tree_initialized);
+             FieldSpaceNode *col_src, RegionTreeForest *ctx, 
+             DistributedID did, RtEvent initialized, RtEvent tree_initialized);
       RegionNode(const RegionNode &rhs);
       virtual ~RegionNode(void);
     public:

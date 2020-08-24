@@ -1560,8 +1560,8 @@ namespace Legion {
       struct LRBroadcast {
       public:
         LRBroadcast(void) : tid(0), double_buffer(0) { }
-        LRBroadcast(RegionTreeID t, DistributedID id, bool db) :
-          tid(t), did(id), double_buffer(db) { }
+        LRBroadcast(RegionTreeID t, DistributedID d, bool db) :
+          tid(t), did(d), double_buffer(db) { }
       public:
         RegionTreeID tid;
         DistributedID did;

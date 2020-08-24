@@ -14731,8 +14731,9 @@ namespace Legion {
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
         // Have to register this before doing the broadcast
-        RegionNode *node = forest->create_logical_region(handle, 
-            false/*notify remote*/, creation_barrier, &applied);
+        RegionNode *node = 
+          forest->create_logical_region(handle, value.did,
+              false/*notify remote*/, creation_barrier, &applied);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
@@ -14768,8 +14769,8 @@ namespace Legion {
         assert(handle.exists());
 #endif
         std::set<RtEvent> applied;
-        forest->create_logical_region(handle, false/*notify remote*/, 
-                                      creation_barrier, &applied);
+        forest->create_logical_region(handle, value.did,
+            false/*notify remote*/, creation_barrier, &applied);
         // Signal that we are done our creation
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
