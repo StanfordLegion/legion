@@ -1113,9 +1113,13 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      ShardMapping *shard_mapping = &repl_ctx->shard_manager->get_mapping();
       RegionTreeForest *forest = runtime->forest;
 
+      ShardID shard_id = repl_ctx->owner_shard->shard_id;
+      size_t total_shards = repl_ctx->shard_manager->total_shards;
+
+      // Here we will initialize pending subspaces and output sizes
+      // so that later finalize_output_regions can do the right job.
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
       {
         const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
@@ -1123,50 +1127,62 @@ namespace Legion {
           output_regions[idx].partition.get_index_partition();
         IndexSpaceNode *parent= forest->get_node(ispace)->as_index_space_node();
 
-        Domain empty;
-        switch (parent->get_num_dims())
+        if (!output_regions[idx].global_indexing)
         {
-#define DIMFUNC(DIM)                                 \
-          case DIM:                                  \
-          {                                          \
-            empty.dim = DIM;                         \
-            for (unsigned idx = 0; idx < DIM; ++idx) \
-            {                                        \
-              empty.rect_data[idx] = 0;              \
-              empty.rect_data[idx + DIM] = -1;       \
-            }                                        \
-            break;                                   \
-          }
-          LEGION_FOREACH_N(DIMFUNC)
-          default:
-            assert(false);
-        }
-#undef DIMFUNC
-        for (Domain::DomainPointIterator itr(index_domain); itr; ++itr)
-        {
-          IndexSpace child;
-          switch (index_domain.get_dim())
+          Domain empty;
+          switch (parent->get_num_dims())
           {
-#define DIMFUNC(DIM)                                                     \
-            case DIM:                                                    \
-            {                                                            \
-              Point<DIM> p = *itr;                                       \
-              child = forest->get_index_subspace(                        \
-                  pid, &p,NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
-              break;                                                     \
+#define DIMFUNC(DIM)                                   \
+            case DIM:                                  \
+            {                                          \
+              empty.dim = DIM;                         \
+              for (unsigned idx = 0; idx < DIM; ++idx) \
+              {                                        \
+                empty.rect_data[idx] = 0;              \
+                empty.rect_data[idx + DIM] = -1;       \
+              }                                        \
+              break;                                   \
             }
             LEGION_FOREACH_N(DIMFUNC)
             default:
               assert(false);
           }
 #undef DIMFUNC
-          forest->set_pending_space_domain(
-              child, empty, runtime->address_space,
-              repl_ctx->owner_shard->shard_id,
-              repl_ctx->shard_manager->total_shards);
-
+          for (Domain::DomainPointIterator itr(index_domain); itr; ++itr)
+          {
+            IndexSpace child;
+            switch (index_domain.get_dim())
+            {
+#define DIMFUNC(DIM)                                                       \
+              case DIM:                                                    \
+              {                                                            \
+                Point<DIM> p = *itr;                                       \
+                child = forest->get_index_subspace(                        \
+                    pid, &p,NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+                break;                                                     \
+              }
+              LEGION_FOREACH_N(DIMFUNC)
+              default:
+                assert(false);
+            }
+#undef DIMFUNC
+            forest->set_pending_space_domain(
+                child, empty, runtime->address_space, shard_id, total_shards);
+          }
         }
-        parent->set_domain(empty, runtime->address_space, shard_mapping);
+        else
+        {
+          typedef std::map<Point<1>,size_t> SizeMap;
+          SizeMap &output_sizes = all_output_sizes[idx];
+          SizeMap &local_sizes = local_output_sizes[idx];
+          for (PointInRectIterator<1> itr(index_domain); itr.valid(); ++itr)
+          {
+            const Point<1> &p = *itr;
+            output_sizes[p] = 0;
+            if (p[0] % total_shards == shard_id)
+              local_sizes[p] = 0;
+          }
+        }
       }
     }
 
