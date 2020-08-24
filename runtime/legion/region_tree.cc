@@ -4284,7 +4284,6 @@ namespace Legion {
         else // not a root so we get a gc ref from our parent
           result->add_nested_gc_ref(parent->did, &mutator);
         result->record_registered();
-        result->register_with_runtime(&mutator);
       }
       if (local_initialized.exists())
       {
