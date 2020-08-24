@@ -128,6 +128,14 @@ namespace Legion {
       // that later is set by a task
       virtual IndexSpace create_index_space(ApEvent ready,
                                             TypeTag type_tag);
+      virtual IndexSpace create_index_space(
+                           const std::vector<DomainPoint> &points);
+      virtual IndexSpace create_index_space(
+                           const std::vector<Domain> &rects);
+    protected:
+      IndexSpace create_index_space_internal(const Domain &bounds,
+                                             TypeTag type_tag);
+    public:
       virtual IndexSpace union_index_spaces(
                            const std::vector<IndexSpace> &spaces);
       virtual IndexSpace intersect_index_spaces(
@@ -1541,10 +1549,11 @@ namespace Legion {
       struct LRBroadcast {
       public:
         LRBroadcast(void) : tid(0), double_buffer(0) { }
-        LRBroadcast(RegionTreeID t, bool db) :
-          tid(t), double_buffer(db) { }
+        LRBroadcast(RegionTreeID t, DistributedID d, bool db) :
+          tid(t), did(d), double_buffer(db) { }
       public:
         RegionTreeID tid;
+        DistributedID did;
         bool double_buffer;
       };
       struct IntraSpaceDeps {
@@ -1755,6 +1764,14 @@ namespace Legion {
                                             TypeTag type_tag);
       virtual IndexSpace create_index_space(ApEvent ready,
                                             TypeTag type_tag);
+      virtual IndexSpace create_index_space(
+                           const std::vector<DomainPoint> &points);
+      virtual IndexSpace create_index_space(
+                           const std::vector<Domain> &rects);
+    protected:
+      IndexSpace create_index_space_replicated(const Domain &bounds,
+                                               TypeTag type_tag);
+    public:
       virtual IndexSpace union_index_spaces(
                            const std::vector<IndexSpace> &spaces);
       virtual IndexSpace intersect_index_spaces(
@@ -2819,6 +2836,10 @@ namespace Legion {
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, TypeTag tag);
       virtual IndexSpace create_index_space(const Future &future, TypeTag tag);
+      virtual IndexSpace create_index_space(
+                           const std::vector<DomainPoint> &points);
+      virtual IndexSpace create_index_space(
+                           const std::vector<Domain> &rects);
       virtual IndexSpace union_index_spaces(
                            const std::vector<IndexSpace> &spaces);
       virtual IndexSpace intersect_index_spaces(

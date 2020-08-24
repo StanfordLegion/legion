@@ -632,6 +632,8 @@ namespace Legion {
       // For each of our regions, a map of operations to the regions
       // which we can verify for each operation
       std::map<Operation*,std::set<unsigned> > verify_regions;
+      // Whether this operation is active or not
+      bool activated;
       // Whether this operation has executed its prepipeline stage yet
       bool prepipelined;
       // Whether this operation has mapped, once it has mapped then

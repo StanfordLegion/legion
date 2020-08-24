@@ -270,6 +270,70 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
+      return create_index_space_internal(bounds, type_tag); 
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace TaskContext::create_index_space(
+                                         const std::vector<DomainPoint> &points)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      switch (points[0].get_dim())
+      {
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            std::vector<Realm::Point<DIM,coord_t> > \
+              realm_points(points.size()); \
+            for (unsigned idx = 0; idx < points.size(); idx++) \
+              realm_points[idx] = Point<DIM,coord_t>(points[idx]); \
+            const DomainT<DIM,coord_t> realm_is( \
+                (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
+            const Domain bounds(realm_is); \
+            return create_index_space_internal(bounds, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace TaskContext::create_index_space(const std::vector<Domain> &rects)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      switch (rects[0].get_dim())
+      {
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            std::vector<Realm::Rect<DIM,coord_t> > realm_rects(rects.size()); \
+            for (unsigned idx = 0; idx < rects.size(); idx++) \
+              realm_rects[idx] = Rect<DIM,coord_t>(rects[idx]); \
+            const DomainT<DIM,coord_t> realm_is( \
+                (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
+            const Domain bounds(realm_is); \
+            return create_index_space_internal(bounds, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace TaskContext::create_index_space_internal(const Domain &bounds,
+                                                        TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
       IndexSpace handle(runtime->get_unique_index_space_id(),
                         runtime->get_unique_index_tree_id(), type_tag);
       DistributedID did = runtime->get_available_distributed_id();
@@ -687,7 +751,8 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_region(index_space.id, field_space.id, tid);
 
-      forest->create_logical_region(region);
+      const DistributedID did = runtime->get_available_distributed_id(); 
+      forest->create_logical_region(region, did);
       // Register the creation of a top-level region with the context
       register_region_creation(region, task_local);
       return region;
@@ -10139,6 +10204,7 @@ namespace Legion {
         {
           const LRBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_region_tree(value.tid);
+          runtime->free_distributed_id(value.did);
         }
         else
         {
@@ -11112,12 +11178,18 @@ namespace Legion {
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
-        Serializer rez;
-        rez.serialize(domain);
-        hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+        hasher.hash(domain);
         hasher.hash(type_tag);
         verify_replicable(hasher, "create_index_space");
       }
+      return create_index_space_replicated(domain, type_tag); 
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::create_index_space_replicated(
+                                         const Domain &domain, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
         increase_pending_index_spaces(1/*count*/, false/*double*/);
@@ -11414,6 +11486,79 @@ namespace Legion {
       increase_pending_index_spaces(double_buffer ? 
           pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
       return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::create_index_space(
+                                         const std::vector<DomainPoint> &points)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
+        for (unsigned idx = 0; idx < points.size(); idx++)
+          hasher.hash(points[idx]);
+        verify_replicable(hasher, "create_index_space");
+      }
+      switch (points[0].get_dim())
+      {
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            std::vector<Realm::Point<DIM,coord_t> > \
+              realm_points(points.size()); \
+            for (unsigned idx = 0; idx < points.size(); idx++) \
+              realm_points[idx] = Point<DIM,coord_t>(points[idx]); \
+            const DomainT<DIM,coord_t> realm_is( \
+                (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
+            const Domain bounds(realm_is); \
+            return create_index_space_replicated(bounds, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::create_index_space(
+                                               const std::vector<Domain> &rects)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
+        for (unsigned idx = 0; idx < rects.size(); idx++)
+          hasher.hash(rects[idx]);
+        verify_replicable(hasher, "create_index_space");
+      }
+      switch (rects[0].get_dim())
+      {
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            std::vector<Realm::Rect<DIM,coord_t> > realm_rects(rects.size()); \
+            for (unsigned idx = 0; idx < rects.size(); idx++) \
+              realm_rects[idx] = Rect<DIM,coord_t>(rects[idx]); \
+            const DomainT<DIM,coord_t> realm_is( \
+                (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
+            const Domain bounds(realm_is); \
+            return create_index_space_replicated(bounds, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
+      return IndexSpace::NO_SPACE;
     }
 
     //--------------------------------------------------------------------------
@@ -14904,8 +15049,8 @@ namespace Legion {
         std::set<RtEvent> applied;
         // Have to register this before doing the broadcast
         RegionNode *node = 
-          forest->create_logical_region(handle, false/*notify remote*/,
-                                        creation_barrier, &applied);
+          forest->create_logical_region(handle, value.did,
+              false/*notify remote*/, creation_barrier, &applied);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
@@ -14940,8 +15085,8 @@ namespace Legion {
         assert(handle.exists());
 #endif
         std::set<RtEvent> applied;
-        forest->create_logical_region(handle, false/*notify remote*/, 
-                                      creation_barrier, &applied);
+        forest->create_logical_region(handle, value.did,
+            false/*notify remote*/, creation_barrier, &applied);
         // Signal that we are done our creation
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -14978,7 +15123,8 @@ namespace Legion {
           // Do our arrival on this generation, should be the last one
           ValueBroadcast<LRBroadcast> *collective = 
             new ValueBroadcast<LRBroadcast>(this, COLLECTIVE_LOC_34);
-          collective->broadcast(LRBroadcast(tid, double_next));
+          collective->broadcast(LRBroadcast(tid, 
+                runtime->get_available_distributed_id(), double_next));
           pending_region_trees.push_back(
               std::pair<ValueBroadcast<LRBroadcast>*,bool>(collective, true));
         }
@@ -20959,6 +21105,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->create_index_space(f, tag);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::create_index_space(
+                                         const std::vector<DomainPoint> &points)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_space(points);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::create_index_space(
+                                               const std::vector<Domain> &rects)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_space(rects);
     }
 
     //--------------------------------------------------------------------------

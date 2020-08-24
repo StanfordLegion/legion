@@ -1844,6 +1844,11 @@ namespace Realm {
 			    CustomSerdezID serdez_id,
 			    MemPathInfo& info)
     {
+      // make sure we write a fresh MemPathInfo
+      info.path.clear();
+      info.xd_kinds.clear();
+      info.xd_target_nodes.clear();
+
       // fast case - can we go straight from src to dst?
       XferDesKind kind = get_xfer_des(src_mem, dst_mem,
 				      serdez_id, serdez_id, 0);
