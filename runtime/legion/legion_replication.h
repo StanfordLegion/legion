@@ -1038,7 +1038,9 @@ namespace Legion {
     public:
       typedef std::map<Point<1>,size_t> SizeMap;
     public:
-      OutputSizeExchange(ReplicateContext *ctx, CollectiveIndexLocation loc);
+      OutputSizeExchange(ReplicateContext *ctx,
+                         CollectiveIndexLocation loc,
+                         std::map<unsigned,SizeMap> &all_output_sizes);
       OutputSizeExchange(const OutputSizeExchange &rhs);
       virtual ~OutputSizeExchange(void);
     public:
@@ -1047,9 +1049,9 @@ namespace Legion {
       virtual void pack_collective_stage(Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      void exchange_output_sizes(const std::map<unsigned,SizeMap> &local_sizes);
+      void exchange_output_sizes(void);
     public:
-      std::map<unsigned,SizeMap> all_output_sizes;
+      std::map<unsigned,SizeMap> &all_output_sizes;
     };
 
     /**
@@ -1164,6 +1166,9 @@ namespace Legion {
       ShardingFunction *sharding_function;
       FutureExchange *reduction_collective;
       OutputSizeExchange *output_size_collective;
+    protected:
+      // Map of output sizes collected by this shard
+      std::map<unsigned,std::map<Point<1>,size_t> > local_output_sizes;
     protected:
       std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
 #ifdef DEBUG_LEGION

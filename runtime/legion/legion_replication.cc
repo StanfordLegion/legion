@@ -828,9 +828,13 @@ namespace Legion {
       }
       if ((output_size_collective != NULL) &&
           ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
+      {
+        // Make a copy of the output sizes before we perform all-gather
+        local_output_sizes = all_output_sizes;
         // We need to gather output region sizes from all the other shards
         // to determine the sizes of globally indexed output regions
-        output_size_collective->exchange_output_sizes(all_output_sizes);
+        output_size_collective->exchange_output_sizes();
+      }
 
       // Then we do the base class thing
       IndexTask::trigger_task_complete(deferred);
@@ -907,7 +911,8 @@ namespace Legion {
           break;
         }
       if (has_globally_indexed_output)
-        output_size_collective = new OutputSizeExchange(ctx, COLLECTIVE_LOC_29);
+        output_size_collective =
+          new OutputSizeExchange(ctx, COLLECTIVE_LOC_29, all_output_sizes);
     } 
 
     //--------------------------------------------------------------------------
@@ -1072,9 +1077,8 @@ namespace Legion {
           // For globally indexed output regions, we need a prefix sum to get
           // the right size for each subregion.
           typedef std::map<Point<1>,size_t> SizeMap;
-          const SizeMap &output_sizes =
-            output_size_collective->all_output_sizes[idx];
-          const SizeMap &local_sizes = all_output_sizes[idx];
+          const SizeMap &output_sizes = all_output_sizes[idx];
+          const SizeMap &local_sizes = local_output_sizes[idx];
           size_t sum = 0;
           for (SizeMap::const_iterator it = output_sizes.begin();
                it != output_sizes.end(); ++it)
@@ -12102,15 +12106,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OutputSizeExchange::OutputSizeExchange(ReplicateContext *ctx,
-                                           CollectiveIndexLocation loc)
-      : AllGatherCollective<false>(loc, ctx)
+                                           CollectiveIndexLocation loc,
+                                          std::map<unsigned,SizeMap> &all_sizes)
+      : AllGatherCollective<false>(loc, ctx), all_output_sizes(all_sizes)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     OutputSizeExchange::OutputSizeExchange(const OutputSizeExchange &rhs)
-      : AllGatherCollective<false>(rhs)
+      : AllGatherCollective<false>(rhs), all_output_sizes(rhs.all_output_sizes)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -12176,14 +12181,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputSizeExchange::exchange_output_sizes(
-                                  const std::map<unsigned,SizeMap> &local_sizes)
+    void OutputSizeExchange::exchange_output_sizes(void)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock c_lock(collective_lock);
-        all_output_sizes = local_sizes;
-      }
       perform_collective_sync();
     }
 
