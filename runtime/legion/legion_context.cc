@@ -644,7 +644,8 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_region(index_space.id, field_space.id, tid);
 
-      forest->create_logical_region(region);
+      const DistributedID did = runtime->get_available_distributed_id(); 
+      forest->create_logical_region(region, did);
       // Register the creation of a top-level region with the context
       register_region_creation(region, task_local);
       return region;

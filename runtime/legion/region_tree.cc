@@ -1180,10 +1180,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::create_logical_region(LogicalRegion handle,
-                                                 std::set<RtEvent> *applied)
+                                  DistributedID did, std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
-      create_node(handle, NULL/*parent*/, RtEvent::NO_RT_EVENT, applied);
+      create_node(handle, NULL/*parent*/, RtEvent::NO_RT_EVENT, did, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -3780,8 +3780,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RegionNode* RegionTreeForest::create_node(LogicalRegion r, 
-                                     PartitionNode *parent, RtEvent initialized,
-                                     std::set<RtEvent> *applied)
+                                  PartitionNode *parent, RtEvent initialized,
+                                  DistributedID did, std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3790,6 +3790,8 @@ namespace Legion {
         assert(r.field_space == parent->handle.field_space);
         assert(r.tree_id == parent->handle.tree_id);
       }
+      // Should have a pre-selected DID for each root node
+      assert((parent != NULL) || (did > 0));
 #endif
       RtEvent row_ready, col_ready;
       IndexSpaceNode *row_src = get_node(r.index_space, &row_ready);
@@ -3823,7 +3825,7 @@ namespace Legion {
       }
       else if (row_ready.exists() || col_ready.exists())
         initialized = Runtime::merge_events(initialized, row_ready, col_ready); 
-      RegionNode *result = new RegionNode(r, parent, row_src, col_src, this, 
+      RegionNode *result = new RegionNode(r, parent, row_src, col_src, this,did,
         initialized, (parent == NULL) ? initialized : parent->tree_initialized);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
@@ -3867,6 +3869,10 @@ namespace Legion {
             result->add_base_valid_ref(APPLICATION_REF, &mutator);
           else
             result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
+          // Root nodes get registered with the runtime since we
+          // know that they all have the same distributed ID
+          // No mutator so no notifications are sent
+          result->register_with_runtime(NULL/*no mutator*/);
         }
         else // not a root so we get a gc ref from our parent
           result->add_nested_gc_ref(parent->did, &mutator);
@@ -4406,10 +4412,11 @@ namespace Legion {
         // are guaranteed that the top level node exists
         PartitionNode *parent = get_node(parent_handle, false/*need check*/);
         // Now make our node and then return it
-        result = create_node(handle, parent, RtEvent::NO_RT_EVENT);
+        result = create_node(handle, parent, RtEvent::NO_RT_EVENT, 0/*did*/);
       }
       else
-        result = create_node(handle, NULL, RtEvent::NO_RT_EVENT);
+        // Even though this is a root node, we'll discover it's already made
+        result = create_node(handle, NULL, RtEvent::NO_RT_EVENT, 0/*did*/);
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         if (!result->initialized.exists())
@@ -13418,12 +13425,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RegionTreeNode::RegionTreeNode(RegionTreeForest *ctx, 
-        FieldSpaceNode *column_src, RtEvent init, RtEvent tree)
+       FieldSpaceNode *column_src, RtEvent init, RtEvent tree, DistributedID id)
       : DistributedCollectable(ctx->runtime, 
-            LEGION_DISTRIBUTED_HELP_ENCODE(
+            LEGION_DISTRIBUTED_HELP_ENCODE((id > 0) ? id :
               ctx->runtime->get_available_distributed_id(),
-              REGION_TREE_NODE_DC),
-            ctx->runtime->address_space, false/*register with runtime*/),
+              REGION_TREE_NODE_DC), (id > 0) ? ctx->runtime->determine_owner(id)
+            : ctx->runtime->address_space, false/*register with runtime*/),
         context(ctx), column_source(column_src), initialized(init),
         tree_initialized(tree), registered(false)
 #ifdef DEBUG_LEGION
@@ -16129,8 +16136,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RegionNode::RegionNode(LogicalRegion r, PartitionNode *par,
                            IndexSpaceNode *row_src, FieldSpaceNode *col_src,
-                           RegionTreeForest *ctx, RtEvent init, RtEvent tree)
-      : RegionTreeNode(ctx, col_src, init, tree), handle(r),
+                           RegionTreeForest *ctx, DistributedID id,
+                           RtEvent init, RtEvent tree)
+      : RegionTreeNode(ctx, col_src, init, tree, id), handle(r),
         parent(par), row_source(row_src)
 #ifdef DEBUG_LEGION
         , currently_valid(true)
@@ -16643,6 +16651,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(handle);
+            rez.serialize(did);
             rez.serialize(initialized);
             rez.serialize<size_t>(semantic_info.size());
             for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
@@ -16667,11 +16676,13 @@ namespace Legion {
       DerezCheck z(derez);
       LogicalRegion handle;
       derez.deserialize(handle);
+      DistributedID did;
+      derez.deserialize(did);
       RtEvent initialized;
       derez.deserialize(initialized);
 
       RegionNode *node = 
-        context->create_node(handle, NULL/*parent*/, initialized);
+        context->create_node(handle, NULL/*parent*/, initialized, did);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -17572,7 +17583,8 @@ namespace Legion {
 #endif
       LogicalRegion reg_handle(handle.tree_id, index_node->handle,
                                handle.field_space);
-      return context->create_node(reg_handle, this, RtEvent::NO_RT_EVENT);
+      return context->create_node(reg_handle, this, 
+                                  RtEvent::NO_RT_EVENT, 0/*did*/);
     }
 
     //--------------------------------------------------------------------------
