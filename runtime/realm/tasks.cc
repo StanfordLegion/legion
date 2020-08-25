@@ -1069,7 +1069,13 @@ namespace Realm {
 	  // drop scheduler lock while we execute the internal task
 	  lock.unlock();
 
+	  // internal tasks are not allowed to context switch, so engage the
+	  //  scheduler lock
+	  ThreadLocal::scheduler_lock++;
+
 	  execute_internal_task(itask);
+
+	  ThreadLocal::scheduler_lock--;
 
 	  // we don't delete the internal task object - it can do that itself
 	  //  if it wants, or the requestor of the operation can do it once
