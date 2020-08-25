@@ -2823,7 +2823,8 @@ namespace Legion {
                                const CollectiveMapping *collective_mapping);
       void clone_from(EquivalenceSet *src, const FieldMask &clone_mask,
                       std::set<RtEvent> &applied_events, 
-                      bool invalidate_overlap = false);
+                      const bool invalidate_overlap = false, 
+                      const bool target_local = false);
       RtEvent make_owner(AddressSpaceID owner, 
                          RtEvent precondition = RtEvent::NO_RT_EVENT);
     protected: 
@@ -2934,14 +2935,15 @@ namespace Legion {
                               const FieldMask &restrict_mask,
                               InstanceView *restricted_view,
                               ReferenceMutator &mutator);
+      void update_reductions(const unsigned fidx, ReferenceMutator &mutator,
+          std::list<std::pair<ReductionView*,IndexSpaceExpression*> > &updates);
+      void update_released(IndexSpaceExpression *expr, const bool expr_covers,
+                FieldMaskSet<InstanceView> &updates, ReferenceMutator &mutator);
     protected:
       void send_equivalence_set(AddressSpaceID target);
       void check_for_migration(PhysicalAnalysis &analysis,
                                std::set<RtEvent> &applied_events);
-      void pack_migration(Serializer &rez, RtEvent done_migration);
-      void update_owner(const AddressSpaceID new_logical_owner);
-      void unpack_state(Deserializer &derez, AddressSpaceID source,
-                        std::set<RtEvent> &ready_events);
+      void update_owner(const AddressSpaceID new_logical_owner); 
       void broadcast_replicated_state_updates(const FieldMask &mask,
               CollectiveMapping *mapping, const AddressSpaceID origin,
               std::set<RtEvent> &applied_events, const bool need_lock = false);
@@ -2950,12 +2952,38 @@ namespace Legion {
                                  std::set<RtEvent> &deferral_events);
       void process_replication_request(const FieldMask &mask, 
                 CollectiveMapping *mapping, PendingReplication *target, 
-                const AddressSpaceID source);
+                const AddressSpaceID source, const RtEvent done_event);
+      void process_replication_response(PendingReplication *target,
+                const FieldMask &mask, RtEvent precondition,
+                const FieldMask &update_mask, Deserializer &derez);
       void unpack_replicated_states(Deserializer &derez);
       void update_replicated_state(CollectiveMapping *mapping, 
                                    const FieldMask &mask);
       void finalize_pending_replication(PendingReplication *pending,
          const FieldMask &mask, const bool first, const bool need_lock = false);
+    protected:
+      void pack_state(Serializer &rez, AddressSpaceID target,
+       IndexSpaceExpression *expr,const bool expr_covers,const FieldMask &mask);
+      void invalidate_state(IndexSpaceExpression *expr, const bool expr_covers,
+                            const FieldMask &mask, RtEvent remove_ref_event);
+      void unpack_state(Deserializer &derez, AddressSpaceID source,
+                 std::set<RtEvent> &ready_events, const bool need_lock = false);
+      void clone_to_local(EquivalenceSet *dst, FieldMask mask,
+                    std::set<RtEvent> &applied_events, bool invalidate_overlap);
+      void clone_to_remote(DistributedID target, AddressSpaceID target_space,
+                    IndexSpaceNode *target_node, const FieldMask &mask,
+                    RtUserEvent done_event, bool invalidate_overlap);
+      void find_overlap_updates(IndexSpaceExpression *overlap, 
+            const bool overlap_covers, const FieldMask &mask, 
+            LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<LogicalView> >::aligned &valid_updates,
+            FieldMaskSet<IndexSpaceExpression> &initialized_updates,
+            std::map<unsigned,std::list<std::pair<ReductionView*,
+                IndexSpaceExpression*> > > &reduction_updates,
+            LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned &restricted_updates,
+            LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned &released_updates) const;
     public:
       static void handle_remote_references(const void *args);
       static void handle_make_owner(const void *args);
@@ -2976,6 +3004,8 @@ namespace Legion {
       static void handle_replication_request(Deserializer &derez, Runtime *rt);
       static void handle_replication_response(Deserializer &derez, Runtime *rt);
       static void handle_replication_update(Deserializer &derez, Runtime *rt);
+      static void handle_clone_request(Deserializer &derez, Runtime *runtime);
+      static void handle_clone_response(Deserializer &derez, Runtime *runtime);
     public:
       RegionNode *const region_node;
       IndexSpaceNode *const set_expr;

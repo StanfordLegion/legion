@@ -9761,6 +9761,16 @@ namespace Legion {
               runtime->handle_equivalence_set_make_owner(derez);
               break;
             }
+          case SEND_EQUIVALENCE_SET_CLONE_REQUEST:
+            {
+              runtime->handle_equivalence_set_clone_request(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_CLONE_RESPONSE:
+            {
+              runtime->handle_equivalence_set_clone_response(derez);
+              break;
+            }
           case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES:
             {
               runtime->handle_equivalence_set_remote_request_instances(derez,
@@ -19455,6 +19465,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_clone_request(AddressSpaceID target,
+                                                     Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_CLONE_REQUEST,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_clone_response(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_CLONE_RESPONSE,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_remote_request_instances(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -21301,6 +21331,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EquivalenceSet::handle_make_owner(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_clone_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_clone_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_clone_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_clone_response(derez, this);
     }
 
     //--------------------------------------------------------------------------

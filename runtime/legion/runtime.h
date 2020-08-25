@@ -2795,6 +2795,10 @@ namespace Legion {
                                              Serializer &rez);
       void send_equivalence_set_make_owner(AddressSpaceID target,
                                            Serializer &rez);
+      void send_equivalence_set_clone_request(AddressSpaceID target,
+                                              Serializer &rez);
+      void send_equivalence_set_clone_response(AddressSpaceID target,
+                                               Serializer &rez);
       void send_equivalence_set_remote_request_instances(AddressSpaceID target,
                                                          Serializer &rez);
       void send_equivalence_set_remote_request_invalid(AddressSpaceID target,
@@ -3062,6 +3066,8 @@ namespace Legion {
                                             AddressSpaceID source);
       void handle_equivalence_set_owner_update(Deserializer &derez);
       void handle_equivalence_set_make_owner(Deserializer &derez);
+      void handle_equivalence_set_clone_request(Deserializer &derez);
+      void handle_equivalence_set_clone_response(Deserializer &derez);
       void handle_equivalence_set_remote_request_instances(Deserializer &derez, 
                                                          AddressSpaceID srouce);
       void handle_equivalence_set_remote_request_invalid(Deserializer &derez, 
