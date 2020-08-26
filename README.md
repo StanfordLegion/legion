@@ -154,6 +154,7 @@ make`) or at the top of each application's Makefile.
     level](http://legion.stanford.edu/debugging/#logging-infrastructure).
   * `USE_CUDA=<0,1>`: enables CUDA support.
   * `USE_GASNET=<0,1>`: enables GASNet support (see [installation instructions](http://legion.stanford.edu/gasnet/)).
+  * `REALM_NETWORKS=<gasnet1,mpi>`: enables the GASNet or MPI backend for Realm.
   * `USE_LLVM=<0,1>`: enables LLVM support.
   * `USE_HDF=<0,1>`: enables HDF5 support.
 
