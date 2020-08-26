@@ -19112,11 +19112,20 @@ namespace Legion {
               runtime->forest->subtract_index_spaces(it->first, expr), overlap);
           }
         }
+        if (!to_add.empty())
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                to_add.begin(); it != to_add.end(); it++)
+            if (initialized_data.insert(it->first, it->second))
+              it->first->add_expression_reference();
+        }
         if (!to_delete.empty())
         {
           for (std::vector<IndexSpaceExpression*>::const_iterator it =
                 to_delete.begin(); it != to_delete.end(); it++)
           {
+            if (to_add.find(*it) != to_add.end())
+              continue;
             initialized_data.erase(*it);
             if (expr_refs_to_remove != NULL)
             {
@@ -19133,6 +19142,598 @@ namespace Legion {
         }
         if (!initialized_data.empty())
           initialized_data.tighten_valid_mask();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::filter_restricted_instances(IndexSpaceExpression *expr,
+                  const bool expr_covers, const FieldMask &filter_mask,
+                  std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
+                  std::map<LogicalView*,unsigned> *view_refs_to_remove)
+    //--------------------------------------------------------------------------
+    {
+      if (restricted_instances.empty() || (filter_mask * restricted_fields))
+        return;
+      if (expr_covers)
+      {
+        if (!(restricted_fields - filter_mask))
+        {
+          // filter everything
+          for (LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned::const_iterator rit =
+                restricted_instances.begin(); rit != 
+                restricted_instances.end(); rit++)
+          {
+            if (expr_refs_to_remove != NULL)
+            {
+              std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                expr_refs_to_remove->find(rit->first);
+              if (finder == expr_refs_to_remove->end())
+                (*expr_refs_to_remove)[rit->first] = 1;
+              else
+                finder->second += 1;
+            }
+            else if (rit->first->remove_expression_reference())
+              delete rit->first;
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                  rit->second.begin(); it != rit->second.end(); it++)
+            {
+              if (view_refs_to_remove != NULL)
+              {
+                std::map<LogicalView*,unsigned>::iterator finder = 
+                  view_refs_to_remove->find(it->first);
+                if (finder == view_refs_to_remove->end())
+                  (*view_refs_to_remove)[it->first] = 1;
+                else
+                  finder->second += 1;
+              }
+              else if (it->first->remove_nested_valid_ref(did))
+                delete it->first;
+            }
+          }
+          restricted_instances.clear();
+          restricted_fields.clear();
+        }
+        else
+        {
+          // filter fields
+          std::vector<IndexSpaceExpression*> to_delete;
+          for (LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned::iterator rit =
+                restricted_instances.begin(); rit != 
+                restricted_instances.end(); rit++)
+          {
+            if (!(rit->second.get_valid_mask() - filter_mask))
+            {
+              // delete all the views in this one
+              for (FieldMaskSet<InstanceView>::const_iterator it =
+                    rit->second.begin(); it != rit->second.end(); it++)
+              {
+                if (view_refs_to_remove != NULL)
+                {
+                  std::map<LogicalView*,unsigned>::iterator finder =
+                    view_refs_to_remove->find(it->first);
+                  if (finder == view_refs_to_remove->end())
+                    (*view_refs_to_remove)[it->first] = 1;
+                  else
+                    finder->second += 1;
+                }
+                else if (it->first->remove_nested_valid_ref(did))
+                  delete it->first;
+              }
+              to_delete.push_back(rit->first);
+            }
+            else
+            {
+              // filter views based on fields
+              std::vector<InstanceView*> to_erase;
+              for (FieldMaskSet<InstanceView>::iterator it =
+                    rit->second.begin(); it != rit->second.end(); it++)
+              {
+                it.filter(filter_mask);
+                if (!it->second)
+                  to_erase.push_back(it->first);
+              }
+              for (std::vector<InstanceView*>::const_iterator it =
+                    to_erase.begin(); it != to_erase.end(); it++)
+              {
+                if (expr_refs_to_remove != NULL)
+                {
+                  std::map<LogicalView*,unsigned>::iterator finder =
+                    view_refs_to_remove->find(*it);
+                  if (finder == view_refs_to_remove->end())
+                    (*view_refs_to_remove)[*it] = 1;
+                  else
+                    finder->second += 1;
+                }
+                else if ((*it)->remove_nested_valid_ref(did))
+                  delete (*it);
+              }
+              if (rit->second.empty())
+                to_delete.push_back(rit->first);
+              else
+                rit->second.tighten_valid_mask();
+            }
+          }
+          for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            restricted_instances.erase(*it);
+            if (expr_refs_to_remove != NULL)
+            {
+              std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                expr_refs_to_remove->find(*it);
+              if (finder == expr_refs_to_remove->end())
+                (*expr_refs_to_remove)[*it] = 1;
+              else
+                finder->second += 1;
+            }
+            else if ((*it)->remove_expression_reference())
+              delete (*it);
+          }
+          restricted_fields -= filter_mask;
+        }
+      }
+      else
+      {
+        // Expression does not cover this equivalence set
+        std::vector<IndexSpaceExpression*> to_delete;
+        LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
+          to_add;
+        for (LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned::iterator rit =
+                restricted_instances.begin(); rit != 
+                restricted_instances.end(); rit++)
+        {
+          if (rit->second.get_valid_mask() * filter_mask)
+            continue;
+          IndexSpaceExpression *intersection = (rit->first == set_expr) ? expr :
+            runtime->forest->intersect_index_spaces(rit->first, expr);
+          const size_t volume = intersection->get_volume();
+          if (volume == 0)
+            continue;
+          if (volume == rit->first->get_volume())
+          {
+            // Covers the whole expression
+            if (!(rit->second.get_valid_mask() - filter_mask))
+            {
+              // filter all of them
+              for (FieldMaskSet<InstanceView>::const_iterator it =
+                    rit->second.begin(); it != rit->second.end(); it++)
+              {
+                if (view_refs_to_remove != NULL)
+                {
+                  std::map<LogicalView*,unsigned>::iterator finder =
+                    view_refs_to_remove->find(it->first);
+                  if (finder == view_refs_to_remove->end())
+                    (*view_refs_to_remove)[it->first] = 1;
+                  else
+                    finder->second += 1;
+                }
+                else if (it->first->remove_nested_valid_ref(did))
+                  delete it->first;
+              }
+              to_delete.push_back(rit->first);
+            }
+            else
+            {
+              // fitler by fields
+              std::vector<InstanceView*> to_erase;
+              for (FieldMaskSet<InstanceView>::iterator it =
+                    rit->second.begin(); it != rit->second.end(); it++)
+              {
+                it.filter(filter_mask);
+                if (!it->second)
+                  to_erase.push_back(it->first);
+              }
+              for (std::vector<InstanceView*>::const_iterator it = 
+                    to_erase.begin(); it != to_erase.end(); it++)
+              {
+                rit->second.erase(*it);
+                if (view_refs_to_remove != NULL)
+                {
+                  std::map<LogicalView*,unsigned>::iterator finder =
+                    view_refs_to_remove->find(*it);
+                  if (finder == view_refs_to_remove->end())
+                    (*view_refs_to_remove)[*it] = 1;
+                  else
+                    finder->second += 1;
+                }
+                else if ((*it)->remove_nested_valid_ref(did))
+                  delete (*it);
+              }
+              if (rit->second.empty())
+                to_delete.push_back(rit->first);
+              else
+                rit->second.tighten_valid_mask();
+            }
+          }
+          else
+          {
+            // Only covers part, so compute diff and put them in the add set
+            IndexSpaceExpression *diff = 
+              runtime->forest->subtract_index_spaces(rit->first, intersection);
+            if (!(rit->second.get_valid_mask() - filter_mask))
+            {
+              // All the views are flowing into to_add
+              LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned::iterator finder = 
+                  to_add.find(diff);
+              if (finder != to_add.end())
+              {
+                // Deduplicate references in to add
+                for (FieldMaskSet<InstanceView>::const_iterator it =
+                      rit->second.begin(); it != rit->second.end(); it++)
+                  if (!finder->second.insert(it->first, it->second) &&
+                      it->first->remove_nested_valid_ref(did))
+                    assert(false); // should never hit this
+              }
+              else
+                to_add[diff].swap(rit->second);
+              to_delete.push_back(rit->first);
+            }
+            else
+            {
+              // Filter by fields
+              FieldMaskSet<InstanceView> &add_set = to_add[diff];
+              std::vector<InstanceView*> to_erase;
+              for (FieldMaskSet<InstanceView>::iterator it =
+                    rit->second.begin(); it != rit->second.end(); it++)
+              {
+                const FieldMask overlap = filter_mask & it->second;
+                if (!overlap)
+                  continue;
+                // No need for a mutator when adding this reference
+                // since we know we already have a valid reference
+                if (add_set.insert(it->first, overlap))
+                  it->first->add_nested_valid_ref(did);
+                it.filter(overlap);
+                if (!it->second)
+                  to_erase.push_back(it->first);
+              }
+              for (std::vector<InstanceView*>::const_iterator it = 
+                    to_erase.begin(); it != to_erase.end(); it++)
+              {
+                rit->second.erase(*it);
+                if (view_refs_to_remove != NULL)
+                {
+                  std::map<LogicalView*,unsigned>::iterator finder =
+                    view_refs_to_remove->find(*it);
+                  if (finder == view_refs_to_remove->end())
+                    (*view_refs_to_remove)[*it] = 1;
+                  else
+                    finder->second += 1;
+                }
+                else if ((*it)->remove_nested_valid_ref(did))
+                  delete (*it);
+              }
+              if (rit->second.empty())
+                to_delete.push_back(rit->first);
+              else
+                rit->second.tighten_valid_mask();
+            }
+          }
+        }
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::aligned::iterator ait =
+              to_add.begin(); ait != to_add.end(); ait++)
+        {
+          LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<InstanceView> >::aligned::iterator finder =
+              restricted_instances.find(ait->first);
+          if (finder != restricted_instances.end())
+          {
+            ait->first->add_expression_reference();
+            restricted_instances[ait->first].swap(ait->second);
+          }
+          else
+          {
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                  ait->second.begin(); it != ait->second.end(); it++)
+              // remove duplicate references
+              if (!finder->second.insert(it->first, it->second) &&
+                  it->first->remove_nested_valid_ref(did))
+                assert(false); // should never hit this
+          }
+        }
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =  
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          if (to_add.find(*it) != to_add.end())
+            continue;
+          restricted_instances.erase(*it);
+          if (expr_refs_to_remove != NULL)
+          {
+            std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+              expr_refs_to_remove->find(*it);
+            if (finder == expr_refs_to_remove->end())
+              (*expr_refs_to_remove)[*it] = 1;
+            else
+              finder->second += 1;
+          }
+          else if ((*it)->remove_expression_reference())
+            delete (*it);
+        }
+        // Rebuild the restricted fields
+        if (!restricted_instances.empty())
+        {
+          restricted_fields.clear();
+          for (LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned::const_iterator rit =
+                restricted_instances.begin(); rit != 
+                restricted_instances.end(); rit++)
+            restricted_fields |= rit->second.get_valid_mask();
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::filter_released_instances(IndexSpaceExpression *expr,
+                  const bool expr_covers, const FieldMask &filter_mask,
+                  std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
+                  std::map<LogicalView*,unsigned> *view_refs_to_remove)
+    //--------------------------------------------------------------------------
+    {
+      if (released_instances.empty())
+        return;
+      if (expr_covers)
+      {
+        // filter fields
+        std::vector<IndexSpaceExpression*> to_delete;
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::aligned::iterator rit =
+              released_instances.begin(); rit != 
+              released_instances.end(); rit++)
+        {
+          if (!(rit->second.get_valid_mask() - filter_mask))
+          {
+            // delete all the views in this one
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                  rit->second.begin(); it != rit->second.end(); it++)
+            {
+              if (view_refs_to_remove != NULL)
+              {
+                std::map<LogicalView*,unsigned>::iterator finder =
+                  view_refs_to_remove->find(it->first);
+                if (finder == view_refs_to_remove->end())
+                  (*view_refs_to_remove)[it->first] = 1;
+                else
+                  finder->second += 1;
+              }
+              else if (it->first->remove_nested_valid_ref(did))
+                delete it->first;
+            }
+            to_delete.push_back(rit->first);
+          }
+          else
+          {
+            // filter views based on fields
+            std::vector<InstanceView*> to_erase;
+            for (FieldMaskSet<InstanceView>::iterator it =
+                  rit->second.begin(); it != rit->second.end(); it++)
+            {
+              it.filter(filter_mask);
+              if (!it->second)
+                to_erase.push_back(it->first);
+            }
+            for (std::vector<InstanceView*>::const_iterator it =
+                  to_erase.begin(); it != to_erase.end(); it++)
+            {
+              if (expr_refs_to_remove != NULL)
+              {
+                std::map<LogicalView*,unsigned>::iterator finder =
+                  view_refs_to_remove->find(*it);
+                if (finder == view_refs_to_remove->end())
+                  (*view_refs_to_remove)[*it] = 1;
+                else
+                  finder->second += 1;
+              }
+              else if ((*it)->remove_nested_valid_ref(did))
+                delete (*it);
+            }
+            if (rit->second.empty())
+              to_delete.push_back(rit->first);
+            else
+              rit->second.tighten_valid_mask();
+          }
+        }
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          released_instances.erase(*it);
+          if (expr_refs_to_remove != NULL)
+          {
+            std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+              expr_refs_to_remove->find(*it);
+            if (finder == expr_refs_to_remove->end())
+              (*expr_refs_to_remove)[*it] = 1;
+            else
+              finder->second += 1;
+          }
+          else if ((*it)->remove_expression_reference())
+            delete (*it);
+        }
+      }
+      else
+      {
+        // Expression does not cover this equivalence set
+        std::vector<IndexSpaceExpression*> to_delete;
+        LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
+          to_add;
+        for (LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned::iterator rit =
+                released_instances.begin(); rit != 
+                released_instances.end(); rit++)
+        {
+          if (rit->second.get_valid_mask() * filter_mask)
+            continue;
+          IndexSpaceExpression *intersection = (rit->first == set_expr) ? expr :
+            runtime->forest->intersect_index_spaces(rit->first, expr);
+          const size_t volume = intersection->get_volume();
+          if (volume == 0)
+            continue;
+          if (volume == rit->first->get_volume())
+          {
+            // Covers the whole expression
+            if (!(rit->second.get_valid_mask() - filter_mask))
+            {
+              // filter all of them
+              for (FieldMaskSet<InstanceView>::const_iterator it =
+                    rit->second.begin(); it != rit->second.end(); it++)
+              {
+                if (view_refs_to_remove != NULL)
+                {
+                  std::map<LogicalView*,unsigned>::iterator finder =
+                    view_refs_to_remove->find(it->first);
+                  if (finder == view_refs_to_remove->end())
+                    (*view_refs_to_remove)[it->first] = 1;
+                  else
+                    finder->second += 1;
+                }
+                else if (it->first->remove_nested_valid_ref(did))
+                  delete it->first;
+              }
+              to_delete.push_back(rit->first);
+            }
+            else
+            {
+              // fitler by fields
+              std::vector<InstanceView*> to_erase;
+              for (FieldMaskSet<InstanceView>::iterator it =
+                    rit->second.begin(); it != rit->second.end(); it++)
+              {
+                it.filter(filter_mask);
+                if (!it->second)
+                  to_erase.push_back(it->first);
+              }
+              for (std::vector<InstanceView*>::const_iterator it = 
+                    to_erase.begin(); it != to_erase.end(); it++)
+              {
+                rit->second.erase(*it);
+                if (view_refs_to_remove != NULL)
+                {
+                  std::map<LogicalView*,unsigned>::iterator finder =
+                    view_refs_to_remove->find(*it);
+                  if (finder == view_refs_to_remove->end())
+                    (*view_refs_to_remove)[*it] = 1;
+                  else
+                    finder->second += 1;
+                }
+                else if ((*it)->remove_nested_valid_ref(did))
+                  delete (*it);
+              }
+              if (rit->second.empty())
+                to_delete.push_back(rit->first);
+              else
+                rit->second.tighten_valid_mask();
+            }
+          }
+          else
+          {
+            // Only covers part, so compute diff and put them in the add set
+            IndexSpaceExpression *diff = 
+              runtime->forest->subtract_index_spaces(rit->first, intersection);
+            if (!(rit->second.get_valid_mask() - filter_mask))
+            {
+              // All the views are flowing into to_add
+              LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned::iterator finder = 
+                  to_add.find(diff);
+              if (finder != to_add.end())
+              {
+                // Deduplicate references in to add
+                for (FieldMaskSet<InstanceView>::const_iterator it =
+                      rit->second.begin(); it != rit->second.end(); it++)
+                  if (!finder->second.insert(it->first, it->second) &&
+                      it->first->remove_nested_valid_ref(did))
+                    assert(false); // should never hit this
+              }
+              else
+                to_add[diff].swap(rit->second);
+              to_delete.push_back(rit->first);
+            }
+            else
+            {
+              // Filter by fields
+              FieldMaskSet<InstanceView> &add_set = to_add[diff];
+              std::vector<InstanceView*> to_erase;
+              for (FieldMaskSet<InstanceView>::iterator it =
+                    rit->second.begin(); it != rit->second.end(); it++)
+              {
+                const FieldMask overlap = filter_mask & it->second;
+                if (!overlap)
+                  continue;
+                // No need for a mutator when adding this reference
+                // since we know we already have a valid reference
+                if (add_set.insert(it->first, overlap))
+                  it->first->add_nested_valid_ref(did);
+                it.filter(overlap);
+                if (!it->second)
+                  to_erase.push_back(it->first);
+              }
+              for (std::vector<InstanceView*>::const_iterator it = 
+                    to_erase.begin(); it != to_erase.end(); it++)
+              {
+                rit->second.erase(*it);
+                if (view_refs_to_remove != NULL)
+                {
+                  std::map<LogicalView*,unsigned>::iterator finder =
+                    view_refs_to_remove->find(*it);
+                  if (finder == view_refs_to_remove->end())
+                    (*view_refs_to_remove)[*it] = 1;
+                  else
+                    finder->second += 1;
+                }
+                else if ((*it)->remove_nested_valid_ref(did))
+                  delete (*it);
+              }
+              if (rit->second.empty())
+                to_delete.push_back(rit->first);
+              else
+                rit->second.tighten_valid_mask();
+            }
+          }
+        }
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::aligned::iterator ait =
+              to_add.begin(); ait != to_add.end(); ait++)
+        {
+          LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<InstanceView> >::aligned::iterator finder =
+              released_instances.find(ait->first);
+          if (finder != released_instances.end())
+          {
+            ait->first->add_expression_reference();
+            released_instances[ait->first].swap(ait->second);
+          }
+          else
+          {
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                  ait->second.begin(); it != ait->second.end(); it++)
+              // remove duplicate references
+              if (!finder->second.insert(it->first, it->second) &&
+                  it->first->remove_nested_valid_ref(did))
+                assert(false); // should never hit this
+          }
+        }
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =  
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          if (to_add.find(*it) != to_add.end())
+            continue;
+          released_instances.erase(*it);
+          if (expr_refs_to_remove != NULL)
+          {
+            std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+              expr_refs_to_remove->find(*it);
+            if (finder == expr_refs_to_remove->end())
+              (*expr_refs_to_remove)[*it] = 1;
+            else
+              finder->second += 1;
+          }
+          else if ((*it)->remove_expression_reference())
+            delete (*it);
+        }
       }
     }
 
