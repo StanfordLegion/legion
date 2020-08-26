@@ -362,12 +362,10 @@ namespace Legion {
       LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
       LG_REPLAY_SLICE_ID,
       LG_DELETE_TEMPLATE_ID,
-      LG_REMOTE_REF_TASK_ID,
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_PENDING_REPLICATION_TASK_ID,
-      LG_DEFER_MERGE_OR_FORWARD_TASK_ID,
-      LG_DEFER_EQ_RESPONSE_TASK_ID,
-      LG_DEFER_REMOVE_EQ_REF_TASK_ID,
+      LG_DEFER_APPLY_STATE_TASK_ID,
+      LG_DEFER_RELEASE_REF_TASK_ID,
       LG_DEFER_REMOTE_REF_UPDATE_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
@@ -480,12 +478,10 @@ namespace Legion {
         "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
         "Delete Physical Template",                               \
-        "Remove Remote References",                               \
         "Defer Equivalence Set Make Owner",                       \
         "Defer Pending Equivalence Set Replication",              \
-        "Defer Merge or Forward",                                 \
-        "Defer Equivalence Set Response",                         \
-        "Defer Remove Equivalence Set Expression References",     \
+        "Defer Equivalence Set Apply State",                      \
+        "Defer Equivalence Set Remove References",                \
         "Defer Remote Reference Update",                          \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \

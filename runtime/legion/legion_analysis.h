@@ -2726,6 +2726,34 @@ namespace Legion {
         PendingReplication *const pending;
         FieldMask *const mask;
       };
+      struct DeferApplyStateArgs : public LgTaskArgs<DeferApplyStateArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_APPLY_STATE_TASK_ID;
+      public:
+        DeferApplyStateArgs(EquivalenceSet *set, RtUserEvent done_event);
+      public:
+        EquivalenceSet *const set;
+        LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::aligned
+          *const valid_updates;
+        FieldMaskSet<IndexSpaceExpression> *const initialized_updates;
+        std::map<unsigned,std::list<std::pair<ReductionView*,
+          IndexSpaceExpression*> > > *const reduction_updates;
+        LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
+          *const restricted_updates;
+        LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
+          *const released_updates;
+        const RtUserEvent done_event;
+      };
+      struct DeferReleaseRefArgs : public LgTaskArgs<DeferReleaseRefArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_RELEASE_REF_TASK_ID;
+      public:
+        DeferReleaseRefArgs(DistributedID did);
+      public:
+        const DistributedID did;
+        std::map<LogicalView*,unsigned> *const view_refs_to_remove;
+        std::map<IndexSpaceExpression*,unsigned> *const expr_refs_to_remove;
+      };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space,
@@ -2873,13 +2901,17 @@ namespace Legion {
       void filter_valid_instances(IndexSpaceExpression *expr, 
                                   const bool expr_covers, 
                                   const FieldMask &filter_mask,
-                                  ReferenceMutator &mutator);
+                                  ReferenceMutator &mutator,
+           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
+           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
       void filter_unrestricted_instances(IndexSpaceExpression *expr,
                                          const bool expr_covers, 
                                          FieldMask filter_mask,
                                          ReferenceMutator &mutator);
       void filter_reduction_instances(IndexSpaceExpression *expr,
-                          const bool expr_covers, const FieldMask &filter_mask);
+           const bool expr_covers, const FieldMask &filter_mask,
+           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
+           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
       void update_set_internal(CopyFillAggregator *&input_aggregator,
                                const RtEvent guard_event,
                                Operation *op, const unsigned index,
@@ -2939,6 +2971,17 @@ namespace Legion {
           std::list<std::pair<ReductionView*,IndexSpaceExpression*> > &updates);
       void update_released(IndexSpaceExpression *expr, const bool expr_covers,
                 FieldMaskSet<InstanceView> &updates, ReferenceMutator &mutator);
+      void filter_initialized_data(IndexSpaceExpression *expr, 
+          const bool expr_covers, const FieldMask &filter_mask, 
+          std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL);
+      void filter_restricted_instances(IndexSpaceExpression *expr, 
+          const bool expr_covers, const FieldMask &filter_mask, 
+          std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
+          std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
+      void filter_released_instances(IndexSpaceExpression *expr, 
+          const bool expr_covers, const FieldMask &filter_mask, 
+          std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
+          std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
     protected:
       void send_equivalence_set(AddressSpaceID target);
       void check_for_migration(PhysicalAnalysis &analysis,
@@ -2962,12 +3005,12 @@ namespace Legion {
       void finalize_pending_replication(PendingReplication *pending,
          const FieldMask &mask, const bool first, const bool need_lock = false);
     protected:
-      void pack_state(Serializer &rez, AddressSpaceID target,
+      void pack_state(Serializer &rez, const AddressSpaceID target,
        IndexSpaceExpression *expr,const bool expr_covers,const FieldMask &mask);
+      void unpack_state_and_apply(Deserializer &derez, 
+          const AddressSpaceID source, std::set<RtEvent> &ready_events);
       void invalidate_state(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &mask, RtEvent remove_ref_event);
-      void unpack_state(Deserializer &derez, AddressSpaceID source,
-                 std::set<RtEvent> &ready_events, const bool need_lock = false);
       void clone_to_local(EquivalenceSet *dst, FieldMask mask,
                     std::set<RtEvent> &applied_events, bool invalidate_overlap);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
@@ -2984,13 +3027,21 @@ namespace Legion {
                 FieldMaskSet<InstanceView> >::aligned &restricted_updates,
             LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> >::aligned &released_updates) const;
+      void apply_state(LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<LogicalView> >::aligned &valid_updates,
+            FieldMaskSet<IndexSpaceExpression> &initialized_updates,
+            std::map<unsigned,std::list<std::pair<ReductionView*,
+                IndexSpaceExpression*> > > &reduction_updates,
+            LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned &restricted_updates,
+            LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned &released_updates,
+            std::set<RtEvent> &applied_events, const bool needs_lock);
     public:
-      static void handle_remote_references(const void *args);
       static void handle_make_owner(const void *args);
-      static void handle_merge_or_forward(const void *args);
-      static void handle_deferred_response(const void *args, Runtime *runtime);
-      static void handle_deferred_remove_refs(const void *args);
       static void handle_pending_replication(const void *args);
+      static void handle_apply_state(const void *args);
+      static void handle_remove_refs(const void *args);
     public:
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);

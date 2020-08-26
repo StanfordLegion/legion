@@ -27867,11 +27867,6 @@ namespace Legion {
             PhysicalTemplate::handle_delete_template(args);
             break;
           }
-        case LG_REMOTE_REF_TASK_ID:
-          {
-            EquivalenceSet::handle_remote_references(args);
-            break;
-          }
         case LG_DEFER_MAKE_OWNER_TASK_ID:
           {
             EquivalenceSet::handle_make_owner(args);
@@ -27882,19 +27877,14 @@ namespace Legion {
             EquivalenceSet::handle_pending_replication(args);
             break;
           }
-        case LG_DEFER_MERGE_OR_FORWARD_TASK_ID:
+        case LG_DEFER_APPLY_STATE_TASK_ID:
           {
-            EquivalenceSet::handle_merge_or_forward(args);
+            EquivalenceSet::handle_apply_state(args);
             break;
           }
-        case LG_DEFER_EQ_RESPONSE_TASK_ID:
+        case LG_DEFER_RELEASE_REF_TASK_ID:
           {
-            EquivalenceSet::handle_deferred_response(args, runtime);
-            break;
-          }
-        case LG_DEFER_REMOVE_EQ_REF_TASK_ID:
-          {
-            EquivalenceSet::handle_deferred_remove_refs(args);
+            EquivalenceSet::handle_remove_refs(args);
             break;
           }
         case LG_DEFER_REMOTE_REF_UPDATE_TASK_ID:

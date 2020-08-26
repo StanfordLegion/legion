@@ -16111,8 +16111,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(done_migration);
-        pack_state(rez, logical_owner_space, set_expr, 
-                   true/*covers*/, all_ones, done_migration);
+        pack_state(rez, logical_owner_space, set_expr, true/*covers*/,all_ones);
       }
       runtime->send_equivalence_set_migration(logical_owner_space, rez);
       invalidate_state(set_expr, true/*covers*/, all_ones, done_migration);
@@ -16693,7 +16692,7 @@ namespace Legion {
         if (!!update_mask)
         {
           rez.serialize(local_space);
-          pack_state(rez, source, set_expr, true/*covers*/, mask, done_event); 
+          pack_state(rez, source, set_expr, true/*covers*/, mask); 
         }
       }
       runtime->send_equivalence_set_replication_response(source, rez);
@@ -16705,13 +16704,17 @@ namespace Legion {
         const FieldMask &update_mask, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock);
+      std::set<RtEvent> unpacked_events;
       if (!!update_mask)
       {
         AddressSpaceID source;
         derez.deserialize(source);
-        unpack_state(derez, source, target->preconditions);
+        unpack_state_and_apply(derez, source, unpacked_events);
       }
+      AutoLock eq(eq_lock);
+      if (!unpacked_events.empty())
+        target->preconditions.insert(unpacked_events.begin(), 
+                                     unpacked_events.end());
       // Then finalize our replication
       if (precondition.exists())
         target->preconditions.insert(precondition);
@@ -17176,9 +17179,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::filter_valid_instances(IndexSpaceExpression *expr,
-                                                const bool expr_covers, 
-                                                const FieldMask &filter_mask, 
-                                                ReferenceMutator &mutator)
+                  const bool expr_covers, const FieldMask &filter_mask,
+                  ReferenceMutator &mutator, 
+                  std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
+                  std::map<LogicalView*,unsigned> *view_refs_to_remove)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -17208,7 +17212,16 @@ namespace Legion {
                   to_delete.begin(); it != to_delete.end(); it++)
             {
               total_valid_instances.erase(*it);
-              if ((*it)->remove_nested_valid_ref(did))
+              if (view_refs_to_remove != NULL)
+              {
+                std::map<LogicalView*,unsigned>::iterator finder = 
+                  view_refs_to_remove->find(*it);
+                if (finder == view_refs_to_remove->end())
+                  (*view_refs_to_remove)[*it] = 1;
+                else
+                  finder->second += 1;
+              }
+              else if ((*it)->remove_nested_valid_ref(did))
                 delete (*it);
             }
           }
@@ -17230,8 +17243,19 @@ namespace Legion {
               // Invalidating all the expressions
               for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                     pit->second.begin(); it != pit->second.end(); it++)
-                if (it->first->remove_expression_reference())
+              {
+                if (expr_refs_to_remove != NULL)
+                {
+                  std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                    expr_refs_to_remove->find(it->first);
+                  if (finder == expr_refs_to_remove->end())
+                    (*expr_refs_to_remove)[it->first] = 1;
+                  else
+                    finder->second += 1;
+                }
+                else if (it->first->remove_expression_reference())
                   delete it->first;
+              }
               to_delete.push_back(pit->first);
             }
             else
@@ -17251,7 +17275,16 @@ namespace Legion {
                       to_erase.begin(); it != to_erase.end(); it++)
                 {
                   pit->second.erase(*it);
-                  if ((*it)->remove_expression_reference())
+                  if (expr_refs_to_remove != NULL)
+                  {
+                    std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                      expr_refs_to_remove->find(*it);
+                    if (finder == expr_refs_to_remove->end())
+                      (*expr_refs_to_remove)[*it] = 1;
+                    else
+                      finder->second += 1;
+                  }
+                  else if ((*it)->remove_expression_reference())
                     delete (*it);
                 }
               }
@@ -17264,7 +17297,16 @@ namespace Legion {
                   to_delete.begin(); it != to_delete.end(); it++)
             {
               partial_valid_instances.erase(*it);
-              if ((*it)->remove_nested_valid_ref(did))
+              if (view_refs_to_remove != NULL)
+              {
+                std::map<LogicalView*,unsigned>::iterator finder = 
+                  view_refs_to_remove->find(*it);
+                if (finder == view_refs_to_remove->end())
+                  (*view_refs_to_remove)[*it] = 1;
+                else
+                  finder->second += 1;
+              }
+              else if ((*it)->remove_nested_valid_ref(did))
                 delete (*it);
             }
           }
@@ -17334,7 +17376,16 @@ namespace Legion {
               if (!!finder->second)
                 continue;
               pit->second.erase(finder);
-              if ((*it)->remove_expression_reference())
+              if (expr_refs_to_remove != NULL)
+              {
+                std::map<IndexSpaceExpression*,unsigned>::iterator finder2 =
+                  expr_refs_to_remove->find(*it);
+                if (finder2 == expr_refs_to_remove->end())
+                  (*expr_refs_to_remove)[*it] = 1;
+                else
+                  finder2->second += 1;
+              }
+              else if ((*it)->remove_expression_reference())
                 delete (*it);
             }
             if (!pit->second.empty())
@@ -17349,7 +17400,16 @@ namespace Legion {
                 to_delete.begin(); it != to_delete.end(); it++)
           {
             partial_valid_instances.erase(*it);
-            if ((*it)->remove_nested_valid_ref(did))
+            if (view_refs_to_remove != NULL)
+            {
+              std::map<LogicalView*,unsigned>::iterator finder = 
+                view_refs_to_remove->find(*it);
+              if (finder == view_refs_to_remove->end())
+                (*view_refs_to_remove)[*it] = 1;
+              else
+                finder->second += 1;
+            }
+            else if ((*it)->remove_nested_valid_ref(did))
               delete (*it);
           }
           partial_valid_fields -= (filter_mask - still_partial_valid);
@@ -17385,7 +17445,16 @@ namespace Legion {
           for (std::vector<LogicalView*>::const_iterator it =
                 to_delete.begin(); it != to_delete.end(); it++)
           {
-            if ((*it)->remove_nested_valid_ref(did))
+            if (view_refs_to_remove != NULL)
+            {
+              std::map<LogicalView*,unsigned>::iterator finder = 
+                view_refs_to_remove->find(*it);
+              if (finder == view_refs_to_remove->end())
+                (*view_refs_to_remove)[*it] = 1;
+              else
+                finder->second += 1;
+            }
+            else if ((*it)->remove_nested_valid_ref(did))
               delete (*it);
             total_valid_instances.erase(*it);
           }
@@ -17479,7 +17548,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::filter_reduction_instances(IndexSpaceExpression *expr,
-                           const bool expr_covers, const FieldMask &filter_mask)
+                  const bool expr_covers, const FieldMask &filter_mask,
+                  std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
+                  std::map<LogicalView*,unsigned> *view_refs_to_remove)
     //--------------------------------------------------------------------------
     {
       int fidx = filter_mask.find_first_set();
@@ -17496,9 +17567,27 @@ namespace Legion {
                   const_iterator it = finder->second.begin(); it !=
                   finder->second.end(); it++)
             {
-              if (it->first->remove_nested_valid_ref(did))
+              if (view_refs_to_remove != NULL)
+              {
+                std::map<LogicalView*,unsigned>::iterator finder = 
+                  view_refs_to_remove->find(it->first);
+                if (finder == view_refs_to_remove->end())
+                  (*view_refs_to_remove)[it->first] = 1;
+                else
+                  finder->second += 1;
+              }
+              else if (it->first->remove_nested_valid_ref(did))
                 delete it->first;
-              if (it->second->remove_expression_reference())
+              if (expr_refs_to_remove != NULL)
+              {
+                std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                  expr_refs_to_remove->find(it->second);
+                if (finder == expr_refs_to_remove->end())
+                  (*expr_refs_to_remove)[it->second] = 1;
+                else
+                  finder->second += 1;
+              }
+              else if (it->second->remove_expression_reference())
                 delete it->second;
             }
             finder->second.clear();
@@ -17521,7 +17610,16 @@ namespace Legion {
 #endif
                 }
                 full_diff->add_expression_reference();
-                if (it->second->remove_expression_reference())
+                if (expr_refs_to_remove != NULL)
+                {
+                  std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                    expr_refs_to_remove->find(it->second);
+                  if (finder == expr_refs_to_remove->end())
+                    (*expr_refs_to_remove)[it->second] = 1;
+                  else
+                    finder->second += 1;
+                }
+                else if (it->second->remove_expression_reference())
                   delete it->second;
                 it->second = full_diff;
                 it++;
@@ -17535,7 +17633,16 @@ namespace Legion {
                   if (diff_expr->get_volume() < it->second->get_volume())
                   {
                     diff_expr->add_expression_reference();
-                    if (it->second->remove_expression_reference())
+                    if (expr_refs_to_remove != NULL)
+                    {
+                      std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                        expr_refs_to_remove->find(it->second);
+                      if (finder == expr_refs_to_remove->end())
+                        (*expr_refs_to_remove)[it->second] = 1;
+                      else
+                        finder->second += 1;
+                    }
+                    else if (it->second->remove_expression_reference())
                       delete it->second;
                     it->second = diff_expr;
                   }
@@ -17544,9 +17651,27 @@ namespace Legion {
                 }
                 else
                 {
-                  if (it->first->remove_nested_valid_ref(did))
+                  if (view_refs_to_remove != NULL)
+                  {
+                    std::map<LogicalView*,unsigned>::iterator finder = 
+                      view_refs_to_remove->find(it->first);
+                    if (finder == view_refs_to_remove->end())
+                      (*view_refs_to_remove)[it->first] = 1;
+                    else
+                      finder->second += 1;
+                  }
+                  else if (it->first->remove_nested_valid_ref(did))
                     delete it->first;
-                  if (it->second->remove_expression_reference())
+                  if (expr_refs_to_remove != NULL)
+                  {
+                    std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                      expr_refs_to_remove->find(it->second);
+                    if (finder == expr_refs_to_remove->end())
+                      (*expr_refs_to_remove)[it->second] = 1;
+                    else
+                      finder->second += 1;
+                  }
+                  else if (it->second->remove_expression_reference())
                     delete it->second;
                   it = finder->second.erase(it);
                 }
@@ -18884,6 +19009,134 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::filter_initialized_data(IndexSpaceExpression *expr, 
+                  const bool expr_covers, const FieldMask &filter_mask, 
+                  std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove)
+    //--------------------------------------------------------------------------
+    {
+      if (initialized_data.empty() || 
+          (filter_mask * initialized_data.get_valid_mask()))
+        return;
+      if (expr_covers)
+      {
+        if (!(initialized_data.get_valid_mask() - filter_mask))
+        {
+          // filter everything
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                initialized_data.begin(); it != initialized_data.end(); it++)
+          {
+            if (expr_refs_to_remove != NULL)
+            {
+              std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                expr_refs_to_remove->find(it->first);
+              if (finder == expr_refs_to_remove->end())
+                (*expr_refs_to_remove)[it->first] = 1;
+              else
+                finder->second += 1;
+            }
+            else if (it->first->remove_expression_reference())
+              delete it->first;
+          }
+          initialized_data.clear();
+        }
+        else
+        {
+          // filter fields
+          std::vector<IndexSpaceExpression*> to_delete;
+          for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                initialized_data.begin(); it != initialized_data.end(); it++)
+          {
+            it.filter(filter_mask);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              initialized_data.erase(*it);
+              if (expr_refs_to_remove != NULL)
+              {
+                std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                  expr_refs_to_remove->find(*it);
+                if (finder == expr_refs_to_remove->end())
+                  (*expr_refs_to_remove)[*it] = 1;
+                else
+                  finder->second += 1;
+              }
+              else if ((*it)->remove_expression_reference())
+                delete (*it);
+            }
+          }
+          if (!initialized_data.empty())
+            initialized_data.tighten_valid_mask();
+        }
+      }
+      else
+      {
+        // Filter on fields first and then on expressions
+        std::vector<IndexSpaceExpression*> to_delete;
+        FieldMaskSet<IndexSpaceExpression> to_add;
+        for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+              initialized_data.begin(); it != initialized_data.end(); it++)
+        {
+          const FieldMask overlap = filter_mask & it->second;
+          if (!overlap)
+            continue;
+          if (it->first != set_expr)
+          {
+            IndexSpaceExpression *intersection =
+              runtime->forest->intersect_index_spaces(it->first, expr);
+            const size_t volume = intersection->get_volume();
+            if (volume == 0)
+              continue;
+            // We're removing this expression no matter what at this point
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+            // See if there are any remaining points left
+            if (volume < it->first->get_volume())
+            {
+              IndexSpaceExpression *diff = 
+                runtime->forest->subtract_index_spaces(it->first, intersection);
+              to_add.insert(diff, overlap);
+            }
+          }
+          else // special case for when we know that the expr is the set expr
+          {
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+            to_add.insert(
+              runtime->forest->subtract_index_spaces(it->first, expr), overlap);
+          }
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            initialized_data.erase(*it);
+            if (expr_refs_to_remove != NULL)
+            {
+              std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                expr_refs_to_remove->find(*it);
+              if (finder == expr_refs_to_remove->end())
+                (*expr_refs_to_remove)[*it] = 1;
+              else
+                finder->second += 1;
+            }
+            else if ((*it)->remove_expression_reference())
+              delete (*it);
+          }
+        }
+        if (!initialized_data.empty())
+          initialized_data.tighten_valid_mask();
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::issue_across_copies(CopyAcrossAnalysis &analysis,
                                              const FieldMask &src_mask, 
                                              IndexSpaceExpression *expr,
@@ -19950,7 +20203,7 @@ namespace Legion {
       std::set<RtEvent> ready_events;
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      set->unpack_state(derez, source, ready_events);
+      set->unpack_state_and_apply(derez, source, ready_events);
       // Check to see if we're ready or we need to defer this
       RtEvent precondition;
       if (!ready_events.empty())
@@ -19959,6 +20212,352 @@ namespace Legion {
       else
         precondition = set->make_owner(runtime->address_space);
       Runtime::trigger_event(done, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::pack_state(Serializer &rez,const AddressSpaceID target,
+      IndexSpaceExpression *expr, const bool expr_covers, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::aligned
+        valid_updates;
+      FieldMaskSet<IndexSpaceExpression> initialized_updates;
+      std::map<unsigned,std::list<
+        std::pair<ReductionView*,IndexSpaceExpression*> > > reduction_updates;
+      LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
+        restricted_updates;
+      LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
+        released_updates;
+      find_overlap_updates(expr, expr_covers, mask, valid_updates,
+                           initialized_updates, reduction_updates, 
+                           restricted_updates, released_updates);
+      rez.serialize<size_t>(valid_updates.size());
+      for (LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<LogicalView> >::aligned::const_iterator vit =
+            valid_updates.begin(); vit != valid_updates.end(); vit++)
+      {
+        vit->first->pack_expression(rez, target);
+        rez.serialize<size_t>(vit->second.size());
+        for (FieldMaskSet<LogicalView>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); it++)
+        {
+          rez.serialize(it->first->did);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<size_t>(initialized_updates.size());
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+            initialized_updates.begin(); it != initialized_updates.end(); it++)
+      {
+        it->first->pack_expression(rez, target);
+        rez.serialize(it->second);
+      }
+      rez.serialize<size_t>(reduction_updates.size());
+      for (std::map<unsigned,std::list<std::pair<ReductionView*,
+            IndexSpaceExpression*> > >::const_iterator rit =
+            reduction_updates.begin(); rit != reduction_updates.end(); rit++)
+      {
+        rez.serialize(rit->first);
+        rez.serialize<size_t>(rit->second.size());
+        for (std::list<std::pair<ReductionView*,
+              IndexSpaceExpression*> >::const_iterator it =
+              rit->second.begin(); it != rit->second.end(); it++)
+        {
+          rez.serialize(it->first->did);
+          it->second->pack_expression(rez, target);
+        }
+      }
+      rez.serialize<size_t>(restricted_updates.size());
+      for (LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<InstanceView> >::aligned::const_iterator rit =
+            restricted_instances.begin(); rit != 
+            restricted_instances.end(); rit++)
+      {
+        rit->first->pack_expression(rez, target);
+        rez.serialize<size_t>(rit->second.size());
+        for (FieldMaskSet<InstanceView>::const_iterator it =
+              rit->second.begin(); it != rit->second.end(); it++)
+        {
+          rez.serialize(it->first->did);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<size_t>(released_updates.size());
+      for (LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<InstanceView> >::aligned::const_iterator rit =
+            released_instances.begin(); rit != released_instances.end(); rit++)
+      {
+        rit->first->pack_expression(rez, target);
+        rez.serialize<size_t>(rit->second.size());
+        for (FieldMaskSet<InstanceView>::const_iterator it =
+              rit->second.begin(); it != rit->second.end(); it++)
+        {
+          rez.serialize(it->first->did);
+          rez.serialize(it->second);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::unpack_state_and_apply(Deserializer &derez,
+                 const AddressSpaceID source, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::aligned
+        valid_updates;
+      FieldMaskSet<IndexSpaceExpression> initialized_updates;
+      std::map<unsigned,std::list<
+        std::pair<ReductionView*,IndexSpaceExpression*> > > reduction_updates;
+      LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
+        restricted_updates;
+      LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
+        released_updates;
+      std::set<RtEvent> ready_events;
+      size_t num_valid;
+      derez.deserialize(num_valid);
+      for (unsigned idx1 = 0; idx1 < num_valid; idx1++)
+      {
+        IndexSpaceExpression *expr = 
+          IndexSpaceExpression::unpack_expression(derez,runtime->forest,source);
+        size_t num_views;
+        derez.deserialize(num_views);
+        FieldMaskSet<LogicalView> &views = valid_updates[expr];
+        for (unsigned idx2 = 0; idx2 < num_views; idx2++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          RtEvent ready;
+          LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+          if (ready.exists() && !ready.has_triggered())
+            ready_events.insert(ready);
+          FieldMask mask;
+          derez.deserialize(mask);
+          views.insert(view, mask);
+        }
+      }
+      size_t num_initialized;
+      derez.deserialize(num_initialized);
+      for (unsigned idx = 0; idx < num_initialized; idx++)
+      {
+        IndexSpaceExpression *expr = 
+          IndexSpaceExpression::unpack_expression(derez,runtime->forest,source);
+        FieldMask mask;
+        derez.deserialize(mask);
+        initialized_updates.insert(expr, mask);
+      }
+      size_t num_reductions;
+      derez.deserialize(num_reductions);
+      for (unsigned idx1 = 0; idx1 < num_reductions; idx1++)
+      {
+        unsigned fidx;
+        derez.deserialize(fidx);
+        size_t num_views;
+        derez.deserialize(num_views);
+        std::list<std::pair<ReductionView*,IndexSpaceExpression*> > 
+          &reductions = reduction_updates[fidx];
+        for (unsigned idx2 = 0; idx2 < num_views; idx2++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          RtEvent ready;
+          LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+          if (ready.exists() && !ready.has_triggered())
+            ready_events.insert(ready);
+          IndexSpaceExpression *expr = 
+            IndexSpaceExpression::unpack_expression(derez,
+                                                    runtime->forest, source);
+          reductions.push_back(std::pair<ReductionView*,IndexSpaceExpression*>(
+                static_cast<ReductionView*>(view), expr));
+        }
+      }
+      size_t num_restrictions;
+      derez.deserialize(num_restrictions);
+      for (unsigned idx1 = 0; idx1 < num_restrictions; idx1++)
+      {
+        IndexSpaceExpression *expr = 
+          IndexSpaceExpression::unpack_expression(derez,runtime->forest,source);
+        size_t num_views;
+        derez.deserialize(num_views);
+        FieldMaskSet<InstanceView> &restrictions = restricted_updates[expr];
+        for (unsigned idx2 = 0; idx2 < num_views; idx2++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          RtEvent ready;
+          LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+          if (ready.exists() && !ready.has_triggered())
+            ready_events.insert(ready);
+          FieldMask mask;
+          derez.deserialize(mask);
+          restrictions.insert(static_cast<InstanceView*>(view), mask);
+        }
+      }
+      size_t num_releases;
+      derez.deserialize(num_releases);
+      for (unsigned idx1 = 0; idx1 < num_releases; idx1++)
+      {
+        IndexSpaceExpression *expr = 
+          IndexSpaceExpression::unpack_expression(derez,runtime->forest,source);
+        size_t num_views;
+        derez.deserialize(num_views);
+        FieldMaskSet<InstanceView> &releases = released_updates[expr];
+        for (unsigned idx2 = 0; idx2 < num_views; idx2++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          RtEvent ready;
+          LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+          if (ready.exists() && !ready.has_triggered())
+            ready_events.insert(ready);
+          FieldMask mask;
+          derez.deserialize(mask);
+          releases.insert(static_cast<InstanceView*>(view), mask);
+        }
+      }
+      if (!ready_events.empty())
+      {
+        const RtEvent ready_event = Runtime::merge_events(ready_events);
+        if (ready_event.exists() && !ready_event.has_triggered())
+        {
+          // Defer this until it is ready to be performed
+          const RtUserEvent applied_event = Runtime::create_rt_user_event();
+          DeferApplyStateArgs args(this, applied_event);
+          args.valid_updates->swap(valid_updates);
+          args.initialized_updates->swap(initialized_updates);
+          args.reduction_updates->swap(reduction_updates);
+          args.restricted_updates->swap(restricted_updates);
+          args.released_updates->swap(released_updates);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, ready_event);
+          applied_events.insert(applied_event);
+          return;
+        }
+      }
+      // All the views are ready so we can add them now
+      apply_state(valid_updates, initialized_updates, reduction_updates,
+       restricted_updates, released_updates, applied_events, true/*need lock*/);
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::DeferApplyStateArgs::DeferApplyStateArgs(EquivalenceSet *s,
+                                                             RtUserEvent done)
+      : LgTaskArgs<DeferApplyStateArgs>(implicit_provenance), set(s),
+        valid_updates(new LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<LogicalView> >::aligned()),
+        initialized_updates(new FieldMaskSet<IndexSpaceExpression>()),
+        reduction_updates(new std::map<unsigned,std::list<std::pair<
+            ReductionView*,IndexSpaceExpression*> > >()),
+        restricted_updates(new LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<InstanceView> >::aligned()),
+        released_updates(new LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<InstanceView> >::aligned()), done_event(done)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_apply_state(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferApplyStateArgs *dargs = (const DeferApplyStateArgs*)args;
+      std::set<RtEvent> applied_events;
+      dargs->set->apply_state(*(dargs->valid_updates), 
+          *(dargs->initialized_updates), *(dargs->reduction_updates),
+          *(dargs->restricted_updates), *(dargs->released_updates),
+          applied_events, true/*needs lock*/);
+      if (!applied_events.empty())
+        Runtime::trigger_event(dargs->done_event, 
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(dargs->done_event);
+      delete dargs->valid_updates;
+      delete dargs->initialized_updates;
+      delete dargs->reduction_updates;
+      delete dargs->restricted_updates;
+      delete dargs->released_updates;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::invalidate_state(IndexSpaceExpression *expr,
+            const bool expr_covers, const FieldMask &mask, RtEvent remove_event)
+    //--------------------------------------------------------------------------
+    {
+      // In general this won't do anything since we won't really be
+      // adding any references here
+      LocalReferenceMutator mutator;
+      if (remove_event.exists())
+      {
+        std::map<LogicalView*,unsigned> view_refs_to_remove;
+        std::map<IndexSpaceExpression*,unsigned> expr_refs_to_remove;
+        filter_valid_instances(expr, expr_covers, mask, mutator, 
+                               &expr_refs_to_remove, &view_refs_to_remove);
+        filter_reduction_instances(expr, expr_covers, mask, 
+                               &expr_refs_to_remove, &view_refs_to_remove);
+        filter_initialized_data(expr, expr_covers, mask, &expr_refs_to_remove);
+        filter_restricted_instances(expr, expr_covers, mask,
+                               &expr_refs_to_remove, &view_refs_to_remove);
+        filter_released_instances(expr, expr_covers, mask,
+                               &expr_refs_to_remove, &view_refs_to_remove);
+        if (!remove_event.has_triggered())
+        {
+          // Defer removing these references until it is safe to do so
+          DeferReleaseRefArgs args(did);
+          args.view_refs_to_remove->swap(view_refs_to_remove);
+          args.expr_refs_to_remove->swap(expr_refs_to_remove);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, remove_event); 
+        }
+        else
+        {
+          // We can remove these references now
+          for (std::map<LogicalView*,unsigned>::const_iterator it = 
+                view_refs_to_remove.begin(); it != 
+                view_refs_to_remove.end(); it++)
+            if (it->first->remove_nested_valid_ref(did, NULL, it->second))
+              delete it->first;
+          for (std::map<IndexSpaceExpression*,unsigned>::const_iterator it =
+                expr_refs_to_remove.begin(); it != 
+                expr_refs_to_remove.end(); it++)
+            if (it->first->remove_expression_reference(it->second))
+              delete it->first;
+        }
+      }
+      else
+      {
+        filter_valid_instances(expr, expr_covers, mask, mutator); 
+        filter_reduction_instances(expr, expr_covers, mask); 
+        filter_initialized_data(expr, expr_covers, mask);
+        filter_restricted_instances(expr, expr_covers, mask);
+        filter_released_instances(expr, expr_covers, mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::DeferReleaseRefArgs::DeferReleaseRefArgs(DistributedID d)
+      : LgTaskArgs<DeferReleaseRefArgs>(implicit_provenance), did(d),
+        view_refs_to_remove(new std::map<LogicalView*,unsigned>()),
+        expr_refs_to_remove(new std::map<IndexSpaceExpression*,unsigned>())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_remove_refs(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferReleaseRefArgs *dargs = (const DeferReleaseRefArgs*)args;
+      for (std::map<LogicalView*,unsigned>::const_iterator it =
+            dargs->view_refs_to_remove->begin(); it !=
+            dargs->view_refs_to_remove->end(); it++)
+        if (it->first->remove_nested_valid_ref(dargs->did, NULL, it->second))
+          delete it->first;
+      for (std::map<IndexSpaceExpression*,unsigned>::const_iterator it =
+            dargs->expr_refs_to_remove->begin(); it !=
+            dargs->expr_refs_to_remove->end(); it++)
+        if (it->first->remove_expression_reference(it->second))
+          delete it->first;
+      delete dargs->view_refs_to_remove;
+      delete dargs->expr_refs_to_remove;
     }
 
     //--------------------------------------------------------------------------
@@ -20031,46 +20630,8 @@ namespace Legion {
                            initialized_updates, reduction_updates, 
                            restricted_updates, released_updates);
       // We hold the lock so calling back into the destination is safe
-      WrapperReferenceMutator mutator(applied_events);
-      const bool dst_volume = dst->set_expr->get_volume();
-      for (LegionMap<IndexSpaceExpression*,
-            FieldMaskSet<LogicalView> >::aligned::const_iterator it = 
-            valid_updates.begin(); it != valid_updates.end(); it++)
-      {
-        if (it->first->get_volume() == dst_volume)
-          dst->record_instances(dst->set_expr, true/*covers*/,
-              it->second.get_valid_mask(), it->second, mutator);
-        else
-          dst->record_instances(it->first, false/*covers*/,
-              it->second.get_valid_mask(), it->second, mutator);
-      }
-      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-            initialized_updates.begin(); it != initialized_updates.end(); it++)
-      {
-        if (it->first->get_volume() == dst_volume)
-          dst->update_initialized_data(dst->set_expr,true/*covers*/,it->second);
-        else
-          dst->update_initialized_data(it->first, false/*covers*/, it->second);
-      }
-      for (std::map<unsigned,std::list<
-            std::pair<ReductionView*,IndexSpaceExpression*> > >::iterator
-            it = reduction_updates.begin(); it != reduction_updates.end(); it++)
-        dst->update_reductions(it->first, mutator, it->second);
-      for (LegionMap<IndexSpaceExpression*,
-            FieldMaskSet<InstanceView> >::aligned::const_iterator rit =
-            restricted_updates.begin(); rit != restricted_updates.end(); rit++)
-      {
-        const bool covers = (rit->first->get_volume() == dst_volume);
-        for (FieldMaskSet<InstanceView>::const_iterator it =
-              rit->second.begin(); it != rit->second.end(); it++)
-          dst->record_restriction(covers ? dst->set_expr : rit->first, covers,
-                                  it->second, it->first, mutator);
-      }
-      for (LegionMap<IndexSpaceExpression*,
-            FieldMaskSet<InstanceView> >::aligned::iterator it =
-            released_updates.begin(); it != released_updates.end(); it++)
-        dst->update_released(it->first, (it->first->get_volume() == dst_volume),
-                             it->second, mutator);
+      apply_state(valid_updates, initialized_updates, reduction_updates,
+        restricted_updates, released_updates, applied_events, false/*no lock*/);
       if (invalidate_overlap)
         invalidate_state(overlap, overlap_covers, mask, RtEvent::NO_RT_EVENT);
     }
@@ -20136,15 +20697,15 @@ namespace Legion {
         rez.serialize(did);
         rez.serialize(local_space);
         rez.serialize(done_event);
-        pack_state(rez, target_space, overlap, overlap_covers, mask,done_event);
+        pack_state(rez, target_space, overlap, overlap_covers, mask);
       }
       runtime->send_equivalence_set_clone_response(target_space, rez);
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::find_overlap_updates(IndexSpaceExpression *overlap,
-              const bool overlap_covers, const FieldMask &mask,
-              LegionMap<IndexSpaceExpression*,
+    void EquivalenceSet::find_overlap_updates(
+              IndexSpaceExpression *overlap_expr, const bool overlap_covers, 
+              const FieldMask &mask, LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<LogicalView> >::aligned &valid_updates,
               FieldMaskSet<IndexSpaceExpression> &initialized_updates,
               std::map<unsigned,std::list<std::pair<ReductionView*,
@@ -20155,7 +20716,317 @@ namespace Legion {
                   FieldMaskSet<InstanceView> >::aligned &released_updates) const
     //--------------------------------------------------------------------------
     {
-      
+      // Get updates from the total valid instances
+      if (!total_valid_instances.empty() && 
+          !(mask * total_valid_instances.get_valid_mask()))
+      {
+        if (!!(total_valid_instances.get_valid_mask() - mask))
+        {
+          // Need to filter on fields
+          for (FieldMaskSet<LogicalView>::const_iterator it =
+                total_valid_instances.begin(); it != 
+                total_valid_instances.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            if (overlap_covers)
+              valid_updates[set_expr].insert(it->first, overlap);
+            else
+              valid_updates[overlap_expr].insert(it->first, overlap);
+          }
+        }
+        else
+        {
+          if (overlap_covers)
+            valid_updates[set_expr] = total_valid_instances;
+          else
+            valid_updates[overlap_expr] = total_valid_instances;
+        }
+      }
+      // Get updates from the partial valid instances
+      if (!partial_valid_instances.empty() && !(mask * partial_valid_fields))
+      {
+        if (!!(partial_valid_fields - mask))
+        {
+          // Need to filter on fields
+          for (LegionMap<LogicalView*,
+                FieldMaskSet<IndexSpaceExpression> >::aligned::const_iterator
+                pit = partial_valid_instances.begin(); 
+                pit != partial_valid_instances.end(); pit++)
+          {
+            if (pit->second.get_valid_mask() * mask)
+              continue;
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  pit->second.begin(); it != pit->second.end(); it++)
+            {
+              const FieldMask overlap = mask & it->second;
+              if (!overlap)
+                continue;
+              if (!overlap_covers)
+              {
+                // Check for expression overlap
+                IndexSpaceExpression *intersection = 
+                  runtime->forest->intersect_index_spaces(overlap_expr, 
+                                                          it->first);
+                const size_t volume = intersection->get_volume();
+                if (volume == 0)
+                  continue;
+                if (volume == overlap_expr->get_volume())
+                  valid_updates[overlap_expr].insert(pit->first, overlap);
+                else if (volume == it->first->get_volume())
+                  valid_updates[it->first].insert(pit->first, overlap);
+                else
+                  valid_updates[intersection].insert(pit->first, overlap);
+              }
+              else
+                valid_updates[it->first].insert(pit->first, overlap);
+            }
+          }
+        }
+        else
+        {
+          // No filtering on fields, just check expressions if necessary
+          for (LegionMap<LogicalView*,
+                FieldMaskSet<IndexSpaceExpression> >::aligned::const_iterator
+                pit = partial_valid_instances.begin(); 
+                pit != partial_valid_instances.end(); pit++)
+          {
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  pit->second.begin(); it != pit->second.end(); it++)
+            {
+              if (!overlap_covers)
+              {
+                // Check for expression overlap
+                IndexSpaceExpression *intersection = 
+                  runtime->forest->intersect_index_spaces(overlap_expr, 
+                                                          it->first);
+                const size_t volume = intersection->get_volume();
+                if (volume == 0)
+                  continue;
+                if (volume == overlap_expr->get_volume())
+                  valid_updates[overlap_expr].insert(pit->first, it->second);
+                else if (volume == it->first->get_volume())
+                  valid_updates[it->first].insert(pit->first, it->second);
+                else
+                  valid_updates[intersection].insert(pit->first, it->second);
+              }
+              else
+                valid_updates[it->first].insert(pit->first, it->second);
+            }
+          }
+        }
+      }
+      // Get updates on the initialized data
+      if (!initialized_data.empty() && 
+          !(mask * initialized_data.get_valid_mask()))
+      {
+        if (!overlap_covers || !!(initialized_data.get_valid_mask() - mask))
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                initialized_data.begin(); it != initialized_data.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            if (!overlap_covers)
+            {
+              IndexSpaceExpression *intersection = 
+                runtime->forest->intersect_index_spaces(it->first,overlap_expr);
+              const size_t volume = intersection->get_volume();
+              if (volume == 0)
+                continue;
+              if (volume == overlap_expr->get_volume())
+                initialized_updates.insert(overlap_expr, overlap);
+              else if (volume == it->first->get_volume())
+                initialized_updates.insert(it->first, overlap);
+              else
+                initialized_updates.insert(intersection, overlap);
+            }
+            else
+              initialized_updates.insert(it->first, overlap);
+          }
+        }
+        else
+          initialized_updates = initialized_data;
+      }
+      // Get updates from the reductions
+      if (!reduction_instances.empty() && !(mask * reduction_fields))
+      {
+        for (std::map<unsigned,std::list<std::pair<ReductionView*,
+              IndexSpaceExpression*> > >::const_iterator rit =
+              reduction_instances.begin(); rit != 
+              reduction_instances.end(); rit++)
+        {
+          if (!mask.is_set(rit->first))
+            continue;
+          std::list<std::pair<ReductionView*,IndexSpaceExpression*> > &updates =
+            reduction_updates[rit->first];
+          updates = rit->second;
+          if (!overlap_covers)
+          {
+            for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::
+                 iterator it = updates.begin(); it != updates.end();/*nothing*/)
+            {
+              if (it->second == set_expr)
+              {
+                it->second = overlap_expr;
+                it++;
+              }
+              else
+              {
+                IndexSpaceExpression *intersection = 
+                  runtime->forest->intersect_index_spaces(it->second, 
+                                                          overlap_expr);
+                const size_t volume = intersection->get_volume();
+                if (volume > 0)
+                {
+                  if (volume == overlap_expr->get_volume())
+                    it->second = overlap_expr;
+                  else if (volume < it->second->get_volume())
+                    it->second = intersection;
+                  it++;
+                }
+                else
+                  it = updates.erase(it);
+              }
+            }
+          }
+        }
+      }
+      // Get updates from the restricted instances
+      if (!restricted_instances.empty() && !(mask * restricted_fields))
+      {
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::aligned::const_iterator rit =
+              restricted_instances.begin(); rit != 
+              restricted_instances.end(); rit++)
+        {
+          if (mask * rit->second.get_valid_mask())
+            continue;
+          IndexSpaceExpression *restricted_overlap = rit->first;
+          if (!overlap_covers)
+          {
+            IndexSpaceExpression *intersection = 
+              runtime->forest->intersect_index_spaces(rit->first, overlap_expr);
+            const size_t volume = intersection->get_volume();
+            if (volume == 0)
+              continue;
+            if (volume == overlap_expr->get_volume())
+              restricted_overlap = overlap_expr;
+            else if (volume < rit->first->get_volume())
+              restricted_overlap = intersection;
+          }
+          FieldMaskSet<InstanceView> &updates = 
+            restricted_updates[restricted_overlap]; 
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            updates.insert(it->first, overlap);
+          }
+        }
+      }
+      // Get updates from the released instances
+      if (!released_instances.empty())
+      {
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::aligned::const_iterator rit =
+              released_instances.begin(); rit != 
+              released_instances.end(); rit++)
+        {
+          if (mask * rit->second.get_valid_mask())
+            continue;
+          IndexSpaceExpression *released_overlap = rit->first;
+          if (!overlap_covers)
+          {
+            IndexSpaceExpression *intersection = 
+              runtime->forest->intersect_index_spaces(rit->first, overlap_expr);
+            const size_t volume = intersection->get_volume();
+            if (volume == 0)
+              continue;
+            if (volume == overlap_expr->get_volume())
+              released_overlap = overlap_expr;
+            else if (volume < rit->first->get_volume())
+              released_overlap = intersection;
+          }
+          FieldMaskSet<InstanceView> &updates = 
+            released_updates[released_overlap]; 
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            updates.insert(it->first, overlap);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::apply_state(LegionMap<IndexSpaceExpression*,
+                      FieldMaskSet<LogicalView> >::aligned &valid_updates,
+                  FieldMaskSet<IndexSpaceExpression> &initialized_updates,
+                  std::map<unsigned,std::list<std::pair<ReductionView*,
+                      IndexSpaceExpression*> > > &reduction_updates,
+                  LegionMap<IndexSpaceExpression*,
+                      FieldMaskSet<InstanceView> >::aligned &restricted_updates,
+                  LegionMap<IndexSpaceExpression*,
+                      FieldMaskSet<InstanceView> >::aligned &released_updates,
+                  std::set<RtEvent> &applied_events, const bool needs_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (needs_lock)
+      {
+        AutoLock eq(eq_lock);
+        apply_state(valid_updates, initialized_updates, reduction_updates,
+                    restricted_updates, released_updates,
+                    applied_events, false/*needs lock*/);
+        return;
+      }
+      WrapperReferenceMutator mutator(applied_events);
+      const bool dst_volume = set_expr->get_volume();
+      for (LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<LogicalView> >::aligned::const_iterator it = 
+            valid_updates.begin(); it != valid_updates.end(); it++)
+      {
+        if (it->first->get_volume() == dst_volume)
+          record_instances(set_expr, true/*covers*/,
+              it->second.get_valid_mask(), it->second, mutator);
+        else
+          record_instances(it->first, false/*covers*/,
+              it->second.get_valid_mask(), it->second, mutator);
+      }
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+            initialized_updates.begin(); it != initialized_updates.end(); it++)
+      {
+        if (it->first->get_volume() == dst_volume)
+          update_initialized_data(set_expr,true/*covers*/,it->second);
+        else
+          update_initialized_data(it->first, false/*covers*/, it->second);
+      }
+      for (std::map<unsigned,std::list<
+            std::pair<ReductionView*,IndexSpaceExpression*> > >::iterator
+            it = reduction_updates.begin(); it != reduction_updates.end(); it++)
+        update_reductions(it->first, mutator, it->second);
+      for (LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<InstanceView> >::aligned::const_iterator rit =
+            restricted_updates.begin(); rit != restricted_updates.end(); rit++)
+      {
+        const bool covers = (rit->first->get_volume() == dst_volume);
+        for (FieldMaskSet<InstanceView>::const_iterator it =
+              rit->second.begin(); it != rit->second.end(); it++)
+          record_restriction(covers ? set_expr : rit->first, covers,
+                             it->second, it->first, mutator);
+      }
+      for (LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<InstanceView> >::aligned::iterator it =
+            released_updates.begin(); it != released_updates.end(); it++)
+        update_released(it->first, (it->first->get_volume() == dst_volume),
+                        it->second, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -20225,7 +21096,7 @@ namespace Legion {
       std::set<RtEvent> applied_events;
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      set->unpack_state(derez, source, applied_events, true/*need lock*/);
+      set->unpack_state_and_apply(derez, source, applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
