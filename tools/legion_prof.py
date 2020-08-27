@@ -765,15 +765,14 @@ class TimePoint(object):
 
 class Memory(object):
     __slots__ = [
-        'mem_id', 'node_id', 'mem_in_node', 'kind', 'capacity', 'instances',
+        'mem_id', 'node_id', 'kind', 'capacity', 'instances',
         'time_points', 'max_live_instances', 'last_time', 'affinity'
     ]
     def __init__(self, mem_id, kind, capacity):
         self.mem_id = mem_id
-        # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 12
+        # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
         # owner_node = mem_id[55:40]
         self.node_id = (mem_id >> 40) & ((1 << 16) - 1)
-        self.mem_in_node = (mem_id) & ((1 << 12) - 1)
         self.kind = kind
         self.capacity = capacity
         self.instances = set()
@@ -934,7 +933,7 @@ class Channel(object):
 
     def node_id(self):
         if self.src is not None:
-            # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 12
+            # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
             # (mem_id >> 40) & ((1 << 16) - 1)
             return (self.src.mem_id >> 40) & ((1 << 16) - 1)
@@ -945,7 +944,7 @@ class Channel(object):
 
     def node_id_src(self):
         if self.src is not None:
-            # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 12
+            # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
             # (mem_id >> 40) & ((1 << 16) - 1)
             return (self.src.mem_id >> 40) & ((1 << 16) - 1)
@@ -954,7 +953,7 @@ class Channel(object):
 
     def node_id_dst(self):
         if self.dst is not None:
-            # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 12
+            # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
             # (mem_id >> 40) & ((1 << 16) - 1)
             return (self.dst.mem_id >> 40) & ((1 << 16) - 1)
