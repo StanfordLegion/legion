@@ -435,7 +435,7 @@ namespace Legion {
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       InstanceView *inst_view = view->as_instance_view();
-      EventFieldExprs preconditions;
+      EventFieldMap preconditions;
       inst_view->find_copy_preconditions_remote(reading, redop, copy_mask, 
           copy_expr, op_id, index, preconditions, trace_recording, source);
       // Send back the response unless the preconditions are empty in
@@ -448,18 +448,11 @@ namespace Legion {
           RezCheck z2(rez);
           rez.serialize(inst_view->did);
           rez.serialize<size_t>(preconditions.size());
-          for (EventFieldExprs::const_iterator eit = preconditions.begin();
-                eit != preconditions.end(); eit++)
+          for (EventFieldMap::const_iterator it = 
+                preconditions.begin(); it != preconditions.end(); it++)
           {
-            rez.serialize(eit->first);
-            const FieldMaskSet<IndexSpaceExpression> &exprs = eit->second;
-            rez.serialize<size_t>(exprs.size());
-            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
-                  exprs.begin(); it != exprs.end(); it++)
-            {
-              it->first->pack_expression(rez, source);
-              rez.serialize(it->second);
-            }
+            rez.serialize(it->first);
+            rez.serialize(it->second);
           }
           rez.serialize(remote_aggregator);
           rez.serialize<bool>(reading);
@@ -483,7 +476,7 @@ namespace Legion {
       assert(dargs->view->is_instance_view());
 #endif
       InstanceView *inst_view = dargs->view->as_instance_view();
-      EventFieldExprs preconditions;
+      EventFieldMap preconditions;
       inst_view->find_copy_preconditions_remote(dargs->reading, dargs->redop,
           *dargs->copy_mask, dargs->copy_expr, dargs->op_id, dargs->index, 
           preconditions, dargs->trace_recording, dargs->source);
@@ -497,18 +490,11 @@ namespace Legion {
           RezCheck z2(rez);
           rez.serialize(inst_view->did);
           rez.serialize<size_t>(preconditions.size());
-          for (EventFieldExprs::const_iterator eit = preconditions.begin();
-                eit != preconditions.end(); eit++)
+          for (EventFieldMap::const_iterator it =
+                preconditions.begin(); it != preconditions.end(); it++)
           {
-            rez.serialize(eit->first);
-            const FieldMaskSet<IndexSpaceExpression> &exprs = eit->second;
-            rez.serialize<size_t>(exprs.size());
-            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
-                  exprs.begin(); it != exprs.end(); it++)
-            {
-              it->first->pack_expression(rez, dargs->source);
-              rez.serialize(it->second);
-            }
+            rez.serialize(it->first);
+            rez.serialize(it->second);
           }
           rez.serialize(dargs->aggregator);
           rez.serialize<bool>(dargs->reading);
@@ -533,24 +519,14 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
 
-      EventFieldExprs preconditions;
+      EventFieldMap preconditions;
       size_t num_events;
       derez.deserialize(num_events);
       for (unsigned idx1 = 0; idx1 < num_events; idx1++)
       {
         ApEvent event;
         derez.deserialize(event);
-        size_t num_exprs;
-        derez.deserialize(num_exprs);
-        FieldMaskSet<IndexSpaceExpression> &exprs = preconditions[event];
-        for (unsigned idx2 = 0; idx2 < num_exprs; idx2++)
-        {
-          IndexSpaceExpression *expr = IndexSpaceExpression::unpack_expression(
-                                                derez, runtime->forest, source);
-          FieldMask expr_mask;
-          derez.deserialize(expr_mask);
-          exprs.insert(expr, expr_mask);
-        }
+        derez.deserialize(preconditions[event]); 
       }
       CopyFillAggregator *local_aggregator;
       derez.deserialize(local_aggregator);
@@ -1023,7 +999,7 @@ namespace Legion {
                                            const bool copy_dominates,
                                            const FieldMask &copy_mask,
                                            UniqueID op_id, unsigned index,
-                                           EventFieldExprs &preconditions,
+                                           EventFieldMap &preconditions,
                                            const bool trace_recording)
     //--------------------------------------------------------------------------
     {
@@ -2205,7 +2181,7 @@ namespace Legion {
                                               const UniqueID op_id,
                                               const unsigned index,
                                               const bool user_covers,
-                                              EventFieldExprs &preconditions,
+                                              EventFieldMap &preconditions,
                                               std::set<ApEvent> &dead_events,
                                               EventFieldUsers &filter_events,
                                               FieldMask &observed,
@@ -2231,7 +2207,7 @@ namespace Legion {
         FieldMask overlap = event_users.get_valid_mask() & user_mask;
         if (!overlap)
           continue;
-        EventFieldExprs::iterator finder = preconditions.find(cit->first);
+        EventFieldMap::iterator finder = preconditions.find(cit->first);
 #if 0
         // You might think you can optimize things like this, but you can't
         // because we still need the correct epoch users for every ExprView
@@ -2256,11 +2232,11 @@ namespace Legion {
           {
             if (finder == preconditions.end())
             {
-              preconditions[cit->first].insert(user_expr, user_overlap);
+              preconditions[cit->first] = user_overlap;
               finder = preconditions.find(cit->first);
             }
             else
-              finder->second.insert(user_expr, user_overlap);
+              finder->second |= user_overlap;
             if (dominated)
             {
               observed |= user_overlap;
@@ -2288,7 +2264,7 @@ namespace Legion {
                                                const UniqueID op_id,
                                                const unsigned index,
                                                const bool user_covers,
-                                               EventFieldExprs &preconditions,
+                                               EventFieldMap &preconditions,
                                                std::set<ApEvent> &dead_events,
                                                const bool trace_recording)
     //--------------------------------------------------------------------------
@@ -2312,7 +2288,7 @@ namespace Legion {
         FieldMask overlap = user_mask & event_users.get_valid_mask();
         if (!overlap)
           continue;
-        EventFieldExprs::iterator finder = preconditions.find(pit->first);
+        EventFieldMap::iterator finder = preconditions.find(pit->first);
 #if 0
         // You might think you can optimize things like this, but you can't
         // because we still need the correct epoch users for every ExprView
@@ -2335,12 +2311,12 @@ namespace Legion {
           {
             if (finder == preconditions.end())
             {
-              preconditions[pit->first].insert(user_expr, user_overlap);
+              preconditions[pit->first] = user_overlap;
               // Needed for when we go around the loop again
               finder = preconditions.find(pit->first);
             }
             else
-              finder->second.insert(user_expr, user_overlap);
+              finder->second |= user_overlap;
           }
         }
       }
@@ -2856,7 +2832,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(current_users != NULL);
 #endif
-              EventFieldExprs preconditions;
+              EventFieldMap preconditions;
               ApEvent start_use_event = manager->get_use_event();
               if (start_use_event.exists())
                 preconditions[start_use_event].insert(copy_expr, copy_mask);
@@ -2967,10 +2943,10 @@ namespace Legion {
       {
         // In the case where we're the owner we can just handle
         // this without needing to do anything
-        EventFieldExprs preconditions;
+        EventFieldMap preconditions;
         const ApEvent start_use_event = manager->get_use_event();
         if (start_use_event.exists())
-          preconditions[start_use_event].insert(copy_expr, copy_mask);
+          preconditions[start_use_event] = copy_mask;
         const RegionUsage usage(reading ? LEGION_READ_ONLY : (redop > 0) ?
             LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
         const bool copy_dominates = 
@@ -2996,7 +2972,7 @@ namespace Legion {
                                                 const FieldMask &copy_mask,
                                                 IndexSpaceExpression *copy_expr,
                                                 UniqueID op_id, unsigned index,
-                                                EventFieldExprs &preconditions,
+                                                EventFieldMap &preconditions,
                                                 const bool trace_recording,
                                                 const AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -3006,7 +2982,7 @@ namespace Legion {
 #endif
       const ApEvent start_use_event = manager->get_use_event();
       if (start_use_event.exists())
-        preconditions[start_use_event].insert(copy_expr, copy_mask);
+        preconditions[start_use_event] = copy_mask;
       const RegionUsage usage(reading ? LEGION_READ_ONLY : (redop > 0) ? 
           LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
       const bool copy_dominates = 
@@ -4810,10 +4786,10 @@ namespace Legion {
       }
       else
       {
-        EventFieldExprs preconditions;
+        EventFieldMap preconditions;
         ApEvent start_use_event = manager->get_use_event();
         if (start_use_event.exists())
-          preconditions[start_use_event].insert(copy_expr, copy_mask);
+          preconditions[start_use_event] = copy_mask;
         if (reading)
         {
           AutoLock v_lock(view_lock,1,false/*exclusive*/);
@@ -4847,7 +4823,7 @@ namespace Legion {
                                             const FieldMask &copy_mask,
                                             IndexSpaceExpression *copy_expr,
                                             UniqueID op_id, unsigned index,
-                                            EventFieldExprs &preconditions,
+                                            EventFieldMap &preconditions,
                                             const bool trace_recording,
                                             const AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -4858,7 +4834,7 @@ namespace Legion {
 #endif
       ApEvent start_use_event = manager->get_use_event();
       if (start_use_event.exists())
-        preconditions[start_use_event].insert(copy_expr, copy_mask);
+        preconditions[start_use_event] = copy_mask;
       if (reading)
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
@@ -4999,7 +4975,7 @@ namespace Legion {
                                                 const FieldMask &user_mask,
                                                 IndexSpaceExpression *user_expr,
                                                 UniqueID op_id,
-                                                EventFieldExprs &preconditions)
+                                                EventFieldMap &preconditions)
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
@@ -5009,14 +4985,14 @@ namespace Legion {
       for (EventFieldUsers::iterator uit = reduction_users.begin();
             uit != reduction_users.end(); /*nothing*/)
       {
-        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
         if (!event_mask)
         {
           uit++;
           continue;
         }
         std::vector<PhysicalUser*> to_delete;
-        EventFieldExprs::iterator event_finder = preconditions.find(uit->first);
+        EventFieldMap::iterator event_finder = preconditions.find(uit->first);
         for (EventUsers::iterator it = uit->second.begin();
               it != uit->second.end(); it++)
         {
@@ -5030,18 +5006,11 @@ namespace Legion {
           // Have a precondition so we need to record it
           if (event_finder == preconditions.end())
           {
-            preconditions[uit->first].insert(expr_overlap, overlap);
+            preconditions[uit->first] = overlap;
             event_finder = preconditions.find(uit->first);
           }
           else
-          {
-            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
-              event_finder->second.find(expr_overlap);
-            if (finder == event_finder->second.end())
-              event_finder->second.insert(expr_overlap, overlap);
-            else
-              finder.merge(overlap);
-          }
+            event_finder->second |= overlap;
           // See if we can prune out this user because it is dominated
           if (expr_overlap->get_volume() == it->first->expr->get_volume())
           {
@@ -5049,6 +5018,11 @@ namespace Legion {
             if (!it->second)
               to_delete.push_back(it->first);
           }
+          // If we've captured a dependence on this event for every
+          // field then we can exit out early
+          event_mask -= overlap;
+          if (!event_mask)
+            break;
         }
         if (!to_delete.empty())
         {
@@ -5076,14 +5050,14 @@ namespace Legion {
       for (EventFieldUsers::iterator uit = reading_users.begin();
             uit != reading_users.end(); /*nothing*/)
       {
-        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
         if (!event_mask)
         {
           uit++;
           continue;
         }
         std::vector<PhysicalUser*> to_delete;
-        EventFieldExprs::iterator event_finder = preconditions.find(uit->first);
+        EventFieldMap::iterator event_finder = preconditions.find(uit->first);
         for (EventUsers::iterator it = uit->second.begin();
               it != uit->second.end(); it++)
         {
@@ -5097,18 +5071,11 @@ namespace Legion {
           // Have a precondition so we need to record it
           if (event_finder == preconditions.end())
           {
-            preconditions[uit->first].insert(expr_overlap, overlap);
+            preconditions[uit->first] = overlap;
             event_finder = preconditions.find(uit->first);
           }
           else
-          {
-            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
-              event_finder->second.find(expr_overlap);
-            if (finder == event_finder->second.end())
-              event_finder->second.insert(expr_overlap, overlap);
-            else
-              finder.merge(overlap);
-          }
+            event_finder->second |= overlap;
           // See if we can prune out this user because it is dominated
           if (expr_overlap->get_volume() == it->first->expr->get_volume())
           {
@@ -5116,6 +5083,11 @@ namespace Legion {
             if (!it->second)
               to_delete.push_back(it->first);
           }
+          // If we've captured a dependence on this event for every
+          // field then we can exit out early
+          event_mask -= overlap;
+          if (!event_mask)
+            break;
         }
         if (!to_delete.empty())
         {
@@ -5146,7 +5118,7 @@ namespace Legion {
     void ReductionView::find_reducing_preconditions(const FieldMask &user_mask,
                                            IndexSpaceExpression *user_expr,
                                            UniqueID op_id,
-                                           EventFieldExprs &preconditions) const
+                                           EventFieldMap &preconditions) const
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
@@ -5155,10 +5127,10 @@ namespace Legion {
       for (EventFieldUsers::const_iterator uit = initialization_users.begin();
             uit != initialization_users.end(); uit++)
       {
-        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
         if (!event_mask)
           continue;
-        EventFieldExprs::iterator event_finder = preconditions.find(uit->first);
+        EventFieldMap::iterator event_finder = preconditions.find(uit->first);
         for (EventUsers::const_iterator it = uit->second.begin();
               it != uit->second.end(); it++)
         {
@@ -5172,18 +5144,16 @@ namespace Legion {
           // Have a precondition so we need to record it
           if (event_finder == preconditions.end())
           {
-            preconditions[uit->first].insert(expr_overlap, overlap);
+            preconditions[uit->first] = overlap;
             event_finder = preconditions.find(uit->first);
           }
           else
-          {
-            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
-              event_finder->second.find(expr_overlap);
-            if (finder == event_finder->second.end())
-              event_finder->second.insert(expr_overlap, overlap);
-            else
-              finder.merge(overlap);
-          }
+            event_finder->second |= overlap;
+          // If we've captured a dependence on this event for every
+          // field then we can exit out early
+          event_mask -= overlap;
+          if (!event_mask)
+            break;
         }
       }
       // reduction copies into reduction instances operate atomically so 
@@ -5191,10 +5161,10 @@ namespace Legion {
       for (EventFieldUsers::const_iterator uit = reduction_users.begin();
             uit != reduction_users.end(); uit++)
       {
-        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
         if (!event_mask)
           continue;
-        EventFieldExprs::iterator event_finder = preconditions.find(uit->first);
+        EventFieldMap::iterator event_finder = preconditions.find(uit->first);
         for (EventUsers::const_iterator it = uit->second.begin();
               it != uit->second.end(); it++)
         {
@@ -5212,18 +5182,16 @@ namespace Legion {
           // Have a precondition so we need to record it
           if (event_finder == preconditions.end())
           {
-            preconditions[uit->first].insert(expr_overlap, overlap);
+            preconditions[uit->first] = overlap;
             event_finder = preconditions.find(uit->first);
           }
           else
-          {
-            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
-              event_finder->second.find(expr_overlap);
-            if (finder == event_finder->second.end())
-              event_finder->second.insert(expr_overlap, overlap);
-            else
-              finder.merge(overlap);
-          }
+            event_finder->second |= overlap;
+          // If we've captured a dependence on this event for every
+          // field then we can exit out early
+          event_mask -= overlap;
+          if (!event_mask)
+            break;
         }
       }
     }
@@ -5232,7 +5200,7 @@ namespace Legion {
     void ReductionView::find_reading_preconditions(const FieldMask &user_mask,
                                            IndexSpaceExpression *user_expr,
                                            UniqueID op_id,
-                                           EventFieldExprs &preconditions) const
+                                           EventFieldMap &preconditions) const
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
@@ -5241,10 +5209,10 @@ namespace Legion {
       for (EventFieldUsers::const_iterator uit = reduction_users.begin();
             uit != reduction_users.end(); uit++)
       {
-        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
         if (!event_mask)
           continue;
-        EventFieldExprs::iterator event_finder = preconditions.find(uit->first);
+        EventFieldMap::iterator event_finder = preconditions.find(uit->first);
         for (EventUsers::const_iterator it = uit->second.begin();
               it != uit->second.end(); it++)
         {
@@ -5258,18 +5226,16 @@ namespace Legion {
           // Have a precondition so we need to record it
           if (event_finder == preconditions.end())
           {
-            preconditions[uit->first].insert(expr_overlap, overlap);
+            preconditions[uit->first] = overlap;
             event_finder = preconditions.find(uit->first);
           }
           else
-          {
-            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
-              event_finder->second.find(expr_overlap);
-            if (finder == event_finder->second.end())
-              event_finder->second.insert(expr_overlap, overlap);
-            else
-              finder.merge(overlap);
-          }
+            event_finder->second |= overlap;
+          // If we've captured a dependence on this event for every
+          // field then we can exit out early
+          event_mask -= overlap;
+          if (!event_mask)
+            break;
         }
       }
 #ifdef LEGION_GPU_REDUCTIONS
@@ -5282,11 +5248,10 @@ namespace Legion {
         for (EventFieldUsers::const_iterator uit = initialization_users.begin();
               uit != initialization_users.end(); uit++)
         {
-          const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+          FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
           if (!event_mask)
             continue;
-          EventFieldExprs::iterator event_finder = 
-            preconditions.find(uit->first);
+          EventFieldMap::iterator event_finder = preconditions.find(uit->first);
           for (EventUsers::const_iterator it = uit->second.begin();
                 it != uit->second.end(); it++)
           {
@@ -5300,18 +5265,16 @@ namespace Legion {
             // Have a precondition so we need to record it
             if (event_finder == preconditions.end())
             {
-              preconditions[uit->first].insert(expr_overlap, overlap);
+              preconditions[uit->first] = overlap;
               event_finder = preconditions.find(uit->first);
             }
             else
-            {
-              FieldMaskSet<IndexSpaceExpression>::iterator finder = 
-                event_finder->second.find(expr_overlap);
-              if (finder == event_finder->second.end())
-                event_finder->second.insert(expr_overlap, overlap);
-              else
-                finder.merge(overlap);
-            }
+              event_finder->second |= overlap;
+            // If we've captured a dependence on this event for every
+            // field then we can exit out early
+            event_mask -= overlap;
+            if (!event_mask)
+              break;
           }
         }
       }

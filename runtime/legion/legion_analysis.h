@@ -1250,8 +1250,7 @@ namespace Legion {
     public:
       typedef LegionMap<InstanceView*,
                FieldMaskSet<IndexSpaceExpression> >::aligned InstanceFieldExprs;
-      typedef LegionMap<ApEvent,
-               FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs;
+      typedef LegionMap<ApEvent,FieldMask>::aligned EventFieldMap;
       class CopyUpdate;
       class FillUpdate;
       class Update {
@@ -1263,12 +1262,10 @@ namespace Legion {
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const = 0;
-        virtual void compute_source_preconditions(RegionTreeForest *forest,
-#ifdef DEBUG_LEGION
-               const bool copy_across,
-#endif
-               const std::map<InstanceView*,EventFieldExprs> &src_pre,
-               LegionMap<ApEvent,FieldMask>::aligned &preconditions) const = 0;
+        virtual void compute_source_preconditions(
+                       RegionTreeForest *forest, const FieldMask &src_mask,
+                       const std::map<InstanceView*,EventFieldMap> &src_pre,
+                       std::set<ApEvent> &preconditions) const = 0;
         virtual void sort_updates(std::map<InstanceView*,
                                            std::vector<CopyUpdate*> > &copies,
                                   std::vector<FillUpdate*> &fills) = 0;
@@ -1294,12 +1291,10 @@ namespace Legion {
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const;
-        virtual void compute_source_preconditions(RegionTreeForest *forest,
-#ifdef DEBUG_LEGION
-                   const bool copy_across,
-#endif
-                   const std::map<InstanceView*,EventFieldExprs> &src_pre,
-                   LegionMap<ApEvent,FieldMask>::aligned &preconditions) const;
+        virtual void compute_source_preconditions(
+                       RegionTreeForest *forest, const FieldMask &src_mask,
+                       const std::map<InstanceView*,EventFieldMap> &src_pre,
+                       std::set<ApEvent> &preconditions) const;
         virtual void sort_updates(std::map<InstanceView*,
                                            std::vector<CopyUpdate*> > &copies,
                                   std::vector<FillUpdate*> &fills);
@@ -1323,12 +1318,10 @@ namespace Legion {
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const;
-        virtual void compute_source_preconditions(RegionTreeForest *forest,
-#ifdef DEBUG_LEGION
-                   const bool copy_across,
-#endif
-                   const std::map<InstanceView*,EventFieldExprs> &src_pre,
-                   LegionMap<ApEvent,FieldMask>::aligned &preconditions) const;
+        virtual void compute_source_preconditions(
+                       RegionTreeForest *forest, const FieldMask &src_mask,
+                       const std::map<InstanceView*,EventFieldMap> &src_pre,
+                       std::set<ApEvent> &preconditions) const;
         virtual void sort_updates(std::map<InstanceView*,
                                            std::vector<CopyUpdate*> > &copies,
                                   std::vector<FillUpdate*> &fills);
@@ -1387,10 +1380,9 @@ namespace Legion {
                                  IndexSpaceExpression *expr);
       // Record preconditions coming back from analysis on views
       void record_preconditions(InstanceView *view, bool reading,
-                                EventFieldExprs &preconditions);
+                                EventFieldMap &preconditions);
       void record_precondition(InstanceView *view, bool reading,
-                               ApEvent event, const FieldMask &mask,
-                               IndexSpaceExpression *expr);
+                               ApEvent event, const FieldMask &mask);
       void issue_updates(const PhysicalTraceInfo &trace_info, 
                          ApEvent precondition,
                          // Next two flags are used for across-copies
@@ -1456,7 +1448,8 @@ namespace Legion {
       std::set<LogicalView*> all_views; // used for reference counting
     protected:
       mutable LocalLock pre_lock; 
-      std::map<InstanceView*,EventFieldExprs> dst_pre, src_pre;
+      std::map<InstanceView*,LegionMap<ApEvent,FieldMask>::aligned> 
+        dst_pre, src_pre;
     protected:
       // Runtime mapping effects that we create
       std::set<RtEvent> effects; 
