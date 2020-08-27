@@ -103,6 +103,8 @@ namespace Realm {
     // used to create a remote proxy for a memory
     virtual MemoryImpl *create_remote_memory(Memory m, size_t size, Memory::Kind kind,
 					     const ByteArray& rdma_info);
+    virtual IBMemory *create_remote_ib_memory(Memory m, size_t size, Memory::Kind kind,
+					      const ByteArray& rdma_info);
 
     virtual ActiveMessageImpl *create_active_message_impl(NodeID target,
 							  unsigned short msgid,
@@ -111,7 +113,17 @@ namespace Realm {
 							  const void *src_payload_addr,
 							  size_t src_payload_lines,
 							  size_t src_payload_line_stride,
-							  void *dest_payload_addr,
+							  void *storage_base,
+							  size_t storage_size);
+
+    virtual ActiveMessageImpl *create_active_message_impl(NodeID target,
+							  unsigned short msgid,
+							  size_t header_size,
+							  size_t max_payload_size,
+							  const void *src_payload_addr,
+							  size_t src_payload_lines,
+							  size_t src_payload_line_stride,
+							  const RemoteAddress& dest_payload_addr,
 							  void *storage_base,
 							  size_t storage_size);
 
@@ -220,6 +232,13 @@ namespace Realm {
     abort();
   }
   
+  IBMemory *LoopbackNetworkModule::create_remote_ib_memory(Memory m, size_t size, Memory::Kind kind,
+							   const ByteArray& rdma_info)
+  {
+    // should never be called
+    abort();
+  }
+  
   ActiveMessageImpl *LoopbackNetworkModule::create_active_message_impl(NodeID target,
 								       unsigned short msgid,
 								       size_t header_size,
@@ -227,7 +246,21 @@ namespace Realm {
 								       const void *src_payload_addr,
 								       size_t src_payload_lines,
 								       size_t src_payload_line_stride,
-								       void *dest_payload_addr,
+								       void *storage_base,
+								       size_t storage_size)
+  {
+    // should never be called
+    abort();
+  }
+
+  ActiveMessageImpl *LoopbackNetworkModule::create_active_message_impl(NodeID target,
+								       unsigned short msgid,
+								       size_t header_size,
+								       size_t max_payload_size,
+								       const void *src_payload_addr,
+								       size_t src_payload_lines,
+								       size_t src_payload_line_stride,
+								       const RemoteAddress& dest_payload_addr,
 								       void *storage_base,
 								       size_t storage_size)
   {

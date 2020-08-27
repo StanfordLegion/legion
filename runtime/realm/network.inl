@@ -100,7 +100,32 @@ namespace Realm {
 							 const void *src_payload_addr,
 							 size_t src_payload_lines,
 							 size_t src_payload_line_stride,
-							 void *dest_payload_addr,
+							 void *storage_base,
+							 size_t storage_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->create_active_message_impl(target,
+							  msgid,
+							  header_size,
+							  max_payload_size,
+							  src_payload_addr,
+							  src_payload_lines,
+							  src_payload_line_stride,
+							  storage_base,
+							  storage_size);
+    }
+
+    inline ActiveMessageImpl *create_active_message_impl(NodeID target,
+							 unsigned short msgid,
+							 size_t header_size,
+							 size_t max_payload_size,
+							 const void *src_payload_addr,
+							 size_t src_payload_lines,
+							 size_t src_payload_line_stride,
+							 const RemoteAddress& dest_payload_addr,
 							 void *storage_base,
 							 size_t storage_size)
     {

@@ -216,7 +216,7 @@ namespace Realm {
     // the subrectangle we give always starts with the current point
     Rect<N,T> target_subrect;
     target_subrect.lo = cur_point;
-    if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType) {
+    if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
       const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
 
       // using the current point, find the biggest subrectangle we want to try
@@ -351,6 +351,9 @@ namespace Realm {
     if(max_elems == 0)
       return 0;
 
+    // filename comes from the external resource info
+    const ExternalHDF5Resource *res = checked_cast<ExternalHDF5Resource *>(inst_impl->metadata.ext_resource);
+
     // std::cout << "step " << this << " " << r << " " << p << " " << field_idx
     // 	      << " " << max_bytes << ":";
 
@@ -360,11 +363,11 @@ namespace Realm {
     Rect<N,T> target_subrect;
     size_t cur_bytes = 0;
     target_subrect.lo = cur_point;
-    if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::HDF5LayoutType) {
+    if(layout_piece->layout_type == PieceLayoutTypes::HDF5LayoutType) {
       const HDF5LayoutPiece<N,T> *hlp = static_cast<const HDF5LayoutPiece<N,T> *>(layout_piece);
 
       info.field_id = cur_field_id;
-      info.filename = &hlp->filename;
+      info.filename = &res->filename;
       info.dsetname = &hlp->dsetname;
 
       bool grow = true;
@@ -551,7 +554,7 @@ namespace Realm {
       assert(layout_piece->bounds.contains(target_subrect));
 #endif
 
-      if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType) {
+      if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
 	const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
 
 	// offset of initial entry is easy to compute
@@ -1452,7 +1455,7 @@ namespace Realm {
 	for(typename std::vector<InstanceLayoutPiece<N,T> *>::const_iterator it2 = it->pieces.begin();
 	    it2 != it->pieces.end();
 	    ++it2) {
-	  if((*it2)->layout_type != InstanceLayoutPiece<N,T>::AffineLayoutType) {
+	  if((*it2)->layout_type != PieceLayoutTypes::AffineLayoutType) {
 	    force_fortran_order = true;
 	    break;
 	  }

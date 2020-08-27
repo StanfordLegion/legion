@@ -2779,11 +2779,6 @@ namespace Realm {
 		_max_req_size, _priority,
                 _complete_fence)
       {
-        // make sure dst buffer is registered memory
-	for(std::vector<XferPort>::const_iterator it = output_ports.begin();
-	    it != output_ports.end();
-	    ++it)
-	  assert(it->mem->kind == MemoryImpl::MKIND_RDMA);
         channel = channel_manager->get_remote_write_channel();
 	kind = XFER_REMOTE_WRITE;
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
@@ -2807,9 +2802,9 @@ namespace Realm {
 	  reqs[i]->src_base = input_ports[reqs[i]->src_port_idx].mem->get_direct_ptr(reqs[i]->src_off,
 										     reqs[i]->nbytes);
 	  assert(reqs[i]->src_base != 0);
-	  RemoteMemory *remote = checked_cast<RemoteMemory *>(output_ports[reqs[i]->dst_port_idx].mem);
-	  reqs[i]->dst_base = static_cast<char *>(remote->get_remote_addr(reqs[i]->dst_off));
-	  assert(reqs[i]->dst_base != 0);
+	  //RemoteMemory *remote = checked_cast<RemoteMemory *>(output_ports[reqs[i]->dst_port_idx].mem);
+	  //reqs[i]->dst_base = static_cast<char *>(remote->get_remote_addr(reqs[i]->dst_off));
+	  //assert(reqs[i]->dst_base != 0);
         }
 	xd_lock.unlock();
         return new_nr;
@@ -2938,8 +2933,10 @@ namespace Realm {
 		   (dst_1d_maxbytes >= dst_sc_maxbytes)) {
 		  // 1D target
 		  NodeID dst_node = ID(out_port->mem->me).memory_owner_node();
-		  RemoteMemory *remote = checked_cast<RemoteMemory *>(out_port->mem);
-		  void *dst_buf = remote->get_remote_addr(out_alc.get_offset());
+		  RemoteAddress dst_buf;
+		  bool ok = out_port->mem->get_remote_addr(out_alc.get_offset(),
+							   dst_buf);
+		  assert(ok);
 
 		  // now look at the input
 		  size_t src_1d_maxbytes = ((in_dim > 0) ?
@@ -4492,12 +4489,15 @@ namespace Realm {
 	    out_port->needs_pbt_update.store(false);
 	    write_bytes_total = out_port->local_bytes_total;
 	  }
+	  RemoteAddress dst_buf;
+	  bool ok = out_port->mem->get_remote_addr(req->dst_off, dst_buf);
+	  assert(ok);
 	  // send a request if there's data or if there's a next XD to update
 	  if((req->nbytes > 0) ||
 	     (out_port->peer_guid != XferDes::XFERDES_NO_GUID)) {
 	    if (req->dim == Request::DIM_1D) {
 	      XferDesRemoteWriteMessage::send_request(
-                dst_node, req->dst_base, req->src_base, req->nbytes, req,
+                dst_node, dst_buf, req->src_base, req->nbytes, req,
 		out_port->peer_guid, out_port->peer_port_idx,
 		req->write_seq_pos, req->write_seq_count, 
 		write_bytes_total);
@@ -4506,7 +4506,7 @@ namespace Realm {
 	      // dest MUST be continuous
 	      assert(req->nlines <= 1 || ((size_t)req->dst_str) == req->nbytes);
 	      XferDesRemoteWriteMessage::send_request(
-                dst_node, req->dst_base, req->src_base, req->nbytes,
+                dst_node, dst_buf, req->src_base, req->nbytes,
                 req->src_str, req->nlines, req,
 		out_port->peer_guid, out_port->peer_port_idx,
 		req->write_seq_pos, req->write_seq_count, 

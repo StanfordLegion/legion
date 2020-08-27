@@ -131,7 +131,7 @@ namespace Realm {
     public:
       //NodeID dst_node;
       const void *src_base;
-      void *dst_base;
+      //void *dst_base;
       //size_t nbytes;
     };
 
@@ -1119,7 +1119,8 @@ namespace Realm {
 				 const void *data,
 				 size_t datalen);
 
-      static void send_request(NodeID target, void *dst_buf,
+      static void send_request(NodeID target,
+			       const RemoteAddress& dst_buf,
                                const void *src_buf, size_t nbytes,
                                RemoteWriteRequest* req,
 			       XferDesID next_xd_guid,
@@ -1141,7 +1142,8 @@ namespace Realm {
 	amsg.commit();
       }
 
-      static void send_request(NodeID target,  void *dst_buf,
+      static void send_request(NodeID target,
+			       const RemoteAddress& dst_buf,
                                const void *src_buf, size_t nbytes, off_t src_str,
                                size_t nlines, RemoteWriteRequest* req,
 			       XferDesID next_xd_guid,

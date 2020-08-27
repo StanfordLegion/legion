@@ -32,9 +32,23 @@ namespace Realm {
 
   class NetworkModule;
   class MemoryImpl;
+  class IBMemory;
   class ByteArray;
   class ActiveMessageImpl;
 
+  // a RemoteAddress is used to name the target of an RDMA operation - in some
+  //  cases it's as simple as a pointer, but in others additional info is needed
+  //  (hopefully we won't need more than 16B anywhere though)
+  struct RemoteAddress {
+    union {
+      struct {
+	uintptr_t ptr;
+	uintptr_t extra;
+      };
+      unsigned char raw_bytes[16];
+    };
+  };
+  
   namespace Network {
     // a few globals for efficiency
     extern NodeID my_node_id;
@@ -76,7 +90,17 @@ namespace Realm {
 						  const void *src_payload_addr,
 						  size_t src_payload_lines,
 						  size_t src_payload_line_stride,
-						  void *dest_payload_addr,
+						  void *storage_base,
+						  size_t storage_size);
+
+    ActiveMessageImpl *create_active_message_impl(NodeID target,
+						  unsigned short msgid,
+						  size_t header_size,
+						  size_t max_payload_size,
+						  const void *src_payload_addr,
+						  size_t src_payload_lines,
+						  size_t src_payload_line_stride,
+						  const RemoteAddress& dest_payload_addr,
 						  void *storage_base,
 						  size_t storage_size);
 
@@ -93,7 +117,7 @@ namespace Realm {
   };
 
   class NetworkSegment;
-  
+
   // a network module provides additional functionality on top of a normal Realm
   //  module
   class NetworkModule : public Module {
@@ -135,6 +159,8 @@ namespace Realm {
     // used to create a remote proxy for a memory
     virtual MemoryImpl *create_remote_memory(Memory m, size_t size, Memory::Kind kind,
 					     const ByteArray& rdma_info) = 0;
+    virtual IBMemory *create_remote_ib_memory(Memory m, size_t size, Memory::Kind kind,
+					      const ByteArray& rdma_info) = 0;
 
     virtual ActiveMessageImpl *create_active_message_impl(NodeID target,
 							  unsigned short msgid,
@@ -143,7 +169,17 @@ namespace Realm {
 							  const void *src_payload_addr,
 							  size_t src_payload_lines,
 							  size_t src_payload_line_stride,
-							  void *dest_payload_addr,
+							  void *storage_base,
+							  size_t storage_size) = 0;
+
+    virtual ActiveMessageImpl *create_active_message_impl(NodeID target,
+							  unsigned short msgid,
+							  size_t header_size,
+							  size_t max_payload_size,
+							  const void *src_payload_addr,
+							  size_t src_payload_lines,
+							  size_t src_payload_line_stride,
+							  const RemoteAddress& dest_payload_addr,
 							  void *storage_base,
 							  size_t storage_size) = 0;
 
@@ -187,7 +223,7 @@ namespace Realm {
 		       const void *data, size_t len);
     const ByteArray *get_rdma_info(NetworkModule *network) const;
   };
-  
+
 }; // namespace Realm
 
 #include "realm/network.inl"

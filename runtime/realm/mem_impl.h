@@ -20,6 +20,7 @@
 
 #include "realm/memory.h"
 #include "realm/id.h"
+#include "realm/network.h"
 
 #include "realm/activemsg.h"
 #include "realm/operation.h"
@@ -41,6 +42,167 @@ namespace Realm {
   class NetworkModule;
   class NetworkSegment;
   class ByteArray;
+
+  class MemoryImpl {
+  public:
+    enum MemoryKind {
+      MKIND_SYSMEM,  // directly accessible from CPU
+      MKIND_GLOBAL,  // accessible via GASnet (spread over all nodes)
+      MKIND_RDMA,    // remote, but accessible via RDMA
+      MKIND_REMOTE,  // not accessible
+
+      // defined even if REALM_USE_CUDA isn't
+      // TODO: make kinds more extensible
+      MKIND_GPUFB,   // GPU framebuffer memory (accessible via cudaMemcpy)
+
+      MKIND_ZEROCOPY, // CPU memory, pinned for GPU access
+      MKIND_DISK,    // disk memory accessible by owner node
+      MKIND_FILE,    // file memory accessible by owner node
+#ifdef REALM_USE_HDF5
+      MKIND_HDF,     // HDF memory accessible by owner node
+#endif
+    };
+
+    MemoryImpl(Memory _me, size_t _size,
+	       MemoryKind _kind, Memory::Kind _lowlevel_kind,
+	       const NetworkSegment *_segment);
+
+    virtual ~MemoryImpl(void);
+
+    // looks up an instance based on ID - creates a proxy object for
+    //   unknown IDs (metadata must be requested explicitly)
+    RegionInstanceImpl *get_instance(RegionInstance i);
+
+    // adds a new instance to this memory, to be filled in by caller
+    RegionInstanceImpl *new_instance(void);
+
+    // releases a deleted instance so that it can be reused
+    void release_instance(RegionInstance inst);
+
+    // attempt to allocate storage for the specified instance
+    enum AllocationResult {
+      ALLOC_INSTANT_SUCCESS,
+      ALLOC_INSTANT_FAILURE,
+      ALLOC_DEFERRED,
+      ALLOC_EVENTUAL_SUCCESS, // i.e. after a DEFERRED
+      ALLOC_EVENTUAL_FAILURE,
+      ALLOC_CANCELLED
+    };
+
+    // default implementation falls through (directly or indirectly) to
+    //  allocate_storage_immediate -  method need only be overridden by
+    //  memories that support deferred allocation
+    virtual AllocationResult allocate_storage_deferrable(RegionInstanceImpl *inst,
+							 bool need_alloc_result,
+							 Event precondition);
+
+    // release storage associated with an instance - this falls through to
+    //  release_storage_immediate similarly to the above
+    virtual void release_storage_deferrable(RegionInstanceImpl *inst,
+					    Event precondition);
+
+    // should only be called by RegionInstance::DeferredCreate or from
+    //  allocate_storage_deferrable
+    virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
+							bool need_alloc_result,
+							bool poisoned,
+							TimeLimit work_until) = 0;
+
+    // should only be called by RegionInstance::DeferredDestroy or from
+    //  release_storage_deferrable
+    virtual void release_storage_immediate(RegionInstanceImpl *inst,
+					   bool poisoned,
+					   TimeLimit work_until) = 0;
+
+    // TODO: try to rip these out?
+    virtual void get_bytes(off_t offset, void *dst, size_t size) = 0;
+    virtual void put_bytes(off_t offset, const void *src, size_t size) = 0;
+
+    virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
+				      size_t count, const void *entry_buffer)
+    {
+      assert(0);
+    }
+
+    virtual void *get_direct_ptr(off_t offset, size_t size) = 0;
+    virtual int get_home_node(off_t offset, size_t size) = 0;
+
+    virtual void *get_inst_ptr(RegionInstanceImpl *inst,
+			       off_t offset, size_t size);
+
+    // gets info related to rdma access from other nodes
+    const ByteArray *get_rdma_info(NetworkModule *network) const;
+    
+    virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
+
+    Memory::Kind get_kind(void) const;
+
+    struct InstanceList {
+      std::vector<RegionInstanceImpl *> instances;
+      std::vector<size_t> free_list;
+      Mutex mutex;
+    };
+
+  public:
+    Memory me;
+    size_t size;
+    MemoryKind kind;
+    Memory::Kind lowlevel_kind;
+    const NetworkSegment *segment;
+
+    // we keep a dedicated instance list for locally created
+    //  instances, but we use a map indexed by creator node for others,
+    //  and protect lookups in it with its own mutex
+    std::map<NodeID, InstanceList *> instances_by_creator;
+    Mutex instance_map_mutex;
+    InstanceList local_instances;
+  };
+
+  // a simple memory used for intermediate buffers in dma system
+  class IBMemory : public MemoryImpl {
+  public:
+    IBMemory(Memory _me, size_t _size,
+	     MemoryKind _kind, Memory::Kind _lowlevel_kind,
+	     void *prealloc_base, const NetworkSegment *_segment);
+
+    virtual ~IBMemory();
+
+    // old-style allocation used by IB memories
+    virtual off_t alloc_bytes_local(size_t size);
+    virtual void free_bytes_local(off_t offset, size_t size);
+
+    virtual void *get_direct_ptr(off_t offset, size_t size);
+    
+    // not used by IB memories
+    virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
+							bool need_alloc_result,
+							bool poisoned,
+							TimeLimit work_until);
+
+    virtual void release_storage_immediate(RegionInstanceImpl *inst,
+					   bool poisoned,
+					   TimeLimit work_until);
+
+    virtual void get_bytes(off_t offset, void *dst, size_t size)
+    {
+      assert(0);
+    }
+    virtual void put_bytes(off_t offset, const void *src, size_t size)
+    {
+      assert(0);
+    }
+    virtual int get_home_node(off_t offset, size_t size)
+    {
+      assert(0);
+      return 0;
+    }
+
+  protected:
+    Mutex mutex; // protection for resizing vectors
+    std::map<off_t, off_t> free_blocks;
+    char *base;
+    NetworkSegment *segment;
+  };
 
   // manages a basic free list of ranges (using range type RT) and allocated
   //  ranges, which are tagged (tag type TT)
@@ -82,99 +244,31 @@ namespace Realm {
     unsigned alloc_range(RT first, RT last);
     void free_range(unsigned index);
   };
-  
-    class MemoryImpl {
+
+    // a memory that manages its own allocations
+    class LocalManagedMemory : public MemoryImpl {
     public:
-      enum MemoryKind {
-	MKIND_SYSMEM,  // directly accessible from CPU
-	MKIND_GLOBAL,  // accessible via GASnet (spread over all nodes)
-	MKIND_RDMA,    // remote, but accessible via RDMA
-	MKIND_REMOTE,  // not accessible
+      LocalManagedMemory(Memory _me, size_t _size, MemoryKind _kind,
+			 size_t _alignment, Memory::Kind _lowlevel_kind,
+			 const NetworkSegment *_segment);
 
-	// defined even if REALM_USE_CUDA isn't
-	// TODO: make kinds more extensible
-	MKIND_GPUFB,   // GPU framebuffer memory (accessible via cudaMemcpy)
+      virtual ~LocalManagedMemory(void);
 
-	MKIND_ZEROCOPY, // CPU memory, pinned for GPU access
-	MKIND_DISK,    // disk memory accessible by owner node
-	MKIND_FILE,    // file memory accessible by owner node
-#ifdef REALM_USE_HDF5
-	MKIND_HDF      // HDF memory accessible by owner node
-#endif
-      };
+      virtual AllocationResult allocate_storage_deferrable(RegionInstanceImpl *inst,
+							   bool need_alloc_result,
+							   Event precondition);
 
-      MemoryImpl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Memory::Kind _lowlevel_kind);
+      virtual void release_storage_deferrable(RegionInstanceImpl *inst,
+					      Event precondition);
 
-      virtual ~MemoryImpl(void);
+      virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
+							  bool need_alloc_result,
+							  bool poisoned,
+							  TimeLimit work_until);
 
-      // looks up an instance based on ID - creates a proxy object for
-      //   unknown IDs (metadata must be requested explicitly)
-      RegionInstanceImpl *get_instance(RegionInstance i);
-
-      // adds a new instance to this memory, to be filled in by caller
-      RegionInstanceImpl *new_instance(void);
-
-      // releases a deleted instance so that it can be reused
-      void release_instance(RegionInstance inst);
-      
-      // attempt to allocate storage for the specified instance
-      enum AllocationResult {
-	ALLOC_INSTANT_SUCCESS,
-	ALLOC_INSTANT_FAILURE,
-	ALLOC_DEFERRED,
-	ALLOC_EVENTUAL_SUCCESS, // i.e. after a DEFERRED
-	ALLOC_EVENTUAL_FAILURE,
-	ALLOC_CANCELLED
-      };
-      virtual AllocationResult allocate_instance_storage(RegionInstance i,
-							 size_t bytes,
-							 size_t alignment,
-							 bool need_alloc_result,
-							 Event precondition, 
-							 // this will be used for zero-size allocs
-                    // TODO: ideally use something like (size_t)-2 here, but that will
-                    //  currently confuse the file read/write path in dma land
-							 size_t offset = 0);
-
-      // release storage associated with an instance
-      virtual void release_instance_storage(RegionInstanceImpl *inst,
-					    Event precondition);
-
-      virtual off_t alloc_bytes_local(size_t size);
-      virtual void free_bytes_local(off_t offset, size_t size);
-
-      virtual void get_bytes(off_t offset, void *dst, size_t size) = 0;
-      virtual void put_bytes(off_t offset, const void *src, size_t size) = 0;
-
-      virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-					size_t count, const void *entry_buffer)
-      {
-	assert(0);
-      }
-
-      virtual void *get_direct_ptr(off_t offset, size_t size) = 0;
-      virtual int get_home_node(off_t offset, size_t size) = 0;
-
-      // gets info related to rdma access from other nodes
-      virtual const ByteArray *get_rdma_info(NetworkModule *network) { return 0; }
-
-      Memory::Kind get_kind(void) const;
-
-      struct InstanceList {
-	std::vector<RegionInstanceImpl *> instances;
-	std::vector<size_t> free_list;
-	Mutex mutex;
-      };
-      
-      // should only be called by RegionInstance::DeferredCreate
-      void deferred_creation_triggered(RegionInstanceImpl *inst,
-				       size_t bytes, size_t alignment,
-				       bool need_alloc_result,
-				       bool poisoned, TimeLimit work_until);
-
-      // should only be called by RegionInstance::DeferredDestroy
-      void deferred_destruction_triggered(RegionInstanceImpl *inst,
-					  bool poisoned, TimeLimit work_until);
+      virtual void release_storage_immediate(RegionInstanceImpl *inst,
+					     bool poisoned,
+					     TimeLimit work_until);
 
     protected:
       // for internal use by allocation routines - must be called with
@@ -190,21 +284,8 @@ namespace Realm {
       bool attempt_release_reordering(std::vector<std::pair<RegionInstanceImpl *, size_t> >& successful_allocs);
 
     public:
-      Memory me;
-      size_t size;
-      MemoryKind kind;
       size_t alignment;
-      Memory::Kind lowlevel_kind;
 
-      // we keep a dedicated instance list for locally created
-      //  instances, but we use a map indexed by creator node for others,
-      //  and protect lookups in it with its own mutex
-      std::map<NodeID, InstanceList *> instances_by_creator;
-      Mutex instance_map_mutex;
-      InstanceList local_instances;
-
-      Mutex mutex; // protection for resizing vectors
-      std::map<off_t, off_t> free_blocks;
       Mutex allocator_mutex;
       // we keep up to three heap states:
       // current: always valid - tracks all completed allocations and all
@@ -237,7 +318,7 @@ namespace Realm {
       ProfilingGauges::AbsoluteGauge<size_t> usage, peak_usage, peak_footprint;
     };
 
-    class LocalCPUMemory : public MemoryImpl {
+    class LocalCPUMemory : public LocalManagedMemory {
     public:
       static const size_t ALIGNMENT = 256;
 
@@ -252,17 +333,14 @@ namespace Realm {
       virtual void *get_direct_ptr(off_t offset, size_t size);
       virtual int get_home_node(off_t offset, size_t size);
 
-      virtual const ByteArray *get_rdma_info(NetworkModule *network);
-      
     public:
       const int numa_node;
     public: //protected:
       char *base, *base_orig;
       bool prealloced;
-      const NetworkSegment *segment;
     };
 
-    class DiskMemory : public MemoryImpl {
+    class DiskMemory : public LocalManagedMemory {
     public:
       static const size_t ALIGNMENT = 256;
 
@@ -287,8 +365,6 @@ namespace Realm {
 
     class FileMemory : public MemoryImpl {
     public:
-      static const size_t ALIGNMENT = 256;
-
       FileMemory(Memory _me);
 
       virtual ~FileMemory(void);
@@ -298,14 +374,30 @@ namespace Realm {
 
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       void put_bytes(ID::IDType inst_id, off_t offset, const void *src, size_t size);
-
+#if 0
       virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
                                        size_t count, const void *entry_buffer);
-
+#endif
       virtual void *get_direct_ptr(off_t offset, size_t size);
       virtual int get_home_node(off_t offset, size_t size);
 
       int get_file_des(ID::IDType inst_id);
+
+      virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
+							  bool need_alloc_result,
+							  bool poisoned,
+							  TimeLimit work_until);
+
+      virtual void release_storage_immediate(RegionInstanceImpl *inst,
+					     bool poisoned,
+					     TimeLimit work_until);
+
+      // the 'mem_specific' data for a file instance contains OpenFileInfo
+      struct OpenFileInfo {
+	int fd;
+	size_t offset;
+      };
+
     public:
       std::vector<int> file_vec;
       Mutex vector_lock;
@@ -316,8 +408,25 @@ namespace Realm {
     class RemoteMemory : public MemoryImpl {
     public:
       RemoteMemory(Memory _me, size_t _size, Memory::Kind k,
-		   MemoryKind mk = MKIND_REMOTE);
+		   MemoryKind mk = MKIND_REMOTE,
+		   const NetworkSegment *_segment = 0);
       virtual ~RemoteMemory(void);
+
+      virtual AllocationResult allocate_storage_deferrable(RegionInstanceImpl *inst,
+							   bool need_alloc_result,
+							   Event precondition);
+
+      virtual void release_storage_deferrable(RegionInstanceImpl *inst,
+					      Event precondition);
+
+      virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
+							  bool need_alloc_result,
+							  bool poisoned,
+							  TimeLimit work_until);
+
+      virtual void release_storage_immediate(RegionInstanceImpl *inst,
+					     bool poisoned,
+					     TimeLimit work_until);
 
       // these are disallowed on a remote memory
       virtual off_t alloc_bytes_local(size_t size);
@@ -327,8 +436,6 @@ namespace Realm {
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
       virtual int get_home_node(off_t offset, size_t size);
-
-      virtual void *get_remote_addr(off_t offset);
     };
 
 
@@ -337,8 +444,6 @@ namespace Realm {
     struct MemStorageAllocRequest {
       Memory memory;
       RegionInstance inst;
-      size_t bytes;
-      unsigned alignment;
       bool need_alloc_result;
       Event precondition;
 

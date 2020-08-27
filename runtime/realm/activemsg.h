@@ -62,19 +62,24 @@ namespace Realm {
     //  of recipients
     // in addition to the header struct (T), a message can include a variable
     //  payload which can be delivered to a particular destination address
-    ActiveMessage(NodeID _target,
-		  size_t _max_payload_size = 0, void *_dest_payload_addr = 0);
+    ActiveMessage(NodeID _target, size_t _max_payload_size = 0);
+    ActiveMessage(NodeID _target, size_t _max_payload_size,
+		  const RemoteAddress& _dest_payload_addr);
     ActiveMessage(const Realm::NodeSet &_targets, size_t _max_payload_size = 0);
 
     // providing the payload (as a 1D or 2D reference, which must be PAYLOAD_KEEP)
     //  up front can avoid a copy if the source location is directly accessible
     //  by the networking hardware
+    ActiveMessage(NodeID _target, const void *_data, size_t _datalen);
     ActiveMessage(NodeID _target, const void *_data, size_t _datalen,
-		  void *_dest_payload_addr = 0);
+		  const RemoteAddress& _dest_payload_addr);
     ActiveMessage(const Realm::NodeSet &_targets,
 		  const void *_data, size_t _datalen);
     ActiveMessage(NodeID _target, const void *_data, size_t _bytes_per_line,
-		  size_t _lines, size_t _line_stride, void *_dest_payload_addr = 0);
+		  size_t _lines, size_t _line_stride);
+    ActiveMessage(NodeID _target, const void *_data, size_t _bytes_per_line,
+		  size_t _lines, size_t _line_stride,
+		  const RemoteAddress& _dest_payload_addr);
     ActiveMessage(const Realm::NodeSet &_targets,
 		  const void *_data, size_t _bytes_per_line,
 		  size_t _lines, size_t _line_stride);
@@ -83,13 +88,19 @@ namespace Realm {
 
     // a version of `init` for each constructor above
     void init(NodeID _target,
-	      size_t _max_payload_size = 0, void *_dest_payload_addr = 0);
+	      size_t _max_payload_size = 0);
+    void init(NodeID _target,
+	      size_t _max_payload_size, const RemoteAddress& _dest_payload_addr);
     void init(const Realm::NodeSet &_targets, size_t _max_payload_size = 0);
+    void init(NodeID _target, const void *_data, size_t _datalen);
     void init(NodeID _target, const void *_data, size_t _datalen,
-	      void *_dest_payload_addr = 0);
+	      const RemoteAddress& _dest_payload_addr);
     void init(const Realm::NodeSet &_targets, const void *_data, size_t _datalen);
     void init(NodeID _target, const void *_data, size_t _bytes_per_line,
-	      size_t _lines, size_t _line_stride, void *_dest_payload_addr = 0);
+	      size_t _lines, size_t _line_stride);
+    void init(NodeID _target, const void *_data, size_t _bytes_per_line,
+	      size_t _lines, size_t _line_stride,
+	      const RemoteAddress& _dest_payload_addr);
     void init(const Realm::NodeSet &_targets,
 	      const void *_data, size_t _bytes_per_line,
 	      size_t _lines, size_t _line_stride);

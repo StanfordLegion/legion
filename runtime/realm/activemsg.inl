@@ -38,8 +38,33 @@ namespace Realm {
 
   template <typename T>
   ActiveMessage<T>::ActiveMessage(NodeID _target,
-				  size_t _max_payload_size /*= 0*/,
-				  void *_dest_payload_addr /*= 0*/)
+				  size_t _max_payload_size /*= 0*/)
+    : impl(0)
+  {
+    init(_target, _max_payload_size);
+  }
+      
+  template <typename T>
+  void ActiveMessage<T>::init(NodeID _target,
+			      size_t _max_payload_size /*= 0*/)
+  {
+    assert(impl == 0);
+    unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
+    impl = Network::create_active_message_impl(_target,
+					       msgid,
+					       sizeof(T),
+					       _max_payload_size,
+					       0, 0, 0,
+					       &inline_capacity,
+					       INLINE_STORAGE);
+    header = new(impl->header_base) T;
+    fbs.reset(impl->payload_base, impl->payload_size);
+  }
+    
+  template <typename T>
+  ActiveMessage<T>::ActiveMessage(NodeID _target,
+				  size_t _max_payload_size,
+				  const RemoteAddress& _dest_payload_addr)
     : impl(0)
   {
     init(_target, _max_payload_size, _dest_payload_addr);
@@ -47,8 +72,8 @@ namespace Realm {
       
   template <typename T>
   void ActiveMessage<T>::init(NodeID _target,
-			      size_t _max_payload_size /*= 0*/,
-			      void *_dest_payload_addr /*= 0*/)
+			      size_t _max_payload_size,
+			      const RemoteAddress& _dest_payload_addr)
   {
     assert(impl == 0);
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
@@ -91,7 +116,32 @@ namespace Realm {
 
   template <typename T>
   ActiveMessage<T>::ActiveMessage(NodeID _target, const void *_data,
-				  size_t _datalen, void *_dest_payload_addr /*= 0*/)
+				  size_t _datalen)
+    : impl(0)
+  {
+    init(_target, _data, _datalen);
+  }
+    
+  template <typename T>
+  void ActiveMessage<T>::init(NodeID _target, const void *_data,
+			      size_t _datalen)
+  {
+    assert(impl == 0);
+    unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
+    impl = Network::create_active_message_impl(_target,
+					       msgid,
+					       sizeof(T),
+					       _datalen,
+					       _data, 0, 0,
+					       &inline_capacity,
+					       INLINE_STORAGE);
+    header = new(impl->header_base) T;
+  }
+    
+  template <typename T>
+  ActiveMessage<T>::ActiveMessage(NodeID _target, const void *_data,
+				  size_t _datalen,
+				  const RemoteAddress& _dest_payload_addr)
     : impl(0)
   {
     init(_target, _data, _datalen, _dest_payload_addr);
@@ -99,7 +149,8 @@ namespace Realm {
     
   template <typename T>
   void ActiveMessage<T>::init(NodeID _target, const void *_data,
-			      size_t _datalen, void *_dest_payload_addr /*= 0*/)
+			      size_t _datalen,
+			      const RemoteAddress& _dest_payload_addr)
   {
     assert(impl == 0);
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
@@ -141,8 +192,34 @@ namespace Realm {
   template <typename T>
   ActiveMessage<T>::ActiveMessage(NodeID _target, const void *_data,
 				  size_t _bytes_per_line, size_t _lines,
+				  size_t _line_stride)
+    : impl(0)
+  {
+    init(_target, _data, _bytes_per_line, _lines, _line_stride);
+  }
+
+  template <typename T>
+  void ActiveMessage<T>::init(NodeID _target, const void *_data,
+			      size_t _bytes_per_line, size_t _lines,
+			      size_t _line_stride)
+  {
+    assert(impl == 0);
+    unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
+    impl = Network::create_active_message_impl(_target,
+					       msgid,
+					       sizeof(T),
+					       _bytes_per_line * _lines,
+					       _data, _lines, _line_stride,
+					       &inline_capacity,
+					       INLINE_STORAGE);
+    header = new(impl->header_base) T;
+  }
+
+  template <typename T>
+  ActiveMessage<T>::ActiveMessage(NodeID _target, const void *_data,
+				  size_t _bytes_per_line, size_t _lines,
 				  size_t _line_stride,
-				  void *_dest_payload_addr /*= 0*/)
+				  const RemoteAddress& _dest_payload_addr)
     : impl(0)
   {
     init(_target, _data, _bytes_per_line, _lines, _line_stride, _dest_payload_addr);
@@ -152,7 +229,7 @@ namespace Realm {
   void ActiveMessage<T>::init(NodeID _target, const void *_data,
 			      size_t _bytes_per_line, size_t _lines,
 			      size_t _line_stride,
-			      void *_dest_payload_addr /*= 0*/)
+			      const RemoteAddress& _dest_payload_addr)
   {
     assert(impl == 0);
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();

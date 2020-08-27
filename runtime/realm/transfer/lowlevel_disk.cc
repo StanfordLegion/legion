@@ -73,9 +73,13 @@ static int fsync(int fd)
 #endif
 
 namespace Realm {
+
+  extern Logger log_inst;
   
     DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
-      : MemoryImpl(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM), file(_file)
+      : LocalManagedMemory(_me, _size, MKIND_DISK, ALIGNMENT,
+			   Memory::DISK_MEM, 0)
+      , file(_file)
     {
       printf("file = %s\n", _file.c_str());
       // do not overwrite an existing file
@@ -88,7 +92,6 @@ namespace Realm {
 #else
       assert(ret == 0);
 #endif
-      free_blocks[0] = (off_t)_size;
     }
 
     DiskMemory::~DiskMemory(void)
@@ -136,7 +139,7 @@ namespace Realm {
     }
 
     FileMemory::FileMemory(Memory _me)
-      : MemoryImpl(_me, 0 /*no memory space*/, MKIND_FILE, ALIGNMENT, Memory::FILE_MEM)
+      : MemoryImpl(_me, 0 /*no memory space*/, MKIND_FILE, Memory::FILE_MEM, 0)
       , next_offset(0x12340000LL)  // something not zero for debugging
     {
     }
@@ -147,6 +150,8 @@ namespace Realm {
 
     void FileMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
+      assert(0);
+#if 0
       // map from the offset back to the instance index
       assert(offset < next_offset);
       vector_lock.lock();
@@ -159,10 +164,13 @@ namespace Realm {
       off_t rel_offset = offset - it->first;
       vector_lock.unlock();
       get_bytes(index, rel_offset, dst, size);
+#endif
     }
 
     void FileMemory::get_bytes(ID::IDType inst_id, off_t offset, void *dst, size_t size)
     {
+      assert(0);
+#if 0
       vector_lock.lock();
       int fd = file_vec[inst_id];
       vector_lock.unlock();
@@ -172,10 +180,13 @@ namespace Realm {
 #else
       assert(ret == size);
 #endif
+#endif
     }
 
     void FileMemory::put_bytes(off_t offset, const void *src, size_t)
     {
+      assert(0);
+#if 0
       // map from the offset back to the instance index
       assert(offset < next_offset);
       vector_lock.lock();
@@ -188,10 +199,13 @@ namespace Realm {
       off_t rel_offset = offset - it->first;
       vector_lock.unlock();
       put_bytes(index, rel_offset, src, size);
+#endif
     }
 
     void FileMemory::put_bytes(ID::IDType inst_id, off_t offset, const void *src, size_t size)
     {
+      assert(0);
+#if 0
       vector_lock.lock();
       int fd = file_vec[inst_id];
       vector_lock.unlock();
@@ -201,10 +215,8 @@ namespace Realm {
 #else
       assert(ret == size);
 #endif
+#endif
     }
-
-    void FileMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-                                          size_t count, const void *entry_buffer) {}
 
     void *FileMemory::get_direct_ptr(off_t offset, size_t size)
     {
@@ -224,88 +236,87 @@ namespace Realm {
       return fd;
     }
 
-  template <int N, typename T>
-  /*static*/ Event RegionInstance::create_file_instance(RegionInstance& inst,
-							const char *file_name,
-							const IndexSpace<N,T>& space,
-							const std::vector<FieldID> &field_ids,
-							const std::vector<size_t> &field_sizes,
-							realm_file_mode_t file_mode,
-							const ProfilingRequestSet& prs,
-							Event wait_on /*= Event::NO_EVENT*/)
-  {
-    // look up the local file memory
-    Memory memory = Machine::MemoryQuery(Machine::get_machine())
-      .local_address_space()
-      .only_kind(Memory::FILE_MEM)
-      .first();
-    assert(memory.exists());
-    
-    // construct an instance layout for the new instance
-    // for now, we put the fields in order and use a fortran
-    //  linearization
-    InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
-    layout->bytes_used = 0;
-    layout->alignment_reqd = 0;  // no allocation being made
-    layout->space = space;
-    layout->piece_lists.resize(field_sizes.size());
-
-    size_t file_ofs = 0;
-    for(size_t i = 0; i < field_sizes.size(); i++) {
-      FieldID id = field_ids[i];
-      InstanceLayoutGeneric::FieldLayout& fl = layout->fields[id];
-      fl.list_idx = i;
-      fl.rel_offset = 0;
-      fl.size_in_bytes = field_sizes[i];
-
-      // create a single piece (for non-empty index spaces)
-      if(!space.empty()) {
-	AffineLayoutPiece<N,T> *alp = new AffineLayoutPiece<N,T>;
-	alp->bounds = space.bounds;
-	alp->offset = file_ofs;
-	size_t stride = field_sizes[i];
-	for(int j = 0; j < N; j++) {
-	  alp->strides[j] = stride;
-	  alp->offset -= space.bounds.lo[j] * stride;
-	  stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
-	}
-	layout->piece_lists[i].pieces.push_back(alp);
-	file_ofs += stride;
+    MemoryImpl::AllocationResult FileMemory::allocate_storage_immediate(RegionInstanceImpl *inst,
+									bool need_alloc_result,
+									bool poisoned,
+									TimeLimit work_until)
+    {
+      // if the allocation request doesn't include an external file resource,
+      //  we fail it immediately
+      ExternalFileResource *res = dynamic_cast<ExternalFileResource *>(inst->metadata.ext_resource);
+      if(res == 0) {
+	if(inst->metadata.ext_resource)
+	  log_inst.warning() << "attempt to register non-file resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
+	else
+	  log_inst.warning() << "attempt to allocate memory in file memory: layout=" << *(inst->metadata.layout);
+	inst->notify_allocation(ALLOC_INSTANT_FAILURE, 0, work_until);
+	return ALLOC_INSTANT_FAILURE;
       }
-    }
 
-    // continue to support creating the file for now
-    if(file_mode == LEGION_FILE_CREATE) {
-      int fd = open(file_name, O_CREAT | O_RDWR, 0777);
+      // poisoned preconditions cancel the allocation request
+      if(poisoned) {
+	inst->notify_allocation(ALLOC_CANCELLED, 0, work_until);
+	return ALLOC_CANCELLED;
+      }
+
+      // try to open the file
+      int fd;
+      switch(res->mode) {
+      case LEGION_FILE_READ_ONLY:
+	{
+	  fd = open(res->filename.c_str(), O_RDONLY);
+	  break;
+	}
+      case LEGION_FILE_READ_WRITE:
+	{
+	  fd = open(res->filename.c_str(), O_RDWR);
+	  break;
+	}
+      case LEGION_FILE_CREATE:
+	{
+	  fd = open(res->filename.c_str(), O_CREAT | O_RDWR, 0777);
+	  assert(fd != -1);
+	  // resize the file to what we want
+	  int ret = ftruncate(fd, inst->metadata.layout->bytes_used);
+	  assert(ret == 0);
+	  break;
+	}
+      default:
+	assert(0);
+      }
+
       assert(fd != -1);
-      // resize the file to what we want
-      int ret = ftruncate(fd, file_ofs);
-      assert(ret == 0);
-      ret = close(fd);
-      assert(ret == 0);
+
+      OpenFileInfo *info = new OpenFileInfo;
+      info->fd = fd;
+      info->offset = res->offset;
+
+      inst->metadata.mem_specific = info;
+
+      AllocationResult result = ALLOC_INSTANT_SUCCESS;
+      size_t inst_offset = 0;
+      inst->notify_allocation(result, inst_offset, work_until);
+
+      return result;
     }
-    
-    // and now create the instance using this layout
-    Event e = create_instance(inst, memory, layout, prs, wait_on);
 
-    // stuff the filename into the impl's metadata for now
-    RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
-    impl->metadata.filename = file_name;
+    // release storage associated with an instance
+    void FileMemory::release_storage_immediate(RegionInstanceImpl *inst,
+					       bool poisoned,
+					       TimeLimit work_until)
+    {
+      // nothing to do for a poisoned release
+      if(poisoned)
+	return;
 
-    return e;
-  }
+      OpenFileInfo *info = reinterpret_cast<OpenFileInfo *>(inst->metadata.mem_specific);
+      assert(info != 0);
+      close(info->fd);
+      delete info;
+      inst->metadata.mem_specific = 0;
 
-  #define DOIT(N,T) \
-  template Event RegionInstance::create_file_instance<N,T>(RegionInstance&, \
-							   const char *, \
-							   const IndexSpace<N,T>&, \
-							   const std::vector<FieldID>&, \
-							   const std::vector<size_t>&, \
-                                                           realm_file_mode_t, \
-							   const ProfilingRequestSet&, \
-							   Event);
-  FOREACH_NT(DOIT)
-
+      inst->notify_deallocation();
+    }
 
 
 }

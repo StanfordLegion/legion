@@ -36,6 +36,26 @@ namespace Realm {
 
   namespace HDF5 {
 
+    class HDF5Dataset {
+    public:
+      static HDF5Dataset *open(const char *filename,
+			       const char *dsetname,
+			       bool read_only);
+      void flush();
+      void close();
+
+    protected:
+      HDF5Dataset();
+      ~HDF5Dataset();
+
+    public:
+      hid_t file_id, dset_id, dtype_id;
+      int ndims;
+      static const int MAX_DIM = 16;
+      hsize_t dset_size[MAX_DIM];
+      bool read_only;
+    };
+
     class HDF5Memory : public MemoryImpl {
     public:
       static const size_t ALIGNMENT = 256;
@@ -51,16 +71,14 @@ namespace Realm {
       virtual void *get_direct_ptr(off_t offset, size_t size);
       virtual int get_home_node(off_t offset, size_t size);
 
-    public:
-      struct HDFMetadata {
-        int lo[3];
-        hsize_t dims[3];
-        int ndims;
-        hid_t file_id;
-	std::map<size_t, hid_t> dataset_ids;
-	std::map<size_t, hid_t> datatype_ids;
-      };
-      std::map<RegionInstance, HDFMetadata *> hdf_metadata;
+      virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
+							  bool need_alloc_result,
+							  bool poisoned,
+							  TimeLimit work_until);
+
+      virtual void release_storage_immediate(RegionInstanceImpl *inst,
+					     bool poisoned,
+					     TimeLimit work_until);
     };
 
     class HDF5WriteChannel : public MemPairCopierFactory {

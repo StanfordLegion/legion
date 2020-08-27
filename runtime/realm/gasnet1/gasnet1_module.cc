@@ -54,7 +54,7 @@ namespace Realm {
   // class GASNet1Memory
   //
 
-  class GASNet1Memory : public MemoryImpl {
+  class GASNet1Memory : public LocalManagedMemory {
   public:
     static const size_t MEMORY_STRIDE = 1024;
 
@@ -92,8 +92,8 @@ namespace Realm {
 
   GASNet1Memory::GASNet1Memory(Memory _me, size_t size_per_node,
 			       NetworkModule *_gasnet)
-    : MemoryImpl(_me, 0 /* we'll calculate it below */, MKIND_GLOBAL,
-		 MEMORY_STRIDE, Memory::GLOBAL_MEM)
+    : LocalManagedMemory(_me, 0 /* we'll calculate it below */, MKIND_GLOBAL,
+			 MEMORY_STRIDE, Memory::GLOBAL_MEM, 0)
     , gasnet(_gasnet)
   {
     num_nodes = Network::max_node_id + 1;
@@ -110,10 +110,6 @@ namespace Realm {
 
     size = size_per_node * num_nodes;
     memory_stride = MEMORY_STRIDE;
-      
-    free_blocks[0] = size;
-    // tell new allocator about the available memory too
-    current_allocator.add_range(0, size);
   }
 
   GASNet1Memory::~GASNet1Memory(void)
@@ -318,7 +314,7 @@ namespace Realm {
     virtual void get_bytes(off_t offset, void *dst, size_t size);
     virtual void put_bytes(off_t offset, const void *src, size_t size);
 
-    virtual void *get_remote_addr(off_t offset);
+    virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
 
   protected:
     char *regbase;
@@ -344,12 +340,41 @@ namespace Realm {
 	       const_cast<void *>(src), size);
   }
 
-  void *GASNet1RemoteMemory::get_remote_addr(off_t offset)
+  bool GASNet1RemoteMemory::get_remote_addr(off_t offset, RemoteAddress& remote_addr)
   {
-    return (regbase + offset);
+    remote_addr.ptr = reinterpret_cast<uintptr_t>(regbase + offset);
+    return true;
   }
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class GASNet1IBMemory
+  //
+
+  class GASNet1IBMemory : public IBMemory {
+  public:
+    GASNet1IBMemory(Memory _me, size_t _size, Memory::Kind k, void *_regbase);
+
+    virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
+
+  protected:
+    char *regbase;
+  };
+
+  GASNet1IBMemory::GASNet1IBMemory(Memory _me, size_t _size, Memory::Kind k,
+				   void *_regbase)
+    : IBMemory(_me, _size, MKIND_REMOTE, k, 0, 0)
+    , regbase(static_cast<char *>(_regbase))
+  {}
+
+  bool GASNet1IBMemory::get_remote_addr(off_t offset, RemoteAddress& remote_addr)
+  {
+    remote_addr.ptr = reinterpret_cast<uintptr_t>(regbase + offset);
+    return true;
+  }
   
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class GASNet1MessageImpl
@@ -790,6 +815,17 @@ namespace Realm {
     }
   }
   
+  IBMemory *GASNet1Module::create_remote_ib_memory(Memory m, size_t size, Memory::Kind kind,
+						   const ByteArray& rdma_info)
+  {
+    // rdma info should be the pointer in the remote address space
+    assert(rdma_info.size() == sizeof(void *));
+    void *regbase;
+    memcpy(&regbase, rdma_info.base(), sizeof(void *));
+
+    return new GASNet1IBMemory(m, size, kind, regbase);
+  }
+
   ActiveMessageImpl *GASNet1Module::create_active_message_impl(NodeID target,
 							       unsigned short msgid,
 							       size_t header_size,
@@ -797,7 +833,6 @@ namespace Realm {
 							       const void *src_payload_addr,
 							       size_t src_payload_lines,
 							       size_t src_payload_line_stride,
-							       void *dest_payload_addr,
 							       void *storage_base,
 							       size_t storage_size)
   {
@@ -809,7 +844,32 @@ namespace Realm {
 								    src_payload_addr,
 								    src_payload_lines,
 								    src_payload_line_stride,
-								    dest_payload_addr);
+								    0);
+    return impl;
+  }
+
+  ActiveMessageImpl *GASNet1Module::create_active_message_impl(NodeID target,
+							       unsigned short msgid,
+							       size_t header_size,
+							       size_t max_payload_size,
+							       const void *src_payload_addr,
+							       size_t src_payload_lines,
+							       size_t src_payload_line_stride,
+							       const RemoteAddress& dest_payload_addr,
+							       void *storage_base,
+							       size_t storage_size)
+  {
+    assert(storage_size >= sizeof(GASNet1MessageImpl));
+    void *dest_ptr = reinterpret_cast<void *>(dest_payload_addr.ptr);
+    assert(dest_ptr != 0);
+    GASNet1MessageImpl *impl = new(storage_base) GASNet1MessageImpl(target,
+								    msgid,
+								    header_size,
+								    max_payload_size,
+								    src_payload_addr,
+								    src_payload_lines,
+								    src_payload_line_stride,
+								    dest_ptr);
     return impl;
   }
 

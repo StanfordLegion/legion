@@ -774,7 +774,7 @@ namespace Realm {
       Realm::CoreReservation *core_rsrv;
     };
 
-    class GPUFBMemory : public MemoryImpl {
+    class GPUFBMemory : public LocalManagedMemory {
     public:
       GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size);
 
@@ -793,7 +793,7 @@ namespace Realm {
       CUdeviceptr base;
     };
 
-    class GPUZCMemory : public MemoryImpl {
+    class GPUZCMemory : public LocalManagedMemory {
     public:
       GPUZCMemory(Memory _me, CUdeviceptr _gpu_base, void *_cpu_base, size_t _size);
 

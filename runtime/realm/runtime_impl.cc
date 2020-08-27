@@ -763,7 +763,7 @@ namespace Realm {
       nodes[Network::my_node_id].memories.push_back(m);
     }
 
-    void RuntimeImpl::add_ib_memory(MemoryImpl *m)
+    void RuntimeImpl::add_ib_memory(IBMemory *m)
     {
       // right now expect this to always be for the current node and the next memory ID
       ID id(m->me);
@@ -1287,17 +1287,17 @@ namespace Realm {
 	  it++)
 	(*it)->create_processors(this);
 
-      LocalCPUMemory *reg_ib_mem;
+      IBMemory *reg_ib_mem;
       if(reg_ib_mem_size > 0) {
 	void *reg_ib_mem_base = reg_ib_mem_segment.base;
 	assert(reg_ib_mem_base != 0);
 	Memory m = get_runtime()->next_local_ib_memory_id();
-	reg_ib_mem = new LocalCPUMemory(m,
-				        reg_ib_mem_size,
-                                        -1/*don't care numa domain*/,
-                                        Memory::REGDMA_MEM,
-				        reg_ib_mem_base,
-					&reg_ib_mem_segment);
+	reg_ib_mem = new IBMemory(m,
+				  reg_ib_mem_size,
+				  MemoryImpl::MKIND_SYSMEM,
+				  Memory::REGDMA_MEM,
+				  reg_ib_mem_base,
+				  &reg_ib_mem_segment);
 	get_runtime()->add_ib_memory(reg_ib_mem);
       } else
         reg_ib_mem = 0;
@@ -1524,7 +1524,7 @@ namespace Realm {
 	      ok = ok && (dbs << *rdma_info);
 	  }
 
-        for (std::vector<MemoryImpl *>::const_iterator it = n->ib_memories.begin();
+        for (std::vector<IBMemory *>::const_iterator it = n->ib_memories.begin();
              it != n->ib_memories.end();
              it++)
           if(*it) {
@@ -2364,6 +2364,17 @@ namespace Realm {
 
       log_runtime.fatal() << "invalid memory handle: id=" << id;
       assert(0 && "invalid memory handle");
+      return 0;
+    }
+
+    IBMemory *RuntimeImpl::get_ib_memory_impl(ID id)
+    {
+      if(id.is_ib_memory()) {
+        return null_check(nodes[id.memory_owner_node()].ib_memories[id.memory_mem_idx()]);
+      }
+
+      log_runtime.fatal() << "invalid ib memory handle: id=" << id;
+      assert(0 && "invalid ib memory handle");
       return 0;
     }
 

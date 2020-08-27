@@ -21,33 +21,15 @@
 #include "realm/inst_layout.h"
 #include <string>
 
-#include <hdf5.h>
-
 namespace Realm {
 
-  namespace HDF5 {
+  // we avoid including hdf5.h here, but we need a definition for something that'll
+  //  be compatible with HDF5's hsize_t
+  typedef unsigned long long hdf5_size_t;
 
-    class HDF5Dataset {
-    public:
-      static HDF5Dataset *open(const char *filename,
-			       const char *dsetname,
-			       bool read_only);
-      void flush();
-      void close();
-
-    protected:
-      HDF5Dataset();
-      ~HDF5Dataset();
-
-    public:
-      hid_t file_id, dset_id, dtype_id;
-      int ndims;
-      static const int MAX_DIM = 16;
-      hsize_t dset_size[MAX_DIM];
-      bool read_only;
-    };
-  }; // namespace HDF5
-
+  namespace PieceLayoutTypes {
+    static const LayoutType HDF5LayoutType = 2;
+  };
 
   template <int N, typename T>
   class HDF5LayoutPiece : public InstanceLayoutPiece<N,T> {
@@ -65,13 +47,17 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
+    virtual size_t lookup_inst_size() const;
+    virtual PieceLookup::Instruction *create_lookup_inst(void *ptr,
+							 unsigned next_delta) const ;
+
     static Serialization::PolymorphicSerdezSubclass<InstanceLayoutPiece<N,T>, HDF5LayoutPiece<N,T> > serdez_subclass;
 
     template <typename S>
     bool serialize(S& serializer) const;
 
-    std::string filename, dsetname;
-    Point<N, hsize_t> offset;
+    std::string dsetname;
+    Point<N, hdf5_size_t> offset;
     int dim_order[N];
     bool read_only;
   };
@@ -79,18 +65,25 @@ namespace Realm {
 
   namespace PieceLookup {
 
+    namespace Opcodes {
+      static const Opcode OP_HDF5_PIECE = 3;  // this is an HDF5Piece<N,T>
+    }
+
+    static const unsigned ALLOW_HDF5_PIECE = 1U << Opcodes::OP_HDF5_PIECE;
+
     template <int N, typename T>
     struct HDF5Piece : public Instruction {
       // data is: { delta[23:0], opcode[7:0] }
       // top 24 bits of data is jump delta
+      HDF5Piece(unsigned next_delta);
+
       unsigned delta() const;
 
-      unsigned short filename_len, dsetname_len;
-      const char *filename() const;
+      unsigned short dsetname_len;
       const char *dsetname() const;
 
       Rect<N,T> bounds;
-      Point<N, hsize_t> offset;
+      Point<N, hdf5_size_t> offset;
       int dim_order[N];
       bool read_only;
 
@@ -99,6 +92,33 @@ namespace Realm {
 
   };
 
+
+  class REALM_PUBLIC_API ExternalHDF5Resource : public ExternalInstanceResource {
+  public:
+    ExternalHDF5Resource(const std::string& _filename, bool _read_only);
+
+    // returns the suggested memory in which this resource should be created
+    Memory suggested_memory() const;
+
+    virtual ExternalInstanceResource *clone(void) const;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
+
+    template <typename S>
+    static ExternalInstanceResource *deserialize_new(S& deserializer);
+
+  protected:
+    ExternalHDF5Resource();
+
+    static Serialization::PolymorphicSerdezSubclass<ExternalInstanceResource, ExternalHDF5Resource> serdez_subclass;
+
+    virtual void print(std::ostream& os) const;
+
+  public:
+    std::string filename;
+    bool read_only;
+  };
 
 }; // namespace Realm
 

@@ -24,21 +24,17 @@
 #include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
 
-#define DISP_OFFSET 0x100
-
 void enqueue_message(int target, int msgid,
                      const void *args, size_t arg_size,
                      const void *payload, size_t payload_size,
 		     size_t payload_lines, size_t payload_line_stride,
-                     void *dstptr, void *remote_comp)
+		     MPI_Aint dst_offset, void *remote_comp)
 {
-    MPI_Aint disp = (MPI_Aint)dstptr;
-    if (disp) {
-        /* Displacement is shifted by DISP_OFFSET */
-        Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, payload_lines, payload_line_stride, 1, disp - DISP_OFFSET, remote_comp);
-    } else {
-        Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, payload_lines, payload_line_stride, 0, 0, remote_comp);
-    }
+    Realm::MPI::AMSend(target, msgid, arg_size, payload_size,
+		       (const char *) args, (const char *) payload,
+		       payload_lines, payload_line_stride,
+		       (dst_offset >= 0),
+		       dst_offset, remote_comp);
 }
 
 namespace Realm {
@@ -52,7 +48,7 @@ namespace Realm {
      * To spread the memory access evenly, it uses round-robin policy with "memory_stride" chunk size.
      * NOTE: the MPI window is assumed to be opened with MPI_Win_unlock_all and to be freed by "user"
      */
-    class MPIMemory : public MemoryImpl {
+    class MPIMemory : public LocalManagedMemory {
     public:
         static const size_t MEMORY_STRIDE = 1024;
 
@@ -91,8 +87,8 @@ namespace Realm {
 
     MPIMemory::MPIMemory(Memory _me, size_t size_per_node,
                            MPI_Win _win, NetworkModule *_network)
-        : MemoryImpl(_me, 0 /* we'll calculate it below */, MKIND_GLOBAL,
-                     MEMORY_STRIDE, Memory::GLOBAL_MEM)
+        : LocalManagedMemory(_me, 0 /* we'll calculate it below */, MKIND_GLOBAL,
+			     MEMORY_STRIDE, Memory::GLOBAL_MEM, 0)
         , win(_win)
         , my_network(_network)
     {
@@ -101,7 +97,6 @@ namespace Realm {
 
         size = size_per_node * num_nodes;
         
-        free_blocks[0] = size;
         current_allocator.add_range(0, size);
     }
 
@@ -287,7 +282,7 @@ namespace Realm {
         virtual void get_bytes(off_t offset, void *dst, size_t size);
         virtual void put_bytes(off_t offset, const void *src, size_t size);
 
-        virtual void *get_remote_addr(off_t offset);
+        virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
 
       protected:
         int rank;
@@ -317,10 +312,39 @@ namespace Realm {
         CHECK_MPI( MPI_Win_flush(rank, win) );
     }
 
-    void *MPIRemoteMemory::get_remote_addr(off_t offset)
+    bool MPIRemoteMemory::get_remote_addr(off_t offset, RemoteAddress& remote_addr)
     {
-        /* shift by DISP_OFFSET so it is never zero */
-        return (void *) (base + offset + DISP_OFFSET);
+        // MPI puts and gets use offsets, but add this memory's base in the window
+        remote_addr.ptr = (base + offset);
+	return true;
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class MPIIBMemory
+    //
+
+    class MPIIBMemory : public IBMemory {
+    public:
+      MPIIBMemory(Memory _me, size_t _size, Memory::Kind k, MPI_Aint _base);
+
+      virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
+
+    protected:
+      MPI_Aint base;
+    };
+
+    MPIIBMemory::MPIIBMemory(Memory _me, size_t _size, Memory::Kind k,
+			     MPI_Aint _base)
+      : IBMemory(_me, _size, MKIND_REMOTE, k, 0, 0)
+      , base(_base)
+    {}
+
+    bool MPIIBMemory::get_remote_addr(off_t offset, RemoteAddress& remote_addr)
+    {
+        // MPI puts and gets use offsets, but add this memory's base in the window
+        remote_addr.ptr = (base + offset);
+	return true;
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -349,11 +373,18 @@ namespace Realm {
         MPIMessageImpl(NodeID _target,
                         unsigned short _msgid,
                         size_t _header_size,
+		        size_t _max_payload_size,
+		        const void *_src_payload_addr,
+		        size_t _src_payload_lines,
+		        size_t _src_payload_line_stride);
+        MPIMessageImpl(NodeID _target,
+                        unsigned short _msgid,
+                        size_t _header_size,
                         size_t _max_payload_size,
 		        const void *_src_payload_addr,
 		        size_t _src_payload_lines,
 		        size_t _src_payload_line_stride,
-                        void *_dest_payload_addr);
+		        const RemoteAddress& _dest_payload_addr);
         MPIMessageImpl(const Realm::NodeSet &_targets,
                         unsigned short _msgid,
                         size_t _header_size,
@@ -380,7 +411,7 @@ namespace Realm {
         const void *src_payload_addr;
         size_t src_payload_lines;
         size_t src_payload_line_stride;
-        void *dest_payload_addr;
+        MPI_Aint dest_payload_offset;
         size_t header_size;
         CompletionList *local_comp, *remote_comp;
 
@@ -395,14 +426,41 @@ namespace Realm {
                                      size_t _max_payload_size,
 				     const void *_src_payload_addr,
 				     size_t _src_payload_lines,
-				     size_t _src_payload_line_stride,
-                                     void *_dest_payload_addr)
+				     size_t _src_payload_line_stride)
         : target(_target)
         , is_multicast(false)
 	, src_payload_addr(_src_payload_addr)
 	, src_payload_lines(_src_payload_lines)
 	, src_payload_line_stride(_src_payload_line_stride)
-        , dest_payload_addr(_dest_payload_addr)
+	, dest_payload_offset(-1)
+        , header_size(_header_size)
+	, local_comp(0)
+	, remote_comp(0)
+        , msgid(_msgid)
+    {
+        if(_max_payload_size && (src_payload_addr == 0)) {
+            payload_base = reinterpret_cast<char *>(malloc(_max_payload_size));
+        } else {
+            payload_base = 0;
+        }
+        payload_size = _max_payload_size;
+        header_base = &msg_header;
+    }
+
+    MPIMessageImpl::MPIMessageImpl(NodeID _target,
+                                     unsigned short _msgid,
+                                     size_t _header_size,
+                                     size_t _max_payload_size,
+				     const void *_src_payload_addr,
+				     size_t _src_payload_lines,
+				     size_t _src_payload_line_stride,
+				     const RemoteAddress& _dest_payload_addr)
+        : target(_target)
+        , is_multicast(false)
+	, src_payload_addr(_src_payload_addr)
+	, src_payload_lines(_src_payload_lines)
+	, src_payload_line_stride(_src_payload_line_stride)
+	, dest_payload_offset(_dest_payload_addr.ptr)
         , header_size(_header_size)
 	, local_comp(0)
 	, remote_comp(0)
@@ -429,7 +487,7 @@ namespace Realm {
 	, src_payload_addr(_src_payload_addr)
 	, src_payload_lines(_src_payload_lines)
 	, src_payload_line_stride(_src_payload_line_stride)
-        , dest_payload_addr(0)
+        , dest_payload_offset(-1)
         , header_size(_header_size)
 	, local_comp(0)
 	, remote_comp(0)
@@ -475,7 +533,7 @@ namespace Realm {
     void MPIMessageImpl::commit(size_t act_payload_size)
     {
         if(is_multicast) {
-	    assert(dest_payload_addr == 0);
+	    assert(dest_payload_offset < 0);
 	    assert(remote_comp == 0);
 	    for(NodeSet::const_iterator it = targets.begin();
 		it != targets.end();
@@ -484,20 +542,20 @@ namespace Realm {
 		enqueue_message(*it, msgid, &msg_header, header_size,
 				src_payload_addr, act_payload_size,
 				src_payload_lines, src_payload_line_stride,
-				NULL, 0);
+				-1, 0);
 	      else
 		enqueue_message(*it, msgid, &msg_header, header_size,
-				payload_base, act_payload_size, 0, 0, NULL, 0);
+				payload_base, act_payload_size, 0, 0, -1, 0);
         } else {
 	    if(src_payload_addr != 0)
 	      enqueue_message(target, msgid, &msg_header, header_size,
 			      src_payload_addr, act_payload_size,
 			      src_payload_lines, src_payload_line_stride,
-			      dest_payload_addr, remote_comp);
+			      dest_payload_offset, remote_comp);
 	    else
 	      enqueue_message(target, msgid, &msg_header, header_size,
 			      payload_base, act_payload_size, 0, 0,
-			      dest_payload_addr, remote_comp);
+			      dest_payload_offset, remote_comp);
         }
 	if(payload_size && (src_payload_addr == 0))
 	  free(payload_base);
@@ -750,6 +808,20 @@ namespace Realm {
     }
   }
   
+  IBMemory *MPIModule::create_remote_ib_memory(Memory m, size_t size, Memory::Kind kind,
+					       const ByteArray& rdma_info)
+  {
+    // rdma info should be the pointer in the remote address space
+    assert(rdma_info.size() == sizeof(void *));
+    char *base;
+    memcpy(&base, rdma_info.base(), sizeof(void *));
+    // get displacement to the window
+    int rank = ID(m).memory_owner_node();
+    MPI_Aint disp = (MPI_Aint) base - (MPI_Aint) g_am_bases[rank];
+
+    return new MPIIBMemory(m, size, kind, disp);
+  }
+  
   ActiveMessageImpl *MPIModule::create_active_message_impl(NodeID target,
 							    unsigned short msgid,
 							    size_t header_size,
@@ -757,7 +829,28 @@ namespace Realm {
 							    const void *src_payload_addr,
 							    size_t src_payload_lines,
 							    size_t src_payload_line_stride,
-							    void *dest_payload_addr,
+							    void *storage_base,
+							    size_t storage_size)
+  {
+    assert(storage_size >= sizeof(MPIMessageImpl));
+    MPIMessageImpl *impl = new(storage_base) MPIMessageImpl(target,
+						              msgid,
+							      header_size,
+							      max_payload_size,
+							      src_payload_addr,
+							      src_payload_lines,
+							      src_payload_line_stride);
+    return impl;
+  }
+
+  ActiveMessageImpl *MPIModule::create_active_message_impl(NodeID target,
+							    unsigned short msgid,
+							    size_t header_size,
+							    size_t max_payload_size,
+							    const void *src_payload_addr,
+							    size_t src_payload_lines,
+							    size_t src_payload_line_stride,
+							    const RemoteAddress& dest_payload_addr,
 							    void *storage_base,
 							    size_t storage_size)
   {
