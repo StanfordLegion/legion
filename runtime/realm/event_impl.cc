@@ -266,7 +266,7 @@ namespace Realm {
     // a poisoned event causes an exception because the caller isn't prepared for it
     if(poisoned) {
 #ifdef REALM_USE_EXCEPTIONS
-      if(Thread::self()->exceptions_permitted()) {
+      if(Thread::self() && Thread::self()->exceptions_permitted()) {
 	throw PoisonedEventException(*this);
       } else
 #endif
