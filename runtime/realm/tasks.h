@@ -177,6 +177,19 @@ namespace Realm {
       typedef IntrusiveList<InternalTask, REALM_PMTA_USE(InternalTask,tl_link), Mutex> TaskList;
     };
 
+    // a common extension for processors is to provide some context for
+    //  running tasks - this can be done by subclassing and overriding
+    //  `execute_task`, but simple cases can be handled with
+    //  TaskContextManagers
+    class TaskContextManager {
+    public:
+      // create a context for the specified task - the value returned will
+      //  be provided to the call to destroy_context
+      virtual void *create_context(Task *task) const = 0;
+
+      virtual void destroy_context(Task *task, void *context) const = 0;
+    };
+
     // a task scheduler in which one or more worker threads execute tasks from one
     //  or more task queues
     // once given a task, a worker must complete it before taking on new work
@@ -196,6 +209,10 @@ namespace Realm {
       virtual void configure_bgworker(BackgroundWorkManager *manager,
 				      long long max_timeslice,
 				      int numa_domain);
+
+      // add a context manager - each new one "wraps" the previous ones,
+      //  constructing its context after them and destroying before
+      void add_task_context(const TaskContextManager *_manager);
 
       virtual void start(void) = 0;
       virtual void shutdown(void) = 0;
@@ -235,6 +252,8 @@ namespace Realm {
       std::set<Thread *> blocked_workers;
       // threads that block while holding a scheduler lock go here instead
       std::set<Thread *> spinning_workers;
+
+      std::vector<const TaskContextManager *> context_managers;
 
       // internal task list is NOT guarded by the main mutex
       InternalTask::TaskList internal_tasks;
