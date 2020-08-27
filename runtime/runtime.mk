@@ -214,6 +214,11 @@ ifeq ($(strip $(USE_COMPLEX)),1)
   LEGION_CC_FLAGS += -DLEGION_REDOP_COMPLEX
 endif
 
+USE_COMPLEX_COMPARE ?= 0
+ifeq ($(strip $(USE_COMPLEX_COMPARE)),1)
+  LEGION_CC_FLAGS += -DLEGION_COMPLEX_LEXICOGRAPHIC_COMPARE
+endif
+
 ifeq ($(strip $(USE_HWLOC)),1)
   ifndef HWLOC
     $(error HWLOC variable is not defined, aborting build)
