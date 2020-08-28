@@ -14,7 +14,7 @@ enum {
   WORKER_TASK,
 };
 
-int num_iterations = 2 << ID::INSTANCE_INDEX_WIDTH;
+int num_iterations = 1024;  // can't actually test long enough to exhaust IDs
 size_t max_live_instances = 4;
 
 struct WorkerArgs {
@@ -46,6 +46,7 @@ void top_level_task(const void *args, size_t arglen,
 
   std::deque<RegionInstance> instances;
   std::deque<Event> finish_events;
+  std::set<RegionInstance> ids_used;
 
   for(int i = 0; i < num_iterations; i++) {
     // pick different bounds for each instance
@@ -65,6 +66,15 @@ void top_level_task(const void *args, size_t arglen,
 				    0 /*SOA*/,
 				    ProfilingRequestSet());
     assert(inst.exists());
+
+    // since we can't run long enough to actually exhaust instance IDs, we
+    //  check that the number of unique IDs we use isn't larger than the
+    //  maximum live at any time - this check is only possible when we're
+    //  working with a local memory though
+    if(m_worker.address_space() == p.address_space()) {
+      ids_used.insert(inst);
+      assert(ids_used.size() <= max_live_instances);
+    }
 
     // prefetch the metadata for the worker processor - this event includes
     //  the successful instance creation above

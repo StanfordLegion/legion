@@ -35,21 +35,21 @@ namespace Realm {
       //  packed with the first field (the type tag) in the most significant bits of the 64-bit ID.
 
       // EVENT:       tag:1 = 0b1,  creator_node:16, gen_event_idx: 27, generation: 20
-      // BARRIER:     tag:4 = 0x7,  creator_node:16, barrier_idx: 24, generation: 20
+      // BARRIER:     tag:4 = 0x2,  creator_node:16, barrier_idx: 24, generation: 20
       // RESERVATION: tag:8 = 0x1f, creator_node:16, (unused):8, rsrv_idx: 32
-      // MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 12
-      // IB_MEMORY:   tag:8 = 0x1a, owner_node:16,   (unused):28, mem_idx: 12
-      // INSTANCE:    tag:4 = 0x6,  owner_node:16,   creator_node:16, mem_idx: 12, inst_idx : 16
+      // MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
+      // IB_MEMORY:   tag:8 = 0x1a, owner_node:16,   (unused):32, mem_idx: 8
+      // INSTANCE:    tag:2 = 0b01, owner_node:16,   creator_node:16, mem_idx: 8, inst_idx : 22
       // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
       // PROCGROUP:   tag:8 = 0x1c, owner_node:16,   creator_node:16, pgroup_idx: 24
-      // SPARSITY:    tag:4 = 0x4,  owner_node:16,   creator_node:16, sparsity_idx: 28
+      // SPARSITY:    tag:4 = 0x3,  owner_node:16,   creator_node:16, sparsity_idx: 28
       // COMPQUEUE:   tag:8 = 0x19, owner_node:16,   (unused):28, cq_idx: 12
-      // SUBGRAPH:    tag:8 = 0x19, creator_node:16, (unused):16, subgraph_idx: 24
+      // SUBGRAPH:    tag:8 = 0x18, creator_node:16, (unused):16, subgraph_idx: 24
 
       static const int NODE_FIELD_WIDTH = 16;
       static const unsigned MAX_NODE_ID = (1U << NODE_FIELD_WIDTH) - 2; // reserve all 1's for special cases
       static const int EVENT_GENERATION_WIDTH = REALM_EVENT_GENERATION_BITS; // fom realm_c.h
-      static const int INSTANCE_INDEX_WIDTH = 16;
+      static const int INSTANCE_INDEX_WIDTH = 22;
 
 #define ACCESSOR(structname, name, field) \
       bitpack<IDType>::bitsliceref<structname::field> name ## _ ## field() { return id.slice<structname::field>(); } \
@@ -80,7 +80,7 @@ namespace Realm {
 			 EVENT_GENERATION_WIDTH> barrier_idx;
 	typedef bitfield<EVENT_GENERATION_WIDTH, 0> generation;  // MUST MATCH FMT_Event::generation size
 
-	static const IDType TAG_VALUE = 7;
+	static const IDType TAG_VALUE = 2;
       };
 
       ACCESSOR(FMT_Barrier, barrier, type_tag)
@@ -107,7 +107,7 @@ namespace Realm {
 	typedef bitfield<NODE_FIELD_WIDTH,
 			 56-NODE_FIELD_WIDTH> owner_node;
 	// middle bits unused
-	typedef bitfield<12, 0> mem_idx;
+	typedef bitfield<8, 0> mem_idx;
 
 	static const IDType TAG_VALUE = 0x1e;
       };
@@ -122,15 +122,15 @@ namespace Realm {
       };
 
       struct FMT_Instance {
-	typedef bitfield<4, 60> type_tag;
+	typedef bitfield<2, 62> type_tag;
 	typedef bitfield<NODE_FIELD_WIDTH,
-			 60-NODE_FIELD_WIDTH> owner_node;
+			 62-NODE_FIELD_WIDTH> owner_node;
 	typedef bitfield<NODE_FIELD_WIDTH,
-			 60-2*NODE_FIELD_WIDTH> creator_node;
-	typedef bitfield<12, INSTANCE_INDEX_WIDTH> mem_idx;
+			 62-2*NODE_FIELD_WIDTH> creator_node;
+	typedef bitfield<8, INSTANCE_INDEX_WIDTH> mem_idx;
 	typedef bitfield<INSTANCE_INDEX_WIDTH, 0> inst_idx;
 
-	static const IDType TAG_VALUE = 0x6;
+	static const IDType TAG_VALUE = 1;
       };
 
       ACCESSOR(FMT_Instance, instance, type_tag)
@@ -177,7 +177,7 @@ namespace Realm {
 			 60-2*NODE_FIELD_WIDTH> creator_node;
 	typedef bitfield<28, 0> sparsity_idx;
 
-	static const IDType TAG_VALUE = 0x4;
+	static const IDType TAG_VALUE = 0x3;
       };
 
       ACCESSOR(FMT_Sparsity, sparsity, type_tag)
