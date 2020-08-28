@@ -810,6 +810,10 @@ namespace Realm {
       assert(0);
     }
 
+    // this can run arbitrary python code, which might ask which processor it's
+    //  on
+    ThreadLocal::current_processor = me;
+
     // we'll take either a python function or a cpp function
     PyObject *python_fnptr = 0;
     Processor::TaskFuncPtr cpp_fnptr = 0;
