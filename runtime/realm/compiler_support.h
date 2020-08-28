@@ -136,15 +136,22 @@
 
 // REALM_ATTR_DEPRECATED(msg, thing) - indicates `thing` is deprecated, printing
 //                                     `msg` at compile time if possible
+// REALM_ATTR_DEPRECATED2(msg, thing1, thing2) - above when `thing` has commas in it
 #ifdef __ICC
   #define REALM_ATTR_DEPRECATED(msg, thing)				\
                                     thing __attribute__((deprecated))
+  #define REALM_ATTR_DEPRECATED2(msg, thing1, thing2)			\
+                                    thing1, thing2 __attribute__((deprecated))
 #elif defined(_MSC_VER)
   #define REALM_ATTR_DEPRECATED(msg, thing)				\
                                     __declspec(deprecated(msg)) thing
+  #define REALM_ATTR_DEPRECATED2(msg, thing1, thing2)			\
+                                    __declspec(deprecated(msg)) thing1, thing2
 #else
   #define REALM_ATTR_DEPRECATED(msg, thing)				\
                                     thing __attribute__((deprecated(msg)))
+  #define REALM_ATTR_DEPRECATED2(msg, thing1, thing2)			\
+                                    thing1, thing2 __attribute__((deprecated(msg)))
 #endif
 
 // REALM_ALIGNOF(type) - returns the byte alignment required for `type`
