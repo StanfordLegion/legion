@@ -882,8 +882,6 @@ namespace Legion {
       SEND_REMOTE_OP_PROFILING_COUNT_UPDATE,
       SEND_REMOTE_TRACE_UPDATE,
       SEND_REMOTE_TRACE_RESPONSE,
-      SEND_REMOTE_TRACE_EQ_REQUEST,
-      SEND_REMOTE_TRACE_EQ_RESPONSE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1087,8 +1085,6 @@ namespace Legion {
         "Remote Op Profiling Count Update",                           \
         "Send Remote Trace Update",                                   \
         "Send Remote Trace Response",                                 \
-        "Send Remote Trace Equivalence Sets Request",                 \
-        "Send Remote Trace Equivalence Sets Response",                \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };

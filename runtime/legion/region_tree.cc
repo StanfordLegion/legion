@@ -2075,7 +2075,7 @@ namespace Legion {
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
               trace_info.record_op_view(analysis->usage, inst_mask, 
-                  analysis->target_views[idx], map_applied_events);
+                  analysis->target_views[idx], local_expr, map_applied_events);
           }
           if (!user_applied.empty())
           {
@@ -2099,7 +2099,7 @@ namespace Legion {
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
               trace_info.record_op_view(analysis->usage, inst_mask, 
-                  analysis->target_views[idx], map_applied_events);
+                  analysis->target_views[idx], local_expr, map_applied_events);
           }
         }
       }

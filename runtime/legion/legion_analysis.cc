@@ -622,12 +622,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_copy_views(ApEvent lhs, Memoizable *memo,
-                                              unsigned src_idx,unsigned dst_idx,
-                                              IndexSpaceExpression *expr,
+    void RemoteTraceRecorder::record_copy_views(ApEvent lhs, 
+                                                IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
-                                              std::set<RtEvent> &applied)
+                                                std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -639,10 +638,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_COPY_VIEWS);
           rez.serialize(done);
-          memo->pack_remote_memoizable(rez, origin_space);
           rez.serialize(lhs);
-          rez.serialize(src_idx);
-          rez.serialize(dst_idx);
           expr->pack_expression(rez, origin_space);
           rez.serialize<size_t>(tracing_srcs.size());
           for (FieldMaskSet<InstanceView>::const_iterator it = 
@@ -663,8 +659,8 @@ namespace Legion {
         applied.insert(done);
       }
       else
-        remote_tpl->record_copy_views(lhs, memo, src_idx, dst_idx, expr,
-                                      tracing_srcs, tracing_dsts, applied);
+        remote_tpl->record_copy_views(lhs, expr, tracing_srcs, 
+                                      tracing_dsts, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -739,8 +735,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_fill_views(ApEvent lhs, Memoizable *memo,
-                                 unsigned idx, IndexSpaceExpression *expr, 
+    void RemoteTraceRecorder::record_fill_views(ApEvent lhs,
+                                 IndexSpaceExpression *expr, 
                                  const FieldMaskSet<FillView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
                                  std::set<RtEvent> &applied_events,
@@ -756,8 +752,6 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_FILL_VIEWS);
           rez.serialize(done);
-          memo->pack_remote_memoizable(rez, origin_space);
-          rez.serialize(idx);
           rez.serialize(lhs);
           expr->pack_expression(rez, origin_space);
           rez.serialize<size_t>(tracing_srcs.size());
@@ -780,8 +774,8 @@ namespace Legion {
         applied_events.insert(done);
       }
       else
-        remote_tpl->record_fill_views(lhs, memo, idx, expr, tracing_srcs,
-                  tracing_dsts, applied_events, reduction_initialization);
+        remote_tpl->record_fill_views(lhs, expr, tracing_srcs, tracing_dsts,
+                                      applied_events, reduction_initialization);
     }
 
     //--------------------------------------------------------------------------
@@ -850,6 +844,7 @@ namespace Legion {
     void RemoteTraceRecorder::record_op_view(Memoizable *memo,
                                              unsigned idx,
                                              InstanceView *view,
+                                             IndexSpaceNode *expr,
                                              const RegionUsage &usage,
                                              const FieldMask &user_mask,
                                              bool update_validity,
@@ -868,6 +863,7 @@ namespace Legion {
           memo->pack_remote_memoizable(rez, origin_space);
           rez.serialize(idx);
           rez.serialize(view->did);
+          rez.serialize(expr->handle);
           rez.serialize(usage);
           rez.serialize(user_mask);
           rez.serialize<bool>(update_validity);
@@ -877,7 +873,7 @@ namespace Legion {
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_op_view(memo, idx, view, usage, 
+        remote_tpl->record_op_view(memo, idx, view, expr, usage, 
                                    user_mask, update_validity, effects);
     }
 
@@ -1238,13 +1234,8 @@ namespace Legion {
           {
             RtUserEvent done;
             derez.deserialize(done);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
             ApUserEvent lhs;
             derez.deserialize(lhs);
-            unsigned src_idx, dst_idx;
-            derez.deserialize(src_idx);
-            derez.deserialize(dst_idx);
             RegionTreeForest *forest = runtime->forest;
             IndexSpaceExpression *expr = 
               IndexSpaceExpression::unpack_expression(derez, forest, source);
@@ -1287,14 +1278,12 @@ namespace Legion {
               if (wait_on.exists() && !wait_on.has_triggered())
                 wait_on.wait();
             }
-            tpl->record_copy_views(lhs, memo, src_idx, dst_idx, expr,
-                                   tracing_srcs, tracing_dsts, ready_events);
+            tpl->record_copy_views(lhs, expr, tracing_srcs, 
+                                   tracing_dsts, ready_events);
             if (!ready_events.empty())
               Runtime::trigger_event(done, Runtime::merge_events(ready_events));
             else
               Runtime::trigger_event(done);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_ISSUE_FILL:
@@ -1360,10 +1349,6 @@ namespace Legion {
           {
             RtUserEvent done;
             derez.deserialize(done);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
-            unsigned index;
-            derez.deserialize(index);
             ApUserEvent lhs;
             derez.deserialize(lhs);
             RegionTreeForest *forest = runtime->forest;
@@ -1411,14 +1396,12 @@ namespace Legion {
               if (wait_on.exists() && !wait_on.has_triggered())
                 wait_on.wait();
             }
-            tpl->record_fill_views(lhs, memo, index, expr, tracing_srcs,
-                   tracing_dsts, ready_events, reduction_initialization);
+            tpl->record_fill_views(lhs, expr, tracing_srcs, tracing_dsts, 
+                                   ready_events, reduction_initialization);
             if (!ready_events.empty())
               Runtime::trigger_event(done, Runtime::merge_events(ready_events));
             else
               Runtime::trigger_event(done);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
 #ifdef LEGION_GPU_REDUCTIONS
@@ -1506,16 +1489,19 @@ namespace Legion {
             RtEvent ready;
             InstanceView *view = static_cast<InstanceView*>(
                 runtime->find_or_request_logical_view(did, ready));           
+            IndexSpace handle;
+            derez.deserialize(handle);
             RegionUsage usage;
             derez.deserialize(usage);
             FieldMask user_mask;
             derez.deserialize(user_mask);
             bool update_validity;
             derez.deserialize<bool>(update_validity);
+            IndexSpaceNode *node = runtime->forest->get_node(handle);
             if (ready.exists() && !ready.has_triggered())
               ready.wait();
             std::set<RtEvent> effects;
-            tpl->record_op_view(memo, index, view, usage, 
+            tpl->record_op_view(memo, index, view, node, usage, 
                                 user_mask, update_validity, effects);
             if (!effects.empty())
               Runtime::trigger_event(applied, Runtime::merge_events(effects));

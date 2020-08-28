@@ -901,8 +901,6 @@ namespace Legion {
       virtual ApEvent compute_sync_precondition(const TraceInfo *in) const = 0;
       virtual void set_effects_postcondition(ApEvent postcondition) = 0;
       virtual void complete_replay(ApEvent complete_event) = 0;
-      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
-        const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const = 0;
     protected:
       virtual const VersionInfo& get_version_info(unsigned idx) const = 0;
     public:
@@ -934,8 +932,6 @@ namespace Legion {
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
       virtual void set_effects_postcondition(ApEvent postcondition);
       virtual void complete_replay(ApEvent complete_event);
-      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
-          const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const;
     protected:
       virtual const VersionInfo& get_version_info(unsigned idx) const;
     public:
@@ -944,9 +940,6 @@ namespace Legion {
       virtual Memoizable* clone(Operation *op);
       static Memoizable* unpack_remote_memoizable(Deserializer &derez,
                                       Operation *op, Runtime *runtime);
-      static void handle_eq_request(Deserializer &derez, Runtime *runtime,
-                                    AddressSpaceID source);
-      static void handle_eq_response(Deserializer &derez, Runtime *runtime);
     public:
       Operation *const op;
       Memoizable *const original; // not a valid pointer on remote nodes
@@ -1005,8 +998,6 @@ namespace Legion {
       virtual Operation::OpKind get_memoizable_kind(void) const
         { return this->get_operation_kind(); }
       virtual ApEvent compute_init_precondition(const TraceInfo &info);
-      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx, 
-          const FieldMask &mask, FieldMaskSet<EquivalenceSet> &eqs) const;
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
     public:

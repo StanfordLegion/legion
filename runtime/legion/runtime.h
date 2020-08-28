@@ -2866,10 +2866,6 @@ namespace Legion {
                                                  Serializer &rez);
       void send_remote_trace_update(AddressSpaceID target, Serializer &rez);
       void send_remote_trace_response(AddressSpaceID target, Serializer &rez);
-      void send_remote_trace_equivalence_sets_request(AddressSpaceID target,
-                                                      Serializer &rez);
-      void send_remote_trace_equivalence_sets_response(AddressSpaceID target,
-                                                       Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -3157,9 +3153,6 @@ namespace Legion {
       void handle_remote_tracing_update(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_remote_tracing_response(Deserializer &derez);
-      void handle_remote_tracing_eq_request(Deserializer &derez,
-                                            AddressSpaceID source);
-      void handle_remote_tracing_eq_response(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);

@@ -423,31 +423,6 @@ namespace Legion {
         return this->execution_fence_event;
     }
 
-#ifdef NEWEQ
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void MemoizableOp<OP>::find_equivalence_sets(Runtime *runtime, unsigned idx, 
-                 const FieldMask &mask, FieldMaskSet<EquivalenceSet> &eqs) const
-    //--------------------------------------------------------------------------
-    {
-      const VersionInfo &info = get_version_info(idx);
-      const FieldMaskSet<EquivalenceSet> &sets = info.get_equivalence_sets();
-      if (mask != sets.get_valid_mask())
-      {
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              sets.begin(); it != sets.end(); it++)
-        {
-          const FieldMask overlap = it->second & mask;
-          if (!overlap)
-            continue;
-          eqs.insert(it->first, overlap);
-        }
-      }
-      else
-        eqs = sets;
-    }
-#endif
-
     //--------------------------------------------------------------------------
     template<typename OP>
     void MemoizableOp<OP>::invoke_memoize_operation(MapperID mapper_id)
