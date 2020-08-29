@@ -1,6 +1,8 @@
 #ifndef __LEGION_IO_H__
 #define __LEGION_IO_H__
 
+// this test makes use of lots of deprecated Legion API calls - ignore for now
+#define LEGION_DEPRECATED(x)
 
 #include "legion.h"
 
@@ -24,7 +26,6 @@ enum FieldIDs {
   //  FID_VOR,
   //  FID_PERS,
 };
-
 
 
 using namespace LegionRuntime::HighLevel;
