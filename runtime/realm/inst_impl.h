@@ -129,7 +129,12 @@ namespace Realm {
 	void *serialize(size_t& out_size) const;
 
 	template<typename T>
-	  void serialize_msg(T &fbd) const;
+	void serialize_msg(T &s) const
+	{
+	  bool ok = ((s << inst_offset) &&
+		     (s << *layout));
+	  assert(ok);
+	}
 
 	void deserialize(const void *in_data, size_t in_size);
 
@@ -137,23 +142,12 @@ namespace Realm {
 	virtual void do_invalidate(void);
 
       public:
-	off_t alloc_offset;
-	size_t size;
-	ReductionOpID redopid;
-	off_t count_offset;
-	off_t red_list_size;
-	size_t block_size, elmt_size;
-	std::vector<size_t> field_sizes;
-	RegionInstance parent_inst;
-
 	size_t inst_offset;
 	Event ready_event;
 	bool need_alloc_result, need_notify_dealloc;
 	InstanceLayoutGeneric *layout;
 	ExternalInstanceResource *ext_resource;
 	void *mem_specific;  // a place for memory's to hang info
-	std::string filename; // temp hack for attached files
-
 	CompiledInstanceLayout lookup_program;
       };
 

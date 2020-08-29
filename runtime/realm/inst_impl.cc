@@ -1335,17 +1335,7 @@ namespace Realm {
     {
       Serialization::DynamicBufferSerializer dbs(128);
 
-      bool ok = ((dbs << alloc_offset) &&
-		 (dbs << size) &&
-		 (dbs << redopid) &&
-		 (dbs << count_offset) &&
-		 (dbs << red_list_size) &&
-		 (dbs << block_size) &&
-		 (dbs << elmt_size) &&
-		 (dbs << field_sizes) &&
-		 (dbs << parent_inst) &&
-		 (dbs << inst_offset) &&
-		 (dbs << filename) &&
+      bool ok = ((dbs << inst_offset) &&
 		 (dbs << *layout));
       assert(ok);
 
@@ -1353,46 +1343,11 @@ namespace Realm {
       return dbs.detach_buffer(0 /*trim*/);
     }
 
-  template <typename T>
-  void RegionInstanceImpl::Metadata::serialize_msg(T& fbs) const
-    {
-      bool ok = ((fbs << alloc_offset) &&
-		 (fbs << size) &&
-		 (fbs << redopid) &&
-		 (fbs << count_offset) &&
-		 (fbs << red_list_size) &&
-		 (fbs << block_size) &&
-		 (fbs << elmt_size) &&
-		 (fbs << field_sizes) &&
-		 (fbs << parent_inst) &&
-		 (fbs << inst_offset) &&
-		 (fbs << filename) &&
-		 (fbs << *layout));
-      assert(ok);
-    }
-
-  // these are used above, but may get inlined, so we need to explicitly
-  //  instantiate them to satisfy metadata.cc's reference
-  template
-  void RegionInstanceImpl::Metadata::serialize_msg(Serialization::ByteCountSerializer&) const;
-  template
-  void RegionInstanceImpl::Metadata::serialize_msg(ActiveMessage<MetadataResponseMessage>&) const;
-
     void RegionInstanceImpl::Metadata::deserialize(const void *in_data, size_t in_size)
     {
       Serialization::FixedBufferDeserializer fbd(in_data, in_size);
 
-      bool ok = ((fbd >> alloc_offset) &&
-		 (fbd >> size) &&
-		 (fbd >> redopid) &&
-		 (fbd >> count_offset) &&
-		 (fbd >> red_list_size) &&
-		 (fbd >> block_size) &&
-		 (fbd >> elmt_size) &&
-		 (fbd >> field_sizes) &&
-		 (fbd >> parent_inst) &&
-		 (fbd >> inst_offset) &&
-		 (fbd >> filename));
+      bool ok = (fbd >> inst_offset);
       if(ok) {
 	layout = InstanceLayoutGeneric::deserialize_new(fbd);
 	layout->compile_lookup_program(lookup_program);

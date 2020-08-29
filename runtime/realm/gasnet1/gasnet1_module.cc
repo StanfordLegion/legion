@@ -66,11 +66,7 @@ namespace Realm {
 
     virtual void put_bytes(off_t offset, const void *src, size_t size);
     
-    virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-				      size_t count, const void *entry_buffer);
-
     virtual void *get_direct_ptr(off_t offset, size_t size);
-    virtual int get_home_node(off_t offset, size_t size);
 
     void get_batch(size_t batch_size,
 		   const off_t *offsets, void * const *dsts, 
@@ -148,41 +144,9 @@ namespace Realm {
     }
   }
 
-  void GASNet1Memory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-					   size_t count, const void *entry_buffer)
-  {
-    assert(0);
-#ifdef NEED_TO_FIX_REDUCTION_LISTS_FOR_DEPPART
-    const char *entry = (const char *)entry_buffer;
-    unsigned ptr;
-
-    for(size_t i = 0; i < count; i++) {
-      redop->get_list_pointers(&ptr, entry, 1);
-      //printf("ptr[%d] = %d\n", i, ptr);
-      off_t elem_offset = offset + ptr * redop->sizeof_lhs;
-      off_t blkid = (elem_offset / memory_stride / num_nodes);
-      off_t node = (elem_offset / memory_stride) % num_nodes;
-      off_t blkoffset = elem_offset % memory_stride;
-      assert(node == Network::my_node_id);
-      char *tgt_ptr = ((char *)seginfos[node].addr)+(blkid * memory_stride)+blkoffset;
-      redop->apply_list_entry(tgt_ptr, entry, 1, ptr);
-      entry += redop->sizeof_list_entry;
-    }
-#endif
-  }
-
   void *GASNet1Memory::get_direct_ptr(off_t offset, size_t size)
   {
     return 0;  // can't give a pointer to the caller - have to use RDMA
-  }
-
-  int GASNet1Memory::get_home_node(off_t offset, size_t size)
-  {
-    off_t start_blk = offset / memory_stride;
-    off_t end_blk = (offset + size - 1) / memory_stride;
-    if(start_blk != end_blk) return -1;
-    
-    return start_blk % num_nodes;
   }
 
   void GASNet1Memory::get_batch(size_t batch_size,

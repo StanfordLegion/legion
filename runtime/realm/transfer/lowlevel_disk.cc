@@ -123,24 +123,13 @@ namespace Realm {
 #endif
     }
 
-    void DiskMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-                        size_t count, const void *entry_buffer)
-    {
-    }
-
     void *DiskMemory::get_direct_ptr(off_t offset, size_t size)
     {
       return 0; // cannot provide a pointer for it.
     }
 
-    int DiskMemory::get_home_node(off_t offset, size_t size)
-    {
-      return Network::my_node_id;
-    }
-
     FileMemory::FileMemory(Memory _me)
       : MemoryImpl(_me, 0 /*no memory space*/, MKIND_FILE, Memory::FILE_MEM, 0)
-      , next_offset(0x12340000LL)  // something not zero for debugging
     {
     }
 
@@ -151,89 +140,26 @@ namespace Realm {
     void FileMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
       assert(0);
-#if 0
-      // map from the offset back to the instance index
-      assert(offset < next_offset);
-      vector_lock.lock();
-      // this finds the first entry _AFTER_ the one we want
-      std::map<off_t, int>::const_iterator it = offset_map.upper_bound(offset);
-      assert(it != offset_map.begin());
-      // back up to the element we want
-      --it;
-      ID::IDType index = it->second;
-      off_t rel_offset = offset - it->first;
-      vector_lock.unlock();
-      get_bytes(index, rel_offset, dst, size);
-#endif
     }
 
     void FileMemory::get_bytes(ID::IDType inst_id, off_t offset, void *dst, size_t size)
     {
       assert(0);
-#if 0
-      vector_lock.lock();
-      int fd = file_vec[inst_id];
-      vector_lock.unlock();
-      size_t ret = pread(fd, dst, size, offset);
-#ifdef NDEBUG
-      (void)ret;
-#else
-      assert(ret == size);
-#endif
-#endif
     }
 
     void FileMemory::put_bytes(off_t offset, const void *src, size_t)
     {
       assert(0);
-#if 0
-      // map from the offset back to the instance index
-      assert(offset < next_offset);
-      vector_lock.lock();
-      // this finds the first entry _AFTER_ the one we want
-      std::map<off_t, int>::const_iterator it = offset_map.upper_bound(offset);
-      assert(it != offset_map.begin());
-      // back up to the element we want
-      --it;
-      ID::IDType index = it->second;
-      off_t rel_offset = offset - it->first;
-      vector_lock.unlock();
-      put_bytes(index, rel_offset, src, size);
-#endif
     }
 
     void FileMemory::put_bytes(ID::IDType inst_id, off_t offset, const void *src, size_t size)
     {
       assert(0);
-#if 0
-      vector_lock.lock();
-      int fd = file_vec[inst_id];
-      vector_lock.unlock();
-      size_t ret = pwrite(fd, src, size, offset);
-#ifdef NDEBUG
-      (void)ret;
-#else
-      assert(ret == size);
-#endif
-#endif
     }
 
     void *FileMemory::get_direct_ptr(off_t offset, size_t size)
     {
       return 0; // cannot provide a pointer for it;
-    }
-
-    int FileMemory::get_home_node(off_t offset, size_t size)
-    {
-      return Network::my_node_id;
-    }
-
-    int FileMemory::get_file_des(ID::IDType inst_id)
-    {
-      vector_lock.lock();
-      int fd = file_vec[inst_id];
-      vector_lock.unlock();
-      return fd;
     }
 
     MemoryImpl::AllocationResult FileMemory::allocate_storage_immediate(RegionInstanceImpl *inst,

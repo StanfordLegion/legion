@@ -786,8 +786,6 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
-      virtual int get_home_node(off_t offset, size_t size);
-
     public:
       GPU *gpu;
       CUdeviceptr base;
@@ -804,8 +802,6 @@ namespace Realm {
       virtual void put_bytes(off_t offset, const void *src, size_t size);
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
-
-      virtual int get_home_node(off_t offset, size_t size);
 
     public:
       CUdeviceptr gpu_base;

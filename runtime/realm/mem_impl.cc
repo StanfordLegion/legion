@@ -1428,11 +1428,6 @@ namespace Realm {
     return (base + offset);
   }
 
-  int LocalCPUMemory::get_home_node(off_t offset, size_t size)
-  {
-    return Network::my_node_id;
-  }
-
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1532,11 +1527,6 @@ namespace Realm {
     void *RemoteMemory::get_direct_ptr(off_t offset, size_t size)
     {
       return 0;
-    }
-
-    int RemoteMemory::get_home_node(off_t offset, size_t size)
-    {
-      return ID(me).memory_owner_node();
     }
 
 
@@ -1940,41 +1930,6 @@ namespace Realm {
   }
 
   
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class RemoteReduceListMessage
-  //
-
-  /*static*/ void RemoteReduceListMessage::handle_message(NodeID sender,
-							  const RemoteReduceListMessage &args,
-							  const void *data, size_t datalen)
-  {
-    MemoryImpl *impl = get_runtime()->get_memory_impl(args.mem);
-    
-    log_copy.debug("received remote reduction list request: mem=" IDFMT ", offset=%zd, size=%zd, redopid=%d",
-		   args.mem.id, (ssize_t)args.offset, datalen, args.redopid);
-
-    switch(impl->kind) {
-    case MemoryImpl::MKIND_SYSMEM:
-    case MemoryImpl::MKIND_ZEROCOPY:
-    case MemoryImpl::MKIND_GPUFB:
-    default:
-      assert(0);
-
-    case MemoryImpl::MKIND_GLOBAL:
-      {
-	const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(args.redopid, 0);
-	assert(redop != 0);
-	assert((datalen % redop->sizeof_list_entry) == 0);
-	impl->apply_reduction_list(args.offset,
-				   redop,
-				   datalen / redop->sizeof_list_entry,
-				   data);
-      }
-    }
-  }
-  
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class RemoteWriteFence
@@ -2479,18 +2434,6 @@ namespace Realm {
       }
     }
 
-    void do_remote_apply_red_list(int node, Memory mem, off_t offset,
-				  ReductionOpID redopid,
-				  const void *data, size_t datalen)
-    {
-      ActiveMessage<RemoteReduceListMessage> amsg(node, datalen);
-      amsg->mem = mem;
-      amsg->offset = offset;
-      amsg->redopid = redopid;
-      amsg.add_payload(data, datalen);
-      amsg.commit();
-    }
-
     void do_remote_fence(Memory mem, unsigned sequence_id, unsigned num_writes,
                          RemoteWriteFence *fence)
     {
@@ -2517,6 +2460,4 @@ namespace Realm {
   ActiveMessageHandlerReg<MemStorageReleaseRequest> mem_storage_release_request_handler;
   ActiveMessageHandlerReg<MemStorageReleaseResponse> mem_storage_release_response_handler;
 
-  ActiveMessageHandlerReg<RemoteReduceListMessage> mem_remote_reduce_list_handler;
-  
 }; // namespace Realm

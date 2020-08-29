@@ -3197,35 +3197,6 @@ namespace Realm {
       Operation::mark_completed();
     }
 
-    size_t FillRequest::optimize_fill_buffer(RegionInstanceImpl *inst_impl, int &fill_elmts)
-    {
-      const size_t max_size = 1024; 
-      // Only do this optimization for "small" fields
-      // which are less than half a page
-      if (fill_size <= max_size)
-      {
-        // If we have a single-field instance or we have a set 
-        // of contiguous elmts then make a bulk buffer to use
-        if ((inst_impl->metadata.elmt_size == fill_size) ||
-            (inst_impl->metadata.block_size > 1)) 
-        {
-          fill_elmts = std::min(inst_impl->metadata.block_size,2*max_size/fill_size);
-          size_t fill_elmts_size = fill_elmts * fill_size;
-          char *next_buffer = (char*)malloc(fill_elmts_size);
-          char *next_ptr = next_buffer;
-          for (int idx = 0; idx < fill_elmts; idx++) {
-            memcpy(next_ptr, fill_buffer, fill_size);
-            next_ptr += fill_size;
-          }
-          // Free the old buffer and replace it
-          free(fill_buffer);
-          fill_buffer = next_buffer;
-          return fill_elmts_size;
-        }
-      }
-      return fill_size;
-    }
-
     bool CopyProfile::check_readiness(void)
     {
       if(state == STATE_INIT) {

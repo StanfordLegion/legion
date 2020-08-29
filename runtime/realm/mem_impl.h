@@ -118,14 +118,7 @@ namespace Realm {
     virtual void get_bytes(off_t offset, void *dst, size_t size) = 0;
     virtual void put_bytes(off_t offset, const void *src, size_t size) = 0;
 
-    virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-				      size_t count, const void *entry_buffer)
-    {
-      assert(0);
-    }
-
     virtual void *get_direct_ptr(off_t offset, size_t size) = 0;
-    virtual int get_home_node(off_t offset, size_t size) = 0;
 
     virtual void *get_inst_ptr(RegionInstanceImpl *inst,
 			       off_t offset, size_t size);
@@ -190,11 +183,6 @@ namespace Realm {
     virtual void put_bytes(off_t offset, const void *src, size_t size)
     {
       assert(0);
-    }
-    virtual int get_home_node(off_t offset, size_t size)
-    {
-      assert(0);
-      return 0;
     }
 
   protected:
@@ -331,7 +319,6 @@ namespace Realm {
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
-      virtual int get_home_node(off_t offset, size_t size);
 
     public:
       const int numa_node;
@@ -352,11 +339,7 @@ namespace Realm {
 
       virtual void put_bytes(off_t offset, const void *src, size_t size);
 
-      virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-                                       size_t count, const void *entry_buffer);
-
       virtual void *get_direct_ptr(off_t offset, size_t size);
-      virtual int get_home_node(off_t offset, size_t size);
 
     public:
       int fd; // file descriptor
@@ -374,14 +357,7 @@ namespace Realm {
 
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       void put_bytes(ID::IDType inst_id, off_t offset, const void *src, size_t size);
-#if 0
-      virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-                                       size_t count, const void *entry_buffer);
-#endif
       virtual void *get_direct_ptr(off_t offset, size_t size);
-      virtual int get_home_node(off_t offset, size_t size);
-
-      int get_file_des(ID::IDType inst_id);
 
       virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
 							  bool need_alloc_result,
@@ -397,12 +373,6 @@ namespace Realm {
 	int fd;
 	size_t offset;
       };
-
-    public:
-      std::vector<int> file_vec;
-      Mutex vector_lock;
-      off_t next_offset;
-      std::map<off_t, int> offset_map;
     };
 
     class RemoteMemory : public MemoryImpl {
@@ -435,7 +405,6 @@ namespace Realm {
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
-      virtual int get_home_node(off_t offset, size_t size);
     };
 
 
@@ -531,15 +500,6 @@ namespace Realm {
 				 const void *data, size_t datalen);
     };
 
-    struct RemoteReduceListMessage {
-      Memory mem;
-      off_t offset;
-      ReductionOpID redopid;
-
-      static void handle_message(NodeID sender, const RemoteReduceListMessage &msg,
-				 const void *data, size_t datalen);
-    };
-    
     class RemoteWriteFence : public Operation::AsyncWorkItem {
     public:
       RemoteWriteFence(Operation *op);
@@ -577,11 +537,6 @@ namespace Realm {
 				     off_t src_stride, off_t dst_stride,
 				     unsigned sequence_id,
 				     bool make_copy = false);				     
-
-    extern unsigned do_remote_apply_red_list(int node, Memory mem, off_t offset,
-					     ReductionOpID redopid,
-					     const void *data, size_t datalen,
-					     unsigned sequence_id);
 
     extern void do_remote_fence(Memory mem, unsigned sequence_id,
                                 unsigned count, RemoteWriteFence *fence);

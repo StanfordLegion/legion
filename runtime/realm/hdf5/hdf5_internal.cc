@@ -96,11 +96,6 @@ namespace Realm {
       return 0; // cannot provide a pointer for it.
     }
 
-    int HDF5Memory::get_home_node(off_t offset, size_t size)
-    {
-      return Network::my_node_id;
-    }
-
     MemoryImpl::AllocationResult HDF5Memory::allocate_storage_immediate(RegionInstanceImpl *inst,
 							    bool need_alloc_result,
 							    bool poisoned,

@@ -2577,11 +2577,6 @@ namespace Realm {
       return (void *)(base + offset);
     }
 
-    int GPUFBMemory::get_home_node(off_t offset, size_t size)
-    {
-      return -1;
-    }
-
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -2609,11 +2604,6 @@ namespace Realm {
     void *GPUZCMemory::get_direct_ptr(off_t offset, size_t size)
     {
       return (cpu_base + offset);
-    }
-
-    int GPUZCMemory::get_home_node(off_t offset, size_t size)
-    {
-      return ID(me).memory_owner_node();
     }
 
     // Helper methods for emulating the cuda runtime
