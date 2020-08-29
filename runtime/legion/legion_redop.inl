@@ -819,7 +819,7 @@ namespace Legion {
     newval.as_int = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>::from_int(newval.as_complex) + rhs;
+      newval.as_complex = complex<float>(newval.as_complex) + rhs;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
@@ -847,7 +847,7 @@ namespace Legion {
     newval.as_int = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>::from_int(newval.as_complex) + rhs2;
+      newval.as_complex = complex<float>(newval.as_complex) + rhs2;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
@@ -1672,7 +1672,7 @@ namespace Legion {
     newval.as_int = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>::from_int(newval.as_complex) - rhs;
+      newval.as_complex = complex<float>(newval.as_complex) - rhs;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
@@ -1700,7 +1700,7 @@ namespace Legion {
     newval.as_int = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>::from_int(newval.as_complex) + rhs2;
+      newval.as_complex = complex<float>(newval.as_complex) + rhs2;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
@@ -2620,7 +2620,7 @@ namespace Legion {
     newval.as_int = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>::from_int(newval.as_complex) * rhs;
+      newval.as_complex = complex<float>(newval.as_complex) * rhs;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
@@ -2648,7 +2648,7 @@ namespace Legion {
     newval.as_int = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>::from_int(newval.as_complex) * rhs2;
+      newval.as_complex = complex<float>(newval.as_complex) * rhs2;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
@@ -3504,7 +3504,7 @@ namespace Legion {
     newval.as_int = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>::from_int(newval.as_complex) / rhs;
+      newval.as_complex = complex<float>(newval.as_complex) / rhs;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
@@ -3532,7 +3532,7 @@ namespace Legion {
     newval.as_int = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>::from_int(newval.as_complex) * rhs2;
+      newval.as_complex = complex<float>(newval.as_complex) * rhs2;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
