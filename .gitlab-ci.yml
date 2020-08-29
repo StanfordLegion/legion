@@ -111,6 +111,8 @@ variables:
   LD_FLAGS: "-m32 -latomic"
   MARCH: "i686"
   CXX_STANDARD: "11"
+.shared: &shared
+  SHARED_OBJECTS: "1"
 
 .openmp: &openmp
   USE_OPENMP: "1"
@@ -301,6 +303,9 @@ before_script:
       else
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ENABLE_SERIAL=ON"
       fi
+      if [[ "$SHARED_OBJECTS" -eq 1 ]]; then
+        KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DBUILD_SHARED_LIBS=ON"
+      fi
       if [[ "$USE_CUDA" -eq 1 ]]; then
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_CUDA_LAMBDA=ON -DKokkos_ENABLE_CUDA_UVM=OFF"
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ARCH_${KOKKOS_CUDA_ARCH}=ON"
@@ -340,6 +345,9 @@ before_script:
         cd kokkos-kernels/build
         KKERNELS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install"
         KKERNELS_CMAKE_OPTS="$KKERNELS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=${KOKKOS_CXX_COMPILER}"
+        if [[ "$SHARED_OBJECTS" -eq 1 ]]; then
+          KKERNELS_CMAKE_OPTS="$KKERNELS_CMAKE_OPTS -DBUILD_SHARED_LIBS=ON"
+        fi
         cmake $KKERNELS_CMAKE_OPTS ..
         make -j$THREADS install
         cd ../..
@@ -1079,6 +1087,10 @@ p100_gcc7_cxx14_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
     <<: [*gcc7, *debug, *cxx14_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest]
+p100_gcc7_cxx14_debug_shared_kokkos_cuda_openmp_legion:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc7, *debug, *shared, *cxx14_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest]
 
 # Darwin Power9 tests:
 darwin_power9_gcc8_cxx17_release_legion:

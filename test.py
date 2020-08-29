@@ -682,7 +682,6 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DLegion_USE_OpenMP=%s' % ('ON' if env['USE_OPENMP'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Kokkos=%s' % ('ON' if env['USE_KOKKOS'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Python=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))
-    cmdline.append('-DBUILD_SHARED_LIBS=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_LLVM=%s' % ('ON' if env['USE_LLVM'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_HDF5=%s' % ('ON' if env['USE_HDF'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Fortran=%s' % ('ON' if env['LEGION_USE_FORTRAN'] == '1' else 'OFF'))
@@ -701,8 +700,11 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmdline.append('-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS'])
     if test_regent or test_legion_cxx or test_external or test_perf or test_ctest:
         cmdline.append('-DLegion_BUILD_ALL=ON')
-    if test_regent or test_external:
+    # several different conditions force the use of shared libraries
+    if test_regent or test_external or (env['USE_PYTHON'] == '1') or (env['SHARED_OBJECTS'] == '1'):
         cmdline.append('-DBUILD_SHARED_LIBS=ON')
+    else:
+        cmdline.append('-DBUILD_SHARED_LIBS=OFF')
     # last argument to cmake is the root of the tree
     cmdline.append(root_dir)
 
@@ -768,7 +770,7 @@ def report_mode(debug, max_dim, launcher,
                 test_external, test_private, test_perf, test_ctest, networks,
                 use_cuda, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
-                use_bounds_checks, use_privilege_checks,
+                use_bounds_checks, use_privilege_checks, use_shared_objects,
                 use_gcov, use_cmake, use_rdir):
     print()
     print('#'*60)
@@ -803,6 +805,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Prof:       %s' % use_prof)
     print('###   * Bounds:     %s' % use_bounds_checks)
     print('###   * Privilege:  %s' % use_privilege_checks)
+    print('###   * Shared Obj: %s' % use_shared_objects)
     print('###   * Gcov:       %s' % use_gcov)
     print('###   * CMake:      %s' % use_cmake)
     print('###   * RDIR:       %s' % use_rdir)
@@ -866,6 +869,8 @@ def run_tests(test_modules=None,
     use_gcov = feature_enabled('gcov', False)
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
+    use_shared_objects = feature_enabled('shared', False,
+                                         envname='SHARED_OBJECTS')
 
     if use_kokkos and not use_cmake:
         raise Exception('Kokkos support requires use of CMake')
@@ -901,7 +906,7 @@ def run_tests(test_modules=None,
                 networks,
                 use_cuda, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
-                use_bounds_checks, use_privilege_checks,
+                use_bounds_checks, use_privilege_checks, use_shared_objects,
                 use_gcov, use_cmake, use_rdir)
 
     tmp_dir = tempfile.mkdtemp(dir=root_dir)
@@ -933,6 +938,7 @@ def run_tests(test_modules=None,
         ('TEST_PROF', '1' if use_prof else '0'),
         ('BOUNDS_CHECKS', '1' if use_bounds_checks else '0'),
         ('PRIVILEGE_CHECKS', '1' if use_privilege_checks else '0'),
+        ('SHARED_OBJECTS', '1' if use_shared_objects else '0'),
         ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
         ('MAX_DIM', str(max_dim)),
