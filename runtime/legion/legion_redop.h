@@ -1104,6 +1104,40 @@ namespace Legion {
     static void fold(RHS &rhs1, RHS rhs2);
   };
 
+#ifdef LEGION_REDOP_COMPLEX
+#ifdef LEGION_REDOP_HALF
+  template<>
+  class MaxReduction<complex<__half> > {
+  public:
+    typedef complex<__half> LHS;
+    typedef complex<__half> RHS;
+
+    static const complex<__half> identity;
+    static const int REDOP_ID = LEGION_REDOP_MAX_COMPLEX32;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+#endif // LEGION_REDOP_HALF
+  template<>
+  class MaxReduction<complex<float> > {
+  public:
+    typedef complex<float> LHS;
+    typedef complex<float> RHS;
+
+    static const complex<float> identity;
+    static const int REDOP_ID = LEGION_REDOP_MAX_COMPLEX64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+  // TODO: LEGION_REDOP_MAX_COMPLEX128,
+#endif // LEGION_REDOP_COMPLEX
+
   template<typename T>
   class MinReduction {
     // Empty definition
@@ -1291,6 +1325,40 @@ namespace Legion {
     template<bool EXCLUSIVE> __CUDA_HD__
     static void fold(RHS &rhs1, RHS rhs2);
   };
+
+#ifdef LEGION_REDOP_COMPLEX
+#ifdef LEGION_REDOP_HALF
+  template<>
+  class MinReduction<complex<__half> > {
+  public:
+    typedef complex<__half> LHS;
+    typedef complex<__half> RHS;
+
+    static const complex<__half> identity;
+    static const int REDOP_ID = LEGION_REDOP_MIN_COMPLEX32;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+#endif // LEGION_REDOP_HALF
+  template<>
+  class MinReduction<complex<float> > {
+  public:
+    typedef complex<float> LHS;
+    typedef complex<float> RHS;
+
+    static const complex<float> identity;
+    static const int REDOP_ID = LEGION_REDOP_MIN_COMPLEX64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+  // TODO: LEGION_REDOP_MAX_COMPLEX128,
+#endif // LEGION_REDOP_COMPLEX
 
   template<typename T>
   class OrReduction {
