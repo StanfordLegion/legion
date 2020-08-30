@@ -39,12 +39,7 @@ template<>
 class complex<__half> {
 public:
   __CUDA_HD__
-  complex(void)
-#ifdef __CUDA_ARCH__
-    : _real(__float2half(0.f)), _imag(__float2half(0.f)) { }
-#else
-    : _real(__half(0.f)), _imag(__half(0.f)) { }
-#endif
+  complex(void) { } // empty default constructor for CUDA
   __CUDA_HD__
   complex(const __half val[2]) : _real(val[0]), _imag(val[1]) { }
   __CUDA_HD__
@@ -155,7 +150,7 @@ template<>
 class complex<float> {
 public:
   __CUDA_HD__
-  complex(void) : _real(0.f), _imag(0.f) { }
+  complex(void) { } // empty default constructor for CUDA
   __CUDA_HD__
   complex(const float val[2]) : _real(val[0]), _imag(val[1]) { }
   __CUDA_HD__
@@ -255,7 +250,7 @@ template<>
 class complex<double> {
 public:
   __CUDA_HD__
-  complex(void) : _real(0.f), _imag(0.f) { }
+  complex(void) { } // empty default constructor for CUDA
   __CUDA_HD__
   complex(const double val[2]) : _real(val[0]), _imag(val[1]) { }
   __CUDA_HD__
