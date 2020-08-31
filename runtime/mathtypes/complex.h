@@ -45,8 +45,6 @@ public:
   __CUDA_HD__
   complex(const __half val[2]) : _real(val[0]), _imag(val[1]) { }
   __CUDA_HD__
-  complex(__half re, __half im) : _real(re), _imag(im) { }
-  __CUDA_HD__
   complex(const complex<__half> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
 #ifdef __CUDACC__
   __device__ // Device only constructor
@@ -158,8 +156,6 @@ public:
   __CUDA_HD__
   complex(const float val[2]) : _real(val[0]), _imag(val[1]) { }
   __CUDA_HD__
-  complex(float re, float im) : _real(re), _imag(im) { }
-  __CUDA_HD__
   complex(const complex<float> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
 #ifdef __CUDACC__
   __device__ // Device only constructor
@@ -259,8 +255,6 @@ public:
   complex(double re, double im = 0.0) : _real(re), _imag(im) { }
   __CUDA_HD__
   complex(const double val[2]) : _real(val[0]), _imag(val[1]) { }
-  __CUDA_HD__
-  complex(double re, double im) : _real(re), _imag(im) { }
   __CUDA_HD__
   complex(const complex<double> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
 #ifdef __CUDACC__
