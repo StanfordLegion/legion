@@ -41,6 +41,8 @@ public:
   __CUDA_HD__
   complex(void) { } // empty default constructor for CUDA
   __CUDA_HD__
+  complex(__half re, __half im = __half()) : _real(re), _imag(im) { }
+  __CUDA_HD__
   complex(const __half val[2]) : _real(val[0]), _imag(val[1]) { }
   __CUDA_HD__
   complex(__half re, __half im) : _real(re), _imag(im) { }
@@ -152,6 +154,8 @@ public:
   __CUDA_HD__
   complex(void) { } // empty default constructor for CUDA
   __CUDA_HD__
+  complex(float re, float im = 0.f) : _real(re), _imag(im) { }
+  __CUDA_HD__
   complex(const float val[2]) : _real(val[0]), _imag(val[1]) { }
   __CUDA_HD__
   complex(float re, float im) : _real(re), _imag(im) { }
@@ -251,6 +255,8 @@ class complex<double> {
 public:
   __CUDA_HD__
   complex(void) { } // empty default constructor for CUDA
+  __CUDA_HD__
+  complex(double re, double im = 0.0) : _real(re), _imag(im) { }
   __CUDA_HD__
   complex(const double val[2]) : _real(val[0]), _imag(val[1]) { }
   __CUDA_HD__
