@@ -6170,7 +6170,8 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(has_blocking_call, this);
+        current_template->finalize(parent_ctx, unique_op_id, 
+                                   has_blocking_call, this);
         if (!current_template->is_replayable())
         {
           const RtEvent pending_deletion = 
@@ -6422,7 +6423,8 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(has_blocking_call, this);
+        current_template->finalize(parent_ctx, unique_op_id, 
+                                   has_blocking_call, this);
         if (!current_template->is_replayable())
         {
           const RtEvent pending_deletion = 
@@ -6636,9 +6638,7 @@ namespace Legion {
             // more templates we try to find to build consensus
             const unsigned number_to_find = 1 << round;
             if ((viable_templates.empty() || (viable_templates.back() >= 0)) &&
-                physical_trace->find_viable_templates(this, 
-                                                      map_applied_conditions,
-                                                      number_to_find, 
+                physical_trace->find_viable_templates(this, number_to_find, 
                                                       viable_templates))
             {
               // If we checked all the templates figure out what kind of 
@@ -6877,7 +6877,8 @@ namespace Legion {
       // analysis stage of the pipeline and we need to get our mapping
       // fence from a different location to avoid racing with the application
       initialize(ctx, MAPPING_FENCE, false/*need future*/, false/*track*/);
-      mapping_fence_barrier = ctx->get_next_summary_fence_barrier();
+      mapping_fence_barrier = 
+        ctx->get_next_summary_fence_barrier(invalidation_barrier);
       context_index = invalidator->get_ctx_index();
       current_template = tpl;
       // The summary could have been marked as being traced,
@@ -6899,6 +6900,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_fence();
+      invalidation_barrier = RtBarrier::NO_RT_BARRIER;
       runtime->free_repl_summary_op(this);
     }
 
@@ -6935,7 +6937,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (current_template->is_replayable())
-        current_template->apply_postcondition(this, map_applied_conditions);
+        current_template->apply_postcondition(this, invalidation_barrier, 
+                                              map_applied_conditions);
       ReplFenceOp::trigger_mapping();
     }
 

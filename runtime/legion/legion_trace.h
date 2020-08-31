@@ -455,11 +455,9 @@ namespace Legion {
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
       void clear_cached_template(void) { current_template = NULL; }
-      void check_template_preconditions(TraceReplayOp *op,
-                                        std::set<RtEvent> &applied_events);
+      void check_template_preconditions(TraceReplayOp *op);
       // Return true if we evaluated all the templates
       bool find_viable_templates(ReplTraceReplayOp *op, 
-                                 std::set<RtEvent> &applied_events,
                                  unsigned templates_to_find,
                                  std::vector<int> &viable_templates);
       PhysicalTemplate* select_template(unsigned template_index);
@@ -516,7 +514,7 @@ namespace Legion {
         std::string to_string(void) const;
       };
     public:
-      TraceViewSet(RegionTreeForest *forest);
+      TraceViewSet(RegionTreeForest *forest, bool need_refs = false);
       virtual ~TraceViewSet(void);
     public:
       void insert(InstanceView *view,
@@ -541,7 +539,7 @@ namespace Legion {
       typedef LegionMap<InstanceView*,
                         FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
     protected:
-      RegionTreeForest * const forest;
+      RegionTreeForest *const forest;
     protected:
       // At most one expression per field
       ViewExprs conditions;
@@ -551,22 +549,66 @@ namespace Legion {
     };
 
     /**
+     * \class TraceEqTracker
+     * This class manages the equivalence sets for the trace and
+     * can detect the case when they change over the course of the
+     * execution of the trace.
+     */
+    class TraceEqTracker : public EqSetTracker, public Collectable, 
+                            public LegionHeapify<TraceEqTracker> {
+    public:
+      TraceEqTracker(void);
+      virtual ~TraceEqTracker(void);
+    public:
+      virtual void add_tracker_reference(unsigned cnt = 1);
+      virtual bool remove_tracker_reference(unsigned cnt = 1);
+    public:
+      virtual void record_equivalence_set(EquivalenceSet *set,
+                                          const FieldMask &mask);
+      virtual void record_pending_equivalence_set(EquivalenceSet *set,
+                                          const FieldMask &mask);
+      virtual void remove_equivalence_set(EquivalenceSet *set,
+                                          const FieldMask &mask);
+    public:
+      void compute_original_sets(IndexSpaceExpression *expr, 
+          const FieldMask &mask, InnerContext *context, UniqueID opid);
+      void perform_traversal(PhysicalAnalysis *analysis,
+                             std::set<RtEvent> &applied_events, 
+                             RtEvent precondition = RtEvent::NO_RT_EVENT);
+    protected:
+      FieldMaskSet<RegionNode> root_regions;
+      FieldMaskSet<EquivalenceSet> equivalence_sets;
+    };
+
+    /**
      * \class TraceConditionSet
      */
     class TraceConditionSet : public TraceViewSet {
     public:
+      struct ExprViews {
+      public:
+        ExprViews(void) : tracker(NULL) { }
+      public:
+        FieldMaskSet<InstanceView> instances;
+        TraceEqTracker *tracker; 
+      };
+    public:
       TraceConditionSet(RegionTreeForest *forest);
       virtual ~TraceConditionSet(void);
     public:
-      void make_ready(bool postcondition);
+      void make_ready(InnerContext *ctx, UniqueID opid);
     public:
-      bool require(Operation *op, std::set<RtEvent> &applied_events);
-      void ensure(Operation *op, std::set<RtEvent> &applied_events);
+      bool require(Operation *op);
+      void ensure(Operation *op, RtBarrier barrier, 
+                  std::set<RtEvent> &applied_events);
     private:
-      bool cached;
-      // The following containers are populated only when the 'cached' is true.
-      LegionVector<FieldMaskSet<InstanceView> >::aligned views;
-      LegionVector<VersionInfo>::aligned                 version_infos;
+      // Transpose of conditions for testing
+      typedef LegionMap<std::pair<RegionTreeID,IndexSpaceExpression*>,
+                        ExprViews>::aligned TreeExprViews;
+      TreeExprViews tree_expression_views;
+#ifdef DEBUG_LEGION
+      bool ready; // should only be set once
+#endif
     };
 
     /**
@@ -637,8 +679,9 @@ namespace Legion {
       virtual ApEvent get_completion(void) const;
       virtual ApEvent get_completion_for_deletion(void) const;
     public:
-      void finalize(bool has_blocking_call, ReplTraceOp *op = NULL);
-      void generate_conditions(void);
+      void finalize(InnerContext *context, UniqueID opid,
+                    bool has_blocking_call, ReplTraceOp *op = NULL);
+      void generate_conditions(InnerContext *context, UniqueID opid);
     public:
       struct Replayable {
         explicit Replayable(bool r)
@@ -680,15 +723,11 @@ namespace Legion {
                           std::vector<unsigned> &inv_topo_order);
     public:
       // Variants for normal traces
-      bool check_preconditions(TraceReplayOp *op,
-                               std::set<RtEvent> &applied_events);
+      bool check_preconditions(TraceReplayOp *op);
       void apply_postcondition(TraceSummaryOp *op,
                                std::set<RtEvent> &applied_events);
       // Variants for control replication traces 
-      bool check_preconditions(ReplTraceReplayOp *op,
-                               std::set<RtEvent> &applied_events);
-      void apply_postcondition(ReplTraceSummaryOp *op,
-                               std::set<RtEvent> &applied_events);
+      bool check_preconditions(ReplTraceReplayOp *op); 
     public:
       void register_operation(Operation *op);
       void execute_all(void);
@@ -763,7 +802,8 @@ namespace Legion {
       virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
-                           std::set<RtEvent> &applied);
+                           std::set<RtEvent> &applied,
+                           const bool restricted_invalidation);
       virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
@@ -790,7 +830,7 @@ namespace Legion {
       virtual void record_op_view(Memoizable *memo,
                                   unsigned idx,
                                   InstanceView *view,
-                                  IndexSpaceNode *expr,
+                                  RegionNode *node,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
                                   bool update_validity,
@@ -800,13 +840,15 @@ namespace Legion {
                            const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events,
-                           bool reduction_initialization);
+                           const bool reduction_initialization,
+                           const bool restricted_invalidation);
     protected:
       void record_views(unsigned entry,
                         IndexSpaceExpression *expr,
                         const RegionUsage &usage,
                         const FieldMaskSet<InstanceView> &views,
-                        std::set<RtEvent> &applied);
+                        std::set<RtEvent> &applied,
+                        const bool restricted_invalidation);
       virtual void update_valid_views(InstanceView *view,
                                       IndexSpaceExpression *expr,
                                       const RegionUsage &usage,
@@ -1090,6 +1132,8 @@ namespace Legion {
     public:
       virtual void trigger_recording_done(void);
     public:
+      void apply_postcondition(ReplTraceSummaryOp *op, RtBarrier barrier,
+                               std::set<RtEvent> &applied_events);
       ApBarrier find_trace_shard_event(ApEvent event, ShardID remote_shard);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);

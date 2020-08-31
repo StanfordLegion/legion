@@ -1229,7 +1229,7 @@ namespace Legion {
         assert(current_template != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(has_blocking_call);
+        current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
         if (!current_template->is_replayable())
         {
           const RtEvent pending_deletion = 
@@ -1391,7 +1391,7 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(has_blocking_call);
+        current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
         if (!current_template->is_replayable())
         {
@@ -1534,8 +1534,7 @@ namespace Legion {
 #endif
 
         if (physical_trace->get_current_template() == NULL)
-          physical_trace->check_template_preconditions(this, 
-                                      map_applied_conditions);
+          physical_trace->check_template_preconditions(this); 
 #ifdef DEBUG_LEGION
         assert(physical_trace->get_current_template() == NULL ||
                !physical_trace->get_current_template()->is_recording());
@@ -1879,15 +1878,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::check_template_preconditions(TraceReplayOp *op,
-                                              std::set<RtEvent> &applied_events)
+    void PhysicalTrace::check_template_preconditions(TraceReplayOp *op)
     //--------------------------------------------------------------------------
     {
       current_template = NULL;
       for (LegionVector<PhysicalTemplate*>::aligned::reverse_iterator it =
            templates.rbegin(); it != templates.rend(); ++it)
       {
-        if ((*it)->check_preconditions(op, applied_events))
+        if ((*it)->check_preconditions(op))
         {
 #ifdef DEBUG_LEGION
           assert((*it)->is_replayable());
@@ -1905,7 +1903,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalTrace::find_viable_templates(ReplTraceReplayOp *op,
-                                             std::set<RtEvent> &applied_events,
                                              unsigned templates_to_find,
                                              std::vector<int> &viable_templates)
     //--------------------------------------------------------------------------
@@ -1917,7 +1914,7 @@ namespace Legion {
             viable_templates.back() - 1; index >= 0; index--)
       {
         PhysicalTemplate *tpl = templates[index];
-        if (tpl->check_preconditions(op, applied_events))
+        if (tpl->check_preconditions(op))
         {
           // A good tmplate so add it to the list
           viable_templates.push_back(index);
@@ -1984,8 +1981,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceViewSet::TraceViewSet(RegionTreeForest *f)
-      : forest(f), view_references(f->runtime->dump_physical_traces)
+    TraceViewSet::TraceViewSet(RegionTreeForest *f, bool need_refs)
+      : forest(f),view_references(need_refs || f->runtime->dump_physical_traces)
     //--------------------------------------------------------------------------
     {
     }
@@ -2445,7 +2442,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceConditionSet::TraceConditionSet(RegionTreeForest *f)
-      : TraceViewSet(f), cached(false)
+      : TraceViewSet(f, true/*need refs*/)
+#ifdef DEBUG_LEGION
+        , ready(false)
+#endif
     //--------------------------------------------------------------------------
     {
     }
@@ -2454,122 +2454,120 @@ namespace Legion {
     TraceConditionSet::~TraceConditionSet(void)
     //--------------------------------------------------------------------------
     {
-      views.clear();
-      version_infos.clear();
+      for (TreeExprViews::const_iterator it =tree_expression_views.begin(); 
+            it != tree_expression_views.end(); it++)
+        if ((it->second.tracker != NULL) &&
+            it->second.tracker->remove_tracker_reference())
+          delete it->second.tracker;
+      tree_expression_views.clear();
     }
 
-#ifdef NEWEQ
     //--------------------------------------------------------------------------
-    void TraceConditionSet::make_ready(bool postcondition)
-    //--------------------------------------------------------------------------
-    {
-      if (cached)
-        return;
-      cached = true;
-
-      typedef std::pair<RegionTreeID,EquivalenceSet*> Key;
-      LegionMap<Key,FieldMaskSet<InstanceView> >::aligned views_by_regions;
-
-      for (ViewSet::iterator it = conditions.begin(); it != conditions.end();
-           ++it)
-      {
-        RegionTreeID tid = it->first->get_manager()->tree_id;
-        for (FieldMaskSet<EquivalenceSet>::iterator eit = it->second.begin();
-             eit != it->second.end(); ++eit)
-        {
-          EquivalenceSet *eq = eit->first;
-          Key key(tid, eq);
-          FieldMaskSet <InstanceView> &vset = views_by_regions[key];
-          vset.insert(it->first, eit->second);
-        }
-      }
-
-      // Filter out views that overlap with some restricted views
-      if (postcondition)
-      {
-        for (LegionMap<Key,FieldMaskSet<InstanceView> >::aligned::iterator it =
-             views_by_regions.begin(); it != views_by_regions.end(); ++it)
-        {
-          EquivalenceSet *eq = it->first.second;
-          FieldMaskSet<InstanceView> &all_views = it->second;
-          if (!eq->has_restrictions(all_views.get_valid_mask())) continue;
-
-          FieldMaskSet<InstanceView> restricted_views;
-          FieldMask restricted_mask;
-          for (FieldMaskSet<InstanceView>::iterator vit = all_views.begin();
-               vit != all_views.end(); ++vit)
-          {
-            FieldMask restricted = eq->is_restricted(vit->first);
-            FieldMask overlap = restricted & vit->second;
-            if (!!overlap)
-            {
-              restricted_views.insert(vit->first, overlap);
-              restricted_mask |= overlap;
-            }
-          }
-
-          std::vector<InstanceView*> to_delete;
-          for (FieldMaskSet<InstanceView>::iterator vit = all_views.begin();
-               vit != all_views.end(); ++vit)
-          {
-            vit.filter(restricted_mask);
-            if (!vit->second)
-              to_delete.push_back(vit->first);
-          }
-
-          for (std::vector<InstanceView*>::iterator vit = to_delete.begin();
-               vit != to_delete.end(); ++vit)
-            all_views.erase(*vit);
-
-          for (FieldMaskSet<InstanceView>::iterator vit =
-               restricted_views.begin(); vit != restricted_views.end(); ++vit)
-            all_views.insert(vit->first, vit->second);
-        }
-      }
-
-      unsigned idx = 0;
-      version_infos.resize(views_by_regions.size());
-      for (LegionMap<Key,FieldMaskSet<InstanceView> >::aligned::iterator it =
-           views_by_regions.begin(); it != views_by_regions.end(); ++it)
-      {
-        views.push_back(it->second);
-        version_infos[idx++].record_equivalence_set(NULL,
-            it->first.second, it->second.get_valid_mask());
-      }
-    }
-#endif // NEWEQ
-
-    //--------------------------------------------------------------------------
-    bool TraceConditionSet::require(Operation *op, 
-                                    std::set<RtEvent> &applied_events)
+    void TraceConditionSet::make_ready(InnerContext *context, UniqueID opid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(cached);
+      assert(!ready);
+      ready = true;
 #endif
-      for (unsigned idx = 0; idx < views.size(); ++idx)
+      // Transpose the conditions data structure to capture by expressions
+      // Note this is only safe because we know each view has exactly one
+      // expression per field
+      for (ViewExprs::const_iterator vit = conditions.begin();
+            vit != conditions.end(); vit++)
       {
-        FieldMaskSet<InstanceView> invalid_views;
-        forest->find_invalid_instances(op, idx, version_infos[idx], views[idx],
-                                       invalid_views, applied_events);
-        if (!invalid_views.empty())
-          return false;
+        const RegionTreeID tid = vit->first->manager->tree_id;
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); it++)
+        {
+          std::pair<RegionTreeID,IndexSpaceExpression*> key(tid, it->first);
+          tree_expression_views[key].instances.insert(vit->first, it->second);
+        }
       }
-      return true;
+      // Next compute the equivalece sets for each of the expressions
+      for (TreeExprViews::iterator it = tree_expression_views.begin();
+            it != tree_expression_views.end(); it++)
+      {
+        // Make an equivalence set tracker to track the equivalence sets
+        // for these expressions
+        it->second.tracker = new TraceEqTracker();
+        it->second.tracker->add_tracker_reference();
+        it->second.tracker->compute_original_sets(it->first.second,
+            it->second.instances.get_valid_mask(), context, opid);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::ensure(Operation *op, 
+    bool TraceConditionSet::require(Operation *op) 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(ready);
+#endif
+      std::set<RtEvent> ready_events;
+      std::vector<InvalidInstAnalysis*> analyses;
+      analyses.reserve(tree_expression_views.size());
+      for (TreeExprViews::const_iterator it = tree_expression_views.begin(); 
+            it != tree_expression_views.end(); it++)
+      {
+        InvalidInstAnalysis *analysis = new InvalidInstAnalysis(op->runtime,
+            op, analyses.size(), it->first.second, it->second.instances);
+        analysis->add_reference();
+        analyses.push_back(analysis);
+        it->second.tracker->perform_traversal(analysis, ready_events); 
+      }
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      bool valid = true;
+      for (std::vector<InvalidInstAnalysis*>::const_iterator it =
+            analyses.begin(); it != analyses.end(); it++)
+      {
+        if (valid && (*it)->has_invalid())
+          valid = false;
+        if ((*it)->remove_reference())
+          delete (*it);
+      }
+      return valid;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::ensure(Operation *op, RtBarrier barrier, 
                                    std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(cached);
+      assert(ready);
 #endif
-      const TraceInfo trace_info(op, false/*init*/);
-      for (unsigned idx = 0; idx < views.size(); ++idx)
-        forest->update_valid_instances(op, idx, version_infos[idx], views[idx],
-            PhysicalTraceInfo(trace_info, idx), applied_events);
+      if (barrier.exists())
+      {
+        // If we have a barrier, we have to do this in two phases
+        // 1. All the shards perform the invalidation first
+        // 2. Once all shards finish the invaliation they can do the update
+
+      }
+      else
+      {
+        // If there is no barrier, then we are not sharded so we can do the full
+        // overwrite analysis without needing to coordinate with other shards 
+        unsigned index = 0;
+        const TraceInfo trace_info(op, false/*init*/);
+        const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
+        for (TreeExprViews::const_iterator it = tree_expression_views.begin();
+              it != tree_expression_views.end(); it++, index++)
+        {
+          OverwriteAnalysis *analysis = new OverwriteAnalysis(op->runtime, op,
+              index, usage, it->first.second, it->second.instances, 
+              PhysicalTraceInfo(trace_info, index), ApEvent::NO_AP_EVENT);
+          analysis->add_reference();
+          it->second.tracker->perform_traversal(analysis, applied_events);
+          if (analysis->remove_reference())
+            delete analysis;
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -2719,11 +2717,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTemplate::check_preconditions(TraceReplayOp *op,
-                                              std::set<RtEvent> &applied_events)
+    bool PhysicalTemplate::check_preconditions(TraceReplayOp *op)
     //--------------------------------------------------------------------------
     {
-      return pre.require(op, applied_events);
+      return pre.require(op);
     }
 
     //--------------------------------------------------------------------------
@@ -2731,24 +2728,15 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      post.ensure(op, applied_events);
+      post.ensure(op, RtBarrier::NO_RT_BARRIER, applied_events);
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTemplate::check_preconditions(ReplTraceReplayOp *op,
-                                              std::set<RtEvent> &applied_events)
+    bool PhysicalTemplate::check_preconditions(ReplTraceReplayOp *op)
     //--------------------------------------------------------------------------
     {
-      return pre.require(op, applied_events);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::apply_postcondition(ReplTraceSummaryOp *op,
-                                              std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      post.ensure(op, applied_events);
-    }
+      return pre.require(op);
+    } 
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::Replayable PhysicalTemplate::check_replayable(
@@ -2853,7 +2841,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finalize(bool has_blocking_call, ReplTraceOp *op)
+    void PhysicalTemplate::finalize(InnerContext *context, UniqueID opid,
+                                    bool has_blocking_call, ReplTraceOp *op)
     //--------------------------------------------------------------------------
     {
       trigger_recording_done();
@@ -2871,7 +2860,7 @@ namespace Legion {
           release_remote_memos();
         return;
       }
-      generate_conditions();
+      generate_conditions(context, opid);
       optimize(op);
       if (trace->runtime->dump_physical_traces) dump_template();
       size_t num_events = events.size();
@@ -2883,11 +2872,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::generate_conditions(void)
+    void PhysicalTemplate::generate_conditions(InnerContext *context, 
+                                               UniqueID opid)
     //--------------------------------------------------------------------------
     {
-      pre.make_ready(false /*postcondition*/);
-      post.make_ready(true /*postcondition*/);
+      pre.make_ready(context, opid);
+      post.make_ready(context, opid);
     }
 
     //--------------------------------------------------------------------------
@@ -4438,7 +4428,7 @@ namespace Legion {
     void PhysicalTemplate::record_op_view(Memoizable *memo,
                                           unsigned idx,
                                           InstanceView *view,
-                                          IndexSpaceNode *expr,
+                                          RegionNode *node,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
                                           bool update_validity,
@@ -4453,6 +4443,7 @@ namespace Legion {
       unsigned entry = find_memo_entry(memo);
 
       FieldMaskSet<IndexSpaceExpression> &views = op_views[op_key][view];
+      IndexSpaceNode *expr = node->row_source;
       views.insert(expr, user_mask);
       if (update_validity)
       {
@@ -4481,7 +4472,8 @@ namespace Legion {
                                  const FieldMaskSet<FillView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
                                  std::set<RtEvent> &applied_events,
-                                 bool reduction_initialization)
+                                 const bool reduction_initialization,
+                                 const bool restricted_invalidation)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
@@ -4490,11 +4482,11 @@ namespace Legion {
 #endif
       const unsigned lhs_ = find_event(lhs, tpl_lock);
       // Don't record fill views for initializing reduction 
-      // istances since since we don't need to track them
+      // instances since we don't need to track them
       if (!reduction_initialization)
         record_fill_views(tracing_srcs, applied_events);
-      record_views(lhs_, expr, RegionUsage(LEGION_WRITE_ONLY, 
-            LEGION_EXCLUSIVE, 0), tracing_dsts, applied_events);
+      record_views(lhs_, expr,RegionUsage(LEGION_WRITE_ONLY,LEGION_EXCLUSIVE,0), 
+          tracing_dsts, applied_events, restricted_invalidation);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -4503,7 +4495,8 @@ namespace Legion {
                                  IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
-                                 std::set<RtEvent> &applied_events)
+                                 std::set<RtEvent> &applied_events,
+                                 const bool restricted_invalidation)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
@@ -4511,11 +4504,11 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs, tpl_lock);
-      record_views(lhs_, expr, RegionUsage(LEGION_READ_ONLY, 
-            LEGION_EXCLUSIVE, 0), tracing_srcs, applied_events);
+      record_views(lhs_, expr, RegionUsage(LEGION_READ_ONLY,LEGION_EXCLUSIVE,0),
+          tracing_srcs, applied_events, restricted_invalidation);
       record_copy_views(lhs_, expr, tracing_srcs);
-      record_views(lhs_, expr, RegionUsage(LEGION_WRITE_ONLY, 
-            LEGION_EXCLUSIVE, 0), tracing_dsts, applied_events);
+      record_views(lhs_, expr,RegionUsage(LEGION_WRITE_ONLY,LEGION_EXCLUSIVE,0),
+          tracing_dsts, applied_events, restricted_invalidation);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -4524,13 +4517,15 @@ namespace Legion {
                                         IndexSpaceExpression *expr,
                                         const RegionUsage &usage,
                                         const FieldMaskSet<InstanceView> &views,
-                                        std::set<RtEvent> &applied)
+                                        std::set<RtEvent> &applied,
+                                        const bool restricted_invalidation)
     //--------------------------------------------------------------------------
     {
       for (FieldMaskSet<InstanceView>::const_iterator it = 
             views.begin(); it != views.end(); ++it)
       {
-        update_valid_views(it->first, expr, usage, it->second, false, applied);
+        update_valid_views(it->first, expr, usage, it->second, 
+                           restricted_invalidation, applied);
         add_view_user(it->first, usage, entry, expr, it->second, applied);
       }
     }
@@ -4586,11 +4581,15 @@ namespace Legion {
         }
         if (invalidates && HAS_WRITE(usage))
         {
-          for (std::set<InstanceView*>::iterator vit = views.begin();
-               vit != views.end(); ++vit)
-          {
-            post.invalidate(*vit, expr, user_mask);
-          }
+          // This little loop right here is the source of all the complexity
+          // for sharded trace capture in control replication. The only way
+          // that this loop is safe is if we know that all the views which
+          // have overlapping fields and expressions are sharded to the same
+          // shard so that all these invalidations are handled correctly. 
+          for (std::set<InstanceView*>::iterator vit = 
+                views.begin(); vit != views.end(); ++vit)
+            if ((*vit) != view)
+              post.invalidate(*vit, expr, user_mask);
         }
         post.insert(view, expr, user_mask);
       }
@@ -5399,6 +5398,14 @@ namespace Legion {
       }
       // Then do the base call
       PhysicalTemplate::record_set_op_sync_event(lhs, memo);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::apply_postcondition(ReplTraceSummaryOp *op,
+                               RtBarrier bar, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      post.ensure(op, bar, applied_events);
     }
 
     //--------------------------------------------------------------------------

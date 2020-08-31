@@ -1993,7 +1993,8 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
     protected:
-      PhysicalTemplate *current_template;
+      ShardedPhysicalTemplate *current_template;
+      RtBarrier invalidation_barrier;
     };
 
     /**

@@ -1685,8 +1685,7 @@ namespace Legion {
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
       LogicalUser user(op, idx, RegionUsage(req), user_mask); 
-      LogicalTraceInfo trace_info(op->already_traced(), 
-                                  op->get_trace(), idx, req); 
+      LogicalTraceInfo trace_info(op, idx, req); 
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -1756,7 +1755,7 @@ namespace Legion {
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
       LogicalUser user(op, idx, RegionUsage(req), user_mask);
-      LogicalTraceInfo trace_info(op->already_traced(),op->get_trace(),idx,req);
+      LogicalTraceInfo trace_info(op, idx, req);
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -2075,7 +2074,7 @@ namespace Legion {
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
               trace_info.record_op_view(analysis->usage, inst_mask, 
-                  analysis->target_views[idx], local_expr, map_applied_events);
+               analysis->target_views[idx], analysis->node, map_applied_events);
           }
           if (!user_applied.empty())
           {
@@ -2099,7 +2098,7 @@ namespace Legion {
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
               trace_info.record_op_view(analysis->usage, inst_mask, 
-                  analysis->target_views[idx], local_expr, map_applied_events);
+               analysis->target_views[idx], analysis->node, map_applied_events);
           }
         }
       }
@@ -2467,7 +2466,7 @@ namespace Legion {
                                          dst_req.redop, false/*fold*/); 
             trace_info.record_copy_views(result, intersect,
                                          tracing_srcs, tracing_dsts,
-                                         map_applied_events);
+                                         map_applied_events, false/*out*/);
             return result;
           }
           else
@@ -2500,7 +2499,7 @@ namespace Legion {
                                         dst_req.redop, false/*fold*/);
             trace_info.record_copy_views(result, dst_expr, 
                                          tracing_srcs, tracing_dsts,
-                                         map_applied_events);
+                                         map_applied_events, false/*out*/);
             return result;
           }
           else
@@ -3002,9 +3001,9 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
-          RegionUsage(req), region_node->row_source, fill_view, trace_info, 
-          precondition, RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, 
-          true/*track effects*/);
+          RegionUsage(req), region_node->row_source, fill_view, 
+          eq_sets.get_valid_mask(), trace_info, precondition, 
+          RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -3051,8 +3050,8 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-          req, region_node->row_source, view, trace_info, precondition, 
-          RtEvent::NO_RT_EVENT, PredEvent::NO_PRED_EVENT, 
+          req, region_node->row_source, view, overwrite_mask, trace_info, 
+          precondition, RtEvent::NO_RT_EVENT, PredEvent::NO_PRED_EVENT, 
           true/*track effects*/, add_restriction);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
@@ -3130,7 +3129,7 @@ namespace Legion {
       }
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
           index, RegionUsage(req), region_node->row_source, registration_view, 
-          trace_info, ApEvent::NO_AP_EVENT,  guard_event, 
+          ext_mask, trace_info, ApEvent::NO_AP_EVENT, guard_event, 
           PredEvent::NO_PRED_EVENT, false/*track effects*/, restricted);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
@@ -3215,7 +3214,8 @@ namespace Legion {
       const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
       IndexSpaceExpression *local_expr = get_node(req.region.get_index_space());
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-          usage, local_expr, NULL/*view*/, trace_info, ApEvent::NO_AP_EVENT);
+          usage, local_expr, NULL/*view*/, eq_sets.get_valid_mask(), 
+          trace_info, ApEvent::NO_AP_EVENT);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       if (collective)
@@ -14642,8 +14642,8 @@ namespace Legion {
         {
           // Generate the close operations         
           // Also check to see if we have any refinements for the close operation
-          const bool check_for_refinements = 
-            (arrived && IS_WRITE(user.usage) && !proj_info.is_projecting());
+          const bool check_for_refinements = (arrived && IS_WRITE(user.usage) 
+              && !proj_info.is_projecting() && !trace_info.replaying_trace);
           closer.initialize_close_operations(state, user.op, trace_info,
                                              check_for_refinements, !arrived);
           // Perform dependence analysis for all the close operations
@@ -14797,7 +14797,7 @@ namespace Legion {
         // Everything in this block of code is for computing any
         // refinements that need to be performed because we wrote
         // to a disjoint complete sub-tree
-        if (!!child_disjoint_complete)
+        if (!!child_disjoint_complete && !trace_info.replaying_trace)
         {
 #ifdef DEBUG_LEGION
           assert(IS_WRITE(user.usage));
@@ -14934,6 +14934,9 @@ namespace Legion {
       // Check to see if we have any unversioned fields we need to initialize
       if (check_unversioned && !!unversioned)
       {
+#ifdef DEBUG_LEGION
+        assert(!trace_info.replaying_trace);
+#endif
         // See if we made refinements for any of these fields, if so
         // they will make the initial batch of equivalence sets
         if (!refinements.empty())

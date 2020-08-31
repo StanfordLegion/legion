@@ -293,8 +293,6 @@ namespace Legion {
       virtual bool is_memoizing(void) const { return false; }
       inline bool is_tracing(void) const { return tracing; }
       inline bool is_tracking_parent(void) const { return track_parent; } 
-      inline bool already_traced(void) const 
-        { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
       inline size_t get_ctx_index(void) const { return context_index; }
     public:

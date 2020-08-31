@@ -2388,7 +2388,11 @@ namespace Legion {
     public:
       FieldMaskSet(void)
         : single(true) { entries.single_entry = NULL; }
-      inline FieldMaskSet(const FieldMaskSet &rhs);
+      inline FieldMaskSet(T *init, const FieldMask &m, bool no_null = true);
+      template<typename T2>
+      inline FieldMaskSet(const FieldMaskSet<T2> &rhs);
+      // If copy is set to false then this is a move constructor
+      inline FieldMaskSet(FieldMaskSet &rhs, bool copy);
       ~FieldMaskSet(void) { clear(); }
     public:
       inline FieldMaskSet& operator=(const FieldMaskSet &rhs);
@@ -2425,6 +2429,8 @@ namespace Legion {
       inline void compute_field_sets(FieldMask universe_mask,
           typename LegionList<FieldSet<T*> >::aligned &output_sets) const;
     protected:
+      template<typename T2>
+      friend class FieldMaskSet;
       // Fun with C, keep these two fields first and in this order
       // so that a FieldMaskSet of size 1 looks the same as an entry
       // in the STL Map in the multi-entries case, 
@@ -2440,7 +2446,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline FieldMaskSet<T>::FieldMaskSet(const FieldMaskSet<T> &rhs)
+    inline FieldMaskSet<T>::FieldMaskSet(T *init, const FieldMask &mask, 
+                                         bool no_null)
+      : single(true)
+    //--------------------------------------------------------------------------
+    {
+      if (!no_null || (init != NULL))
+      {
+        entries.single_entry = init;
+        valid_fields = mask;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T> template<typename T2>
+    inline FieldMaskSet<T>::FieldMaskSet(const FieldMaskSet<T2> &rhs)
       : valid_fields(rhs.valid_fields), single(rhs.single)
     //--------------------------------------------------------------------------
     {
@@ -2450,6 +2470,33 @@ namespace Legion {
         entries.multi_entries = new typename LegionMap<T*,FieldMask>::aligned(
             rhs.entries.multi_entries->begin(),
             rhs.entries.multi_entries->end());
+    }
+    
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline FieldMaskSet<T>::FieldMaskSet(FieldMaskSet<T> &rhs, bool copy)
+      : valid_fields(rhs.valid_fields), single(rhs.single)
+    //--------------------------------------------------------------------------
+    {
+      if (copy)
+      {
+        if (single)
+          entries.single_entry = rhs.entries.single_entry;
+        else
+          entries.multi_entries = new typename LegionMap<T*,FieldMask>::aligned(
+              rhs.entries.multi_entries->begin(),
+              rhs.entries.multi_entries->end());
+      }
+      else
+      {
+        if (single)
+          entries.single_entry = rhs.entries.single_entry;
+        else
+          entries.multi_entries = rhs.entries.multi_entries;
+        rhs.entries.single_entry = NULL;
+        rhs.valid_fields.clear();
+        rhs.single = true;
+      }
     }
 
     //--------------------------------------------------------------------------

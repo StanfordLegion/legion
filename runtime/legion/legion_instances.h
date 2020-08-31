@@ -245,6 +245,7 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info,
                                 const FieldMaskSet<FillView> *tracing_srcs,
                                 const FieldMaskSet<InstanceView> *tracing_dsts,
+                                const bool restricted_copy,
                                 std::set<RtEvent> &effects_applied,
                                 CopyAcrossHelper *across_helper = NULL) = 0;
       virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
@@ -254,6 +255,7 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info,
                                 const FieldMaskSet<InstanceView> *tracing_srcs,
                                 const FieldMaskSet<InstanceView> *tracing_dsts,
+                                const bool restricted_copy,
                                 std::set<RtEvent> &effects_applied,
                                 CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
@@ -438,6 +440,7 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info,
                                 const FieldMaskSet<FillView> *tracing_srcs,
                                 const FieldMaskSet<InstanceView> *tracing_dsts,
+                                const bool restricted_copy,
                                 std::set<RtEvent> &effects_applied,
                                 CopyAcrossHelper *across_helper = NULL);
       virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
@@ -447,6 +450,7 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info,
                                 const FieldMaskSet<InstanceView> *tracing_srcs,
                                 const FieldMaskSet<InstanceView> *tracing_dsts,
+                                const bool restricted_copy,
                                 std::set<RtEvent> &effects_applied,
                                 CopyAcrossHelper *across_helper = NULL);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
@@ -618,6 +622,7 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info,
                                 const FieldMaskSet<FillView> *tracing_srcs,
                                 const FieldMaskSet<InstanceView> *tracing_dsts,
+                                const bool restricted_copy,
                                 std::set<RtEvent> &effects_applied,
                                 CopyAcrossHelper *across_helper = NULL);
       virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
@@ -627,6 +632,7 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info,
                                 const FieldMaskSet<InstanceView> *tracing_srcs,
                                 const FieldMaskSet<InstanceView> *tracing_dsts,
+                                const bool restricted_copy,
                                 std::set<RtEvent> &effects_applied,
                                 CopyAcrossHelper *across_helper = NULL);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,

@@ -107,15 +107,14 @@ namespace Legion {
      */
     struct LogicalTraceInfo {
     public:
-      LogicalTraceInfo(bool already_tr,
-                       LegionTrace *tr,
-                       unsigned idx,
+      LogicalTraceInfo(Operation *op, unsigned idx,
                        const RegionRequirement &r);
     public:
-      bool already_traced;
-      LegionTrace *trace;
-      unsigned req_idx;
+      LegionTrace *const trace;
+      const unsigned req_idx;
       const RegionRequirement &req;
+      const bool already_traced;
+      const bool replaying_trace;
     };
 
     /**
@@ -171,7 +170,8 @@ namespace Legion {
       virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
-                           std::set<RtEvent> &applied) = 0;
+                           std::set<RtEvent> &applied,
+                           const bool restricted_invalidation) = 0;
       virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField> &fields,
@@ -197,12 +197,13 @@ namespace Legion {
                            const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events,
-                           bool reduction_initialization) = 0;
+                           const bool reduction_initialization,
+                           const bool restricted_invalidatation) = 0;
     public:
       virtual void record_op_view(Memoizable *memo,
                           unsigned idx,
                           InstanceView *view,
-                          IndexSpaceNode *expr,
+                          RegionNode *node,
                           const RegionUsage &usage,
                           const FieldMask &user_mask,
                           bool update_validity,
@@ -297,7 +298,8 @@ namespace Legion {
       virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
-                           std::set<RtEvent> &applied);
+                           std::set<RtEvent> &applied,
+                           const bool restricted_invalidation);
       virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField> &fields,
@@ -322,12 +324,13 @@ namespace Legion {
                            const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events,
-                           bool reduction_initialization);
+                           const bool reduction_initialization,
+                           const bool restricted_invalidation);
     public:
       virtual void record_op_view(Memoizable *memo,
                           unsigned idx,
                           InstanceView *view,
-                          IndexSpaceNode *expr,
+                          RegionNode *node,
                           const RegionUsage &usage,
                           const FieldMask &user_mask,
                           bool update_validity,
@@ -552,11 +555,12 @@ namespace Legion {
                                     const FieldMaskSet<FillView> &srcs,
                                     const FieldMaskSet<InstanceView> &dsts,
                                     std::set<RtEvent> &applied,
-                                    bool reduction_initialization) const
+                                    const bool reduction_initialization,
+                                    const bool restricted_invalidation) const
         {
           sanity_check();
           rec->record_fill_views(lhs, expr, srcs, dsts, applied, 
-                                 reduction_initialization);
+              reduction_initialization, restricted_invalidation);
         }
       inline void record_issue_indirect(ApEvent &result,
                              IndexSpaceExpression *expr,
@@ -572,18 +576,20 @@ namespace Legion {
       inline void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
-                                    std::set<RtEvent> &applied) const
+                                    std::set<RtEvent> &applied,
+                                    const bool restricted_invalidation) const
         {
           sanity_check();
-          rec->record_copy_views(lhs, expr, tracing_srcs, tracing_dsts,applied);
+          rec->record_copy_views(lhs, expr, tracing_srcs, tracing_dsts,
+                                 applied, restricted_invalidation);
         }
       inline void record_op_view(const RegionUsage &usage,
                                  const FieldMask &user_mask,
-                                 InstanceView *view, IndexSpaceNode *expr,
+                                 InstanceView *view, RegionNode *node,
                                  std::set<RtEvent> &applied) const
         {
           sanity_check();
-          rec->record_op_view(memo, index, view, expr, usage, user_mask,
+          rec->record_op_view(memo, index, view, node, usage, user_mask,
                               update_validity, applied);
         }
     public:
@@ -1325,12 +1331,12 @@ namespace Legion {
       typedef LegionMap<ApEvent,
                FieldMaskSet<Update> >::aligned EventFieldUpdates;
     public:
-      CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
-                         unsigned idx, RtEvent guard_event, bool track_events,
+      CopyFillAggregator(RegionTreeForest *forest, Operation *op, unsigned idx,
+                         RtEvent guard_event, bool track_events, bool copy_out,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
-                         unsigned src_idx, unsigned dst_idx, 
-                         RtEvent guard_event, bool track_events,
+                         unsigned src_idx, unsigned dst_idx,
+                         RtEvent guard_event, bool track_events, bool copy_out,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
       CopyFillAggregator(const CopyFillAggregator &rhs);
       virtual ~CopyFillAggregator(void);
@@ -1430,6 +1436,7 @@ namespace Legion {
       const RtEvent guard_precondition;
       const PredEvent predicate_guard;
       const bool track_events;
+      const bool copy_out;
     protected:
       FieldMask update_fields;
       LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned sources; 
@@ -1678,6 +1685,9 @@ namespace Legion {
       virtual ~InvalidInstAnalysis(void);
     public:
       InvalidInstAnalysis& operator=(const InvalidInstAnalysis &rhs);
+    public:
+      inline bool has_invalid(void) const
+        { return ((remote_instances != NULL) && !remote_instances->empty()); }
     public:
       virtual void perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
@@ -1984,7 +1994,8 @@ namespace Legion {
     public:
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
                         const RegionUsage &usage, IndexSpaceExpression *expr, 
-                        LogicalView *view, const PhysicalTraceInfo &trace_info,
+                        LogicalView *view, const FieldMask &mask,
+                        const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
                         const RtEvent guard_event = RtEvent::NO_RT_EVENT,
                         const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
@@ -1993,7 +2004,7 @@ namespace Legion {
       // Also local but with a full set of views
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
                         const RegionUsage &usage, IndexSpaceExpression *expr,
-                        const std::set<LogicalView*> &views,
+                        const FieldMaskSet<InstanceView> &views,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
                         const RtEvent guard_event = RtEvent::NO_RT_EVENT,
@@ -2003,7 +2014,7 @@ namespace Legion {
       OverwriteAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                         Operation *op, unsigned index,
                         IndexSpaceExpression *expr, const RegionUsage &usage, 
-                        const std::set<LogicalView*> &views,
+                        FieldMaskSet<LogicalView> &views,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
                         const RtEvent guard_event,
@@ -2039,7 +2050,7 @@ namespace Legion {
                                            AddressSpaceID previous); 
     public:
       const RegionUsage usage;
-      const std::set<LogicalView*> views;
+      const FieldMaskSet<LogicalView> views;
       const PhysicalTraceInfo trace_info;
       const ApEvent precondition;
       const RtEvent guard_event;
@@ -2940,7 +2951,7 @@ namespace Legion {
                             const FieldMask &reduction_mask, 
                             CopyFillAggregator *&aggregator,RtEvent guard_event,
                             Operation *op, const unsigned index, 
-                            const bool track_events,
+                            const bool track_events, const bool copy_out,
                             FieldMaskSet<IndexSpaceExpression> *applied_exprs,
                             CopyAcrossHelper *across_helper = NULL);
       template<typename T>

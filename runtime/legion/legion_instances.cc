@@ -1335,6 +1335,7 @@ namespace Legion {
                                          const PhysicalTraceInfo &trace_info,
                                 const FieldMaskSet<FillView> *tracing_srcs,
                                 const FieldMaskSet<InstanceView> *tracing_dsts,
+                                         const bool restricted_copy,
                                          std::set<RtEvent> &effects_applied,
                                          CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
@@ -1354,8 +1355,8 @@ namespace Legion {
 #endif
                                                  precondition, predicate_guard);
       if (trace_info.recording)
-        trace_info.record_fill_views(result, fill_expression,
-              *tracing_srcs, *tracing_dsts, effects_applied, (redop > 0));
+        trace_info.record_fill_views(result, fill_expression, *tracing_srcs, 
+            *tracing_dsts, effects_applied, (redop > 0), restricted_copy);
       return result;
     }
 
@@ -1369,6 +1370,7 @@ namespace Legion {
                                          const PhysicalTraceInfo &trace_info,
                                  const FieldMaskSet<InstanceView> *tracing_srcs,
                                  const FieldMaskSet<InstanceView> *tracing_dsts,
+                                         const bool restricted_copy,
                                          std::set<RtEvent> &effects_applied,
                                          CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
@@ -1402,8 +1404,8 @@ namespace Legion {
               finder->second, this, source_manager, precondition, 
               predicate_guard, reduction_op_id, false/*fold*/);
           if (trace_info.recording)
-            trace_info.record_copy_views(result, copy_expression,
-                  *tracing_srcs, *tracing_dsts, effects_applied);
+            trace_info.record_copy_views(result, copy_expression, *tracing_srcs,
+                *tracing_dsts, effects_applied, restricted_copy);
           return result;
         }
       }
@@ -1417,8 +1419,8 @@ namespace Legion {
                                          precondition, predicate_guard,
                                          reduction_op_id, false/*fold*/); 
       if (trace_info.recording)
-        trace_info.record_copy_views(result, copy_expression,
-              *tracing_srcs, *tracing_dsts, effects_applied);
+        trace_info.record_copy_views(result, copy_expression, *tracing_srcs, 
+            *tracing_dsts, effects_applied, restricted_copy);
       return result;
     }
 
@@ -2870,6 +2872,7 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info,
                                 const FieldMaskSet<FillView> *tracing_srcs,
                                 const FieldMaskSet<InstanceView> *tracing_dsts,
+                                const bool restricted_copy,
                                 std::set<RtEvent> &effects_applied,
                                 CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
@@ -2888,6 +2891,7 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info,
                                 const FieldMaskSet<InstanceView> *tracing_srcs,
                                 const FieldMaskSet<InstanceView> *tracing_dsts,
+                                const bool restricted_copy,
                                 std::set<RtEvent> &effects_applied,
                                 CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
