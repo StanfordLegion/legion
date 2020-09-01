@@ -7120,17 +7120,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Traverse upwards for any parent operations and invalidate them
-      if (!parent_operations.empty())
+      std::vector<IndexSpaceOperation*> parents;
       {
-        std::vector<IndexSpaceOperation*> parents(parent_operations.size());
-        unsigned idx = 0;
-        for (std::set<IndexSpaceOperation*>::const_iterator it = 
-              parent_operations.begin(); it != 
-              parent_operations.end(); it++, idx++)
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        if (!parent_operations.empty())
         {
-          (*it)->add_reference();
-          parents[idx] = (*it);
+          parents.resize(parent_operations.size());
+          unsigned idx = 0;
+          for (std::set<IndexSpaceOperation*>::const_iterator it = 
+                parent_operations.begin(); it != 
+                parent_operations.end(); it++, idx++)
+          {
+            (*it)->add_reference();
+            parents[idx] = (*it);
+          }
         }
+      }
+      if (!parents.empty())
+      {
         context->invalidate_index_space_expression(parents);
         // Remove any references that we have on the parents
         for (std::vector<IndexSpaceOperation*>::const_iterator it = 
