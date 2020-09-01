@@ -4016,10 +4016,6 @@ namespace Legion {
           if (!virtual_mapped[idx] && !no_access_regions[idx])
             physical_instances[idx].update_wait_on_events(ready_events);
         }
-        if (tpl != NULL)
-          tpl->get_reduction_ready_events(this, ready_events);
-        else
-          remote_trace_info->get_reduction_ready_events(this, ready_events);
         ApEvent ready_event = Runtime::merge_events(&trace_info, ready_events);
         if (tpl != NULL)
           tpl->record_complete_replay(this, ready_event);

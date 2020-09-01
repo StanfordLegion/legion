@@ -39,16 +39,11 @@ template<>
 class complex<__half> {
 public:
   __CUDA_HD__
-  complex(void)
-#ifdef __CUDA_ARCH__
-    : _real(__float2half(0.f)), _imag(__float2half(0.f)) { }
-#else
-    : _real(__half(0.f)), _imag(__half(0.f)) { }
-#endif
+  complex(void) { } // empty default constructor for CUDA
+  __CUDA_HD__
+  complex(__half re, __half im = __half()) : _real(re), _imag(im) { }
   __CUDA_HD__
   complex(const __half val[2]) : _real(val[0]), _imag(val[1]) { }
-  __CUDA_HD__
-  complex(__half re, __half im) : _real(re), _imag(im) { }
   __CUDA_HD__
   complex(const complex<__half> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
 #ifdef __CUDACC__
@@ -56,19 +51,21 @@ public:
   complex(__half2 val) : _real(val.x), _imag(val.y) { }
 #endif
 public:
-  // explicit reinterpret cast from integer
+  // reinterpret cast from integer
   __CUDA_HD__ 
-  explicit complex(int val) 
+  static inline complex<__half> from_int(int val) 
     {
       union { int as_int; unsigned short array[2]; } convert;
       convert.as_int = val;
+      complex<__half> retval;
 #ifdef __CUDA_ARCH__
-      _real = __short_as_half(convert.array[0]);
-      _imag = __short_as_half(convert.array[1]);
+      retval._real = __short_as_half(convert.array[0]);
+      retval._imag = __short_as_half(convert.array[1]);
 #else
-      _real = *(reinterpret_cast<const __half*>(&convert.array[0]));
-      _imag = *(reinterpret_cast<const __half*>(&convert.array[1]));
+      retval._real = *(reinterpret_cast<const __half*>(&convert.array[0]));
+      retval._imag = *(reinterpret_cast<const __half*>(&convert.array[1]));
 #endif
+      return retval;
     }
   // cast back to integer
   __CUDA_HD__
@@ -153,11 +150,11 @@ template<>
 class complex<float> {
 public:
   __CUDA_HD__
-  complex(void) : _real(0.f), _imag(0.f) { }
+  complex(void) { } // empty default constructor for CUDA
+  __CUDA_HD__
+  complex(float re, float im = 0.f) : _real(re), _imag(im) { }
   __CUDA_HD__
   complex(const float val[2]) : _real(val[0]), _imag(val[1]) { }
-  __CUDA_HD__
-  complex(float re, float im) : _real(re), _imag(im) { }
   __CUDA_HD__
   complex(const complex<float> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
 #ifdef __CUDACC__
@@ -165,14 +162,16 @@ public:
   complex(float2 val) : _real(val.x), _imag(val.y) { }
 #endif
 public:
-  // explicit reinterpret case from integer
+  // reinterpret cast from integer
   __CUDA_HD__ 
-  explicit complex(unsigned long long val)
+  static inline complex<float> from_int(unsigned long long val)
     {
       union { unsigned long long as_long; float array[2]; } convert;
       convert.as_long = val;
-      _real = convert.array[0];
-      _imag = convert.array[1];
+      complex<float> retval;
+      retval._real = convert.array[0];
+      retval._imag = convert.array[1];
+      return retval;
     }
   // cast back to integer
   __CUDA_HD__
@@ -251,11 +250,11 @@ template<>
 class complex<double> {
 public:
   __CUDA_HD__
-  complex(void) : _real(0.f), _imag(0.f) { }
+  complex(void) { } // empty default constructor for CUDA
+  __CUDA_HD__
+  complex(double re, double im = 0.0) : _real(re), _imag(im) { }
   __CUDA_HD__
   complex(const double val[2]) : _real(val[0]), _imag(val[1]) { }
-  __CUDA_HD__
-  complex(double re, double im) : _real(re), _imag(im) { }
   __CUDA_HD__
   complex(const complex<double> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
 #ifdef __CUDACC__
@@ -263,14 +262,16 @@ public:
   complex(double2 val) : _real(val.x), _imag(val.y) { }
 #endif
 public:
-  // explicit reinterpret case from integer
+  // reinterpret cast from integer
   __CUDA_HD__ 
-  explicit complex(unsigned long long val)
+  static inline complex<double> from_int(unsigned long long val)
     {
       union { unsigned long long as_long; double array[2]; } convert;
       convert.as_long = val;
-      _real = convert.array[0];
-      _imag = convert.array[1];
+      complex<double> retval;
+      retval._real = convert.array[0];
+      retval._imag = convert.array[1];
+      return retval;
     }
   // cast back to integer
   __CUDA_HD__
@@ -398,6 +399,30 @@ template<typename T> __CUDA_HD__
 inline bool operator!=(const complex<T> &one, const complex<T> &two)
 {
   return (one.real() != two.real()) || (one.imag() != two.imag());
+}
+
+template<typename T> __CUDA_HD__
+inline bool operator<(const complex<T>& c1, const complex<T>& c2) {
+    return (c1.real() < c2.real()) || 
+      (!(c2.real() < c1.real()) && (c1.imag() < c2.imag()));
+}
+
+template<typename T> __CUDA_HD__
+inline bool operator>(const complex<T>& c1, const complex<T>& c2) {
+    return (c1.real() > c2.real()) || 
+      (!(c2.real() > c1.real()) && (c1.imag() > c2.imag()));
+}
+
+template<typename T> __CUDA_HD__
+inline bool operator<=(const complex<T>& c1, const complex<T>& c2) {
+    return (c1 == c2) || (c1.real() < c2.real()) || 
+      (!(c2.real() < c1.real()) && (c1.imag() < c2.imag()));
+}
+
+template<typename T> __CUDA_HD__
+inline bool operator>=(const complex<T>& c1, const complex<T>& c2) {
+    return (c1 == c2) || (c1.real() > c2.real()) || 
+      (!(c2.real() > c1.real()) && (c1.imag() > c2.imag()));
 }
 
 // TODO: fill this out with full support for std::complex

@@ -31,6 +31,10 @@ namespace Kokkos {
   template <class, class...> class View;
   template <unsigned> struct MemoryTraits;
   struct LayoutStride;
+  template <class, size_t, class> struct Array;
+  namespace Experimental {
+    template <class, class...> class OffsetView;
+  };
 };
 // Kokkos::Unmanaged is an enum, which we can't forward declare - we'll test
 //  that we have the right value in the template though
@@ -517,9 +521,18 @@ namespace Realm {
 
 #ifdef REALM_PROVIDE_ACCESSOR_TO_KOKKOS_VIEW_CONVERSION
   // conversion to Kokkos unmanaged views
+
+  // Kokkos::View uses relative ("local") indexing - the first element is
+  //  always index 0, even when accessing a subregion that does not include
+  //  global element 0
   template <typename ... Args>
   operator Kokkos::View<Args...>() const;
-  //operator Kokkos::View<const T *, Kokkos::HostSpace>() const;
+
+  // Kokkos::Experimental::OffsetView uses absolute ("global") indexing -
+  //  the indices used on the OffsetView::operator() match what is used for
+  //  the AffineAccessor's operator[]
+  template <typename ... Args>
+  operator Kokkos::Experimental::OffsetView<Args...>() const;
 #endif
 
   //protected:
@@ -528,6 +541,9 @@ namespace Realm {
 //#define REALM_ACCESSOR_DEBUG
 #if defined(REALM_ACCESSOR_DEBUG) || defined(REALM_USE_KOKKOS)
   Rect<N,T> bounds;
+#endif
+#ifdef REALM_USE_KOKKOS
+  bool bounds_specified;
 #endif
 #ifdef REALM_ACCESSOR_DEBUG
   RegionInstance dbg_inst;
