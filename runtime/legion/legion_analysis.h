@@ -114,6 +114,7 @@ namespace Legion {
       const unsigned req_idx;
       const RegionRequirement &req;
       const bool already_traced;
+      const bool recording_trace;
       const bool replaying_trace;
     };
 
@@ -170,8 +171,7 @@ namespace Legion {
       virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
-                           std::set<RtEvent> &applied,
-                           const bool restricted_invalidation) = 0;
+                           std::set<RtEvent> &applied) = 0;
       virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField> &fields,
@@ -197,8 +197,7 @@ namespace Legion {
                            const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events,
-                           const bool reduction_initialization,
-                           const bool restricted_invalidatation) = 0;
+                           const bool reduction_initialization) = 0;
     public:
       virtual void record_op_view(Memoizable *memo,
                           unsigned idx,
@@ -298,8 +297,7 @@ namespace Legion {
       virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
-                           std::set<RtEvent> &applied,
-                           const bool restricted_invalidation);
+                           std::set<RtEvent> &applied);
       virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField> &fields,
@@ -320,12 +318,11 @@ namespace Legion {
                            ReductionOpID redop, bool reduction_fold);
 #endif
       virtual void record_post_fill_view(FillView *view, const FieldMask &mask);
-      virtual void record_fill_views(ApEvent lhs, IndexSpaceExpression *expr, 
+      virtual void record_fill_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events,
-                           const bool reduction_initialization,
-                           const bool restricted_invalidation);
+                           const bool reduction_initialization);
     public:
       virtual void record_op_view(Memoizable *memo,
                           unsigned idx,
@@ -551,16 +548,15 @@ namespace Legion {
           rec->record_post_fill_view(view, mask);
         }
       inline void record_fill_views(ApEvent lhs,
-                                    IndexSpaceExpression *expr, 
+                                    IndexSpaceExpression *expr,
                                     const FieldMaskSet<FillView> &srcs,
                                     const FieldMaskSet<InstanceView> &dsts,
                                     std::set<RtEvent> &applied,
-                                    const bool reduction_initialization,
-                                    const bool restricted_invalidation) const
+                                    const bool reduction_initialization) const
         {
           sanity_check();
-          rec->record_fill_views(lhs, expr, srcs, dsts, applied, 
-              reduction_initialization, restricted_invalidation);
+          rec->record_fill_views(lhs, expr, srcs, dsts, applied,
+                                 reduction_initialization);
         }
       inline void record_issue_indirect(ApEvent &result,
                              IndexSpaceExpression *expr,
@@ -576,12 +572,10 @@ namespace Legion {
       inline void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
-                                    std::set<RtEvent> &applied,
-                                    const bool restricted_invalidation) const
+                                    std::set<RtEvent> &applied) const
         {
           sanity_check();
-          rec->record_copy_views(lhs, expr, tracing_srcs, tracing_dsts,
-                                 applied, restricted_invalidation);
+          rec->record_copy_views(lhs, expr, tracing_srcs, tracing_dsts,applied);
         }
       inline void record_op_view(const RegionUsage &usage,
                                  const FieldMask &user_mask,
@@ -1332,11 +1326,11 @@ namespace Legion {
                FieldMaskSet<Update> >::aligned EventFieldUpdates;
     public:
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, unsigned idx,
-                         RtEvent guard_event, bool track_events, bool copy_out,
+                         RtEvent guard_event, bool track_events,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
                          unsigned src_idx, unsigned dst_idx,
-                         RtEvent guard_event, bool track_events, bool copy_out,
+                         RtEvent guard_event, bool track_events,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
       CopyFillAggregator(const CopyFillAggregator &rhs);
       virtual ~CopyFillAggregator(void);
@@ -1347,12 +1341,14 @@ namespace Legion {
                           LogicalView *src_view,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
+                          EquivalenceSet *tracing_eq,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
       void record_updates(InstanceView *dst_view, 
                           const FieldMaskSet<LogicalView> &src_views,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
+                          EquivalenceSet *tracing_eq,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
       void record_partial_updates(InstanceView *dst_view,
@@ -1360,6 +1356,7 @@ namespace Legion {
                       FieldMaskSet<IndexSpaceExpression> >::aligned &src_views,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
+                          EquivalenceSet *tracing_eq,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
       // Neither fills nor reductions should have a redop across as they
@@ -1368,16 +1365,15 @@ namespace Legion {
                        FillView *src_view,
                        const FieldMask &fill_mask,
                        IndexSpaceExpression *expr,
+                       EquivalenceSet *tracing_eq,
                        CopyAcrossHelper *across_helper = NULL);
       void record_reductions(InstanceView *dst_view,
                              const std::list<std::pair<ReductionView*,
                                     IndexSpaceExpression*> > &src_views,
                              const unsigned src_fidx,
                              const unsigned dst_fidx,
+                             EquivalenceSet *tracing_eq,
                              CopyAcrossHelper *across_helper = NULL);
-      void record_reduction_fill(ReductionView *init_view,
-                                 const FieldMask &fill_mask,
-                                 IndexSpaceExpression *expr);
       // Record preconditions coming back from analysis on views
       void record_preconditions(InstanceView *view, bool reading,
                                 EventFieldMap &preconditions);
@@ -1394,6 +1390,9 @@ namespace Legion {
       ApEvent summarize(const PhysicalTraceInfo &trace_info) const;
     protected:
       void record_view(LogicalView *new_view);
+      void update_tracing_valid_views(EquivalenceSet *tracing_eq,
+            LogicalView *src, LogicalView *dst, const FieldMask &mask,
+            IndexSpaceExpression *expr, ReductionOpID redop) const;
       RtEvent perform_updates(const LegionMap<InstanceView*,
                             FieldMaskSet<Update> >::aligned &updates,
                            const PhysicalTraceInfo &trace_info,
@@ -1436,7 +1435,6 @@ namespace Legion {
       const RtEvent guard_precondition;
       const PredEvent predicate_guard;
       const bool track_events;
-      const bool copy_out;
     protected:
       FieldMask update_fields;
       LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned sources; 
@@ -2853,6 +2851,14 @@ namespace Legion {
                       const bool target_local = false);
       RtEvent make_owner(AddressSpaceID owner, 
                          RtEvent precondition = RtEvent::NO_RT_EVENT);
+      void update_tracing_valid_views(LogicalView *view,
+                                      IndexSpaceExpression *expr,
+                                      const RegionUsage &usage,
+                                      const FieldMask &user_mask,
+                                      const bool invalidates);
+      void update_tracing_anti_views(LogicalView *view,
+                                     IndexSpaceExpression *expr,
+                                     const FieldMask &user_mask);
     protected: 
       void defer_traversal(AutoTryLock &eq, PhysicalAnalysis &analysis,
                            const FieldMask &mask,
@@ -2919,6 +2925,7 @@ namespace Legion {
                                const FieldMask &user_mask,
                                const FieldMaskSet<InstanceView> &target_insts,
                                const std::vector<InstanceView*> &source_insts,
+                               const PhysicalTraceInfo &trace_info,
                                ReferenceMutator &mutator, 
                                const bool record_valid);
       void make_instances_valid(CopyFillAggregator *&aggregator,
@@ -2930,10 +2937,11 @@ namespace Legion {
                                 const FieldMask &update_mask,
                                 const FieldMaskSet<InstanceView> &target_insts,
                                 const std::vector<InstanceView*> &source_insts,
+                                const PhysicalTraceInfo &trace_info,
                                 const bool skip_check = false,
                                 const int dst_index = -1,
                                 const ReductionOpID redop = 0,
-                                CopyAcrossHelper *across_helper = NULL) const;
+                                CopyAcrossHelper *across_helper = NULL);
       void issue_update_copies_and_fills(InstanceView *target,
                                 const std::vector<InstanceView*> &source_views,
                                          CopyFillAggregator *&aggregator,
@@ -2943,15 +2951,17 @@ namespace Legion {
                                          IndexSpaceExpression *expr,
                                          const bool expr_covers,
                                          FieldMask update_mask,
+                                         const PhysicalTraceInfo &trace_info,
                                          const int dst_index,
                                          const ReductionOpID redop,
-                                         CopyAcrossHelper *across_helper) const;
+                                         CopyAcrossHelper *across_helper);
       void apply_reductions(const FieldMaskSet<InstanceView> &reduction_targets,
                             IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &reduction_mask, 
                             CopyFillAggregator *&aggregator,RtEvent guard_event,
                             Operation *op, const unsigned index, 
-                            const bool track_events, const bool copy_out,
+                            const bool track_events,
+                            const PhysicalTraceInfo &trace_info,
                             FieldMaskSet<IndexSpaceExpression> *applied_exprs,
                             CopyAcrossHelper *across_helper = NULL);
       template<typename T>
@@ -2959,6 +2969,7 @@ namespace Legion {
                     const FieldMask &restricted_mask, 
                     const FieldMaskSet<T> &src_views,
                     Operation *op, const unsigned index,
+                    const PhysicalTraceInfo &trace_info,
                     CopyFillAggregator *&aggregator);
       void record_restriction(IndexSpaceExpression *expr, 
                               const bool expr_covers,
@@ -3080,6 +3091,11 @@ namespace Legion {
       // List of instances that were restricted, but have been acquired
       LegionMap<IndexSpaceExpression*,
         FieldMaskSet<InstanceView> >::aligned           released_instances;
+    protected:
+      // Tracing state for this equivalence set
+      TraceViewSet                                      *tracing_preconditions;
+      TraceViewSet                                      *tracing_anticonditions;
+      TraceViewSet                                      *tracing_postconditions;
     protected:
       // This tracks the most recent copy-fill aggregator for each field
       FieldMaskSet<CopyFillGuard>                       update_guards;

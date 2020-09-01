@@ -905,6 +905,7 @@ namespace Legion {
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
+                           EquivalenceSet *tracing_eq,
                            CopyAcrossHelper *helper) = 0;
     };
 
@@ -964,6 +965,7 @@ namespace Legion {
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
+                           EquivalenceSet *tracing_eq,
                            CopyAcrossHelper *helper);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
@@ -1036,6 +1038,7 @@ namespace Legion {
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
+                           EquivalenceSet *tracign_eq,
                            CopyAcrossHelper *helper);
     public:
       void record_true_view(LogicalView *view, const FieldMask &view_mask,
@@ -1101,7 +1104,9 @@ namespace Legion {
     public:
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
-                           IndexSpaceExpression *expr,CopyAcrossHelper *helper);
+                           IndexSpaceExpression *expr,
+                           EquivalenceSet *tracing_eq,
+                           CopyAcrossHelper *helper);
     public:
       void initialize(LegionMap<DistributedID,FieldMask>::aligned &views,
                       const InstanceSet &local_instances,

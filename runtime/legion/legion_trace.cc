@@ -1981,10 +1981,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceViewSet::TraceViewSet(RegionTreeForest *f, bool need_refs)
-      : forest(f),view_references(need_refs || f->runtime->dump_physical_traces)
+    TraceViewSet::TraceViewSet(RegionTreeForest *f,RegionNode *r,bool need_refs)
+      : forest(f), region(r),
+        view_references(need_refs || f->runtime->dump_physical_traces)
     //--------------------------------------------------------------------------
     {
+      region->add_base_resource_ref(TRACE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -2004,16 +2006,18 @@ namespace Legion {
             delete vit->first;
         }
       }
+      if (region->remove_base_resource_ref(TRACE_REF))
+        delete region;
       conditions.clear();
     }
 
     //--------------------------------------------------------------------------
     void TraceViewSet::insert(
-          InstanceView *view, IndexSpaceExpression *expr, const FieldMask &mask)
+           LogicalView *view, IndexSpaceExpression *expr, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       ViewExprs::iterator finder = conditions.find(view);
-      IndexSpaceExpression *const total_expr = view->manager->instance_domain; 
+      IndexSpaceExpression *const total_expr = region->row_source; 
       const size_t expr_volume = expr->get_volume();
       if (expr != total_expr)
       {
@@ -2106,7 +2110,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceViewSet::invalidate(
-          InstanceView *view, IndexSpaceExpression *expr, const FieldMask &mask)
+           LogicalView *view, IndexSpaceExpression *expr, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       ViewExprs::iterator finder = conditions.find(view);
@@ -2115,7 +2119,7 @@ namespace Legion {
         return;
       
       const size_t expr_volume = expr->get_volume();
-      IndexSpaceExpression *const total_expr = view->manager->instance_domain; 
+      IndexSpaceExpression *const total_expr = region->row_source; 
 #ifdef DEBUG_LEGION
       // This is a necessary but not sufficient condition for dominance
       // If we need to we can put in the full intersection test later
@@ -2226,7 +2230,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TraceViewSet::dominates(InstanceView *view, IndexSpaceExpression *expr, 
+    void TraceViewSet::invalidate_all_but(LogicalView *except,
+                              IndexSpaceExpression *expr, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<LogicalView*> to_invalidate;
+      for (ViewExprs::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+      {
+        if (it->first == except)
+          continue;
+        if (it->second.get_valid_mask() * mask)
+          continue;
+        to_invalidate.push_back(it->first);
+      }
+      for (std::vector<LogicalView*>::const_iterator it = 
+            to_invalidate.begin(); it != to_invalidate.end(); it++)
+        invalidate(*it, expr, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    bool TraceViewSet::dominates(LogicalView *view, IndexSpaceExpression *expr, 
                                  FieldMask &non_dominated) const
     //--------------------------------------------------------------------------
     {
@@ -2238,7 +2262,7 @@ namespace Legion {
         return false;
 
       const size_t expr_volume = expr->get_volume();
-      IndexSpaceExpression *const total_expr = view->manager->instance_domain;
+      IndexSpaceExpression *const total_expr = region->row_source;
 #ifdef DEBUG_LEGION
       // This is a necessary but not sufficient condition for dominance
       // If we need to we can put in the full intersection test later
@@ -2284,7 +2308,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceViewSet::dominates(InstanceView *view, 
+    void TraceViewSet::dominates(LogicalView *view, 
                             IndexSpaceExpression *expr, FieldMask mask,
                             FieldMaskSet<IndexSpaceExpression> &non_dominated,
                             FieldMaskSet<IndexSpaceExpression> *dominated) const
@@ -2306,7 +2330,7 @@ namespace Legion {
       }
 
       const size_t expr_volume = expr->get_volume();
-      IndexSpaceExpression *const total_expr = view->manager->instance_domain;
+      IndexSpaceExpression *const total_expr = region->row_source;
 #ifdef DEBUG_LEGION
       // This is a necessary but not sufficient condition for dominance
       // If we need to we can put in the full intersection test later
@@ -2410,23 +2434,25 @@ namespace Legion {
     void TraceViewSet::dump(void) const
     //--------------------------------------------------------------------------
     {
+      const LogicalRegion lr = region->handle;
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); ++vit)
       {
-        InstanceView *view = vit->first;
+        LogicalView *view = vit->first;
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               vit->second.begin(); it != vit->second.end(); ++it)
         {
           char *mask = it->second.to_string();
-          LogicalRegion lr =
-            forest->get_tree(view->get_manager()->tree_id)->handle;
           const void *name = NULL; size_t name_size = 0;
           forest->runtime->retrieve_semantic_information(lr, 
               LEGION_NAME_SEMANTIC_TAG, name, name_size, true, true);
+          PhysicalManager *manager = view->get_manager();
           log_tracing.info() << "  "
-                    <<(view->is_reduction_view() ? "Reduction" : "Materialized")
+                    << (view->is_reduction_view() ? "Reduction" : 
+                       (view->is_fill_view() ? "Fill" : "Materialized"))
                     << " view: " << view << ", Inst: " << std::hex
-                    << view->get_manager()->get_instance(DomainPoint()).id 
+                    << ((manager != NULL) ? 
+                        manager->get_instance(DomainPoint()).id : 0)
                     << std::dec
                     << ", Index expr: " << it->first->expr_id
                     << ", Name: " << (name_size > 0 ? (const char*)name : "")
@@ -2436,6 +2462,7 @@ namespace Legion {
       }
     }
 
+#if 0
     /////////////////////////////////////////////////////////////
     // TraceConditionSet
     /////////////////////////////////////////////////////////////
@@ -2569,6 +2596,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // PhysicalTemplate
@@ -2580,10 +2608,7 @@ namespace Legion {
         fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false),
-        recording_done(Runtime::create_rt_user_event()),
-        pre(t->runtime->forest), post(t->runtime->forest),
-        pre_reductions(t->runtime->forest), post_reductions(t->runtime->forest),
-        consumed_reductions(t->runtime->forest)
+        recording_done(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
       events.push_back(fence_event);
@@ -2596,9 +2621,7 @@ namespace Legion {
     PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
       : trace(NULL), recording(true), replayable(false, "uninitialized"),
         fence_completion_id(0),
-        replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT),
-        pre(NULL), post(NULL), pre_reductions(NULL), post_reductions(NULL),
-        consumed_reductions(NULL)
+        replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2716,6 +2739,7 @@ namespace Legion {
       return Runtime::merge_events(NULL, all_events);
     }
 
+#if NEWEQ 
     //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_preconditions(TraceReplayOp *op)
     //--------------------------------------------------------------------------
@@ -2781,6 +2805,7 @@ namespace Legion {
 
       return Replayable(true);
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::register_operation(Operation *op)
@@ -2871,14 +2896,24 @@ namespace Legion {
         release_remote_memos();
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     void PhysicalTemplate::generate_conditions(InnerContext *context, 
                                                UniqueID opid)
     //--------------------------------------------------------------------------
     {
+      // Compute the equivalence sets based on the region operations we used
+
+      // Extract the pre and postconditions from the equivalence sets
+
+      // Transpose them so we have preconditions for each expression to test
+
+      // Make a tracker for each one of those expressions
+
       pre.make_ready(context, opid);
       post.make_ready(context, opid);
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::optimize(ReplTraceOp *op)
@@ -4018,6 +4053,7 @@ namespace Legion {
       }
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     void PhysicalTemplate::dump_template(void)
     //--------------------------------------------------------------------------
@@ -4052,6 +4088,7 @@ namespace Legion {
       log_tracing.info() << "[Consumed Reductions]";
       consumed_reductions.dump();
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::dump_instructions(
@@ -4446,10 +4483,7 @@ namespace Legion {
       IndexSpaceNode *expr = node->row_source;
       views.insert(expr, user_mask);
       if (update_validity)
-      {
-        update_valid_views(view, expr, usage, user_mask, true, applied);
         add_view_user(view, usage, entry, expr, user_mask, applied);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -4472,8 +4506,7 @@ namespace Legion {
                                  const FieldMaskSet<FillView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
                                  std::set<RtEvent> &applied_events,
-                                 const bool reduction_initialization,
-                                 const bool restricted_invalidation)
+                                 const bool reduction_initialization)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
@@ -4486,7 +4519,7 @@ namespace Legion {
       if (!reduction_initialization)
         record_fill_views(tracing_srcs, applied_events);
       record_views(lhs_, expr,RegionUsage(LEGION_WRITE_ONLY,LEGION_EXCLUSIVE,0), 
-          tracing_dsts, applied_events, restricted_invalidation);
+                   tracing_dsts, applied_events);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -4495,8 +4528,7 @@ namespace Legion {
                                  IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
-                                 std::set<RtEvent> &applied_events,
-                                 const bool restricted_invalidation)
+                                 std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
@@ -4505,10 +4537,10 @@ namespace Legion {
 #endif
       const unsigned lhs_ = find_event(lhs, tpl_lock);
       record_views(lhs_, expr, RegionUsage(LEGION_READ_ONLY,LEGION_EXCLUSIVE,0),
-          tracing_srcs, applied_events, restricted_invalidation);
+                   tracing_srcs, applied_events);
       record_copy_views(lhs_, expr, tracing_srcs);
       record_views(lhs_, expr,RegionUsage(LEGION_WRITE_ONLY,LEGION_EXCLUSIVE,0),
-          tracing_dsts, applied_events, restricted_invalidation);
+                   tracing_dsts, applied_events);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -4517,82 +4549,12 @@ namespace Legion {
                                         IndexSpaceExpression *expr,
                                         const RegionUsage &usage,
                                         const FieldMaskSet<InstanceView> &views,
-                                        std::set<RtEvent> &applied,
-                                        const bool restricted_invalidation)
+                                        std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       for (FieldMaskSet<InstanceView>::const_iterator it = 
             views.begin(); it != views.end(); ++it)
-      {
-        update_valid_views(it->first, expr, usage, it->second, 
-                           restricted_invalidation, applied);
         add_view_user(it->first, usage, entry, expr, it->second, applied);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::update_valid_views(InstanceView *view,
-                                              IndexSpaceExpression *expr,
-                                              const RegionUsage &usage,
-                                              const FieldMask &user_mask,
-                                              bool invalidates,
-                                              std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-      std::set<InstanceView*> &views= view_groups[view->get_manager()->tree_id];
-      views.insert(view);
-
-      if (view->is_reduction_view())
-      {
-        if (invalidates)
-        {
-#ifdef DEBUG_LEGION
-          assert(IS_REDUCE(usage));
-#endif
-          post_reductions.insert(view, expr, user_mask);
-          if (expr->is_empty())
-            consumed_reductions.insert(view, expr, user_mask);
-        }
-        else
-        {
-          if (HAS_READ(usage))
-          {
-            FieldMaskSet<IndexSpaceExpression> dominated, not_dominated;
-            post_reductions.dominates(view, expr, user_mask,
-                                      not_dominated, &dominated);
-            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
-                  not_dominated.begin(); it != not_dominated.end(); it++)
-              pre_reductions.insert(view, it->first, it->second);
-            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                  dominated.begin(); it != dominated.end(); it++)
-              consumed_reductions.insert(view, it->first, it->second);
-          }
-        }
-      }
-      else
-      {
-        if (HAS_READ(usage))
-        {
-          FieldMaskSet<IndexSpaceExpression> not_dominated;
-          post.dominates(view, expr, user_mask, not_dominated);
-          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                not_dominated.begin(); it != not_dominated.end(); it++)
-            pre.insert(view, it->first, it->second);
-        }
-        if (invalidates && HAS_WRITE(usage))
-        {
-          // This little loop right here is the source of all the complexity
-          // for sharded trace capture in control replication. The only way
-          // that this loop is safe is if we know that all the views which
-          // have overlapping fields and expressions are sharded to the same
-          // shard so that all these invalidations are handled correctly. 
-          for (std::set<InstanceView*>::iterator vit = 
-                views.begin(); vit != views.end(); ++vit)
-            if ((*vit) != view)
-              post.invalidate(*vit, expr, user_mask);
-        }
-        post.insert(view, expr, user_mask);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -5400,6 +5362,7 @@ namespace Legion {
       PhysicalTemplate::record_set_op_sync_event(lhs, memo);
     }
 
+#ifdef NEWEQ
     //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::apply_postcondition(ReplTraceSummaryOp *op,
                                RtBarrier bar, std::set<RtEvent> &applied_events)
@@ -5407,6 +5370,7 @@ namespace Legion {
     {
       post.ensure(op, bar, applied_events);
     }
+#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     ApBarrier ShardedPhysicalTemplate::find_trace_shard_event(ApEvent event,
@@ -5504,58 +5468,6 @@ namespace Legion {
       std::set<RtEvent> applied;
       switch (kind)
       {
-        case UPDATE_VALID_VIEWS:
-          {
-            derez.deserialize(done);
-            DistributedID view_did;
-            derez.deserialize(view_did);
-            RtEvent view_ready;
-            InstanceView *view = static_cast<InstanceView*>(
-                runtime->find_or_request_logical_view(view_did, view_ready));
-            bool is_local, is_index_space;
-            IndexSpace handle; 
-            IndexSpaceExprID remote_expr_id;
-            RtEvent expr_ready;
-            IndexSpaceExpression *user_expr = 
-              IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
-                                    source, is_local, is_index_space, handle, 
-                                    remote_expr_id, expr_ready);
-            if ((view_ready.exists() && !view_ready.has_triggered()) ||
-                (expr_ready.exists() && !expr_ready.has_triggered()))
-            {
-              if (user_expr != NULL)
-              {
-#ifdef DEBUG_LEGION
-                assert(!expr_ready.exists() || expr_ready.has_triggered());
-#endif
-                DeferTraceUpdateArgs args(this, kind,done,view,derez,user_expr);
-                runtime->issue_runtime_meta_task(args, 
-                    LG_LATENCY_MESSAGE_PRIORITY, view_ready);
-              }
-              else if (is_index_space)
-              {
-                DeferTraceUpdateArgs args(this, kind, done, view, derez,handle);
-                const RtEvent pre = !view_ready.exists() ? expr_ready : 
-                  Runtime::merge_events(view_ready, expr_ready);
-                runtime->issue_runtime_meta_task(args, 
-                    LG_LATENCY_MESSAGE_PRIORITY, pre);
-              }
-              else
-              {
-                DeferTraceUpdateArgs args(this, kind, done, view, 
-                                          derez, remote_expr_id);
-                const RtEvent pre = !view_ready.exists() ? expr_ready : 
-                  Runtime::merge_events(view_ready, expr_ready);
-                runtime->issue_runtime_meta_task(args, 
-                    LG_LATENCY_MESSAGE_PRIORITY, pre);
-              }
-              return;
-            }
-            else if (handle_update_valid_views(view, user_expr, derez, 
-                                               applied, done)) 
-              return;
-            break;
-          }
         case UPDATE_PRE_FILL:
           {
             derez.deserialize(done);
@@ -6014,34 +5926,6 @@ namespace Legion {
       Deserializer derez(dargs->buffer, dargs->buffer_size);
       switch (dargs->kind)
       {
-        case UPDATE_VALID_VIEWS:
-          {
-            if (dargs->expr != NULL)
-            {
-              if (dargs->target->handle_update_valid_views(
-                    static_cast<InstanceView*>(dargs->view), 
-                    dargs->expr, derez, applied, dargs->done, dargs))
-                return;
-            }
-            else if (dargs->handle.exists())
-            {
-              IndexSpaceNode *node = runtime->forest->get_node(dargs->handle);
-              if (dargs->target->handle_update_valid_views(
-                    static_cast<InstanceView*>(dargs->view), node, derez,
-                    applied, dargs->done, dargs))
-                return;
-            }
-            else
-            {
-              IndexSpaceExpression *expr = 
-                runtime->forest->find_remote_expression(dargs->remote_expr_id);
-              if (dargs->target->handle_update_valid_views(
-                    static_cast<InstanceView*>(dargs->view),
-                    expr, derez, applied, dargs->done, dargs))
-                return;
-            }
-            break;
-          }
         case UPDATE_PRE_FILL:
           {
             if (dargs->target->handle_update_pre_fill(
@@ -6122,56 +6006,6 @@ namespace Legion {
       if (dargs->deferral_event.exists())
         Runtime::trigger_event(dargs->deferral_event);
       free(dargs->buffer);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ShardedPhysicalTemplate::handle_update_valid_views(InstanceView *view,
-      IndexSpaceExpression *expr,Deserializer &derez,std::set<RtEvent> &applied,
-      RtUserEvent done, const DeferTraceUpdateArgs *dargs /*=NULL*/)
-    //--------------------------------------------------------------------------
-    {
-      AutoTryLock tpl_lock(template_lock);
-      if (!tpl_lock.has_lock())
-      {
-        RtUserEvent deferral;
-        if (dargs != NULL)
-          deferral = dargs->deferral_event;
-        RtEvent pre;
-        if (!deferral.exists())
-        {
-          deferral = Runtime::create_rt_user_event();
-          pre = chain_deferral_events(deferral);
-        }
-        else
-          pre = tpl_lock.try_next();
-        if (dargs == NULL)
-        {
-          DeferTraceUpdateArgs args(this, UPDATE_VALID_VIEWS, done,
-                                    view, derez, expr, deferral);
-          repl_ctx->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-        }
-        else
-        {
-          DeferTraceUpdateArgs args(*dargs, deferral);
-          repl_ctx->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-#ifdef DEBUG_LEGION
-          // Keep the deserializer happy since we didn't use it
-          derez.advance_pointer(derez.get_remaining_bytes());
-#endif
-        }
-        return true;
-      }
-      RegionUsage usage;
-      derez.deserialize(usage);
-      FieldMask user_mask;
-      derez.deserialize(user_mask);
-      bool invalidates;
-      derez.deserialize<bool>(invalidates);
-      PhysicalTemplate::update_valid_views(view, expr, usage, user_mask,
-                                           invalidates, applied);
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -6620,40 +6454,6 @@ namespace Legion {
           all_events.insert(it->first);
       }
       return Runtime::merge_events(NULL, all_events);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::update_valid_views(InstanceView *view,
-                                                     IndexSpaceExpression *expr,
-                                                     const RegionUsage &usage,
-                                                     const FieldMask &user_mask,
-                                                     bool invalidates,
-                                                     std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-      const ShardID target_shard = find_view_owner(view); 
-      // Check to see if we're on the right shard, if not send the message
-      if (target_shard != repl_ctx->owner_shard->shard_id)
-      {
-        const ShardMapping &mapping = repl_ctx->shard_manager->get_mapping();
-        RtUserEvent done = Runtime::create_rt_user_event();
-        Serializer rez;
-        rez.serialize(repl_ctx->shard_manager->repl_id);
-        rez.serialize(target_shard);
-        rez.serialize(template_index);
-        rez.serialize(UPDATE_VALID_VIEWS);
-        rez.serialize(done);
-        rez.serialize(view->did);
-        expr->pack_expression(rez, mapping[target_shard]);
-        rez.serialize(usage);
-        rez.serialize(user_mask);
-        rez.serialize<bool>(invalidates);
-        repl_ctx->shard_manager->send_trace_update(target_shard, rez);
-        applied.insert(done);
-      }
-      else // Now that we are on the right shard we can do the update call
-        PhysicalTemplate::update_valid_views(view, expr, usage, user_mask,
-                                             invalidates, applied);
     }
 
     //--------------------------------------------------------------------------

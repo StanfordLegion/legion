@@ -507,26 +507,30 @@ namespace Legion {
     class TraceViewSet {
     public:
       struct FailedPrecondition {
-        InstanceView *view;
+        LogicalView *view;
         IndexSpaceExpression *expr;
         FieldMask mask;
 
         std::string to_string(void) const;
       };
     public:
-      TraceViewSet(RegionTreeForest *forest, bool need_refs = false);
+      TraceViewSet(RegionTreeForest *forest, RegionNode *region,
+                   bool need_refs = false);
       virtual ~TraceViewSet(void);
     public:
-      void insert(InstanceView *view,
+      void insert(LogicalView *view,
                   IndexSpaceExpression *expr,
                   const FieldMask &mask);
-      void invalidate(InstanceView *view,
-                      IndexSpaceExpression *eq,
+      void invalidate(LogicalView *view,
+                      IndexSpaceExpression *expr,
                       const FieldMask &mask);
+      void invalidate_all_but(LogicalView *except,
+                              IndexSpaceExpression *expr,
+                              const FieldMask &mask);
     public:
-      bool dominates(InstanceView *view, IndexSpaceExpression *expr, 
+      bool dominates(LogicalView *view, IndexSpaceExpression *expr, 
                      FieldMask &non_dominated) const;
-      void dominates(InstanceView *view, 
+      void dominates(LogicalView *view, 
                      IndexSpaceExpression *expr, FieldMask mask,
                      FieldMaskSet<IndexSpaceExpression> &non_dominated,
                      FieldMaskSet<IndexSpaceExpression> *dominate = NULL) const;
@@ -536,10 +540,11 @@ namespace Legion {
     public:
       void dump(void) const;
     protected:
-      typedef LegionMap<InstanceView*,
+      typedef LegionMap<LogicalView*,
                         FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
     protected:
       RegionTreeForest *const forest;
+      RegionNode *const region;
     protected:
       // At most one expression per field
       ViewExprs conditions;
@@ -580,6 +585,7 @@ namespace Legion {
       FieldMaskSet<EquivalenceSet> equivalence_sets;
     };
 
+#if 0
     /**
      * \class TraceConditionSet
      */
@@ -610,6 +616,7 @@ namespace Legion {
       bool ready; // should only be set once
 #endif
     };
+#endif
 
     /**
      * \class PhysicalTemplate
@@ -802,8 +809,7 @@ namespace Legion {
       virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
-                           std::set<RtEvent> &applied,
-                           const bool restricted_invalidation);
+                           std::set<RtEvent> &applied);
       virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
@@ -840,21 +846,13 @@ namespace Legion {
                            const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events,
-                           const bool reduction_initialization,
-                           const bool restricted_invalidation);
+                           const bool reduction_initialization);
     protected:
       void record_views(unsigned entry,
                         IndexSpaceExpression *expr,
                         const RegionUsage &usage,
                         const FieldMaskSet<InstanceView> &views,
-                        std::set<RtEvent> &applied,
-                        const bool restricted_invalidation);
-      virtual void update_valid_views(InstanceView *view,
-                                      IndexSpaceExpression *expr,
-                                      const RegionUsage &usage,
-                                      const FieldMask &user_mask,
-                                      bool invalidates,
-                                      std::set<RtEvent> &applied_events);
+                        std::set<RtEvent> &applied);
       virtual void add_view_user(InstanceView *view,
                          const RegionUsage &usage,
                          unsigned user, IndexSpaceExpression *user_expr,
@@ -977,9 +975,7 @@ namespace Legion {
       std::map<unsigned,ViewExprs>     copy_views;
     protected:
       // THESE ARE SHARDED FOR CONTROL REPLICATION!!!
-      TraceConditionSet   pre, post;
-      // THIS IS SHARDED FOR CONTROL REPLICATION!!!
-      ViewGroups          view_groups;
+      //TraceConditionSet   pre, post;
       // This data structure holds a set of last users for each view.
       // Each user (which is an index in the event table) is associated with
       // a field mask, an index expression representing the working set within
@@ -989,9 +985,9 @@ namespace Legion {
       ViewUsers           view_users;
       std::set<ViewUser*> all_users;
     private:
-      TraceViewSet pre_reductions;
-      TraceViewSet post_reductions;
-      TraceViewSet consumed_reductions;
+      //TraceViewSet pre_reductions;
+      //TraceViewSet post_reductions;
+      //TraceViewSet consumed_reductions;
     private:
       std::map<TraceLocalID,std::set<ApEvent> > reduction_ready_events;
     protected:
@@ -1012,7 +1008,6 @@ namespace Legion {
     class ShardedPhysicalTemplate : public PhysicalTemplate {
     public:
       enum UpdateKind {
-        UPDATE_VALID_VIEWS,
         UPDATE_PRE_FILL,
         UPDATE_POST_FILL,
         UPDATE_VIEW_USER,
@@ -1139,10 +1134,6 @@ namespace Legion {
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       static void handle_deferred_trace_update(const void *args, Runtime *rt);
     protected:
-      bool handle_update_valid_views(InstanceView *view, 
-                           IndexSpaceExpression *expr, Deserializer &derez, 
-                           std::set<RtEvent> &applied, RtUserEvent done, 
-                           const DeferTraceUpdateArgs *dargs = NULL);
       bool handle_update_pre_fill(FillView *view, Deserializer &derez,
                                   std::set<RtEvent> &applied, RtUserEvent done,
                                   const DeferTraceUpdateArgs *dargs = NULL);
@@ -1164,12 +1155,6 @@ namespace Legion {
       static AddressSpaceID find_event_space(ApEvent event);
       virtual Replayable check_replayable(ReplTraceOp *op,
                             bool has_blocking_call) const;
-      virtual void update_valid_views(InstanceView *view,
-                                      IndexSpaceExpression *expr,
-                                      const RegionUsage &usage,
-                                      const FieldMask &user_mask,
-                                      bool invalidates,
-                                      std::set<RtEvent> &applied);
       virtual void add_view_user(InstanceView *view,
                          const RegionUsage &usage,
                          unsigned user, IndexSpaceExpression *user_expr,

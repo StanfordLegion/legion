@@ -3970,10 +3970,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void FillView::flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
-                           IndexSpaceExpression *expr, CopyAcrossHelper *helper)
+                           IndexSpaceExpression *expr, 
+                           EquivalenceSet *tracing_eq, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
-      aggregator.record_fill(dst_view, this, src_mask, expr, helper);
+      aggregator.record_fill(dst_view, this, src_mask, expr, tracing_eq,helper);
     }
 
     //--------------------------------------------------------------------------
@@ -4256,7 +4257,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PhiView::flatten(CopyFillAggregator &aggregator,
                           InstanceView *dst_view, const FieldMask &src_mask,
-                          IndexSpaceExpression *expr, CopyAcrossHelper *helper)
+                          IndexSpaceExpression *expr, 
+                          EquivalenceSet *tracing_eq, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this
@@ -4475,6 +4477,7 @@ namespace Legion {
     void ShardedView::flatten(CopyFillAggregator &aggregator,
                               InstanceView *dst_view, const FieldMask &src_mask,
                               IndexSpaceExpression *expr,
+                              EquivalenceSet *tracing_eq,
                               CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
@@ -4513,7 +4516,7 @@ namespace Legion {
       }
       if (!src_views.empty())
         aggregator.record_updates(dst_view, src_views, copy_mask, expr,
-                                  0/*redop*/, helper);
+                                  tracing_eq, 0/*redop*/, helper);
     }
 
     //--------------------------------------------------------------------------

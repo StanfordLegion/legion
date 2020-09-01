@@ -2464,9 +2464,8 @@ namespace Legion {
 #endif
                                          full_precondition, guard,
                                          dst_req.redop, false/*fold*/); 
-            trace_info.record_copy_views(result, intersect,
-                                         tracing_srcs, tracing_dsts,
-                                         map_applied_events, false/*out*/);
+            trace_info.record_copy_views(result, intersect, tracing_srcs, 
+                                         tracing_dsts, map_applied_events);
             return result;
           }
           else
@@ -2497,9 +2496,8 @@ namespace Legion {
 #endif
                                         full_precondition, guard,
                                         dst_req.redop, false/*fold*/);
-            trace_info.record_copy_views(result, dst_expr, 
-                                         tracing_srcs, tracing_dsts,
-                                         map_applied_events, false/*out*/);
+            trace_info.record_copy_views(result, dst_expr, tracing_srcs, 
+                                         tracing_dsts, map_applied_events);
             return result;
           }
           else
@@ -14642,8 +14640,8 @@ namespace Legion {
         {
           // Generate the close operations         
           // Also check to see if we have any refinements for the close operation
-          const bool check_for_refinements = (arrived && IS_WRITE(user.usage) 
-              && !proj_info.is_projecting() && !trace_info.replaying_trace);
+          const bool check_for_refinements = arrived && IS_WRITE(user.usage) 
+              && !proj_info.is_projecting() && !trace_info.replaying_trace;
           closer.initialize_close_operations(state, user.op, trace_info,
                                              check_for_refinements, !arrived);
           // Perform dependence analysis for all the close operations
