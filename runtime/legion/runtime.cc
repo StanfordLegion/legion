@@ -3672,8 +3672,16 @@ namespace Legion {
             domain.rect_data[idx + 1] = index_point[idx];
             domain.rect_data[idx + 1 + domain.dim] = index_point[idx];
           }
-          domain.rect_data[0] = 0;
-          domain.rect_data[domain.dim] = num_elements - 1;
+          if (num_elements > 0)
+          {
+            domain.rect_data[0] = 0;
+            domain.rect_data[domain.dim] = num_elements - 1;
+          }
+          else
+          {
+            domain.rect_data[0] = 0;
+            domain.rect_data[domain.dim] = -1;
+          }
 
           runtime->forest->set_pending_space_domain(
               index_node->handle, domain, runtime->address_space);
@@ -3691,7 +3699,8 @@ namespace Legion {
       }
       else
       {
-        domain = Rect<1>(0, num_elements - 1);
+        domain =
+          num_elements > 0 ? Rect<1>(0, num_elements - 1) : Rect<1>(0, -1);
         index_node->set_domain(domain, runtime->address_space);
       }
 
