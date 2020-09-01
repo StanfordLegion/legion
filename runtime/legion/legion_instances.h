@@ -413,6 +413,14 @@ namespace Legion {
         const size_t piece_list_size;
         const bool shadow_instance;
       };
+    private:
+      struct BroadcastFunctor {
+        BroadcastFunctor(Runtime *rt, Serializer &r) : runtime(rt), rez(r) { }
+        inline void apply(AddressSpaceID target)
+          { runtime->send_manager_update(target, rez); }
+        Runtime *runtime;
+        Serializer &rez;
+      };
     public:
       IndividualManager(RegionTreeForest *ctx, DistributedID did,
                         AddressSpaceID owner_space,
@@ -510,7 +518,12 @@ namespace Legion {
       inline bool is_unbound() const { return kind == UNBOUND; }
       void update_physical_instance(PhysicalInstance new_instance,
                                     InstanceKind new_kind,
+                                    size_t new_footprint,
                                     uintptr_t new_pointer = 0);
+      void broadcast_manager_update(void);
+      static void handle_send_manager_update(Runtime *runtime,
+                                             AddressSpaceID source,
+                                             Deserializer &derez);
     public:
       MemoryManager *const memory_manager;
       PhysicalInstance instance;

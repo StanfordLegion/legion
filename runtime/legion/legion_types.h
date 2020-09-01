@@ -775,6 +775,7 @@ namespace Legion {
       SEND_SHARDED_VIEW,
       SEND_REDUCTION_VIEW,
       SEND_INSTANCE_MANAGER,
+      SEND_MANAGER_UPDATE,
       SEND_COLLECTIVE_MANAGER,
       SEND_COLLECTIVE_MESSAGE,
       SEND_CREATE_SHADOW_REQUEST,
@@ -981,6 +982,7 @@ namespace Legion {
         "Send Sharded View",                                          \
         "Send Reduction View",                                        \
         "Send Instance Manager",                                      \
+        "Send Manager Update",                                        \
         "Send Collective Instance Manager",                           \
         "Send Collective Instance Message",                           \
         "Send Create Shadow Reduction Instance Request",              \

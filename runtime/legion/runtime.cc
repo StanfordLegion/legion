@@ -3785,6 +3785,7 @@ namespace Legion {
                                           info.eager_pool
                                           ? IndividualManager::EAGER
                                           : IndividualManager::EXTERNAL_OWNED,
+                                          layout->bytes_used,
                                           info.ptr);
 
         // If this is an allocation drawn from the eager pool,
@@ -9979,6 +9980,12 @@ namespace Legion {
             {
               runtime->handle_send_instance_manager(derez, 
                                                     remote_address_space);
+              break;
+            }
+          case SEND_MANAGER_UPDATE:
+            {
+              runtime->handle_send_manager_update(derez,
+                                                  remote_address_space);
               break;
             }
           case SEND_COLLECTIVE_MANAGER:
@@ -19464,6 +19471,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_manager_update(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_MANAGER_UPDATE,
+                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_collective_instance_manager(AddressSpaceID target, 
                                                    Serializer &rez)
     //--------------------------------------------------------------------------
@@ -21364,6 +21379,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndividualManager::handle_send_manager(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_manager_update(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndividualManager::handle_send_manager_update(this, source, derez);
     }
 
     //--------------------------------------------------------------------------

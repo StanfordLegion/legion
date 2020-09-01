@@ -1526,6 +1526,7 @@ namespace Legion {
 #endif
       Serializer rez;
       {
+        AutoLock lock(inst_lock,1,false/*exlcusive*/);
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(owner_space);
@@ -1538,7 +1539,10 @@ namespace Legion {
           rez.serialize(piece_list, piece_list_size);
         rez.serialize(field_space_node->handle);
         rez.serialize(tree_id);
-        rez.serialize(unique_event);
+        if (kind != UNBOUND)
+          rez.serialize(unique_event);
+        else
+          rez.serialize(producer_event);
         layout->pack_layout_description(rez, target);
         rez.serialize(redop);
         rez.serialize<bool>(shadow_instance);
@@ -2093,6 +2097,7 @@ namespace Legion {
     void IndividualManager::update_physical_instance(
                                                   PhysicalInstance new_instance,
                                                   InstanceKind new_kind,
+                                                  size_t new_footprint,
                                                   uintptr_t new_pointer)
     //--------------------------------------------------------------------------
     {
@@ -2109,7 +2114,7 @@ namespace Legion {
         assert(kind != EXTERNAL_OWNED || external_pointer != -1UL);
 #endif
 
-        update_instance_footprint(instance.get_layout()->bytes_used);
+        update_instance_footprint(new_footprint);
 
         if (runtime->legion_spy_enabled)
         {
@@ -2119,9 +2124,53 @@ namespace Legion {
           layout->log_instance_layout(unique_event);
         }
 
+        if (is_owner() && has_remote_instances())
+          broadcast_manager_update();
+
         Runtime::trigger_event(
             NULL, use_event, fetch_metadata(instance, producer_event));
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualManager::broadcast_manager_update(void)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(instance);
+        rez.serialize(instance_footprint);
+        rez.serialize(kind);
+      }
+      BroadcastFunctor functor(context->runtime, rez);
+      map_over_remote_instances(functor);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndividualManager::handle_send_manager_update(
+                   Runtime *runtime, AddressSpaceID source, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      PhysicalInstance instance;
+      derez.deserialize(instance);
+      size_t footprint;
+      derez.deserialize(footprint);
+      InstanceKind kind;
+      derez.deserialize(kind);
+
+      RtEvent manager_ready;
+      PhysicalManager *manager =
+        runtime->find_or_request_instance_manager(did, manager_ready);
+      if (manager_ready.exists() && !manager_ready.has_triggered())
+        manager_ready.wait();
+
+      manager->as_individual_manager()->update_physical_instance(
+          instance, kind, footprint);
     }
 
     /////////////////////////////////////////////////////////////

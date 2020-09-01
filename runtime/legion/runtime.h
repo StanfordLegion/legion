@@ -2808,6 +2808,7 @@ namespace Legion {
       void send_sharded_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
+      void send_manager_update(AddressSpaceID target, Serializer &rez);
       void send_collective_instance_manager(AddressSpaceID target, 
                                             Serializer &rez);
       void send_collective_instance_message(AddressSpaceID target, 
@@ -3103,6 +3104,8 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,
                                         AddressSpaceID source);
+      void handle_send_manager_update(Deserializer &derez,
+                                      AddressSpaceID source);
       void handle_collective_instance_manager(Deserializer &derez,
                                               AddressSpaceID source);
       void handle_collective_instance_message(Deserializer &derez);
