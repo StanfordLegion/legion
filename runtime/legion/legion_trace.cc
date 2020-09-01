@@ -3994,18 +3994,6 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::get_reduction_ready_events(
-                              Memoizable *memo, std::set<ApEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(template_lock, 1, false/*exclusive*/);
-      std::map<TraceLocalID,std::set<ApEvent> >::iterator finder =
-        reduction_ready_events.find(find_trace_local_id(memo));
-      if (finder != reduction_ready_events.end())
-        ready_events.insert(finder->second.begin(), finder->second.end());
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_op_view(Memoizable *memo,
                                           unsigned idx,
                                           InstanceView *view,

@@ -894,31 +894,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::get_reduction_ready_events(Memoizable *memo,
-                                                std::set<ApEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      if (local_space != origin_space)
-      {
-        RtUserEvent done_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(remote_tpl);
-          rez.serialize(REMOTE_TRACE_GET_REDUCTION_EVENTS);
-          rez.serialize(done_event);
-          memo->pack_remote_memoizable(rez, origin_space);
-          rez.serialize(&ready_events);
-        }
-        runtime->send_remote_trace_update(origin_space, rez);
-        // Wait for the result to be ready
-        done_event.wait();
-      }
-      else
-        remote_tpl->get_reduction_ready_events(memo, ready_events);
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_set_effects(Memoizable *memo, 
                                                  ApEvent &rhs)
     //--------------------------------------------------------------------------
@@ -1517,38 +1492,6 @@ namespace Legion {
               delete memo;
             break;
           }
-        case REMOTE_TRACE_GET_REDUCTION_EVENTS:
-          {
-            RtUserEvent done;
-            derez.deserialize(done);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
-            std::set<ApEvent> *target;
-            derez.deserialize(target);
-
-            std::set<ApEvent> result;
-            tpl->get_reduction_ready_events(memo, result);
-            if (!result.empty())
-            {
-              Serializer rez;
-              {
-                RezCheck z2(rez);
-                rez.serialize(REMOTE_TRACE_GET_REDUCTION_EVENTS);
-                rez.serialize(target);
-                rez.serialize<size_t>(result.size());
-                for (std::set<ApEvent>::const_iterator it = 
-                      result.begin(); it != result.end(); it++)
-                  rez.serialize(*it);
-                rez.serialize(done);
-              }
-              runtime->send_remote_trace_response(source, rez);
-            }
-            else
-              Runtime::trigger_event(done);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
-            break;
-          }
         case REMOTE_TRACE_SET_EFFECTS:
           {
             RtUserEvent applied;
@@ -1603,23 +1546,6 @@ namespace Legion {
             ApUserEvent *event_ptr;
             derez.deserialize(event_ptr);
             derez.deserialize(*event_ptr);
-            RtUserEvent done;
-            derez.deserialize(done);
-            Runtime::trigger_event(done);
-            break;
-          }
-        case REMOTE_TRACE_GET_REDUCTION_EVENTS:
-          {
-            std::set<ApEvent> *target;
-            derez.deserialize(target);
-            size_t num_events;
-            derez.deserialize(num_events);
-            for (unsigned idx = 0; idx < num_events; idx++)
-            {
-              ApEvent event;
-              derez.deserialize(event);
-              target->insert(event);
-            }
             RtUserEvent done;
             derez.deserialize(done);
             Runtime::trigger_event(done);
