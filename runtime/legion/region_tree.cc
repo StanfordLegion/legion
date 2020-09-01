@@ -2990,12 +2990,6 @@ namespace Legion {
       assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       RegionNode *region_node = get_node(req.region);
-      if (trace_info.recording)
-      {
-        FieldSpaceNode *fs_node = region_node->column_source;
-        trace_info.record_post_fill_view(fill_view,
-            fs_node->get_field_mask(req.privilege_fields));
-      }
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 

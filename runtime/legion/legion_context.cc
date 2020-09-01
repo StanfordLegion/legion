@@ -18265,15 +18265,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_summary_fence_barrier(RtBarrier &first)
+    RtBarrier ReplicateContext::get_next_summary_fence_barrier(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!first.exists());
-#endif
-      // Summary operations need two generations of these barriers
-      first = summary_fence_barrier;
-      advance_logical_barrier(summary_fence_barrier, total_shards);
       const RtBarrier result = summary_fence_barrier;
       advance_logical_barrier(summary_fence_barrier, total_shards);
       return result;

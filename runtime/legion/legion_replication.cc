@@ -6877,8 +6877,7 @@ namespace Legion {
       // analysis stage of the pipeline and we need to get our mapping
       // fence from a different location to avoid racing with the application
       initialize(ctx, MAPPING_FENCE, false/*need future*/, false/*track*/);
-      mapping_fence_barrier = 
-        ctx->get_next_summary_fence_barrier(invalidation_barrier);
+      mapping_fence_barrier = ctx->get_next_summary_fence_barrier();
       context_index = invalidator->get_ctx_index();
       current_template = tpl;
       // The summary could have been marked as being traced,
@@ -6900,7 +6899,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_fence();
-      invalidation_barrier = RtBarrier::NO_RT_BARRIER;
       runtime->free_repl_summary_op(this);
     }
 
@@ -6937,8 +6935,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (current_template->is_replayable())
-        current_template->apply_postcondition(this, invalidation_barrier, 
-                                              map_applied_conditions);
+        current_template->apply_postcondition(this, map_applied_conditions);
       ReplFenceOp::trigger_mapping();
     }
 

@@ -1704,7 +1704,13 @@ typedef enum legion_builtin_redop_t {
 #endif
   LEGION_REDOP_MAX_FLOAT32    = LEGION_REDOP_VALUE(MAX,FLOAT32),
   LEGION_REDOP_MAX_FLOAT64    = LEGION_REDOP_VALUE(MAX,FLOAT64),
-  // No definitions of max for complex types
+#ifdef LEGION_REDOP_COMPLEX
+#ifdef LEGION_REDOP_HALF
+  LEGION_REDOP_MAX_COMPLEX32  = LEGION_REDOP_VALUE(MAX,COMPLEX32),
+#endif
+  LEGION_REDOP_MAX_COMPLEX64  = LEGION_REDOP_VALUE(MAX,COMPLEX64),
+  // TODO: LEGION_REDOP_MAX_COMPLEX128,
+#endif
   ////////////////////////////////////////
   // Min reductions
   ////////////////////////////////////////
@@ -1722,7 +1728,13 @@ typedef enum legion_builtin_redop_t {
 #endif
   LEGION_REDOP_MIN_FLOAT32    = LEGION_REDOP_VALUE(MIN,FLOAT32),
   LEGION_REDOP_MIN_FLOAT64    = LEGION_REDOP_VALUE(MIN,FLOAT64),
-  // No definitions of min for complex types
+#ifdef LEGION_REDOP_COMPLEX
+#ifdef LEGION_REDOP_HALF
+  LEGION_REDOP_MIN_COMPLEX32  = LEGION_REDOP_VALUE(MIN,COMPLEX32),
+#endif
+  LEGION_REDOP_MIN_COMPLEX64  = LEGION_REDOP_VALUE(MIN,COMPLEX64),
+  // TODO: LEGION_REDOP_MIN_COMPLEX128
+#endif
   ////////////////////////////////////////
   // Bitwise-OR reductions
   ////////////////////////////////////////

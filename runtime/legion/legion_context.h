@@ -2152,7 +2152,7 @@ namespace Legion {
       RtBarrier get_next_mapping_fence_barrier(void);
       ApBarrier get_next_execution_fence_barrier(void);
       RtBarrier get_next_trace_recording_barrier(void);
-      RtBarrier get_next_summary_fence_barrier(RtBarrier &first);
+      RtBarrier get_next_summary_fence_barrier(void);
       inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
         {
           Runtime::advance_barrier(bar);

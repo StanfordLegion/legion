@@ -2462,7 +2462,7 @@ namespace Legion {
       }
     }
 
-#if 0
+#if NEWEQ
     /////////////////////////////////////////////////////////////
     // TraceConditionSet
     /////////////////////////////////////////////////////////////
@@ -2596,7 +2596,7 @@ namespace Legion {
         }
       }
     }
-#endif
+#endif // NEWEQ
 
     /////////////////////////////////////////////////////////////
     // PhysicalTemplate
@@ -2637,6 +2637,10 @@ namespace Legion {
         for (std::set<ViewUser*>::iterator it = all_users.begin();
              it != all_users.end(); ++it)
           delete (*it);
+        for (std::vector<TraceConditionSet*>::const_iterator it =
+              conditions.begin(); it != conditions.end(); it++)
+          if ((*it)->remove_reference())
+            delete (*it);
         for (std::vector<Instruction*>::iterator it = instructions.begin();
              it != instructions.end(); ++it)
           delete *it;
@@ -2739,12 +2743,26 @@ namespace Legion {
       return Runtime::merge_events(NULL, all_events);
     }
 
-#if NEWEQ 
     //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_preconditions(TraceReplayOp *op)
     //--------------------------------------------------------------------------
     {
-      return pre.require(op);
+      std::set<RtEvent> ready_events;
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->test_require(op, ready_events);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      bool result = true;
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+        if (!(*it)->check_require())
+          result = false;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2752,19 +2770,47 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      post.ensure(op, RtBarrier::NO_RT_BARRIER, applied_events);
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->ensure(op, applied_events);
     }
 
     //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_preconditions(ReplTraceReplayOp *op)
     //--------------------------------------------------------------------------
     {
-      return pre.require(op);
+      std::set<RtEvent> ready_events;
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->test_require(op, ready_events);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      bool result = true;
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+        if (!(*it)->check_require())
+          result = false;
+      return result;
     } 
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::apply_postcondition(ReplTraceSummaryOp *op,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->ensure(op, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalTemplate::Replayable PhysicalTemplate::check_replayable(
-                                  ReplTraceOp *op, bool has_blocking_call) const
+                                         ReplTraceOp *op, InnerContext *context,
+                                         UniqueID opid, bool has_blocking_call) 
     //--------------------------------------------------------------------------
     {
       if (has_blocking_call)
@@ -2773,39 +2819,86 @@ namespace Legion {
       if (has_virtual_mapping)
         return Replayable(false, "virtual mapping");
 
-      if (!pre_fill_views.empty())
-        return Replayable(false, "external fill views");
-
-      if (!pre_reductions.empty())
-        return Replayable(false, "external reduction views");
-
+      // Next we need to compute the equivalence sets for all these regions
+      LegionVector<VersionInfo>::aligned version_infos(trace_regions.size());
+      unsigned index = 0;
+      std::set<RtEvent> ready_events;
+      const ContextID ctx = context->get_context().get_id();
+      for (FieldMaskSet<RegionNode>::const_iterator it =
+            trace_regions.begin(); it != trace_regions.end(); it++, index++)
+        it->first->perform_versioning_analysis(ctx, context, 
+            &version_infos[index], it->second, opid, 
+            trace->runtime->address_space, ready_events);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        ready_events.clear();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      // Deduplicate equivalence sets so that they are unique
+      index = 0;
+      LegionMap<RegionTreeID,FieldMaskSet<EquivalenceSet> >::aligned all_sets;
+      for (FieldMaskSet<RegionNode>::const_iterator it =
+            trace_regions.begin(); it != trace_regions.end(); it++, index++)
+      {
+        const RegionTreeID tid = it->first->handle.get_tree_id();
+        FieldMaskSet<EquivalenceSet> &sets = all_sets[tid];
+        if (!sets.empty())
+        {
+          const FieldMaskSet<EquivalenceSet> &region_sets = 
+            version_infos[index].get_equivalence_sets();
+          for (FieldMaskSet<EquivalenceSet>::const_iterator eit =
+                region_sets.begin(); eit != region_sets.end(); eit++)
+            sets.insert(eit->first, eit->second);
+        }
+        else
+          version_infos[index].swap(sets);
+      }
+      trace_regions.clear();
+      // Make a trace condition set for each one of them
+      // Note for control replication, we're just letting multiple shards 
+      // race to their equivalence sets, whichever one gets their first for
+      // their fields will be the one to own the preconditions
+      for (LegionMap<RegionTreeID,FieldMaskSet<EquivalenceSet> >::aligned::
+            const_iterator rit = all_sets.begin(); rit != all_sets.end(); rit++)
+      {
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              rit->second.begin(); it != rit->second.end(); it++)
+        {
+          TraceConditionSet *condition = 
+           new TraceConditionSet(trace->runtime->forest,it->first->region_node);
+          condition->capture(it->first, it->second, ready_events);
+          condition->add_reference();
+          conditions.push_back(condition);
+        }
+      }
+      // Wait for the conditions to be ready and then test them for subsumption
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        ready_events.clear();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       TraceViewSet::FailedPrecondition condition;
-      if (!post_reductions.subsumed_by(consumed_reductions, &condition))
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
       {
-        if (trace->runtime->dump_physical_traces)
+        if (!(*it)->is_replayable(&condition))
         {
-          return Replayable(
-              false, "escaping reduction view: " + condition.to_string());
+          if (trace->runtime->dump_physical_traces)
+          {
+            return Replayable(
+                false, "precondition not subsumed: " + condition.to_string());
+          }
+          else
+            return Replayable(
+                false, "precondition not subsumed by postcondition");
         }
-        else
-          return Replayable(false, "escaping reduction views");
       }
-
-      if (!pre.subsumed_by(post, &condition))
-      {
-        if (trace->runtime->dump_physical_traces)
-        {
-          return Replayable(
-              false, "precondition not subsumed: " + condition.to_string());
-        }
-        else
-          return Replayable(
-              false, "precondition not subsumed by postcondition");
-      }
-
       return Replayable(true);
     }
-#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::register_operation(Operation *op)
@@ -2872,7 +2965,7 @@ namespace Legion {
     {
       trigger_recording_done();
       recording = false;
-      replayable = check_replayable(op, has_blocking_call);
+      replayable = check_replayable(op, context, opid, has_blocking_call);
 
       if (!replayable)
       {
@@ -2885,7 +2978,6 @@ namespace Legion {
           release_remote_memos();
         return;
       }
-      generate_conditions(context, opid);
       optimize(op);
       if (trace->runtime->dump_physical_traces) dump_template();
       size_t num_events = events.size();
@@ -2895,25 +2987,6 @@ namespace Legion {
       if (!remote_memos.empty())
         release_remote_memos();
     }
-
-#ifdef NEWEQ
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::generate_conditions(InnerContext *context, 
-                                               UniqueID opid)
-    //--------------------------------------------------------------------------
-    {
-      // Compute the equivalence sets based on the region operations we used
-
-      // Extract the pre and postconditions from the equivalence sets
-
-      // Transpose them so we have preconditions for each expression to test
-
-      // Make a tracker for each one of those expressions
-
-      pre.make_ready(context, opid);
-      post.make_ready(context, opid);
-    }
-#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::optimize(ReplTraceOp *op)
@@ -4053,7 +4126,6 @@ namespace Legion {
       }
     }
 
-#ifdef NEWEQ
     //--------------------------------------------------------------------------
     void PhysicalTemplate::dump_template(void)
     //--------------------------------------------------------------------------
@@ -4070,25 +4142,20 @@ namespace Legion {
                            << it->first << "]";
 
       log_tracing.info() << "[Precondition]";
-      pre.dump();
-      for (FieldMaskSet<FillView>::const_iterator vit = pre_fill_views.begin();
-           vit != pre_fill_views.end(); ++vit)
-      {
-        char *mask = vit->second.to_string();
-        log_tracing.info() << "  Fill view: " << vit->first
-                           << ", Field Mask: " << mask;
-        free(mask);
-      }
-      pre_reductions.dump();
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->dump_preconditions();
+
+      log_tracing.info() << "[Anit-Conditions]";
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->dump_anticonditions();
 
       log_tracing.info() << "[Postcondition]";
-      post.dump();
-      post_reductions.dump();
-
-      log_tracing.info() << "[Consumed Reductions]";
-      consumed_reductions.dump();
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->dump_postconditions();
     }
-#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::dump_instructions(
@@ -4450,18 +4517,6 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::get_reduction_ready_events(
-                              Memoizable *memo, std::set<ApEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(template_lock, 1, false/*exclusive*/);
-      std::map<TraceLocalID,std::set<ApEvent> >::iterator finder =
-        reduction_ready_events.find(find_trace_local_id(memo));
-      if (finder != reduction_ready_events.end())
-        ready_events.insert(finder->second.begin(), finder->second.end());
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_op_view(Memoizable *memo,
                                           unsigned idx,
                                           InstanceView *view,
@@ -4484,20 +4539,7 @@ namespace Legion {
       views.insert(expr, user_mask);
       if (update_validity)
         add_view_user(view, usage, entry, expr, user_mask, applied);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_post_fill_view(
-                                     FillView *view, const FieldMask &user_mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock tpl_lock(template_lock);
-      // If you change this then also change 
-      // ShardedPhysicalTemplate::handle_update_post_fill
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      post_fill_views.insert(view, user_mask);
+      trace_regions.insert(node, user_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -4514,10 +4556,6 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs, tpl_lock);
-      // Don't record fill views for initializing reduction 
-      // instances since we don't need to track them
-      if (!reduction_initialization)
-        record_fill_views(tracing_srcs, applied_events);
       record_views(lhs_, expr,RegionUsage(LEGION_WRITE_ONLY,LEGION_EXCLUSIVE,0), 
                    tracing_dsts, applied_events);
       record_copy_views(lhs_, expr, tracing_dsts);
@@ -4617,27 +4655,6 @@ namespace Legion {
       for (FieldMaskSet<InstanceView>::const_iterator it = views.begin();
            it != views.end(); ++it)
         cviews[it->first].insert(expr, it->second);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_fill_views(const FieldMaskSet<FillView>&views,
-                                             std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      for (FieldMaskSet<FillView>::const_iterator it = views.begin();
-           it != views.end(); ++it)
-      {
-        FieldMaskSet<FillView>::iterator finder =
-          post_fill_views.find(it->first);
-        if (finder == post_fill_views.end())
-          pre_fill_views.insert(it->first, it->second);
-        else
-        {
-          FieldMask non_dominated = it->second - finder->second;
-          if (!!non_dominated)
-            pre_fill_views.insert(it->first, non_dominated);
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -5360,17 +5377,7 @@ namespace Legion {
       }
       // Then do the base call
       PhysicalTemplate::record_set_op_sync_event(lhs, memo);
-    }
-
-#ifdef NEWEQ
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::apply_postcondition(ReplTraceSummaryOp *op,
-                               RtBarrier bar, std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      post.ensure(op, bar, applied_events);
-    }
-#endif // NEWEQ
+    } 
 
     //--------------------------------------------------------------------------
     ApBarrier ShardedPhysicalTemplate::find_trace_shard_event(ApEvent event,
@@ -5468,44 +5475,6 @@ namespace Legion {
       std::set<RtEvent> applied;
       switch (kind)
       {
-        case UPDATE_PRE_FILL:
-          {
-            derez.deserialize(done);
-            DistributedID view_did;
-            derez.deserialize(view_did);
-            RtEvent view_ready;
-            FillView *view = static_cast<FillView*>(
-                runtime->find_or_request_logical_view(view_did, view_ready));
-            if (view_ready.exists() && !view_ready.has_triggered())
-            {
-              DeferTraceUpdateArgs args(this, kind, done, derez, view);
-              runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, view_ready);
-              return;
-            }
-            else if (handle_update_pre_fill(view, derez, applied, done)) 
-              return;
-            break;
-          }
-        case UPDATE_POST_FILL:
-          {
-            derez.deserialize(done);
-            DistributedID view_did;
-            derez.deserialize(view_did);
-            RtEvent view_ready;
-            FillView *view = static_cast<FillView*>(
-                runtime->find_or_request_logical_view(view_did, view_ready));
-            if (view_ready.exists() && !view_ready.has_triggered())
-            {
-              DeferTraceUpdateArgs args(this, kind, done, derez, view);
-              runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, view_ready);
-              return;
-            }
-            else if (handle_update_post_fill(view, derez, applied, done)) 
-              return;
-            break;
-          }
         case UPDATE_VIEW_USER:
           {
             derez.deserialize(done);
@@ -5926,22 +5895,6 @@ namespace Legion {
       Deserializer derez(dargs->buffer, dargs->buffer_size);
       switch (dargs->kind)
       {
-        case UPDATE_PRE_FILL:
-          {
-            if (dargs->target->handle_update_pre_fill(
-                  static_cast<FillView*>(dargs->view), derez, applied, 
-                  dargs->done, dargs))
-              return;
-            break;
-          }
-        case UPDATE_POST_FILL:
-          {
-            if (dargs->target->handle_update_post_fill(
-                  static_cast<FillView*>(dargs->view), derez, applied, 
-                  dargs->done, dargs))
-              return;
-            break;
-          }
         case UPDATE_VIEW_USER:
           {
             if (dargs->expr != NULL)
@@ -6006,101 +5959,6 @@ namespace Legion {
       if (dargs->deferral_event.exists())
         Runtime::trigger_event(dargs->deferral_event);
       free(dargs->buffer);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ShardedPhysicalTemplate::handle_update_pre_fill(FillView *view,
-                            Deserializer &derez, std::set<RtEvent> &applied,
-                            RtUserEvent done, const DeferTraceUpdateArgs *dargs)
-    //--------------------------------------------------------------------------
-    {
-      AutoTryLock tpl_lock(template_lock);
-      if (!tpl_lock.has_lock())
-      {
-        RtUserEvent deferral;
-        if (dargs != NULL)
-          deferral = dargs->deferral_event;
-        RtEvent pre;
-        if (!deferral.exists())
-        {
-          deferral = Runtime::create_rt_user_event();
-          pre = chain_deferral_events(deferral);
-        }
-        else
-          pre = tpl_lock.try_next();
-        if (dargs == NULL)
-        {
-          DeferTraceUpdateArgs args(this, UPDATE_PRE_FILL, done,
-                                    derez, view, deferral);
-          repl_ctx->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-        }
-        else
-        {
-          DeferTraceUpdateArgs args(*dargs, deferral);
-          repl_ctx->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-#ifdef DEBUG_LEGION
-          // Keep the deserializer happy since we didn't use it
-          derez.advance_pointer(derez.get_remaining_bytes());
-#endif
-        }
-        return true;
-      }
-      FieldMask view_mask;
-      derez.deserialize(view_mask);
-      FieldMaskSet<FillView> views;
-      views.insert(view, view_mask);
-      PhysicalTemplate::record_fill_views(views, applied);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ShardedPhysicalTemplate::handle_update_post_fill(FillView *view,
-                            Deserializer &derez, std::set<RtEvent> &applied,
-                            RtUserEvent done, const DeferTraceUpdateArgs *dargs)
-    //--------------------------------------------------------------------------
-    {
-      AutoTryLock tpl_lock(template_lock);
-      if (!tpl_lock.has_lock())
-      {
-        RtUserEvent deferral;
-        if (dargs != NULL)
-          deferral = dargs->deferral_event;
-        RtEvent pre;
-        if (!deferral.exists())
-        {
-          deferral = Runtime::create_rt_user_event();
-          pre = chain_deferral_events(deferral);
-        }
-        else
-          pre = tpl_lock.try_next();
-        if (dargs == NULL)
-        {
-          DeferTraceUpdateArgs args(this, UPDATE_POST_FILL, done,
-                                    derez, view, deferral);
-          repl_ctx->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-        }
-        else
-        {
-          DeferTraceUpdateArgs args(*dargs, deferral);
-          repl_ctx->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-#ifdef DEBUG_LEGION
-          // Keep the deserializer happy since we didn't use it
-          derez.advance_pointer(derez.get_remaining_bytes());
-#endif
-        }
-        return true;
-      }
-      FieldMask view_mask;
-      derez.deserialize(view_mask);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      post_fill_views.insert(view, view_mask);
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -6291,7 +6149,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::Replayable ShardedPhysicalTemplate::check_replayable(
-                                  ReplTraceOp *op, bool has_blocking_call) const
+                                         ReplTraceOp *op, InnerContext *context,
+                                         UniqueID opid, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6302,7 +6161,7 @@ namespace Legion {
       op->sync_for_replayable_check();
       // Do the base call first to determine if our local shard is replayable
       const Replayable result = 
-        PhysicalTemplate::check_replayable(op, has_blocking_call);
+       PhysicalTemplate::check_replayable(op, context, opid, has_blocking_call);
       if (result)
       {
         // One extra step to do here, since we sharded the view_users we
@@ -6496,46 +6355,6 @@ namespace Legion {
       else
         PhysicalTemplate::add_view_user(view, usage, user_index, user_expr, 
                       user_mask, applied, owner_shard);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::record_fill_views(
-         const FieldMaskSet<FillView> &views, std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      FieldMaskSet<FillView> local_set;
-      for (FieldMaskSet<FillView>::const_iterator it =
-            views.begin(); it != views.end(); it++)
-      {
-        // Figure out which shard these fill views should be stored on 
-        // using the same algorithm that we use for other views above
-        const AddressSpaceID view_owner = it->first->owner_space;
-        std::vector<ShardID> owner_shards;
-        find_owner_shards(view_owner, owner_shards);
-#ifdef DEBUG_LEGION
-        assert(!owner_shards.empty());
-#endif
-        // For now just send all views to the first shard on each node
-        const ShardID target_shard = owner_shards.front();
-        if (target_shard != repl_ctx->owner_shard->shard_id)
-        {
-          RtUserEvent applied = Runtime::create_rt_user_event(); 
-          Serializer rez;
-          rez.serialize(repl_ctx->shard_manager->repl_id);
-          rez.serialize(target_shard);
-          rez.serialize(template_index);
-          rez.serialize(UPDATE_PRE_FILL);
-          rez.serialize(applied);
-          rez.serialize(it->first->did);
-          rez.serialize(it->second);
-          repl_ctx->shard_manager->send_trace_update(target_shard,rez);
-          applied_events.insert(applied);
-        }
-        else
-          local_set.insert(it->first, it->second);
-      }
-      if (!local_set.empty())
-        PhysicalTemplate::record_fill_views(local_set, applied_events);
     }
 
     //--------------------------------------------------------------------------

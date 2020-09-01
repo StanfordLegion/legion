@@ -1994,7 +1994,6 @@ namespace Legion {
                                          std::set<RtEvent> &applied) const;
     protected:
       ShardedPhysicalTemplate *current_template;
-      RtBarrier invalidation_barrier;
     };
 
     /**
