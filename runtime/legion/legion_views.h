@@ -906,6 +906,7 @@ namespace Legion {
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            EquivalenceSet *tracing_eq,
+                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper) = 0;
     };
 
@@ -966,6 +967,7 @@ namespace Legion {
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            EquivalenceSet *tracing_eq,
+                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
@@ -1039,6 +1041,7 @@ namespace Legion {
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            EquivalenceSet *tracign_eq,
+                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
       void record_true_view(LogicalView *view, const FieldMask &view_mask,
@@ -1106,6 +1109,7 @@ namespace Legion {
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr,
                            EquivalenceSet *tracing_eq,
+                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
       void initialize(LegionMap<DistributedID,FieldMask>::aligned &views,

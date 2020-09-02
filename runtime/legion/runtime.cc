@@ -27936,6 +27936,16 @@ namespace Legion {
             break;
           }
 #endif
+        case LG_DEFER_TRACE_PRECONDITION_TASK_ID:
+          {
+            TraceConditionSet::handle_precondition_test(args);
+            break;
+          }
+        case LG_DEFER_TRACE_POSTCONDITION_TASK_ID:
+          {
+            TraceConditionSet::handle_postcondition_test(args);
+            break;
+          }
         case LG_DEFER_CONSENSUS_MATCH_TASK_ID:
           {
             ConsensusMatchBase::handle_consensus_match(args);

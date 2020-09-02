@@ -1941,14 +1941,17 @@ namespace Legion {
       // Wait for all the responses to be ready
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      FieldMaskSet<InstanceView> instances;
+      FieldMaskSet<LogicalView> instances;
       if (analysis.report_instances(instances))
         req.flags |= LEGION_RESTRICTED_FLAG;
       const std::vector<LogicalRegion> to_meet(1, req.region); 
-      for (FieldMaskSet<InstanceView>::const_iterator it = 
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
             instances.begin(); it != instances.end(); it++)
       {
-        InstanceManager *manager = it->first->get_manager();
+#ifdef DEBUG_LEGION
+        assert(it->first->is_instance_view());
+#endif
+        InstanceManager *manager = it->first->as_instance_view()->get_manager();
         if (manager->meets_regions(to_meet))
           targets.add_instance(InstanceRef(manager, it->second));
       }
@@ -2234,7 +2237,7 @@ namespace Legion {
           analysis.perform_remote(traversal_done, map_applied_events);
       if (remote_ready.exists() && !remote_ready.has_triggered())
         remote_ready.wait();
-      FieldMaskSet<InstanceView> instances;
+      FieldMaskSet<LogicalView> instances;
       analysis.report_instances(instances);
       // Fill in the restricted instances and record users
       std::set<ApEvent> acquired_events;
@@ -2244,12 +2247,16 @@ namespace Legion {
       const UniqueID op_id = op->get_unique_op_id();
       const RtEvent collect_event = trace_info.get_collect_event();
       // Now add users for all the instances
-      for (FieldMaskSet<InstanceView>::const_iterator it = 
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
             instances.begin(); it != instances.end(); it++, inst_index++)
       {
+#ifdef DEBUG_LEGION
+        assert(it->first->is_instance_view());
+#endif
+        InstanceView *inst_view = it->first->as_instance_view();
         restricted_instances[inst_index++] = 
-          InstanceRef(it->first->get_manager(), it->second);
-        ApEvent ready = it->first->register_user(usage, it->second,
+          InstanceRef(inst_view->get_manager(), it->second);
+        ApEvent ready = inst_view->register_user(usage, it->second,
             local_expr, op_id, index, term_event, collect_event,
             map_applied_events, trace_info, runtime->address_space);
         if (ready.exists())
@@ -2305,7 +2312,7 @@ namespace Legion {
       // attempt to get the set of valid instances
       if (remote_ready.exists() && !remote_ready.has_triggered())
         remote_ready.wait();
-      FieldMaskSet<InstanceView> instances;
+      FieldMaskSet<LogicalView> instances;
       analysis.report_instances(instances);
       // Now we can register our users
       std::set<ApEvent> released_events;
@@ -2317,12 +2324,16 @@ namespace Legion {
       if (updates_done.exists() && !updates_done.has_triggered())
         updates_done.wait();
       const RtEvent collect_event = trace_info.get_collect_event();
-      for (FieldMaskSet<InstanceView>::const_iterator it = 
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
             instances.begin(); it != instances.end(); it++, inst_index++)
       {
+#ifdef DEBUG_LEGION
+        assert(it->first->is_instance_view());
+#endif
+        InstanceView *inst_view = it->first->as_instance_view();
         restricted_instances[inst_index++] = 
-          InstanceRef(it->first->get_manager(), it->second);
-        ApEvent ready = it->first->register_user(usage, it->second,
+          InstanceRef(inst_view->get_manager(), it->second);
+        ApEvent ready = inst_view->register_user(usage, it->second,
             local_expr, op_id, index, term_event, collect_event,
             map_applied_events, trace_info, runtime->address_space);
         if (ready.exists())
@@ -3237,82 +3248,6 @@ namespace Legion {
       if (analysis->remove_reference())
         delete analysis;
     }
-
-#ifdef NEWEQ
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::find_invalid_instances(Operation *op, unsigned index,
-                                                  VersionInfo &version_info,
-                                  const FieldMaskSet<InstanceView> &valid_views,
-                                      FieldMaskSet<InstanceView> &invalid_views,
-                                          std::set<RtEvent> &map_applied_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(invalid_views.empty());
-#endif
-      const FieldMaskSet<EquivalenceSet> &eq_sets =
-        version_info.get_equivalence_sets();
-      InvalidInstAnalysis analysis(runtime, op, index,version_info,valid_views);
-      std::set<RtEvent> deferral_events;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis.traverse(it->first, it->second, deferral_events,
-                          map_applied_events, true/*original set*/);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-      RtEvent ready;
-      if (traversal_done.exists() || analysis.has_remote_sets())
-        ready = analysis.perform_remote(traversal_done, map_applied_events);
-      // Wait for all the responses to be ready
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      analysis.report_instances(invalid_views);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::update_valid_instances(Operation *op, unsigned index,
-                                                  VersionInfo &version_info,
-                                  const FieldMaskSet<InstanceView> &valid_views,
-                                          const PhysicalTraceInfo &trace_info,
-                                          std::set<RtEvent> &map_applied_events)
-    //--------------------------------------------------------------------------
-    {
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        version_info.get_equivalence_sets();
-      const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
-      // Sort the valid views into field mask sets
-      LegionList<FieldSet<InstanceView*> >::aligned view_sets;
-      valid_views.compute_field_sets(FieldMask(), view_sets);
-      for (LegionList<FieldSet<InstanceView*> >::aligned::const_iterator vit =
-            view_sets.begin(); vit != view_sets.end(); vit++)
-      {
-        // Stupid container problem
-        const std::set<LogicalView*> *log_views = 
-          reinterpret_cast<const std::set<LogicalView*>*>(&vit->elements);
-        OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-           usage, version_info, *log_views, trace_info, ApEvent::NO_AP_EVENT);
-        analysis->add_reference();
-        std::set<RtEvent> deferral_events;
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              eq_sets.begin(); it != eq_sets.end(); it++)
-        {
-          const FieldMask overlap = it->second & vit->set_mask;
-          if (!overlap)
-            continue;
-          // We don't bother tracking updates here since they could race
-          // with each other to update the VersionInfo data structure
-          it->first->overwrite_set(*analysis, overlap, deferral_events,
-                                   map_applied_events);
-        }
-        const RtEvent traversal_done = deferral_events.empty() ?
-          RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-        if (traversal_done.exists() || analysis->has_remote_sets())
-          analysis->perform_remote(traversal_done, map_applied_events);
-        if (analysis->remove_reference())
-          delete analysis;  
-      }
-    }
-#endif // NEWEQ
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::physical_convert_sources(Operation *op,

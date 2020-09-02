@@ -3969,12 +3969,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FillView::flatten(CopyFillAggregator &aggregator,
-                           InstanceView *dst_view, const FieldMask &src_mask,
-                           IndexSpaceExpression *expr, 
-                           EquivalenceSet *tracing_eq, CopyAcrossHelper *helper)
+                         InstanceView *dst_view, const FieldMask &src_mask,
+                         IndexSpaceExpression *expr, EquivalenceSet *tracing_eq, 
+                         std::set<RtEvent> &applied, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
-      aggregator.record_fill(dst_view, this, src_mask, expr, tracing_eq,helper);
+      aggregator.record_fill(dst_view, this, src_mask, expr, 
+                             tracing_eq, applied, helper);
     }
 
     //--------------------------------------------------------------------------
@@ -4256,9 +4257,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhiView::flatten(CopyFillAggregator &aggregator,
-                          InstanceView *dst_view, const FieldMask &src_mask,
-                          IndexSpaceExpression *expr, 
-                          EquivalenceSet *tracing_eq, CopyAcrossHelper *helper)
+                         InstanceView *dst_view, const FieldMask &src_mask,
+                         IndexSpaceExpression *expr, EquivalenceSet *tracing_eq,
+                         std::set<RtEvent> &applied, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this
@@ -4478,6 +4479,7 @@ namespace Legion {
                               InstanceView *dst_view, const FieldMask &src_mask,
                               IndexSpaceExpression *expr,
                               EquivalenceSet *tracing_eq,
+                              std::set<RtEvent> &applied,
                               CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
@@ -4516,7 +4518,7 @@ namespace Legion {
       }
       if (!src_views.empty())
         aggregator.record_updates(dst_view, src_views, copy_mask, expr,
-                                  tracing_eq, 0/*redop*/, helper);
+                                  tracing_eq, applied, 0/*redop*/, helper);
     }
 
     //--------------------------------------------------------------------------

@@ -391,6 +391,8 @@ namespace Legion {
       LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
+      LG_DEFER_TRACE_PRECONDITION_TASK_ID,
+      LG_DEFER_TRACE_POSTCONDITION_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_YIELD_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
@@ -507,6 +509,8 @@ namespace Legion {
         "Defer Disjoint Complete Response",                       \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
+        "Defer Trace Precondition Test",                          \
+        "Defer Trace Postcondition Test",                         \
         "Defer Consensus Match",                                  \
         "Yield",                                                  \
         "Defer Trace Update",                                     \

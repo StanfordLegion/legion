@@ -514,19 +514,27 @@ namespace Legion {
         std::string to_string(void) const;
       };
     public:
-      TraceViewSet(RegionTreeForest *forest, RegionNode *region,
-                   bool need_refs = false);
+      TraceViewSet(RegionTreeForest *forest, DistributedID owner_did,
+                   RegionNode *region);
+      TraceViewSet(RegionTreeForest *forest, TraceViewSet &source,
+                   DistributedID owner_did, RegionNode *region,
+                   std::set<RtEvent> &applied_events);
       virtual ~TraceViewSet(void);
     public:
       void insert(LogicalView *view,
                   IndexSpaceExpression *expr,
-                  const FieldMask &mask);
+                  const FieldMask &mask,
+                  std::set<RtEvent> *ready_events);
       void invalidate(LogicalView *view,
                       IndexSpaceExpression *expr,
-                      const FieldMask &mask);
+                      const FieldMask &mask,
+           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
+           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
       void invalidate_all_but(LogicalView *except,
                               IndexSpaceExpression *expr,
-                              const FieldMask &mask);
+                              const FieldMask &mask,
+           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
+           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
     public:
       bool dominates(LogicalView *view, IndexSpaceExpression *expr, 
                      FieldMask &non_dominated) const;
@@ -536,7 +544,18 @@ namespace Legion {
                      FieldMaskSet<IndexSpaceExpression> *dominate = NULL) const;
       bool subsumed_by(const TraceViewSet &set,
                        FailedPrecondition *condition = NULL) const;
+      bool independent_of(const TraceViewSet &set,
+                       FailedPrecondition *condition = NULL) const;
+      void transpose(LegionMap<IndexSpaceExpression*,
+                            FieldMaskSet<LogicalView> >::aligned &target) const;
+      void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
+                         const bool expr_covers, const FieldMask &mask) const;
       bool empty(void) const;
+    public:
+      void merge(TraceViewSet &target, std::set<RtEvent> &applied_events) const;
+      void pack(Serializer &rez, AddressSpaceID target) const;
+      void unpack(Deserializer &derez, size_t num_views,
+                  AddressSpaceID source, std::set<RtEvent> &ready_events);
     public:
       void dump(void) const;
     protected:
@@ -545,12 +564,10 @@ namespace Legion {
     protected:
       RegionTreeForest *const forest;
       RegionNode *const region;
+      const DistributedID owner_did;
     protected:
       // At most one expression per field
       ViewExprs conditions;
-      // Need to hold view references if we're going to be dumping
-      // this trace even past the end of execution
-      const bool view_references;
     };
 
     /**
@@ -559,8 +576,41 @@ namespace Legion {
     class TraceConditionSet : public EqSetTracker, public Collectable,
                               public LegionHeapify<TraceConditionSet> {
     public:
-      TraceConditionSet(RegionTreeForest *forest, RegionNode *node); 
+      struct DeferTracePreconditionTestArgs :
+        public LgTaskArgs<DeferTracePreconditionTestArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_TRACE_PRECONDITION_TASK_ID;
+      public:
+        DeferTracePreconditionTestArgs(TraceConditionSet *s, Operation *o, 
+                                       RtUserEvent d)
+          : LgTaskArgs<DeferTracePreconditionTestArgs>(o->get_unique_op_id()),
+            set(s), op(o), done_event(d) { }
+      public:
+        TraceConditionSet *const set;
+        Operation *const op;
+        const RtUserEvent done_event;
+      };
+      struct DeferTracePostconditionTestArgs :
+        public LgTaskArgs<DeferTracePostconditionTestArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_TRACE_POSTCONDITION_TASK_ID;
+      public:
+        DeferTracePostconditionTestArgs(TraceConditionSet *s, Operation *o, 
+                                        RtUserEvent d)
+          : LgTaskArgs<DeferTracePostconditionTestArgs>(o->get_unique_op_id()),
+            set(s), op(o), done_event(d) { }
+      public:
+        TraceConditionSet *const set;
+        Operation *const op;
+        const RtUserEvent done_event;
+      };
+    public:
+      TraceConditionSet(RegionTreeForest *forest, IndexSpaceExpression *expr,
+                const FieldMask &mask, const std::set<RegionNode*> &regions); 
+      TraceConditionSet(const TraceConditionSet &rhs);
       virtual ~TraceConditionSet(void);
+    public:
+      TraceConditionSet& operator=(const TraceConditionSet &rhs);
     public:
       virtual void add_tracker_reference(unsigned cnt = 1);
       virtual bool remove_tracker_reference(unsigned cnt = 1);
@@ -572,9 +622,11 @@ namespace Legion {
       virtual void remove_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
     public:
-      void capture(EquivalenceSet *set, const FieldMask &capture_mask,
-                   std::set<RtEvent> &ready_events);
-      bool is_replayable(TraceViewSet::FailedPrecondition *failed) const;
+      void capture(EquivalenceSet *set, std::set<RtEvent> &ready_events);
+      void receive_capture(TraceViewSet *pre, TraceViewSet *anti,
+                           TraceViewSet *post, std::set<RtEvent> &ready);
+      bool is_replayable(bool &not_subsumed, 
+                         TraceViewSet::FailedPrecondition *failed);
       void dump_preconditions(void) const;
       void dump_anticonditions(void) const;
       void dump_postconditions(void) const;
@@ -583,17 +635,32 @@ namespace Legion {
       bool check_require(void);
       void ensure(Operation *op, std::set<RtEvent> &applied_events);
     public:
-      RegionNode *const region_node;
+      static void handle_precondition_test(const void *args);
+      static void handle_postcondition_test(const void *args);
+    private:
+      RtEvent recompute_equivalence_sets(Operation *op);
+    public:
+      RegionTreeForest *const forest;
+      IndexSpaceExpression *const condition_expr;
+      const FieldMask condition_mask;
+      const std::vector<RegionNode*> regions;
     private:
       mutable LocalLock set_lock;
-      FieldMask condition_mask;
       FieldMaskSet<EquivalenceSet> current_sets;
+      FieldMask invalid_mask;
+    private:
+      TraceViewSet *precondition_views;
+      TraceViewSet *anticondition_views;
+      TraceViewSet *postcondition_views; 
       // Transpose of conditions for testing
       typedef LegionMap<IndexSpaceExpression*,
                         FieldMaskSet<LogicalView> >::aligned ExprViews;
-      ExprViews precondtions;
+      ExprViews preconditions;
       ExprViews anticonditions;
       ExprViews postconditions;
+    private:
+      std::vector<InvalidInstAnalysis*> precondition_analyses;
+      std::vector<AntivalidInstAnalysis*> anticondition_analyses;
     };
 
     /**

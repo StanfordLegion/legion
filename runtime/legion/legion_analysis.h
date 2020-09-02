@@ -1322,6 +1322,7 @@ namespace Legion {
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
                           EquivalenceSet *tracing_eq,
+                          std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
       void record_updates(InstanceView *dst_view, 
@@ -1329,6 +1330,7 @@ namespace Legion {
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
                           EquivalenceSet *tracing_eq,
+                          std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
       void record_partial_updates(InstanceView *dst_view,
@@ -1337,6 +1339,7 @@ namespace Legion {
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
                           EquivalenceSet *tracing_eq,
+                          std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
       // Neither fills nor reductions should have a redop across as they
@@ -1346,6 +1349,7 @@ namespace Legion {
                        const FieldMask &fill_mask,
                        IndexSpaceExpression *expr,
                        EquivalenceSet *tracing_eq,
+                       std::set<RtEvent> &applied,
                        CopyAcrossHelper *across_helper = NULL);
       void record_reductions(InstanceView *dst_view,
                              const std::list<std::pair<ReductionView*,
@@ -1353,6 +1357,7 @@ namespace Legion {
                              const unsigned src_fidx,
                              const unsigned dst_fidx,
                              EquivalenceSet *tracing_eq,
+                             std::set<RtEvent> &applied,
                              CopyAcrossHelper *across_helper = NULL);
       // Record preconditions coming back from analysis on views
       void record_preconditions(InstanceView *view, bool reading,
@@ -1372,7 +1377,8 @@ namespace Legion {
       void record_view(LogicalView *new_view);
       void update_tracing_valid_views(EquivalenceSet *tracing_eq,
             LogicalView *src, LogicalView *dst, const FieldMask &mask,
-            IndexSpaceExpression *expr, ReductionOpID redop) const;
+            IndexSpaceExpression *expr, ReductionOpID redop,
+            std::set<RtEvent> &applied_events) const;
       RtEvent perform_updates(const LegionMap<InstanceView*,
                             FieldMaskSet<Update> >::aligned &updates,
                            const PhysicalTraceInfo &trace_info,
@@ -1566,18 +1572,18 @@ namespace Legion {
     public:
       void process_remote_instances(Deserializer &derez,
                                     std::set<RtEvent> &ready_events);
-      void process_local_instances(const FieldMaskSet<InstanceView> &views,
+      void process_local_instances(const FieldMaskSet<LogicalView> &views,
                                    const bool local_restricted);
       void filter_remote_expressions(FieldMaskSet<IndexSpaceExpression> &exprs);
       // Return true if any are restricted
-      bool report_instances(FieldMaskSet<InstanceView> &instances);
+      bool report_instances(FieldMaskSet<LogicalView> &instances);
     public:
       // Lock taken by these methods if needed
       void record_remote(EquivalenceSet *set, const FieldMask &mask, 
                          const AddressSpaceID owner);
     public:
       // Lock must be held from caller
-      void record_instance(InstanceView* view, const FieldMask &mask);
+      void record_instance(LogicalView* view, const FieldMask &mask);
       inline void record_restriction(void) { restricted = true; }
     public:
       static void handle_remote_instances(Deserializer &derez, Runtime *rt);
@@ -1598,7 +1604,7 @@ namespace Legion {
     protected:
       LegionMap<AddressSpaceID,
                 FieldMaskSet<EquivalenceSet> >::aligned remote_sets; 
-      FieldMaskSet<InstanceView> *remote_instances;
+      FieldMaskSet<LogicalView> *recorded_instances;
       bool restricted;
     private:
       // This tracks whether this analysis is being used 
@@ -1654,18 +1660,18 @@ namespace Legion {
     public:
       InvalidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
                           IndexSpaceExpression *expr,
-                          const FieldMaskSet<InstanceView> &valid_instances);
+                          const FieldMaskSet<LogicalView> &valid_instances);
       InvalidInstAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                         Operation *op, unsigned index, 
                         IndexSpaceExpression *expr, InvalidInstAnalysis *target,
-                        const FieldMaskSet<InstanceView> &valid_instances);
+                        const FieldMaskSet<LogicalView> &valid_instances);
       InvalidInstAnalysis(const InvalidInstAnalysis &rhs);
       virtual ~InvalidInstAnalysis(void);
     public:
       InvalidInstAnalysis& operator=(const InvalidInstAnalysis &rhs);
     public:
       inline bool has_invalid(void) const
-        { return ((remote_instances != NULL) && !remote_instances->empty()); }
+      { return ((recorded_instances != NULL) && !recorded_instances->empty()); }
     public:
       virtual void perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
@@ -1684,8 +1690,51 @@ namespace Legion {
       static void handle_remote_request_invalid(Deserializer &derez, 
                                      Runtime *rt, AddressSpaceID previous);
     public:
-      const FieldMaskSet<InstanceView> valid_instances;
+      const FieldMaskSet<LogicalView> valid_instances;
       InvalidInstAnalysis *const target_analysis;
+    };
+
+    /**
+     * \class AntivalidInstAnalysis
+     * For checking that some views are not in the set of valid instances
+     */
+    class AntivalidInstAnalysis : public PhysicalAnalysis,
+                                  public LegionHeapify<AntivalidInstAnalysis> {
+    public:
+      AntivalidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
+                          IndexSpaceExpression *expr,
+                          const FieldMaskSet<LogicalView> &valid_instances);
+      AntivalidInstAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
+                        Operation *op, unsigned index, 
+                        IndexSpaceExpression *expr, InvalidInstAnalysis *target,
+                        const FieldMaskSet<LogicalView> &valid_instances);
+      AntivalidInstAnalysis(const AntivalidInstAnalysis &rhs);
+      virtual ~AntivalidInstAnalysis(void);
+    public:
+      AntivalidInstAnalysis& operator=(const AntivalidInstAnalysis &rhs);
+    public:
+      inline bool has_antivalid(void) const
+      { return ((recorded_instances != NULL) && !recorded_instances->empty()); }
+    public:
+      virtual void perform_traversal(EquivalenceSet *set,
+                                     IndexSpaceExpression *expr,
+                                     const bool expr_covers,
+                                     const FieldMask &mask,
+                                     std::set<RtEvent> &deferral_events,
+                                     std::set<RtEvent> &applied_events,
+                                     const bool already_deferred = false);
+      virtual RtEvent perform_remote(RtEvent precondition,
+                                     std::set<RtEvent> &applied_events,
+                                     const bool already_deferred = false);
+      virtual RtEvent perform_updates(RtEvent precondition, 
+                                      std::set<RtEvent> &applied_events,
+                                      const bool already_deferred = false);
+    public:
+      static void handle_remote_request_antivalid(Deserializer &derez, 
+                                     Runtime *rt, AddressSpaceID previous);
+    public:
+      const FieldMaskSet<LogicalView> antivalid_instances;
+      AntivalidInstAnalysis *const target_analysis;
     };
 
     /**
@@ -1982,7 +2031,7 @@ namespace Legion {
       // Also local but with a full set of views
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
                         const RegionUsage &usage, IndexSpaceExpression *expr,
-                        const FieldMaskSet<InstanceView> &views,
+                        const FieldMaskSet<LogicalView> &views,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
                         const RtEvent guard_event = RtEvent::NO_RT_EVENT,
@@ -1993,6 +2042,7 @@ namespace Legion {
                         Operation *op, unsigned index,
                         IndexSpaceExpression *expr, const RegionUsage &usage, 
                         FieldMaskSet<LogicalView> &views,
+                        FieldMaskSet<ReductionView> &reduction_views,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
                         const RtEvent guard_event,
@@ -2028,7 +2078,8 @@ namespace Legion {
                                            AddressSpaceID previous); 
     public:
       const RegionUsage usage;
-      const FieldMaskSet<LogicalView> views;
+      FieldMaskSet<LogicalView> views;
+      FieldMaskSet<ReductionView> reduction_views;
       const PhysicalTraceInfo trace_info;
       const ApEvent precondition;
       const RtEvent guard_event;
@@ -2718,6 +2769,9 @@ namespace Legion {
           *const restricted_updates;
         LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
           *const released_updates;
+        TraceViewSet *precondition_updates;
+        TraceViewSet *anticondition_updates;
+        TraceViewSet *postcondition_updates;
         const RtUserEvent done_event;
       };
       struct DeferReleaseRefArgs : public LgTaskArgs<DeferReleaseRefArgs> {
@@ -2835,11 +2889,17 @@ namespace Legion {
                                       IndexSpaceExpression *expr,
                                       const RegionUsage &usage,
                                       const FieldMask &user_mask,
-                                      const bool invalidates);
+                                      const bool invalidates,
+                                      std::set<RtEvent> &applied);
       void update_tracing_anti_views(LogicalView *view,
                                      IndexSpaceExpression *expr,
-                                     const FieldMask &user_mask);
-    protected: 
+                                     const FieldMask &user_mask,
+                                     std::set<RtEvent> &applied);
+      void capture_trace_conditions(TraceConditionSet *target,
+                                    IndexSpaceExpression *expr,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &ready_events);
+    protected:
       void defer_traversal(AutoTryLock &eq, PhysicalAnalysis &analysis,
                            const FieldMask &mask,
                            std::set<RtEvent> &deferral_events,
@@ -2906,7 +2966,7 @@ namespace Legion {
                                const FieldMaskSet<InstanceView> &target_insts,
                                const std::vector<InstanceView*> &source_insts,
                                const PhysicalTraceInfo &trace_info,
-                               ReferenceMutator &mutator, 
+                               std::set<RtEvent> &applied_events,
                                const bool record_valid);
       void make_instances_valid(CopyFillAggregator *&aggregator,
                                 const RtEvent guard_event,
@@ -2918,6 +2978,7 @@ namespace Legion {
                                 const FieldMaskSet<InstanceView> &target_insts,
                                 const std::vector<InstanceView*> &source_insts,
                                 const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &applied_events,
                                 const bool skip_check = false,
                                 const int dst_index = -1,
                                 const ReductionOpID redop = 0,
@@ -2932,6 +2993,7 @@ namespace Legion {
                                          const bool expr_covers,
                                          FieldMask update_mask,
                                          const PhysicalTraceInfo &trace_info,
+                                         std::set<RtEvent> &applied_events,
                                          const int dst_index,
                                          const ReductionOpID redop,
                                          CopyAcrossHelper *across_helper);
@@ -2942,6 +3004,7 @@ namespace Legion {
                             Operation *op, const unsigned index, 
                             const bool track_events,
                             const PhysicalTraceInfo &trace_info,
+                            std::set<RtEvent> &applied_events,
                             FieldMaskSet<IndexSpaceExpression> *applied_exprs,
                             CopyAcrossHelper *across_helper = NULL);
       template<typename T>
@@ -2950,6 +3013,7 @@ namespace Legion {
                     const FieldMaskSet<T> &src_views,
                     Operation *op, const unsigned index,
                     const PhysicalTraceInfo &trace_info,
+                    std::set<RtEvent> &applied_events,
                     CopyFillAggregator *&aggregator);
       void record_restriction(IndexSpaceExpression *expr, 
                               const bool expr_covers,
@@ -3015,7 +3079,10 @@ namespace Legion {
             LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> >::aligned &restricted_updates,
             LegionMap<IndexSpaceExpression*,
-                FieldMaskSet<InstanceView> >::aligned &released_updates) const;
+                FieldMaskSet<InstanceView> >::aligned &released_updates,
+            TraceViewSet *&precondition_updates,
+            TraceViewSet *&anticondition_updates,
+            TraceViewSet *&postcondition_updates) const;
       void apply_state(LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> >::aligned &valid_updates,
             FieldMaskSet<IndexSpaceExpression> &initialized_updates,
@@ -3025,7 +3092,10 @@ namespace Legion {
                 FieldMaskSet<InstanceView> >::aligned &restricted_updates,
             LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> >::aligned &released_updates,
-            std::set<RtEvent> &applied_events, const bool needs_lock);
+            TraceViewSet *precondition_updates,
+            TraceViewSet *anticondition_updates,
+            TraceViewSet *postcondition_updates,
+            std::set<RtEvent> &applied_events, const bool needs_lock); 
     public:
       static void handle_make_owner(const void *args);
       static void handle_pending_replication(const void *args);
