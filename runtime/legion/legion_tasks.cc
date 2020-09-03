@@ -2265,7 +2265,7 @@ namespace Legion {
     bool SingleTask::is_created_region(unsigned index) const
     //--------------------------------------------------------------------------
     {
-      return (index >= regions.size());
+      return (index >= get_region_count());
     }
 
     //--------------------------------------------------------------------------
