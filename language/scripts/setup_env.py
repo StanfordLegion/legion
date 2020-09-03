@@ -256,8 +256,8 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-9.0.0.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-9.0.0.src.tar.xz')
         clang_source_dir = os.path.join(llvm_dir, 'cfe-9.0.0.src')
-        download(llvm_tarball, '%s/9.0.0/llvm-9.0.0.src.tar.xz' % mirror, '7ef2527ba3da7603a41ce3592a8cd890f8d27ffa', insecure=insecure)
-        download(clang_tarball, '%s/9.0.0/cfe-9.0.0.src.tar.xz' % mirror, '6977cf7a802a053c57fa74138d3648b563e71e88', insecure=insecure)
+        download(llvm_tarball, '%s/9.0.0/llvm-9.0.0.src.tar.xz' % mirror, 'd6a0565cf21f22e9b4353b2eb92622e8365000a9e90a16b09b56f8157eabfe84', insecure=insecure)
+        download(clang_tarball, '%s/9.0.0/cfe-9.0.0.src.tar.xz' % mirror, '7ba81eef7c22ca5da688fdf9d88c20934d2d6b40bfe150ffd338900890aa4610', insecure=insecure)
     else:
         assert False
 
@@ -364,6 +364,8 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
     elif llvm_version == '39':
         llvm_use_cmake = True
     elif llvm_version == '60':
+        llvm_use_cmake = True
+    elif llvm_version == '90':
         llvm_use_cmake = True
     else:
         raise Exception('Unrecognized LLVM version %s' % llvm_version)
@@ -513,7 +515,7 @@ if __name__ == '__main__':
         default=[],
         help='Extra flags for Make/CMake command.')
     parser.add_argument(
-        '--llvm-version', dest='llvm_version', required=False, choices=('35', '38', '39', '60'),
+        '--llvm-version', dest='llvm_version', required=False, choices=('35', '38', '39', '60', '90'),
         default=discover_llvm_version(),
         help='Select LLVM version.')
     parser.add_argument(
