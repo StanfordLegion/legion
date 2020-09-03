@@ -270,7 +270,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      return create_index_space_internal(bounds, type_tag); 
+      return create_index_space_internal(&bounds, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -291,7 +291,7 @@ namespace Legion {
             const DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
             const Domain bounds(realm_is); \
-            return create_index_space_internal(bounds, \
+            return create_index_space_internal(&bounds, \
                 NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -318,7 +318,7 @@ namespace Legion {
             const DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
             const Domain bounds(realm_is); \
-            return create_index_space_internal(bounds, \
+            return create_index_space_internal(&bounds, \
                 NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -330,7 +330,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace TaskContext::create_index_space_internal(const Domain &bounds,
+    IndexSpace TaskContext::create_index_space_internal(const Domain *bounds,
                                                         TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
@@ -343,30 +343,17 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
-      runtime->forest->create_index_space(handle, &bounds, did); 
+      runtime->forest->create_index_space(handle, bounds, did); 
       register_index_space_creation(handle);
       return handle;
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace TaskContext::create_index_space(ApEvent ready, TypeTag type_tag)
+    IndexSpace TaskContext::create_unbound_index_space(TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id(), type_tag);
-      DistributedID did = runtime->get_available_distributed_id();
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index space %x in task%s (ID %lld)",
-                      handle.id, get_task_name(), get_unique_id());
-#endif
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
-      runtime->forest->create_index_space(
-          handle, NULL/*domain*/, did, true/*notify remote*/,
-          0/*expr id*/, ready);
-      register_index_space_creation(handle);
-      return handle;
+      return create_index_space_internal(NULL, type_tag); 
     }
 
     //--------------------------------------------------------------------------
@@ -11182,12 +11169,12 @@ namespace Legion {
         hasher.hash(type_tag);
         verify_replicable(hasher, "create_index_space");
       }
-      return create_index_space_replicated(domain, type_tag); 
+      return create_index_space_replicated(&domain, type_tag); 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace ReplicateContext::create_index_space_replicated(
-                                         const Domain &domain, TypeTag type_tag)
+                                         const Domain *domain, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       // Seed this with the first index space broadcast
@@ -11205,7 +11192,7 @@ namespace Legion {
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
         IndexSpaceNode *node = 
-          runtime->forest->create_index_space(handle, &domain, value.did, 
+          runtime->forest->create_index_space(handle, domain, value.did, 
               false/*notify remote*/, value.expr_id, ApEvent::NO_AP_EVENT,
               creation_barrier, &applied);
         // Now we can update the creation set
@@ -11240,7 +11227,7 @@ namespace Legion {
         assert(handle.exists());
 #endif
         std::set<RtEvent> applied;
-        runtime->forest->create_index_space(handle, &domain, value.did,
+        runtime->forest->create_index_space(handle, domain, value.did,
                false/*notify remote*/, value.expr_id, ApEvent::NO_AP_EVENT,
                creation_barrier, &applied);
         // Arrive on the creation barrier
@@ -11265,93 +11252,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplicateContext::create_index_space(ApEvent ready,
-                                                    TypeTag type_tag)
+    IndexSpace ReplicateContext::create_unbound_index_space(TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       if (runtime->safe_control_replication)
       {
         Murmur3Hasher hasher;
-        hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
+        hasher.hash(REPLICATE_CREATE_UNBOUND_INDEX_SPACE);
         Serializer rez;
-        rez.serialize(ready);
-        hasher.hash(rez.get_buffer(), rez.get_used_bytes());
         hasher.hash(type_tag);
-        verify_replicable(hasher, "create_index_space");
+        verify_replicable(hasher, "create_unbounded_index_space");
       }
-      // Seed this with the first index space broadcast
-      if (pending_index_spaces.empty())
-        increase_pending_index_spaces(1/*count*/, false/*double*/);
-      IndexSpace handle;
-      bool double_next = false;
-      bool double_buffer = false;
-      std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective =
-        pending_index_spaces.front();
-      if (collective.second)
-      {
-        const ISBroadcast value = collective.first->get_value(false);
-        handle = IndexSpace(value.space_id, value.tid, type_tag);
-        double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
-        IndexSpaceNode *node =
-          runtime->forest->create_index_space(handle, NULL/*domain*/,
-              value.did, false/*notify remote*/, value.expr_id,
-              ready, creation_barrier, &applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
-        // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
-        runtime->forest->revoke_pending_index_space(value.space_id);
-        runtime->revoke_pending_distributed_collectable(value.did);
-#ifdef DEBUG_LEGION
-        log_index.debug("Creating index space %x in task%s (ID %lld)",
-                        handle.id, get_task_name(), get_unique_id());
-#endif
-        if (runtime->legion_spy_enabled)
-          LegionSpy::log_top_index_space(handle.id);
-      }
-      else
-      {
-        const RtEvent done = collective.first->get_done_event();
-        if (!done.has_triggered())
-        {
-          double_next = true;
-          done.wait();
-        }
-        const ISBroadcast value = collective.first->get_value(false);
-        handle = IndexSpace(value.space_id, value.tid, type_tag);
-        double_buffer = value.double_buffer;
-#ifdef DEBUG_LEGION
-        assert(handle.exists());
-#endif
-        std::set<RtEvent> applied;
-        runtime->forest->create_index_space(handle, NULL/*domain*/,
-               value.did, false/*notify remote*/, value.expr_id,
-               ready, creation_barrier, &applied);
-        // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
-      }
-      delete collective.first;
-      pending_index_spaces.pop_front();
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
-      // Record this in our context
-      register_index_space_creation(handle);
-      // Get new handles in flight for the next time we need them
-      // Always add a new one to replace the old one, but double the number
-      // in flight if we're not hiding the latency
-      increase_pending_index_spaces(double_buffer ?
-          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
-      return handle;
+      return create_index_space_replicated(NULL, type_tag); 
     }
 
     //--------------------------------------------------------------------------
@@ -11514,7 +11427,7 @@ namespace Legion {
             const DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
             const Domain bounds(realm_is); \
-            return create_index_space_replicated(bounds, \
+            return create_index_space_replicated(&bounds, \
                 NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -11550,7 +11463,7 @@ namespace Legion {
             const DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
             const Domain bounds(realm_is); \
-            return create_index_space_replicated(bounds, \
+            return create_index_space_replicated(&bounds, \
                 NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
         LEGION_FOREACH_N(DIMFUNC)

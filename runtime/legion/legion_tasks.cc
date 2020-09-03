@@ -5655,8 +5655,7 @@ namespace Legion {
 
         // Create a deferred index space
         // For an individual task, the index space is always 1D.
-        IndexSpace index_space = parent_ctx->create_index_space(
-            get_completion_event(),
+        IndexSpace index_space = parent_ctx->create_unbound_index_space(
             Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
 
         // Create an output region
@@ -8666,7 +8665,7 @@ namespace Legion {
 
         // Create a deferred index space
         IndexSpace index_space =
-          parent_ctx->create_index_space(get_completion_event(), type_tag);
+          parent_ctx->create_unbound_index_space(type_tag);
 
         // Create a pending partition using the launch domain as the color space
         IndexSpace color_space = launch_space;

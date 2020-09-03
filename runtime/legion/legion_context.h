@@ -124,16 +124,15 @@ namespace Legion {
                                             TypeTag type_tag);
       virtual IndexSpace create_index_space(const Future &future,
                                             TypeTag type_tag) = 0;
-      // This variant creates an uninitialized index space
-      // that later is set by a task
-      virtual IndexSpace create_index_space(ApEvent ready,
-                                            TypeTag type_tag);
       virtual IndexSpace create_index_space(
                            const std::vector<DomainPoint> &points);
       virtual IndexSpace create_index_space(
                            const std::vector<Domain> &rects);
+      // This variant creates an uninitialized index space
+      // that later is set by a task
+      virtual IndexSpace create_unbound_index_space(TypeTag type_tag);
     protected:
-      IndexSpace create_index_space_internal(const Domain &bounds,
+      IndexSpace create_index_space_internal(const Domain *bounds,
                                              TypeTag type_tag);
     public:
       virtual IndexSpace union_index_spaces(
@@ -1573,6 +1572,7 @@ namespace Legion {
         REPLICATE_GENERATE_DYNAMIC_REDUCTION_ID,
         REPLICATE_GENERATE_DYNAMIC_SERDEZ_ID,
         REPLICATE_CREATE_INDEX_SPACE,
+        REPLICATE_CREATE_UNBOUND_INDEX_SPACE,
         REPLICATE_UNION_INDEX_SPACES,
         REPLICATE_INTERSECT_INDEX_SPACES,
         REPLICATE_SUBTRACT_INDEX_SPACES,
@@ -1762,14 +1762,13 @@ namespace Legion {
                                             TypeTag type_tag);
       virtual IndexSpace create_index_space(const Future &future, 
                                             TypeTag type_tag);
-      virtual IndexSpace create_index_space(ApEvent ready,
-                                            TypeTag type_tag);
       virtual IndexSpace create_index_space(
                            const std::vector<DomainPoint> &points);
       virtual IndexSpace create_index_space(
                            const std::vector<Domain> &rects);
+      virtual IndexSpace create_unbound_index_space(TypeTag type_tag);
     protected:
-      IndexSpace create_index_space_replicated(const Domain &bounds,
+      IndexSpace create_index_space_replicated(const Domain *bounds,
                                                TypeTag type_tag);
     public:
       virtual IndexSpace union_index_spaces(
