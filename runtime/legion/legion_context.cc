@@ -10106,103 +10106,6 @@ namespace Legion {
         Realm::Barrier bar = future_map_barriers[idx];
         bar.destroy_barrier();
       }
-      while (!pending_index_spaces.empty())
-      {
-        std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
-          pending_index_spaces.front();
-        if (collective.second)
-        {
-          const ISBroadcast value = collective.first->get_value(false);
-          runtime->forest->revoke_pending_index_space(value.space_id);
-          runtime->revoke_pending_distributed_collectable(value.did);
-          runtime->free_distributed_id(value.did);
-        }
-        else
-        {
-          // Make sure this collective is done before we delete it
-          const RtEvent done = collective.first->get_done_event();
-          if (!done.has_triggered())
-            done.wait();
-        }
-        delete collective.first;
-        pending_index_spaces.pop_front();
-      }
-      while (!pending_index_partitions.empty())
-      {
-        std::pair<ValueBroadcast<IPBroadcast>*,ShardID> &collective = 
-          pending_index_partitions.front();
-        if (collective.second)
-        {
-          const IPBroadcast value = collective.first->get_value(false);
-          runtime->forest->revoke_pending_partition(value.pid);
-          runtime->revoke_pending_distributed_collectable(value.did);
-          runtime->free_distributed_id(value.did);
-        }
-        else
-        {
-          // Make sure this collective is done before we delete it
-          const RtEvent done = collective.first->get_done_event();
-          if (!done.has_triggered())
-            done.wait();
-        }
-        delete collective.first;
-        pending_index_partitions.pop_front();
-      }
-      while (!pending_field_spaces.empty())
-      {
-        std::pair<ValueBroadcast<FSBroadcast>*,bool> &collective = 
-          pending_field_spaces.front();
-        if (collective.second)
-        {
-          const FSBroadcast value = collective.first->get_value(false);
-          runtime->forest->revoke_pending_field_space(value.space_id);
-          runtime->revoke_pending_distributed_collectable(value.did);
-          runtime->free_distributed_id(value.did);
-        }
-        else
-        {
-          // Make sure this collective is done before we delete it
-          const RtEvent done = collective.first->get_done_event();
-          if (!done.has_triggered())
-            done.wait();
-        }
-        delete collective.first;
-        pending_field_spaces.pop_front();
-      }
-      while (!pending_fields.empty())
-      {
-        std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
-          pending_fields.front();
-        if (!collective.second)
-        {
-          // Make sure this collective is done before we delete it
-          const RtEvent done = collective.first->get_done_event();
-          if (!done.has_triggered())
-            done.wait();
-        }
-        delete collective.first;
-        pending_fields.pop_front();
-      }
-      while (!pending_region_trees.empty())
-      {
-        std::pair<ValueBroadcast<LRBroadcast>*,bool> &collective = 
-          pending_region_trees.front();
-        if (collective.second)
-        {
-          const LRBroadcast value = collective.first->get_value(false);
-          runtime->forest->revoke_pending_region_tree(value.tid);
-          runtime->free_distributed_id(value.did);
-        }
-        else
-        {
-          // Make sure this collective is done before we delete it
-          const RtEvent done = collective.first->get_done_event();
-          if (!done.has_triggered())
-            done.wait();
-        }
-        delete collective.first;
-        pending_region_trees.pop_front();
-      }
       if (returned_resource_ready_barrier.exists())
         returned_resource_ready_barrier.destroy_barrier();
       if (returned_resource_mapped_barrier.exists())
@@ -16554,6 +16457,103 @@ namespace Legion {
       }
       InnerContext::end_task(res, res_size, owned, 
           deferred_result_instance, callback_functor);
+      while (!pending_index_spaces.empty())
+      {
+        std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
+          pending_index_spaces.front();
+        if (collective.second)
+        {
+          const ISBroadcast value = collective.first->get_value(false);
+          runtime->forest->revoke_pending_index_space(value.space_id);
+          runtime->revoke_pending_distributed_collectable(value.did);
+          runtime->free_distributed_id(value.did);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_index_spaces.pop_front();
+      }
+      while (!pending_index_partitions.empty())
+      {
+        std::pair<ValueBroadcast<IPBroadcast>*,ShardID> &collective = 
+          pending_index_partitions.front();
+        if (collective.second)
+        {
+          const IPBroadcast value = collective.first->get_value(false);
+          runtime->forest->revoke_pending_partition(value.pid);
+          runtime->revoke_pending_distributed_collectable(value.did);
+          runtime->free_distributed_id(value.did);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_index_partitions.pop_front();
+      }
+      while (!pending_field_spaces.empty())
+      {
+        std::pair<ValueBroadcast<FSBroadcast>*,bool> &collective = 
+          pending_field_spaces.front();
+        if (collective.second)
+        {
+          const FSBroadcast value = collective.first->get_value(false);
+          runtime->forest->revoke_pending_field_space(value.space_id);
+          runtime->revoke_pending_distributed_collectable(value.did);
+          runtime->free_distributed_id(value.did);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_field_spaces.pop_front();
+      }
+      while (!pending_fields.empty())
+      {
+        std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
+          pending_fields.front();
+        if (!collective.second)
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_fields.pop_front();
+      }
+      while (!pending_region_trees.empty())
+      {
+        std::pair<ValueBroadcast<LRBroadcast>*,bool> &collective = 
+          pending_region_trees.front();
+        if (collective.second)
+        {
+          const LRBroadcast value = collective.first->get_value(false);
+          runtime->forest->revoke_pending_region_tree(value.tid);
+          runtime->free_distributed_id(value.did);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_region_trees.pop_front();
+      }
     }
 
     //--------------------------------------------------------------------------
