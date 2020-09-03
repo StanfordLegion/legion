@@ -1779,15 +1779,7 @@ namespace Legion {
       }
       // If this is an eager allocation, return it back to the eager pool
       else if (kind == EAGER)
-      {
-        // FIXME: Deferred allocation is broken again and causing shutdown
-        //        hang again, so we will temporarily disabled now.
-        //        Note that the replacement is UNSAFE and used only to
-        //        work around the shutdown hang, which should be properly
-        //        fixed.
-        //memory_manager->free_eager_instance(instance, deferred_event);
-        memory_manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
-      }
+        memory_manager->free_eager_instance(instance, deferred_event);
       else
 #endif
       {
