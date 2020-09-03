@@ -3767,8 +3767,9 @@ namespace Legion {
         size_t alignment = info.alignment;
         if (alignment == 0)
           alignment = field_size;
-        layout->bytes_used =
+        size_t bytes_used =
           (num_elements * field_size + alignment - 1) / alignment * alignment;
+        layout->bytes_used = bytes_used;
 
         // Create an external Realm instance
         Realm::RegionInstance instance;
@@ -3785,7 +3786,7 @@ namespace Legion {
                                           info.eager_pool
                                           ? IndividualManager::EAGER
                                           : IndividualManager::EXTERNAL_OWNED,
-                                          layout->bytes_used,
+                                          bytes_used,
                                           info.ptr);
 
         // If this is an allocation drawn from the eager pool,
@@ -8228,7 +8229,7 @@ namespace Legion {
                               region.get_tree_id(),
                               layout,
                               0/*redop id*/, true/*register now*/,
-                              0/*instance_footprint*/,
+                              -1U/*instance_footprint*/,
                               ready_event,
                               IndividualManager::UNBOUND,
                               NULL/*op*/,

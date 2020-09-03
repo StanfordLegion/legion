@@ -274,7 +274,7 @@ namespace Legion {
       virtual RtEvent detach_external_instance(void) = 0;
       virtual bool has_visible_from(const std::set<Memory> &memories) const = 0;
       virtual Memory get_memory(void) const = 0; 
-      inline size_t get_instance_size(void) const { return instance_footprint; }
+      size_t get_instance_size(void) const;
       void update_instance_footprint(size_t footprint)
         { instance_footprint = footprint; }
 #ifdef LEGION_GPU_REDUCTIONS

@@ -289,7 +289,8 @@ namespace Legion {
         for (std::map<PhysicalManager*,unsigned>::iterator it = 
               acquired_instances.begin(); it != acquired_instances.end(); )
         {
-          if (it->first->instance_footprint > 0)
+          size_t instance_size = it->first->get_instance_size();
+          if (instance_size > 0)
           {
             if (to_release == NULL)
               to_release = 
@@ -313,7 +314,8 @@ namespace Legion {
       for (std::map<PhysicalManager*,unsigned>::iterator it = 
             acquired_instances.begin(); it != acquired_instances.end(); )
       {
-        if (it->first->instance_footprint > 0)
+        size_t instance_size = it->first->get_instance_size();
+        if (instance_size > 0)
         {
           if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
                                 NULL/*mutator*/, it->second))

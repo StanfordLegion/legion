@@ -1035,6 +1035,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t PhysicalManager::get_instance_size(void) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock lock(inst_lock,1,false/*exlcusive*/);
+      return instance_footprint;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ ApEvent PhysicalManager::fetch_metadata(PhysicalInstance inst, 
                                                        ApEvent use_event)
     //--------------------------------------------------------------------------
@@ -2105,7 +2113,7 @@ namespace Legion {
         AutoLock lock(inst_lock);
 #ifdef DEBUG_LEGION
         assert(kind == UNBOUND);
-        assert(instance_footprint == 0);
+        assert(instance_footprint == -1U);
 #endif
         instance = new_instance;
         kind = new_kind;
