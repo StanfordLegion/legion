@@ -211,8 +211,6 @@ namespace Legion {
                          const Mapper::MapTaskOutput &output,
                          const std::deque<InstanceSet> &physical_instances,
                          std::set<RtEvent> &applied_events) = 0;
-      virtual void get_reduction_ready_events(Memoizable *memo,
-                                           std::set<ApEvent> &ready_events) = 0;
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs) = 0;
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs) = 0;
     };
@@ -239,7 +237,6 @@ namespace Legion {
         REMOTE_TRACE_SET_OP_SYNC,
         REMOTE_TRACE_SET_EFFECTS,
         REMOTE_TRACE_RECORD_MAPPER_OUTPUT,
-        REMOTE_TRACE_GET_REDUCTION_EVENTS,
         REMOTE_TRACE_COMPLETE_REPLAY,
 #ifdef LEGION_GPU_REDUCTIONS
         REMOTE_TRACE_GPU_REDUCTION,
@@ -338,8 +335,6 @@ namespace Legion {
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
                           std::set<RtEvent> &applied_events);
-      virtual void get_reduction_ready_events(Memoizable *memo,
-                                              std::set<ApEvent> &ready_events);
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
     public:
@@ -432,12 +427,6 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_mapper_output(local, output, physical_instances, applied);
-        }
-      inline void get_reduction_ready_events(Memoizable *local,
-                                             std::set<ApEvent> &ready_events)
-        {
-          base_sanity_check();
-          rec->get_reduction_ready_events(local, ready_events);
         }
       inline void record_set_effects(Memoizable *memo, ApEvent &rhs) const
         {

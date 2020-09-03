@@ -782,9 +782,6 @@ namespace Legion {
                            ReductionOpID redop, bool reduction_fold);
 #endif
     public:
-      virtual void get_reduction_ready_events(Memoizable *memo,
-                                              std::set<ApEvent> &ready_events);
-    public:
       virtual void record_op_view(Memoizable *memo,
                                   unsigned idx,
                                   InstanceView *view,
@@ -949,8 +946,6 @@ namespace Legion {
       TraceViewSet pre_reductions;
       TraceViewSet post_reductions;
       TraceViewSet consumed_reductions;
-    private:
-      std::map<TraceLocalID,std::set<ApEvent> > reduction_ready_events;
     protected:
       FieldMaskSet<FillView> pre_fill_views;
       FieldMaskSet<FillView> post_fill_views;
