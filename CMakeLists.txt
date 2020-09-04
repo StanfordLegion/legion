@@ -246,10 +246,15 @@ if(Legion_USE_Kokkos)
   find_package(Kokkos REQUIRED)
 
   # in order to build using Kokkos' exported compile options, we need to use
-  #  the same compiler, but Kokkos doesn't tell us what that is, so we need it
-  #  from the configuration or the environment
-  set(KOKKOS_CXX_COMPILER $ENV{KOKKOS_CXX_COMPILER} CACHE STRING
-      "C++ compiler used by Kokkos")
+  #  the same compiler - newer versions of Kokkos will tell us, but for older
+  #  versions, we need it from the configuration or the environment
+  if(Kokkos_CXX_COMPILER)
+    set(KOKKOS_CXX_COMPILER ${Kokkos_CXX_COMPILER} CACHE STRING
+                            "C++ compiler used by Kokkos")
+  else()
+    set(KOKKOS_CXX_COMPILER $ENV{KOKKOS_CXX_COMPILER} CACHE STRING
+                            "C++ compiler used by Kokkos")
+  endif()
   if(NOT KOKKOS_CXX_COMPILER)
     message(FATAL_ERROR "to build correctly with Kokkos, the exact compiler used in the Kokkos build (typically set via CXX=... or -DCMAKE_CXX_COMPILER=...) must be provided in KOKKOS_CXX_COMPILER (either on the command line or from the environment)")
   endif()
