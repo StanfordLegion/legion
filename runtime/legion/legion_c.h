@@ -2180,6 +2180,14 @@ extern "C" {
   legion_output_requirement_destroy(legion_output_requirement_t handle);
 
   /**
+   * @see Legion::OutputRequirement::add_field()
+   */
+  void
+  legion_output_requirement_add_field(legion_output_requirement_t handle,
+                                      legion_field_id_t field,
+                                      bool instance);
+
+  /**
    * @see Legion::OutputRequirement::region
    */
   legion_logical_region_t
@@ -2928,6 +2936,18 @@ extern "C" {
                                           legion_context_t ctx,
                                           legion_index_launcher_t launcher,
                                           legion_reduction_op_id_t redop);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &, std::vector<OutputRequirement>*)
+   */
+  legion_future_map_t
+  legion_index_launcher_execute_outputs(legion_runtime_t runtime,
+                                        legion_context_t ctx,
+                                        legion_index_launcher_t launcher,
+                                        legion_output_requirement_t *reqs,
+                                        size_t reqs_size);
 
   /**
    * @return Caller takes ownership of return value.
