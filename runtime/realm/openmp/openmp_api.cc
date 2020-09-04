@@ -437,6 +437,23 @@ extern "C" {
   {
     GOMP_critical_name_end(0);
   }
+
+  // GOMP_atomic_{start,end} just take/release a global lock - not great for
+  //  performance, but compilers seem to only use it when they have no other
+  //  choice
+  Mutex gomp_atomic_mutex;
+
+  REALM_PUBLIC_API
+  void GOMP_atomic_start(void)
+  {
+    gomp_atomic_mutex.lock();
+  }
+
+  REALM_PUBLIC_API
+  void GOMP_atomic_end(void)
+  {
+    gomp_atomic_mutex.unlock();
+  }
 };
 #endif
 
