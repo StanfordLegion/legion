@@ -197,6 +197,35 @@ endif()
 set(BINDINGS_DEFAULT_MODULE "" CACHE STRING "module to load by default in Python bindings, if any")
 
 #------------------------------------------------------------------------------#
+# Kokkos configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_Kokkos "Enable support for the Kokkos runtime" OFF)
+if(Legion_USE_Kokkos)
+  # the kokkos interop stuff uses target_link_options, which doesn't show up
+  #  until cmake 3.13
+  cmake_minimum_required(VERSION 3.13)
+
+  # cmake uses -DKokkos_DIR=.../lib/cmake to look in non-standard locations
+  find_package(Kokkos REQUIRED)
+
+  # in order to build using Kokkos' exported compile options, we need to use
+  #  the same compiler - newer versions of Kokkos will tell us, but for older
+  #  versions, we need it from the configuration or the environment
+  if(Kokkos_CXX_COMPILER)
+    set(KOKKOS_CXX_COMPILER ${Kokkos_CXX_COMPILER} CACHE STRING
+                            "C++ compiler used by Kokkos")
+  else()
+    set(KOKKOS_CXX_COMPILER $ENV{KOKKOS_CXX_COMPILER} CACHE STRING
+                            "C++ compiler used by Kokkos")
+  endif()
+  if(NOT KOKKOS_CXX_COMPILER)
+    message(FATAL_ERROR "to build correctly with Kokkos, the exact compiler used in the Kokkos build (typically set via CXX=... or -DCMAKE_CXX_COMPILER=...) must be provided in KOKKOS_CXX_COMPILER (either on the command line or from the environment)")
+  endif()
+
+  set(REALM_USE_KOKKOS ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # CUDA configuration
 #------------------------------------------------------------------------------#
 option(Legion_USE_CUDA "Enable support for the CUDA runtime" OFF)
@@ -227,34 +256,15 @@ if(Legion_USE_CUDA)
   # define variable for realm_defines.h
   set(REALM_USE_CUDA ON)
 
-  option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
+  # default is to use hijack unless Kokkos interop is enabled
+  if(Legion_USE_Kokkos)
+    option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" OFF)
+  else()
+    option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
+  endif()
   if(Legion_HIJACK_CUDART)
     set(REALM_USE_CUDART_HIJACK ON)
   endif()
-endif()
-
-#------------------------------------------------------------------------------#
-# Kokkos configuration
-#------------------------------------------------------------------------------#
-option(Legion_USE_Kokkos "Enable support for the Kokkos runtime" OFF)
-if(Legion_USE_Kokkos)
-  # the kokkos interop stuff uses target_link_options, which doesn't show up
-  #  until cmake 3.13
-  cmake_minimum_required(VERSION 3.13)
-
-  # cmake uses -DKokkos_DIR=.../lib/cmake to look in non-standard locations
-  find_package(Kokkos REQUIRED)
-
-  # in order to build using Kokkos' exported compile options, we need to use
-  #  the same compiler, but Kokkos doesn't tell us what that is, so we need it
-  #  from the configuration or the environment
-  set(KOKKOS_CXX_COMPILER $ENV{KOKKOS_CXX_COMPILER} CACHE STRING
-      "C++ compiler used by Kokkos")
-  if(NOT KOKKOS_CXX_COMPILER)
-    message(FATAL_ERROR "to build correctly with Kokkos, the exact compiler used in the Kokkos build (typically set via CXX=... or -DCMAKE_CXX_COMPILER=...) must be provided in KOKKOS_CXX_COMPILER (either on the command line or from the environment)")
-  endif()
-
-  set(REALM_USE_KOKKOS ON)
 endif()
 
 #------------------------------------------------------------------------------#

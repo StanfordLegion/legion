@@ -2842,7 +2842,7 @@ namespace Realm {
       : module(_module), info(_info), worker(_worker)
       , proc(0), fbmem(0), context(_context), next_stream(0)
     {
-      // assume context is already current (happens automatically on creation)
+      push_context();
 
       event_pool.init_pool();
 
@@ -2882,7 +2882,7 @@ namespace Realm {
       // free memory
       CHECK_CU( cuMemFree(fbmem_base) );
 
-      CHECK_CU( cuCtxDestroy(context) );
+      CHECK_CU( cuDevicePrimaryCtxRelease(info->device) );
     }
 
     void GPU::push_context(void)
@@ -3304,11 +3304,21 @@ namespace Realm {
       for(size_t i = cfg_skip_gpu_count;
           (i < gpu_info.size()) && (gpu_count < cfg_num_gpus);
           i++) {
-	// try to create a context and possibly check available memory
+	// try to create a context and possibly check available memory - in order
+	//  to be compatible with an application's use of the cuda runtime, we
+	//  need this to be the device's "primary context"
+
+	// set context flags before we create it, but it's ok to be told that
+	//  it's too late
+	{
+	  CUresult res = cuDevicePrimaryCtxSetFlags(gpu_info[i]->device,
+						    CU_CTX_SCHED_BLOCKING_SYNC);
+	  assert((res == CUDA_SUCCESS) || (res == CUDA_ERROR_PRIMARY_CONTEXT_ACTIVE));
+	}
+
 	CUcontext context;
-	CUresult res = cuCtxCreate(&context,
-				   CU_CTX_MAP_HOST | CU_CTX_SCHED_BLOCKING_SYNC,
-				   gpu_info[i]->device);
+	CUresult res = cuDevicePrimaryCtxRetain(&context,
+						gpu_info[i]->device);
 	// a busy GPU might return INVALID_DEVICE or OUT_OF_MEMORY here
 	if((res == CUDA_ERROR_INVALID_DEVICE) ||
 	   (res == CUDA_ERROR_OUT_OF_MEMORY)) {
@@ -3328,11 +3338,11 @@ namespace Realm {
 	  CHECK_CU( cuMemGetInfo(&avail_mem, &total_mem) );
 	  if(avail_mem < cfg_min_avail_mem) {
 	    log_gpu.info() << "GPU " << gpu_info[i]->device << " does not have enough available memory (" << avail_mem << " < " << cfg_min_avail_mem << ") - skipping";
-	    CHECK_CU( cuCtxDestroy(context) );
+	    CHECK_CU( cuDevicePrimaryCtxRelease(gpu_info[i]->device) );
 	    continue;
 	  }
 	}
-	
+
 	// either create a worker for this GPU or use the shared one
 	GPUWorker *worker;
 	if(cfg_use_shared_worker) {

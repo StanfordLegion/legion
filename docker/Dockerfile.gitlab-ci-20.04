@@ -21,7 +21,7 @@ RUN dpkg --add-architecture i386 && \
       g++-9 g++-10 \
       gfortran-9 gfortran-10 \
       gcc-multilib g++-multilib \
-      clang-9 libclang-9-dev llvm-9-dev \
+      clang-9 libclang-9-dev llvm-9-dev libomp-9-dev \
       clang-10 libclang-10-dev llvm-10-dev \
       cmake \
       libncurses5-dev libedit-dev \
