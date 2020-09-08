@@ -8594,7 +8594,7 @@ namespace Legion {
       for (unsigned out_idx = 0, idx = regions.size();
            out_idx < output_regions.size(); ++out_idx, ++idx)
       {
-        ProjectionInfo projection_info(runtime, output_regions[idx],
+        ProjectionInfo projection_info(runtime, output_regions[out_idx],
                                        launch_space);
         runtime->forest->perform_dependence_analysis(this, idx,
                                                      output_regions[out_idx],
