@@ -3585,6 +3585,37 @@ legion_index_launcher_execute_deterministic_reduction(
   return CObjectWrapper::wrap(new Future(f));
 }
 
+legion_future_t
+legion_index_launcher_execute_reduction_and_outputs(
+                                        legion_runtime_t runtime_,
+                                        legion_context_t ctx_,
+                                        legion_index_launcher_t launcher_,
+                                        legion_reduction_op_id_t redop,
+                                        bool deterministic,
+                                        legion_output_requirement_t *reqs_,
+                                        size_t reqs_size)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  std::vector<OutputRequirement> reqs;
+  for (size_t idx = 0; idx < reqs_size; ++idx)
+    reqs.push_back(*CObjectWrapper::unwrap(reqs_[idx]));
+
+  Future f = runtime->execute_index_space(ctx, *launcher, redop, deterministic, &reqs);
+  legion_future_t result = CObjectWrapper::wrap(new Future(f));
+
+  for (size_t idx = 0; idx < reqs_size; ++idx)
+  {
+    OutputRequirement *target = CObjectWrapper::unwrap(reqs_[idx]);
+    target->parent = reqs[idx].parent;
+    target->partition = reqs[idx].partition;
+  }
+
+  return result;
+}
+
 unsigned
 legion_index_launcher_add_region_requirement_logical_region(
   legion_index_launcher_t launcher_,

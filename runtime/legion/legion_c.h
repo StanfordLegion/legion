@@ -2962,6 +2962,20 @@ extern "C" {
                                                         bool deterministic);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &, ReductionOpID, std::vector<OutputRequirement>*)
+   */
+  legion_future_t
+  legion_index_launcher_execute_reduction_and_outputs(legion_runtime_t runtime,
+                                                      legion_context_t ctx,
+                                                      legion_index_launcher_t launcher,
+                                                      legion_reduction_op_id_t redop,
+                                                      bool deterministic,
+                                                      legion_output_requirement_t *reqs,
+                                                      size_t reqs_size);
+
+  /**
    * @see Legion::IndexTaskLauncher::add_region_requirement()
    */
   unsigned
