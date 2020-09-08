@@ -2799,10 +2799,16 @@ namespace Legion {
                                               Serializer &rez);
       void send_equivalence_set_clone_response(AddressSpaceID target,
                                                Serializer &rez);
+      void send_equivalence_set_capture_request(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_equivalence_set_capture_response(AddressSpaceID target,
+                                                 Serializer &rez);
       void send_equivalence_set_remote_request_instances(AddressSpaceID target,
                                                          Serializer &rez);
       void send_equivalence_set_remote_request_invalid(AddressSpaceID target,
                                                        Serializer &rez);
+      void send_equivalence_set_remote_request_antivalid(AddressSpaceID target,
+                                                         Serializer &rez);
       void send_equivalence_set_remote_updates(AddressSpaceID target,
                                                Serializer &rez);
       void send_equivalence_set_remote_acquires(AddressSpaceID target,
@@ -3064,10 +3070,16 @@ namespace Legion {
       void handle_equivalence_set_make_owner(Deserializer &derez);
       void handle_equivalence_set_clone_request(Deserializer &derez);
       void handle_equivalence_set_clone_response(Deserializer &derez);
+      void handle_equivalence_set_capture_request(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_equivalence_set_capture_response(Deserializer &derez,
+                                                   AddressSpaceID source);
       void handle_equivalence_set_remote_request_instances(Deserializer &derez, 
                                                          AddressSpaceID srouce);
       void handle_equivalence_set_remote_request_invalid(Deserializer &derez, 
                                                          AddressSpaceID srouce);
+      void handle_equivalence_set_remote_request_antivalid(Deserializer &derez,
+                                                         AddressSpaceID source);
       void handle_equivalence_set_remote_updates(Deserializer &derez,
                                                  AddressSpaceID source);
       void handle_equivalence_set_remote_acquires(Deserializer &derez,

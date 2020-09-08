@@ -835,8 +835,11 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_MAKE_OWNER,
       SEND_EQUIVALENCE_SET_CLONE_REQUEST,
       SEND_EQUIVALENCE_SET_CLONE_RESPONSE,
+      SEND_EQUIVALENCE_SET_CAPTURE_REQUEST,
+      SEND_EQUIVALENCE_SET_CAPTURE_RESPONSE,
       SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES,
       SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INVALID,
+      SEND_EQUIVALENCE_SET_REMOTE_REQUEST_ANTIVALID,
       SEND_EQUIVALENCE_SET_REMOTE_UPDATES,
       SEND_EQUIVALENCE_SET_REMOTE_ACQUIRES,
       SEND_EQUIVALENCE_SET_REMOTE_RELEASES,
@@ -1038,8 +1041,11 @@ namespace Legion {
         "Send Equivalence Set Make Owner",                            \
         "Send Equivalence Set Clone Request",                         \
         "Send Equivalence Set Clone Response",                        \
+        "Send Equivalence Set Tracing Capture Request",               \
+        "Send Equivalence Set Tracing Capture Response",              \
         "Send Equivalence Set Remote Request Instances",              \
         "Send Equivalence Set Remote Request Invalid",                \
+        "Send Equivalence Set Remote Request Antivalid",              \
         "Send Equivalence Set Remote Updates",                        \
         "Send Equivalence Set Remote Acquires",                       \
         "Send Equivalence Set Remote Releases",                       \

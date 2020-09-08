@@ -9771,6 +9771,18 @@ namespace Legion {
               runtime->handle_equivalence_set_clone_response(derez);
               break;
             }
+          case SEND_EQUIVALENCE_SET_CAPTURE_REQUEST:
+            {
+              runtime->handle_equivalence_set_capture_request(derez,
+                                              remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_CAPTURE_RESPONSE:
+            {
+              runtime->handle_equivalence_set_capture_response(derez,
+                                                remote_address_space);
+              break;
+            }
           case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES:
             {
               runtime->handle_equivalence_set_remote_request_instances(derez,
@@ -9780,6 +9792,12 @@ namespace Legion {
           case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INVALID:
             {
               runtime->handle_equivalence_set_remote_request_invalid(derez,
+                                                        remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_ANTIVALID:
+            {
+              runtime->handle_equivalence_set_remote_request_antivalid(derez,
                                                         remote_address_space);
               break;
             }
@@ -19459,6 +19477,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_capture_request(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_CAPTURE_REQUEST,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_capture_response(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_CAPTURE_RESPONSE,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_remote_request_instances(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -19475,6 +19513,16 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez,
           SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INVALID,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_request_antivalid(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_REQUEST_ANTIVALID,
           DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
@@ -21302,6 +21350,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_capture_request(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_capture_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_capture_response(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_capture_response(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_remote_request_instances(
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -21315,6 +21379,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InvalidInstAnalysis::handle_remote_request_invalid(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_remote_request_antivalid(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      AntivalidInstAnalysis::handle_remote_request_antivalid(derez,this,source);
     }
 
     //--------------------------------------------------------------------------

@@ -6652,6 +6652,269 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Antivalid Inst Analysis
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AntivalidInstAnalysis::AntivalidInstAnalysis(Runtime *rt, Operation *o, 
+                                  unsigned idx, IndexSpaceExpression *expr, 
+                                  const FieldMaskSet<LogicalView> &anti_insts)
+      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/), 
+        antivalid_instances(anti_insts), target_analysis(this)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AntivalidInstAnalysis::AntivalidInstAnalysis(Runtime *rt,AddressSpaceID src, 
+                           AddressSpaceID prev, Operation *o, unsigned idx,
+                           IndexSpaceExpression *expr, AntivalidInstAnalysis *a,
+                           const FieldMaskSet<LogicalView> &anti_insts)
+      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/), 
+        antivalid_instances(anti_insts), target_analysis(a)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AntivalidInstAnalysis::AntivalidInstAnalysis(
+                                               const AntivalidInstAnalysis &rhs)
+      : PhysicalAnalysis(rhs), antivalid_instances(rhs.antivalid_instances),
+        target_analysis(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    AntivalidInstAnalysis::~AntivalidInstAnalysis(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AntivalidInstAnalysis& AntivalidInstAnalysis::operator=(
+                                                const AntivalidInstAnalysis &rs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void AntivalidInstAnalysis::perform_traversal(EquivalenceSet *set,
+                                             IndexSpaceExpression *expr,
+                                             const bool expr_covers,
+                                             const FieldMask &mask,
+                                             std::set<RtEvent> &deferral_events,
+                                             std::set<RtEvent> &applied_events,
+                                             const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      set->find_antivalid_instances(*this,expr,expr_covers,mask,deferral_events,
+                                    applied_events, already_deferred);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent AntivalidInstAnalysis::perform_remote(RtEvent perform_precondition,
+                                              std::set<RtEvent> &applied_events,
+                                              const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      if (perform_precondition.exists() && 
+          !perform_precondition.has_triggered())
+      {
+        // Defer this until the precondition is met
+        DeferPerformRemoteArgs args(this);
+        runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
+        applied_events.insert(args.applied_event);
+        return args.done_event;
+      }
+      // Easy out if we don't have remote sets
+      if (remote_sets.empty())
+        return RtEvent::NO_RT_EVENT;
+      std::set<RtEvent> ready_events;
+      for (LegionMap<AddressSpaceID,
+                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->second.empty());
+#endif
+        const AddressSpaceID target = rit->first;
+        const RtUserEvent ready = Runtime::create_rt_user_event();
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(original_source);
+          rez.serialize<size_t>(rit->second.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          analysis_expr->pack_expression(rez, target);
+          op->pack_remote_operation(rez, target, applied_events);
+          rez.serialize(index);
+          rez.serialize<size_t>(antivalid_instances.size());
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                antivalid_instances.begin(); it != 
+                antivalid_instances.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize(target_analysis);
+          rez.serialize(ready);
+          rez.serialize(applied);
+        }
+        runtime->send_equivalence_set_remote_request_antivalid(target, rez);
+        ready_events.insert(ready);
+        applied_events.insert(applied);
+      }
+      return Runtime::merge_events(ready_events);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent AntivalidInstAnalysis::perform_updates(RtEvent perform_precondition,
+                                              std::set<RtEvent> &applied_events,
+                                              const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      if (perform_precondition.exists() && 
+          !perform_precondition.has_triggered())
+      {
+        // Defer this until the precondition is met
+        DeferPerformUpdateArgs args(this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
+        applied_events.insert(args.applied_event);
+        return args.done_event;
+      }
+      if (recorded_instances != NULL)
+      {
+        if (original_source != runtime->address_space)
+        {
+          const RtUserEvent response_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(target_analysis);
+            rez.serialize(response_event);
+            rez.serialize<size_t>(recorded_instances->size());
+            for (FieldMaskSet<LogicalView>::const_iterator it = 
+                  recorded_instances->begin(); it != 
+                  recorded_instances->end(); it++)
+            {
+              rez.serialize(it->first->did);
+              rez.serialize(it->second);
+            }
+            rez.serialize<bool>(restricted);
+          }
+          runtime->send_equivalence_set_remote_instances(original_source, rez);
+          return response_event;
+        }
+        else
+          target_analysis->process_local_instances(*recorded_instances, 
+                                                   restricted);
+      }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void AntivalidInstAnalysis::handle_remote_request_antivalid(
+                 Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      AddressSpaceID original_source;
+      derez.deserialize(original_source);
+      size_t num_eq_sets;
+      derez.deserialize(num_eq_sets);
+      std::set<RtEvent> ready_events;
+      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      LegionVector<FieldMask>::aligned eq_masks(num_eq_sets);
+      for (unsigned idx = 0; idx < num_eq_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready);
+        if (ready.exists())
+          ready_events.insert(ready);
+        derez.deserialize(eq_masks[idx]);
+      }
+      IndexSpaceExpression *expr = 
+        IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
+      RemoteOp *op = 
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      unsigned index;
+      derez.deserialize(index);
+      FieldMaskSet<LogicalView> antivalid_instances;
+      size_t num_antivalid_instances;
+      derez.deserialize<size_t>(num_antivalid_instances);
+      for (unsigned idx = 0; idx < num_antivalid_instances; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+        if (ready.exists())
+          ready_events.insert(ready);
+        FieldMask view_mask;
+        derez.deserialize(view_mask);
+        antivalid_instances.insert(view, view_mask);
+      }
+      AntivalidInstAnalysis *target;
+      derez.deserialize(target);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+
+      AntivalidInstAnalysis *analysis = new AntivalidInstAnalysis(runtime, 
+       original_source, previous, op, index, expr, target, antivalid_instances);
+      analysis->add_reference();
+      std::set<RtEvent> deferral_events, applied_events;
+      // Wait for the equivalence sets to be ready if necessary
+      RtEvent ready_event;
+      if (!ready_events.empty())
+        ready_event = Runtime::merge_events(ready_events);
+      for (unsigned idx = 0; idx < eq_sets.size(); idx++)
+        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
+                           applied_events, ready_event);
+      const RtEvent traversal_done = deferral_events.empty() ?
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      if (traversal_done.exists() || analysis->has_remote_sets())
+      {
+        const RtEvent remote_ready = 
+          analysis->perform_remote(traversal_done, applied_events);
+        if (remote_ready.exists())
+          ready_events.insert(remote_ready);
+      }
+      // Defer sending the updates until we're ready
+      const RtEvent local_ready = 
+        analysis->perform_updates(traversal_done, applied_events);
+      if (local_ready.exists())
+        ready_events.insert(local_ready);
+      if (!ready_events.empty())
+        Runtime::trigger_event(ready, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(ready);
+      if (!applied_events.empty())
+        Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(applied);
+      if (analysis->remove_reference())
+        delete analysis;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Update Analysis
     /////////////////////////////////////////////////////////////
 
@@ -15143,6 +15406,126 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::find_antivalid_instances(
+                                            AntivalidInstAnalysis &analysis,
+                                            IndexSpaceExpression *expr,
+                                            const bool expr_covers, 
+                                            const FieldMask &user_mask,
+                                            std::set<RtEvent> &deferral_events,
+                                            std::set<RtEvent> &applied_events,
+                                            const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+      {
+        defer_traversal(eq, analysis, user_mask, deferral_events,
+                        applied_events, already_deferred);
+        return;
+      }
+      // This is a read-only analysis so we don't need to invalidate
+      // replicated state if we get a non-collective operation
+      if (is_remote_analysis(analysis, user_mask, deferral_events,
+            applied_events, false/*exclusive*/, true/*immutable*/))
+        return;
+#ifdef DEBUG_LEGION
+      // Should only be here if we're the owner
+      assert(is_logical_owner() || has_replicated_fields(user_mask));
+#endif
+      // Lock the analysis so we can perform updates here
+      AutoLock a_lock(analysis);
+      for (FieldMaskSet<LogicalView>::const_iterator ait = 
+            analysis.antivalid_instances.begin(); ait !=
+            analysis.antivalid_instances.end(); ait++)
+      {
+        const FieldMask antivalid_mask = ait->second & user_mask;
+        if (!antivalid_mask)
+          continue;
+        if (ait->first->is_reduction_view())
+        {
+          // Handle reductions special
+          if (antivalid_mask * reduction_fields)
+            continue;
+          ReductionView *reduction_view = ait->first->as_reduction_view();
+          int fidx = antivalid_mask.find_first_set();
+          while (fidx >= 0)
+          {
+            std::map<unsigned,std::list<std::pair<ReductionView*,
+              IndexSpaceExpression*> > >::const_iterator finder = 
+                reduction_instances.find(fidx);
+            if (finder != reduction_instances.end())
+            {
+              for (std::list<std::pair<ReductionView*,
+                    IndexSpaceExpression*> >::const_iterator it = 
+                    finder->second.begin(); it != finder->second.end(); it++)
+              {
+                if (it->first != reduction_view)
+                  continue;
+                FieldMask local_mask;
+                local_mask.set_bit(fidx);
+                if (!expr_covers)
+                {
+                  if ((it->second != set_expr) && (it->second != expr)) 
+                  {
+                    IndexSpaceExpression *intersection = 
+                      runtime->forest->intersect_index_spaces(expr, it->second);
+                    if (!intersection->is_empty())
+                      analysis.record_instance(reduction_view, local_mask);
+                  }
+                  else
+                    analysis.record_instance(reduction_view, local_mask);
+                }
+                else // they intersect so record it
+                  analysis.record_instance(reduction_view, local_mask);
+              }
+            }
+            fidx = antivalid_mask.find_next_set(fidx+1);
+          }
+        }
+        else
+        {
+          // Check for it in the total valid instances first
+          FieldMaskSet<LogicalView>::const_iterator total_finder = 
+            total_valid_instances.find(ait->first);
+          if (total_finder != total_valid_instances.end())
+          {
+            const FieldMask overlap = antivalid_mask & total_finder->second;
+            if (!!overlap)
+              analysis.record_instance(ait->first, overlap);
+          }
+          // Then check for it in the partial valid instances
+          LegionMap<LogicalView*,
+            FieldMaskSet<IndexSpaceExpression> >::aligned::const_iterator
+              finder = partial_valid_instances.find(ait->first);
+          if (finder != partial_valid_instances.end())
+          {
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
+                  finder->second.begin(); it != finder->second.end(); it++)
+            {
+              const FieldMask overlap = it->second & antivalid_mask;
+              if (!overlap)
+                continue;
+              if (!expr_covers)
+              {
+                if ((it->first != set_expr) && (it->first != expr))
+                {
+                  IndexSpaceExpression *intersection = 
+                    runtime->forest->intersect_index_spaces(expr, it->first);
+                  if (!intersection->is_empty())
+                    analysis.record_instance(ait->first, overlap);
+                }
+                else
+                  analysis.record_instance(ait->first, overlap);
+              }
+              else
+                analysis.record_instance(ait->first, overlap);
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::update_set(UpdateAnalysis &analysis,
                                     IndexSpaceExpression *expr,
                                     const bool expr_covers,
@@ -20154,6 +20537,196 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent EquivalenceSet::capture_trace_conditions(TraceConditionSet *target,
+                        AddressSpaceID target_space, IndexSpaceExpression *expr,
+                        const FieldMask &mask, RtUserEvent ready_event)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);    
+      // This always needs to be sent to the owner to handle the case where
+      // we are figuring out which shard owns each precondition expression
+      // We can only deduplicate if they go to the same place
+      if (!is_logical_owner())
+      {
+        if (!ready_event.exists())
+          ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(target);
+          rez.serialize(target_space);
+          expr->pack_expression(rez, logical_owner_space);
+          rez.serialize(mask);
+          rez.serialize(ready_event);
+        }
+        runtime->send_equivalence_set_capture_request(logical_owner_space, rez);
+        return ready_event;
+      }
+      // If we get here then we are the ones to do the analysis
+      TraceViewSet *previews = NULL;
+      TraceViewSet *antiviews = NULL;
+      TraceViewSet *postviews = NULL;
+      // Compute the views to send back
+      if (tracing_preconditions != NULL)
+      {
+        previews = 
+          new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
+        tracing_preconditions->find_overlaps(*previews, expr, 
+                                             (expr == set_expr), mask);
+      }
+      if (tracing_anticonditions != NULL)
+      {
+        antiviews =
+          new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
+        tracing_anticonditions->find_overlaps(*antiviews, expr,
+                                              (expr == set_expr), mask);
+      }
+      if (tracing_postconditions != NULL)
+      {
+        postviews =
+          new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
+        tracing_postconditions->find_overlaps(*postviews, expr,
+                                              (expr == set_expr), mask);
+      }
+      // Return the results
+      RtEvent result = ready_event;
+      if (target_space != local_space)
+      {
+#ifdef DEBUG_LEGION
+        assert(ready_event.exists());
+#endif
+        // Send back the results to the target node
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          rez.serialize(region_node->handle);
+          if (previews != NULL)
+            previews->pack(rez, target_space);
+          else
+            rez.serialize<size_t>(0);
+          if (antiviews != NULL)
+            antiviews->pack(rez, target_space);
+          else
+            rez.serialize<size_t>(0);
+          if (postviews != NULL)
+            postviews->pack(rez, target_space);
+          else
+            rez.serialize<size_t>(0);
+          rez.serialize(ready_event);
+        }
+        runtime->send_equivalence_set_capture_response(target_space, rez);
+      }
+      else
+      {
+        std::set<RtEvent> ready_events;
+        target->receive_capture(previews, antiviews, postviews, ready_events);
+        if (!ready_events.empty())
+        {
+          if (ready_event.exists())
+            Runtime::trigger_event(ready_event, 
+                Runtime::merge_events(ready_events));
+          else
+            result = Runtime::merge_events(ready_events);
+        }
+        else if (ready_event.exists())
+          Runtime::trigger_event(ready_event);
+      }
+      // Finally remove our references
+      if (result.exists() && !result.has_triggered())
+      {
+        // Defer removal of the references until the result is triggered
+        std::map<IndexSpaceExpression*,unsigned> expr_refs_to_remove;
+        std::map<LogicalView*,unsigned> view_refs_to_remove;
+        if (tracing_preconditions != NULL)
+        {
+          tracing_preconditions->invalidate_all_but(NULL, expr, mask,
+                          &expr_refs_to_remove, &view_refs_to_remove);
+          if (tracing_preconditions->empty())
+          {
+            delete tracing_preconditions;
+            tracing_preconditions = NULL;
+          }
+        }
+        if (tracing_anticonditions != NULL)
+        {
+          tracing_anticonditions->invalidate_all_but(NULL, expr, mask,
+                          &expr_refs_to_remove, &view_refs_to_remove);
+          if (tracing_anticonditions->empty())
+          {
+            delete tracing_anticonditions;
+            tracing_anticonditions = NULL;
+          }
+        }
+        if (tracing_postconditions != NULL)
+        {
+          tracing_postconditions->invalidate_all_but(NULL, expr, mask,
+                          &expr_refs_to_remove, &view_refs_to_remove);
+          if (tracing_postconditions->empty())
+          {
+            delete tracing_postconditions;
+            tracing_postconditions = NULL;
+          }
+        }
+        if (!result.has_triggered())
+        {
+          // Defer removing these references until it is safe to do so
+          DeferReleaseRefArgs args(did);
+          args.view_refs_to_remove->swap(view_refs_to_remove);
+          args.expr_refs_to_remove->swap(expr_refs_to_remove);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, result); 
+        }
+        else
+        {
+          // We can remove these references now
+          for (std::map<LogicalView*,unsigned>::const_iterator it = 
+                view_refs_to_remove.begin(); it != 
+                view_refs_to_remove.end(); it++)
+            if (it->first->remove_nested_valid_ref(did, NULL, it->second))
+              delete it->first;
+          for (std::map<IndexSpaceExpression*,unsigned>::const_iterator it =
+                expr_refs_to_remove.begin(); it != 
+                expr_refs_to_remove.end(); it++)
+            if (it->first->remove_expression_reference(it->second))
+              delete it->first;
+        }
+      }
+      else
+      {
+        if (tracing_preconditions != NULL)
+        {
+          tracing_preconditions->invalidate_all_but(NULL, expr, mask);
+          if (tracing_preconditions->empty())
+          {
+            delete tracing_preconditions;
+            tracing_preconditions = NULL;
+          }
+        }
+        if (tracing_anticonditions != NULL)
+        {
+          tracing_anticonditions->invalidate_all_but(NULL, expr, mask);
+          if (tracing_anticonditions->empty())
+          {
+            delete tracing_anticonditions;
+            tracing_anticonditions = NULL;
+          }
+        }
+        if (tracing_postconditions != NULL)
+        {
+          tracing_postconditions->invalidate_all_but(NULL, expr, mask);
+          if (tracing_postconditions->empty())
+          {
+            delete tracing_postconditions;
+            tracing_postconditions = NULL;
+          }
+        }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::remove_update_guard(CopyFillGuard *guard)
     //--------------------------------------------------------------------------
     {
@@ -21831,6 +22404,96 @@ namespace Legion {
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_capture_request(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      TraceConditionSet *target;
+      derez.deserialize(target);
+      AddressSpaceID target_space;
+      derez.deserialize(target_space);
+      IndexSpaceExpression *expr = 
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      FieldMask mask;
+      derez.deserialize(mask);
+      RtUserEvent ready_event;
+      derez.deserialize(ready_event);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      set->capture_trace_conditions(target,target_space,expr,mask,ready_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_capture_response(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      TraceConditionSet *target;
+      derez.deserialize(target);
+      TraceViewSet *previews = NULL;
+      TraceViewSet *antiviews = NULL;
+      TraceViewSet *postviews = NULL;
+      RegionNode *region_node = NULL;
+      size_t num_previews;
+      derez.deserialize(num_previews);
+      std::set<RtEvent> ready_events;
+      if (num_previews > 0)
+      {
+        if (region_node == NULL)
+          region_node = runtime->forest->get_node(handle);
+        previews = 
+          new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
+        previews->unpack(derez, num_previews, source, ready_events); 
+      }
+      size_t num_antiviews;
+      derez.deserialize(num_antiviews);
+      if (num_antiviews > 0)
+      {
+        if (region_node == NULL)
+          region_node = runtime->forest->get_node(handle);
+        antiviews =
+          new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
+        antiviews->unpack(derez, num_antiviews, source, ready_events);
+      }
+      size_t num_postviews;
+      derez.deserialize(num_postviews);
+      if (num_postviews > 0)
+      {
+        if (region_node == NULL)
+          region_node = runtime->forest->get_node(handle);
+        postviews =
+          new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
+        postviews->unpack(derez, num_postviews, source, ready_events);
+      }
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+#ifdef DEBUG_LEGION
+      assert(done_event.exists());
+#endif
+      // Wait for the views to be ready before recording them
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        ready_events.clear();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      target->receive_capture(previews, antiviews, postviews, ready_events); 
+      if (!ready_events.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
       else
         Runtime::trigger_event(done_event);
     }

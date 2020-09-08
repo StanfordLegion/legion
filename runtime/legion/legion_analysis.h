@@ -1703,11 +1703,11 @@ namespace Legion {
     public:
       AntivalidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
                           IndexSpaceExpression *expr,
-                          const FieldMaskSet<LogicalView> &valid_instances);
-      AntivalidInstAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                        Operation *op, unsigned index, 
-                        IndexSpaceExpression *expr, InvalidInstAnalysis *target,
-                        const FieldMaskSet<LogicalView> &valid_instances);
+                          const FieldMaskSet<LogicalView> &anti_instances);
+      AntivalidInstAnalysis(Runtime *rt, AddressSpaceID src,AddressSpaceID prev,
+                      Operation *op, unsigned index, 
+                      IndexSpaceExpression *expr, AntivalidInstAnalysis *target,
+                      const FieldMaskSet<LogicalView> &anti_instances);
       AntivalidInstAnalysis(const AntivalidInstAnalysis &rhs);
       virtual ~AntivalidInstAnalysis(void);
     public:
@@ -2832,6 +2832,13 @@ namespace Legion {
                                 std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
                                 const bool already_deferred = false);
+      void find_antivalid_instances(AntivalidInstAnalysis &analysis,
+                                IndexSpaceExpression *expr,
+                                const bool expr_covers, 
+                                const FieldMask &user_mask,
+                                std::set<RtEvent> &deferral_events,
+                                std::set<RtEvent> &applied_events,
+                                const bool already_deferred = false);
       void update_set(UpdateAnalysis &analysis, IndexSpaceExpression *expr,
                       const bool expr_covers, FieldMask user_mask,
                       std::set<RtEvent> &deferral_events,
@@ -2895,10 +2902,11 @@ namespace Legion {
                                      IndexSpaceExpression *expr,
                                      const FieldMask &user_mask,
                                      std::set<RtEvent> &applied);
-      void capture_trace_conditions(TraceConditionSet *target,
-                                    IndexSpaceExpression *expr,
-                                    const FieldMask &mask,
-                                    std::set<RtEvent> &ready_events);
+      RtEvent capture_trace_conditions(TraceConditionSet *target,
+                                       AddressSpaceID target_space,
+                                       IndexSpaceExpression *expr,
+                                       const FieldMask &mask,
+                                       RtUserEvent ready_event);
     protected:
       void defer_traversal(AutoTryLock &eq, PhysicalAnalysis &analysis,
                            const FieldMask &mask,
@@ -3116,6 +3124,10 @@ namespace Legion {
       static void handle_replication_update(Deserializer &derez, Runtime *rt);
       static void handle_clone_request(Deserializer &derez, Runtime *runtime);
       static void handle_clone_response(Deserializer &derez, Runtime *runtime);
+      static void handle_capture_request(Deserializer &derez, Runtime *runtime,
+                                         AddressSpaceID source);
+      static void handle_capture_response(Deserializer &derez, Runtime *runtime,
+                                          AddressSpaceID source);
     public:
       RegionNode *const region_node;
       IndexSpaceNode *const set_expr;

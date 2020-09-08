@@ -2574,6 +2574,76 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TraceViewSet::find_overlaps(TraceViewSet &target, 
+                                     IndexSpaceExpression *expr, 
+                                     const bool expr_covers, 
+                                     const FieldMask &mask) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target.owner_did == 0);
+#endif
+      if (expr_covers)
+      {
+        for (ViewExprs::const_iterator vit = 
+              conditions.begin(); vit != conditions.end(); vit++)
+        {
+          if (!(vit->second.get_valid_mask() - mask))
+          {
+            // sending everything
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+              target.insert(vit->first, it->first, it->second, NULL);
+          }
+          else
+          {
+            // filtering on fields
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = mask & it->second;
+              if (!overlap)
+                continue;
+              target.insert(vit->first, it->first, overlap, NULL);
+            }
+          }
+        }
+      }
+      else
+      {
+        for (ViewExprs::const_iterator vit = 
+              conditions.begin(); vit != conditions.end(); vit++)
+        {
+          FieldMask view_overlap = vit->second.get_valid_mask() & mask;
+          if (!view_overlap)
+            continue;
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                vit->second.begin(); it != vit->second.end(); it++)
+          {
+            const FieldMask overlap = it->second & view_overlap;
+            if (!overlap)
+              continue;
+            IndexSpaceExpression *expr_overlap = 
+              forest->intersect_index_spaces(it->first, expr); 
+            const size_t volume = expr_overlap->get_volume();
+            if (volume > 0)
+            {
+              if (volume == expr->get_volume())
+                target.insert(vit->first, expr, overlap, NULL);
+              else if (volume == it->first->get_volume())
+                target.insert(vit->first, it->first, overlap, NULL);
+              else
+                target.insert(vit->first, expr_overlap, overlap, NULL);
+            }
+            view_overlap -= overlap;
+            if (!view_overlap)
+              break;
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool TraceViewSet::empty(void) const
     //--------------------------------------------------------------------------
     {
@@ -2824,8 +2894,11 @@ namespace Legion {
     {
       current_sets.insert(set, condition_mask);
       set->record_tracker(this, condition_mask);
-      set->capture_trace_conditions(this, condition_expr, 
-                                    condition_mask, ready_events); 
+      const RtEvent ready_event = 
+        set->capture_trace_conditions(this, set->local_space, condition_expr, 
+                              condition_mask, RtUserEvent::NO_RT_USER_EVENT); 
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_events.insert(ready_event);
     }
 
     //--------------------------------------------------------------------------
@@ -2841,36 +2914,45 @@ namespace Legion {
       precondition_views = pre;
       anticondition_views = anti;
       postcondition_views = post;
-      precondition_views->transpose(preconditions);
-      anticondition_views->transpose(anticonditions);
-      postcondition_views->transpose(postconditions);
       WrapperReferenceMutator mutator(ready);
-      for (LegionMap<IndexSpaceExpression*,
-                     FieldMaskSet<LogicalView> >::aligned::const_iterator eit =
-            preconditions.begin(); eit != preconditions.end(); eit++)
+      if (precondition_views != NULL)
       {
-        eit->first->add_expression_reference();
-        for (FieldMaskSet<LogicalView>::const_iterator it = 
-              eit->second.begin(); it != eit->second.end(); it++)
-          it->first->add_base_valid_ref(TRACE_REF, &mutator);
+        precondition_views->transpose(preconditions);
+        for (LegionMap<IndexSpaceExpression*,
+                       FieldMaskSet<LogicalView> >::aligned::const_iterator 
+              eit = preconditions.begin(); eit != preconditions.end(); eit++)
+        {
+          eit->first->add_expression_reference();
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+            it->first->add_base_valid_ref(TRACE_REF, &mutator);
+        }
       }
-      for (LegionMap<IndexSpaceExpression*,
-                     FieldMaskSet<LogicalView> >::aligned::const_iterator eit =
-            anticonditions.begin(); eit != anticonditions.end(); eit++)
+      if (anticondition_views != NULL)
       {
-        eit->first->add_expression_reference();
-        for (FieldMaskSet<LogicalView>::const_iterator it = 
-              eit->second.begin(); it != eit->second.end(); it++)
-          it->first->add_base_valid_ref(TRACE_REF, &mutator);
+        anticondition_views->transpose(anticonditions);
+        for (LegionMap<IndexSpaceExpression*,
+                       FieldMaskSet<LogicalView> >::aligned::const_iterator 
+              eit = anticonditions.begin(); eit != anticonditions.end(); eit++)
+        {
+          eit->first->add_expression_reference();
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+            it->first->add_base_valid_ref(TRACE_REF, &mutator);
+        }
       }
-      for (LegionMap<IndexSpaceExpression*,
-                     FieldMaskSet<LogicalView> >::aligned::const_iterator eit =
-            postconditions.begin(); eit != postconditions.end(); eit++)
+      if (postcondition_views != NULL)
       {
-        eit->first->add_expression_reference();
-        for (FieldMaskSet<LogicalView>::const_iterator it = 
-              eit->second.begin(); it != eit->second.end(); it++)
-          it->first->add_base_valid_ref(TRACE_REF, &mutator);
+        postcondition_views->transpose(postconditions);
+        for (LegionMap<IndexSpaceExpression*,
+                       FieldMaskSet<LogicalView> >::aligned::const_iterator 
+              eit = postconditions.begin(); eit != postconditions.end(); eit++)
+        {
+          eit->first->add_expression_reference();
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+            it->first->add_base_valid_ref(TRACE_REF, &mutator);
+        }
       }
     }
 
