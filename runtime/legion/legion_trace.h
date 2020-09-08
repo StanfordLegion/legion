@@ -462,7 +462,7 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  unsigned templates_to_find,
                                  std::vector<int> &viable_templates);
-      PhysicalTemplate* select_template(unsigned template_index);
+      void select_template(unsigned template_index);
     public:
       PhysicalTemplate* get_current_template(void) { return current_template; }
       bool has_any_templates(void) const { return templates.size() > 0; }
@@ -1130,8 +1130,6 @@ namespace Legion {
                          int owner_shard = -1);
       virtual void record_fill_views(const FieldMaskSet<FillView> &views,
                                      std::set<RtEvent> &applied_events);
-    public:
-      void record_replayed(void);
     protected:
       ShardID find_view_owner(InstanceView *view);
       ShardID find_equivalence_owner(EquivalenceSet *set);
@@ -1208,6 +1206,7 @@ namespace Legion {
       std::vector<std::pair<ApBarrier,unsigned> > remote_frontiers;
       // Pending refreshes from remote nodes
       std::map<ApBarrier,ApBarrier> pending_refresh_frontiers;
+      std::map<ApEvent,ApBarrier> pending_refresh_barriers;
     };
 
     enum InstructionKind
