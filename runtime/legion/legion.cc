@@ -2607,6 +2607,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Memory OutputRegion::target_memory(void) const
+    //--------------------------------------------------------------------------
+    {
+      return impl->target_memory();
+    }
+
+    //--------------------------------------------------------------------------
     void OutputRegion::return_data(size_t num_elements,
                                    FieldID field_id,
                                    void *ptr,

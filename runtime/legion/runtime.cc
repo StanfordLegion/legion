@@ -3531,6 +3531,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Memory OutputRegionImpl::target_memory(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(instance_set.size() > 0);
+#endif
+      InstanceRef ref = instance_set[0];
+      return ref.get_manager()->as_individual_manager()->get_memory();
+    }
+
+    //--------------------------------------------------------------------------
     void OutputRegionImpl::return_data(size_t new_num_elements,
                                        FieldID field_id,
                                        uintptr_t ptr,

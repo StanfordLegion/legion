@@ -667,6 +667,8 @@ namespace Legion {
     public:
       OutputRegionImpl& operator=(const OutputRegionImpl &rhs);
     public:
+      Memory target_memory(void) const;
+    public:
       void return_data(size_t num_elements,
                        FieldID field_id,
                        uintptr_t ptr,
