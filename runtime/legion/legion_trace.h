@@ -1206,6 +1206,8 @@ namespace Legion {
       // Remote frontiers records barriers that we should fill in as
       // events from remote shards
       std::vector<std::pair<ApBarrier,unsigned> > remote_frontiers;
+      // Pending refreshes from remote nodes
+      std::map<ApBarrier,ApBarrier> pending_refresh_frontiers;
     };
 
     enum InstructionKind

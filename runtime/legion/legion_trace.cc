@@ -4887,6 +4887,38 @@ namespace Legion {
           RtEvent wait_on;
           {
             AutoLock tpl_lock(template_lock);
+            // Apply any pending refresh frontiers
+            if (!pending_refresh_frontiers.empty())
+            {
+              for (std::map<ApBarrier,ApBarrier>::const_iterator pit =
+                    pending_refresh_frontiers.begin(); pit != 
+                    pending_refresh_frontiers.end(); pit++)
+              {
+#ifdef DEBUG_LEGION
+                bool found = false;
+#endif
+                for (std::vector<std::pair<ApBarrier,unsigned> >::iterator it =
+                      remote_frontiers.begin(); it !=
+                      remote_frontiers.end(); it++)
+                {
+                  if (it->first != pit->first)
+                    continue;
+                  it->first = pit->second;
+#ifdef DEBUG_LEGION
+                  found = true;
+#endif
+                  break;
+                }
+#ifdef DEBUG_LEGION
+                assert(found);
+#endif
+              }
+              updated_frontiers += pending_refresh_frontiers.size();
+#ifdef DEBUG_LEGION
+              assert(updated_frontiers <= remote_frontiers.size());
+#endif
+              pending_refresh_frontiers.clear();
+            }
             if (updated_frontiers < remote_frontiers.size())
             {
               update_frontiers_ready = Runtime::create_rt_user_event();
@@ -5646,9 +5678,7 @@ namespace Legion {
                 ApBarrier oldbar, newbar;
                 derez.deserialize(oldbar);
                 derez.deserialize(newbar);
-#ifdef DEBUG_LEGION
                 bool found = false;
-#endif
                 for (std::vector<std::pair<ApBarrier,unsigned> >::iterator it =
                       remote_frontiers.begin(); it != 
                       remote_frontiers.end(); it++) 
@@ -5656,16 +5686,19 @@ namespace Legion {
                   if (it->first != oldbar)
                     continue;
                   it->first = newbar;
-#ifdef DEBUG_LEGION
                   found = true;
-#endif
                   break;
                 }
-#ifdef DEBUG_LEGION
-                assert(found);
-#endif
+                if (!found)
+                {
+                  // It's possible we haven't finished our replays
+                  // yet so the barriers might not match yet, record
+                  // them for later
+                  pending_refresh_frontiers[oldbar] = newbar;
+                }
+                else
+                  updated_frontiers++;
               }
-              updated_frontiers += num_barriers;
 #ifdef DEBUG_LEGION
               assert(updated_frontiers <= remote_frontiers.size());
 #endif
