@@ -4919,15 +4919,9 @@ namespace Legion {
       else
       {
         PhysicalTemplate::initialize(runtime, completion, recurrent);
-        for (std::vector<std::pair<ApBarrier,unsigned> >::iterator it =
+        for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it =
               remote_frontiers.begin(); it != remote_frontiers.end(); it++)
-        {
           events[it->second] = completion;
-          // Still advance the barrier for the case where we go to
-          // do the refresh from a remote node and we need the names
-          // to line up with the barrier names from the owner node
-          Runtime::advance_barrier(it->first);
-        }
       }
     }
 
