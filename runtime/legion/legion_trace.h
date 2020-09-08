@@ -1186,8 +1186,6 @@ namespace Legion {
                          const FieldMask &user_mask,
                          std::set<RtEvent> &applied,
                          int owner_shard = -1);
-      virtual void record_fill_views(const FieldMaskSet<FillView> &views,
-                                     std::set<RtEvent> &applied_events);
     protected:
       ShardID find_view_owner(InstanceView *view);
       void find_owner_shards(AddressSpace owner, std::vector<ShardID> &shards);
