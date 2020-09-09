@@ -8792,7 +8792,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         first_valid(true),
 #endif
-        union_expr((has_complete && complete) ? parent : NULL)
+        union_expr((has_complete && complete) ? parent : NULL),first_entry(NULL)
     //--------------------------------------------------------------------------
     { 
       parent->add_nested_resource_ref(did);
@@ -8827,7 +8827,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         first_valid(true),
 #endif
-        union_expr((has_complete && complete) ? parent : NULL)
+        union_expr((has_complete && complete) ? parent : NULL),first_entry(NULL)
     //--------------------------------------------------------------------------
     {
       parent->add_nested_resource_ref(did);
@@ -9987,7 +9987,96 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/void IndexPartNode::handle_disjointness_test(
+    void IndexPartNode::find_interfering_children(IndexSpaceExpression *expr,
+                                               std::vector<LegionColor> &colors)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // This should only be called on disjoint and complete partitions
+      assert(is_disjoint());
+      assert(is_complete());
+      assert(colors.empty());
+#endif
+      // Check to see if we have this in the cache
+      {
+        AutoLock n_lock(node_lock);
+        std::map<IndexSpaceExprID,InterferenceEntry>::iterator finder = 
+          interference_cache.find(expr->expr_id);
+        if (finder != interference_cache.end())
+        {
+          if (finder->second.expr_id != first_entry->expr_id)
+          {
+            InterferenceEntry *entry = &finder->second;
+            // Remove it from its place in line
+            if (entry->older != NULL)
+              entry->older->newer = entry->newer;
+            if (entry->newer != NULL)
+              entry->newer->older = entry->older;
+            // Move it to the front of the line
+            entry->newer = NULL;
+            entry->older = first_entry;
+            first_entry->newer = entry;
+            first_entry = entry;
+          }
+          // Record the result
+          colors = finder->second.colors;
+          return;
+        }
+      }
+      // TODO: compute this using a distributed algorithm with K-D trees
+      // If not, test this against all the children
+      if (total_children == max_linearized_color)
+      {
+        for (LegionColor color = 0; color < total_children; color++)
+        {
+          IndexSpaceNode *child = get_child(color);
+          IndexSpaceExpression *intersection = 
+            context->intersect_index_spaces(expr, child);
+          if (!intersection->is_empty())
+            colors.push_back(color);
+        }
+      }
+      else
+      {
+        ColorSpaceIterator *itr = color_space->create_color_space_iterator();
+        while (itr->is_valid())
+        {
+          const LegionColor color = itr->yield_color();
+          IndexSpaceNode *child = get_child(color);
+          IndexSpaceExpression *intersection = 
+            context->intersect_index_spaces(expr, child);
+          if (!intersection->is_empty())
+            colors.push_back(color);
+        }
+        delete itr;
+      }
+      // Save the result in the cache for the future
+      AutoLock n_lock(node_lock);
+      // If someone else beat us to it then we are done
+      if (interference_cache.find(expr->expr_id) != interference_cache.end())
+        return;
+      // Insert it at the front
+      InterferenceEntry *entry = &interference_cache[expr->expr_id];
+      entry->expr_id = expr->expr_id;
+      entry->colors = colors;
+      if (first_entry != NULL)
+        first_entry->newer = entry;
+      entry->older = first_entry;
+      first_entry = entry;
+      if (interference_cache.size() > MAX_INTERFERENCE_CACHE_SIZE)
+      {
+        // Remove the oldest entry in the cache
+        InterferenceEntry *last_entry = first_entry; 
+        while (last_entry->older != NULL)
+          last_entry = last_entry->older;
+        if (last_entry->newer != NULL)
+          last_entry->newer->older = NULL;
+        interference_cache.erase(last_entry->expr_id);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_disjointness_test(
              IndexPartNode *parent, IndexSpaceNode *left, IndexSpaceNode *right)
     //--------------------------------------------------------------------------
     {
@@ -19180,6 +19269,7 @@ namespace Legion {
               if (!result && break_early)
                 break;
             }
+            delete itr;
           }
         }
         else

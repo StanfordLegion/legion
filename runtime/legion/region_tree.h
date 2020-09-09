@@ -2822,6 +2822,17 @@ namespace Legion {
         IndexPartNode *const node;
         ReferenceMutator *const mutator;
       }; 
+    protected:
+      class InterferenceEntry {
+      public:
+        InterferenceEntry(void)
+          : expr_id(0), older(NULL), newer(NULL) { }
+      public:
+        std::vector<LegionColor> colors;
+        IndexSpaceExprID expr_id;
+        InterferenceEntry *older;
+        InterferenceEntry *newer;
+      };
     public:
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
@@ -2963,6 +2974,11 @@ namespace Legion {
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subspaces;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subspaces;
       std::list<PartitionTracker*> partition_trackers;
+    protected:
+      // Members for the interference cache
+      static const size_t MAX_INTERFERENCE_CACHE_SIZE = 64;
+      std::map<IndexSpaceExprID,InterferenceEntry> interference_cache;
+      InterferenceEntry *first_entry;
     protected:
       // Support for remote disjoint events being stored
       RtUserEvent remote_disjoint_ready;
