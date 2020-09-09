@@ -2642,13 +2642,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void OutputRegion::return_data(FieldID field_id,
                                    Realm::RegionInstance instance,
-                                   size_t field_size)
+                                   size_t field_size,
+                                   const size_t *num_elements)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->return_data(field_id, instance, field_size);
+      impl->return_data(field_id, instance, field_size, num_elements);
     }
 
     /////////////////////////////////////////////////////////////

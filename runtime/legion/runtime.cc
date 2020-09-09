@@ -3618,7 +3618,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void OutputRegionImpl::return_data(FieldID field_id,
                                        PhysicalInstance instance,
-                                       size_t field_size)
+                                       size_t field_size,
+                                       const size_t *pnum_elements)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *fspace_node = runtime->forest->get_node(req.field_space);
@@ -3643,8 +3644,11 @@ namespace Legion {
         reinterpret_cast<const Realm::InstanceLayout<1,coord_t>*>(
             instance.get_layout());
 
-      return_data(layout->space.bounds.volume(), field_id, ptr,
-                  layout->alignment_reqd, true);
+      size_t num_elements = pnum_elements != NULL
+                          ? *pnum_elements
+                          : layout->space.bounds.volume();
+
+      return_data(num_elements, field_id, ptr, layout->alignment_reqd, true);
     }
 
     //--------------------------------------------------------------------------

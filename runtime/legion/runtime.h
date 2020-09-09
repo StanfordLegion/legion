@@ -679,7 +679,8 @@ namespace Legion {
                        std::map<FieldID,size_t> *alignments);
       void return_data(FieldID field_id,
                        PhysicalInstance instance,
-                       size_t field_size);
+                       size_t field_size,
+                       const size_t *num_elements);
     private:
       struct FinalizeOutputArgs : public LgTaskArgs<FinalizeOutputArgs> {
       public:

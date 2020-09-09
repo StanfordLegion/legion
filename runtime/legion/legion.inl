@@ -16974,11 +16974,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    void OutputRegion::return_data(
-                                  FieldID field_id, DeferredBuffer<T,1> &buffer)
+    void OutputRegion::return_data(FieldID field_id,
+                                   DeferredBuffer<T,1> &buffer,
+                                   const size_t *num_elements /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return_data(field_id, buffer.instance, sizeof(T));
+      return_data(field_id, buffer.instance, sizeof(T), num_elements);
     }
 
     //--------------------------------------------------------------------------

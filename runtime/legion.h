@@ -2992,11 +2992,14 @@ namespace Legion {
                        std::map<FieldID,void*> ptrs,
                        std::map<FieldID,size_t> *alignments = NULL);
       template<typename T>
-      void return_data(FieldID field_id, DeferredBuffer<T,1> &buffer);
+      void return_data(FieldID field_id,
+                       DeferredBuffer<T,1> &buffer,
+                       const size_t *num_elements = NULL);
     private:
       void return_data(FieldID field_id,
                        Realm::RegionInstance instance,
-                       size_t field_size);
+                       size_t field_size,
+                       const size_t *num_elements);
     };
 
     //==========================================================================
