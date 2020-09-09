@@ -21223,9 +21223,6 @@ namespace Legion {
       }
       // If we make it here then we can finally mark ourselves the owner
       AutoLock eq(eq_lock);
-#ifdef DEBUG_LEGION
-      assert(logical_owner_space != local_space);
-#endif
       logical_owner_space = local_space;
       return RtEvent::NO_RT_EVENT;
     }
@@ -22503,11 +22500,13 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PendingEquivalenceSet::PendingEquivalenceSet(RegionNode *node)
+    PendingEquivalenceSet::PendingEquivalenceSet(RegionNode *node, 
+                                                 const FieldMask &mask)
       : region_node(node), new_set(NULL)
     //--------------------------------------------------------------------------
     {
       region_node->add_base_resource_ref(PENDING_REFINEMENT_REF);
+      previous_sets.relax_valid_mask(mask);
     }
 
     //--------------------------------------------------------------------------
@@ -22864,7 +22863,6 @@ namespace Legion {
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
       assert(set->region_node != node);
-      assert(mask * disjoint_complete);
 #endif
       if (equivalence_sets.insert(set, mask))
         set->add_base_resource_ref(VERSION_MANAGER_REF);
@@ -23052,7 +23050,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::compute_equivalence_sets(EqSetTracker *target,
+    void VersionManager::compute_equivalence_sets(const ContextID ctx,
+                                          EqSetTracker *target,
                                           const AddressSpaceID target_space,
                                           FieldMask mask, InnerContext *context,
                                           const UniqueID opid,
@@ -23103,10 +23102,11 @@ namespace Legion {
       // Release the lock before doing the call out to the context
       if (!!request_mask)
       {
+        RegionNode *region_node = node->as_region_node();
 #ifdef DEBUG_LEGION
         assert(request_ready.exists());
+        assert(region_node->parent != NULL);
 #endif
-        RegionNode *region_node = node->as_region_node();
         // Ask the context to fill in the disjoint complete sets here
         if (context->finalize_disjoint_complete_sets(region_node, this,
               request_mask, opid, original_source, request_ready, ready_events))
@@ -23117,6 +23117,9 @@ namespace Legion {
           mask |= request_mask;
           deferral_events.erase(request_ready);
         }
+        // Record that this is now a disjoint complete child for invalidation
+        region_node->parent->propagate_refinement(ctx, region_node, 
+                                                  request_mask, ready_events);
         // If we don't have any local fields remaining then we are done
         if (!mask)
           return;
@@ -23205,7 +23208,7 @@ namespace Legion {
           ready_events.insert(done);
         }
       }
-      else
+      else if (target != this)
       {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               equivalence_sets.begin(); it != equivalence_sets.end(); it++)
@@ -23220,6 +23223,8 @@ namespace Legion {
         }
       }
 #ifdef DEBUG_LEGION
+      else
+        mask.clear();
       assert(!mask);
 #endif
     }
@@ -23292,8 +23297,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!node->is_region());
-      assert(node->as_partition_node()->row_source->is_disjoint());
-      assert(node->as_partition_node()->is_complete());
 #endif
       AutoLock m_lock(manager_lock,1,false/*exclusive*/);
       if (!!disjoint_complete)
@@ -23345,7 +23348,6 @@ namespace Legion {
       AutoLock m_lock(manager_lock);     
  #ifdef DEBUG_LEGION
       assert(to_traverse.empty());
-      assert(!(mask - disjoint_complete));
 #endif
       if (self)
         disjoint_complete -= mask;
@@ -23397,13 +23399,17 @@ namespace Legion {
           // Add a reference for to_traverse
           it->first->add_base_resource_ref(VERSION_MANAGER_REF);
           if (!it->second)
-            it->first->remove_base_valid_ref(VERSION_MANAGER_REF);
+            to_delete.push_back(it->first);
         }
         if (!to_delete.empty())
         {
           for (std::vector<RegionTreeNode*>::const_iterator it = 
                 to_delete.begin(); it != to_delete.end(); it++)
+          {
             disjoint_complete_children.erase(*it);
+            if ((*it)->remove_base_valid_ref(VERSION_MANAGER_REF))
+              delete (*it);
+          }
         }
         disjoint_complete_children.tighten_valid_mask();
       }

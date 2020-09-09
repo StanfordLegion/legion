@@ -1965,6 +1965,7 @@ namespace Legion {
                       const LogicalTraceInfo &trace_info,
                       RegionNode *to_refine);
       void record_refinement(PartitionNode *node, const FieldMask &mask);
+      void record_uninitialized(const FieldMask &mask);
 #ifdef DEBUG_LEGION
       void verify_refinement_mask(const FieldMask &refinement_mask);
 #endif
@@ -1993,6 +1994,8 @@ namespace Legion {
       FieldMaskSet<PartitionNode> make_from;
       // Equivalence sets that need to be released at completion
       std::vector<EquivalenceSet*> to_release;
+      // Fields which do not have initialized equivalence sets
+      FieldMask uninitialized_fields;
     };
 
     /**

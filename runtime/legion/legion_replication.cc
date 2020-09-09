@@ -1316,6 +1316,9 @@ namespace Legion {
       for (FieldMaskSet<PartitionNode>::const_iterator it =
             make_from.begin(); it != make_from.end(); it++)
       {
+        const FieldMask version_mask = it->second - uninitialized_fields;
+        if (!version_mask)
+          continue;
         if (replicated_partitions.find(it->first->handle) == 
             replicated_partitions.end())
         {
@@ -1330,8 +1333,9 @@ namespace Legion {
             {
               RegionNode *child = it->first->get_child(color);
               VersionInfo &info = sharded_region_version_infos[child];
+              info.relax_valid_mask(it->second);
               child->perform_versioning_analysis(ctx, parent_ctx, &info,
-                    it->second, unique_op_id, local_space, ready_events);
+                    version_mask, unique_op_id, local_space, ready_events);
             }
           }
           else
@@ -1349,8 +1353,9 @@ namespace Legion {
             {
               RegionNode *child = it->first->get_child(itr->yield_color());
               VersionInfo &info = sharded_region_version_infos[child];
+              info.relax_valid_mask(it->second);
               child->perform_versioning_analysis(ctx, parent_ctx, &info,
-                          it->second, unique_op_id, local_space, ready_events);
+                    version_mask, unique_op_id, local_space, ready_events);
               // Skip ahead to the next color
               for (unsigned idx = 0; idx < (repl_ctx->total_shards-1); idx++)
               {
@@ -1363,7 +1368,7 @@ namespace Legion {
           }
         }
         else
-          replicated_mask |= it->second;
+          replicated_mask |= version_mask;
       }
       if (!!replicated_mask)
         to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
@@ -1397,7 +1402,8 @@ namespace Legion {
               sharded_region_version_infos.begin(); it !=
               sharded_region_version_infos.end(); it++)
         {
-          PendingEquivalenceSet *pending = new PendingEquivalenceSet(it->first);
+          PendingEquivalenceSet *pending = 
+            new PendingEquivalenceSet(it->first, it->second.get_valid_mask());
           pending->record_all(it->second, references_added);
           // Context takes ownership at this point
           parent_ctx->record_pending_disjoint_complete_set(pending);
@@ -1406,8 +1412,17 @@ namespace Legion {
       // Now go through and invalidate the current refinements for
       // the regions that we are updating
       const ContextID ctx = parent_ctx->get_context().get_id();
-      to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
-          false/*self*/, map_applied_conditions, to_release, repl_ctx);
+      if (!!uninitialized_fields)
+      {
+        const FieldMask invalidate_mask = 
+          make_from.get_valid_mask() - uninitialized_fields;
+        if (!!invalidate_mask)
+          to_refine->invalidate_refinement(ctx, invalidate_mask, false/*self*/,
+                                  map_applied_conditions, to_release, repl_ctx);
+      }
+      else
+        to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
+            false/*self*/, map_applied_conditions, to_release, repl_ctx);
       if (make_from.size() != replicated_partitions.size())
       {
         // First make the equivalence sets for our sharded partitions

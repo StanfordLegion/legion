@@ -14633,7 +14633,9 @@ namespace Legion {
         // a close operation at the end to initialize the equivalence
         // set at the root of the tree
         if (!!unversioned)
+        {
           state.disjoint_complete_tree |= unversioned;
+        }
       }
       RegionTreeNode *next_child = NULL;
       if (!arrived)
@@ -14963,7 +14965,17 @@ namespace Legion {
         // See if we made refinements for any of these fields, if so
         // they will make the initial batch of equivalence sets
         if (!refinements.empty())
+        {
+          for (FieldMaskSet<RefinementOp>::const_iterator it = 
+                refinements.begin(); it != refinements.end(); it++)
+          {
+            const FieldMask overlap = unversioned & it->second;
+            if (!overlap)
+              continue;
+            it->first->record_uninitialized(overlap);
+          }
           unversioned -= refinements.get_valid_mask();
+        }
         if (!!unversioned)
         {
           // If we have unversioned fields and no refinements were
@@ -18123,9 +18135,9 @@ namespace Legion {
       FieldMask parent_traversal;
       FieldMaskSet<PartitionNode> children_traversal;
       std::set<RtEvent> deferral_events;
-      manager.compute_equivalence_sets(target, target_space, mask, context,
-          opid, source, ready_events, children_traversal, parent_traversal, 
-          deferral_events, downward_only);
+      manager.compute_equivalence_sets(ctx, target, target_space, mask, context,
+               opid, source, ready_events, children_traversal, parent_traversal,
+               deferral_events, downward_only);
       if (!deferral_events.empty())
       {
 #ifdef DEBUG_LEGION

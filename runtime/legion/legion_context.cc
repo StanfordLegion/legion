@@ -14636,12 +14636,10 @@ namespace Legion {
       bool double_buffer = false;
       std::pair<ValueBroadcast<LRBroadcast>*,bool> &collective = 
         pending_region_trees.front();
-      DistributedID eq_did = 0;
       if (collective.second)
       {
         const LRBroadcast value = collective.first->get_value(false);
         handle.tree_id = value.tid;
-        eq_did = value.did;
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
         // Have to register this before doing the broadcast
@@ -14677,7 +14675,6 @@ namespace Legion {
         }
         const LRBroadcast value = collective.first->get_value(false);
         handle.tree_id = value.tid;
-        eq_did = value.did;
         double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());

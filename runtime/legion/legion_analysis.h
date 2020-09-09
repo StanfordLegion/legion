@@ -89,6 +89,10 @@ namespace Legion {
         const { return equivalence_sets; }
       inline void swap(FieldMaskSet<EquivalenceSet> &others)
         { equivalence_sets.swap(others); }
+      inline const FieldMask& get_valid_mask(void) const
+        { return equivalence_sets.get_valid_mask(); }
+      inline void relax_valid_mask(const FieldMask &mask)
+        { equivalence_sets.relax_valid_mask(mask); }
     public:
       void pack_equivalence_sets(Serializer &rez) const;
       void unpack_equivalence_sets(Deserializer &derez, Runtime *runtime,
@@ -3205,7 +3209,7 @@ namespace Legion {
      */
     class PendingEquivalenceSet : public LegionHeapify<PendingEquivalenceSet> {
     public:
-      PendingEquivalenceSet(RegionNode *region_node);
+      PendingEquivalenceSet(RegionNode *region_node, const FieldMask &mask);
       PendingEquivalenceSet(const PendingEquivalenceSet &rhs);
       ~PendingEquivalenceSet(void);
     public:
@@ -3301,7 +3305,8 @@ namespace Legion {
       // Call these from region nodes
       void initialize_versioning_analysis(EquivalenceSet *set,
               const FieldMask &mask, std::set<RtEvent> &applied_events);
-      void compute_equivalence_sets(EqSetTracker *target, 
+      void compute_equivalence_sets(const ContextID ctx,
+                                    EqSetTracker *target, 
                                     const AddressSpaceID target_space,
                                     FieldMask mask, InnerContext *context,
                                     const UniqueID opid,

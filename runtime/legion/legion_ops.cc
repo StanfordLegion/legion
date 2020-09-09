@@ -9615,6 +9615,7 @@ namespace Legion {
       version_info.clear();
       make_from.clear();
       to_release.clear();
+      uninitialized_fields.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -9659,6 +9660,13 @@ namespace Legion {
       make_from.insert(node, mask);
     }
 
+    //--------------------------------------------------------------------------
+    void RefinementOp::record_uninitialized(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      uninitialized_fields |= mask;
+    }
+
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void RefinementOp::verify_refinement_mask(const FieldMask &refinement_mask)
@@ -9674,9 +9682,19 @@ namespace Legion {
     {
       std::set<RtEvent> ready_events;
       const ContextID ctx = parent_ctx->get_context().get_id();
-      to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
-                                    make_from.get_valid_mask(), unique_op_id, 
-                                    runtime->address_space, ready_events);
+      if (!!uninitialized_fields)
+      {
+        const FieldMask version_mask = 
+          make_from.get_valid_mask() - uninitialized_fields;
+        if (!!version_mask)
+          to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
+                                          version_mask, unique_op_id,
+                                          runtime->address_space, ready_events);
+      }
+      else
+        to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
+                                      make_from.get_valid_mask(), unique_op_id,
+                                      runtime->address_space, ready_events);
       if (!ready_events.empty())
         enqueue_ready_operation(Runtime::merge_events(ready_events));
       else
@@ -9703,7 +9721,8 @@ namespace Legion {
                 color < index_part->total_children; color++)
           {
             RegionNode *child = it->first->get_child(color);
-            PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
+            PendingEquivalenceSet *pending = 
+              new PendingEquivalenceSet(child, it->second);
             initialize_pending(pending, it->second, map_applied_conditions);
             // Parent context takes ownership here
             parent_ctx->record_pending_disjoint_complete_set(pending);
@@ -9717,7 +9736,8 @@ namespace Legion {
           {
             const LegionColor color = itr->yield_color();
             RegionNode *child = it->first->get_child(color);
-            PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
+            PendingEquivalenceSet *pending = 
+              new PendingEquivalenceSet(child, it->second);
             initialize_pending(pending, it->second, map_applied_conditions);
             // Parent context takes ownership here
             parent_ctx->record_pending_disjoint_complete_set(pending);
@@ -9727,8 +9747,17 @@ namespace Legion {
       }
       // Now we can invalidate the previous refinement
       const ContextID ctx = parent_ctx->get_context().get_id();
-      to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
-         false/*self*/, map_applied_conditions, to_release, parent_ctx);
+      if (!!uninitialized_fields)
+      {
+        const FieldMask invalidate_mask = 
+          make_from.get_valid_mask() - uninitialized_fields;
+        if (!!invalidate_mask)
+          to_refine->invalidate_refinement(ctx, invalidate_mask, false/*self*/,
+                                map_applied_conditions, to_release, parent_ctx);
+      }
+      else
+        to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
+           false/*self*/, map_applied_conditions, to_release, parent_ctx);
       // Finally propagate the new refinements up from the partitions
       for (FieldMaskSet<PartitionNode>::const_iterator it = 
             make_from.begin(); it != make_from.end(); it++)
