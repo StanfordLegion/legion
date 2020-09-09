@@ -90,6 +90,7 @@ ALL_REDUCE_OP_KIND = 22
 PREDICATE_OP_KIND = 23
 MUST_EPOCH_OP_KIND = 24
 CREATION_OP_KIND = 25
+REFINEMENT_OP_KIND = 26
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -124,6 +125,7 @@ OpNames = [
 "Predicate Op",
 "Must Epoch Op",
 "Creation Op",
+"Refinement Op",
 ]
 
 INDEX_SPACE_EXPR = 0
@@ -5367,7 +5369,7 @@ class Operation(object):
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'copy_kind', 'collective_src', 'collective_dst', 'collective_copies', 
                  'eq_incoming', 'eq_outgoing', 'eq_privileges',
-                 'start_event', 'finish_event', 'inter_close_ops', 'inlined',
+                 'start_event', 'finish_event', 'internal_ops', 'inlined',
                  'summary_op', 'task', 'task_id', 'predicate', 'predicate_result',
                  'futures', 'owner_shard', 'index_owner', 'points', 'launch_rect', 
                  'creator', 'realm_copies', 'realm_fills', 'realm_depparts', 
@@ -5397,7 +5399,7 @@ class Operation(object):
         self.eq_privileges = None
         self.start_event = state.get_no_event() 
         self.finish_event = state.get_no_event()
-        self.inter_close_ops = None
+        self.internal_ops = None
         self.summary_op = None
         self.realm_copies = None
         self.realm_depparts = None
@@ -5448,7 +5450,7 @@ class Operation(object):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
 
     def is_internal(self):
-        return self.is_close()
+        return self.is_close() or self.kind == REFINEMENT_OP_KIND
 
     def set_name(self, name):
         self.name = name
@@ -5470,9 +5472,9 @@ class Operation(object):
     def set_context(self, context, add=True):
         self.context = context
         # Recurse for any inter close operations
-        if self.inter_close_ops:
-            for close in self.inter_close_ops:
-                close.set_context(context, False)
+        if self.internal_ops:
+            for internal in self.internal_ops:
+                internal.set_context(context, False)
         # Also recurse for any points we have
         if self.points is not None:
             for point in itervalues(self.points):
@@ -5514,13 +5516,13 @@ class Operation(object):
     def set_creator(self, creator, idx):
         # Better be an internal op kind
         assert self.kind == INTER_CLOSE_OP_KIND or \
-            self.kind == POST_CLOSE_OP_KIND
+            self.kind == POST_CLOSE_OP_KIND or self.kind == REFINEMENT_OP_KIND
         self.creator = creator
         self.internal_idx = idx
         # If our parent context created us we don't need to be recorded 
         if creator is not self.context.op:
             assert self.kind != POST_CLOSE_OP_KIND
-            creator.add_close_operation(self)
+            creator.add_internal_operation(self)
         else:
             assert self.kind == POST_CLOSE_OP_KIND
 
@@ -5547,10 +5549,10 @@ class Operation(object):
         assert self.launch_rect
         return self.launch_rect
 
-    def add_close_operation(self, close):
-        if self.inter_close_ops is None:
-            self.inter_close_ops = list()
-        self.inter_close_ops.append(close)
+    def add_internal_operation(self, internal):
+        if self.internal_ops is None:
+            self.internal_ops = list()
+        self.internal_ops.append(internal)
 
     def set_summary_operation(self, summary):
         self.summary_op = summary
@@ -5563,9 +5565,11 @@ class Operation(object):
         return self
 
     def get_close_operation(self, req, node, field, read_only):
-        if self.inter_close_ops is None:
+        if self.internal_ops is None:
             return None
-        for close in self.inter_close_ops:
+        for close in self.internal_ops:
+            if not close.is_close():
+                continue
             #if close.internal_idx != req.index:
                 #continue
             assert len(close.reqs) == 1
@@ -5813,10 +5817,10 @@ class Operation(object):
                 self.finish_event.update_incoming_op(other, self)
         else:
             assert not other.finish_event.exists() 
-        if not self.inter_close_ops:
-            self.inter_close_ops = other.inter_close_ops
+        if not self.internal_ops:
+            self.internal_ops = other.internal_ops
         else:
-            assert not other.inter_close_ops
+            assert not other.internal_ops
         if not self.realm_copies:
             self.realm_copies = other.realm_copies
             if self.realm_copies:
@@ -7426,10 +7430,10 @@ class Operation(object):
         return self.check_for_spurious_realm_ops(perform_checks)
 
     def print_op_mapping_decisions(self, depth):
-        if self.inter_close_ops:
+        if self.internal_ops:
             assert not self.is_close()
-            for close in self.inter_close_ops:
-                close.print_op_mapping_decisions(depth)
+            for internal in self.internal_ops:
+                internal.print_op_mapping_decisions(depth)
         # If we are an index task just do our points and return
         if self.kind == INDEX_TASK_KIND:
             assert self.points is not None
@@ -7492,6 +7496,7 @@ class Operation(object):
             ALL_REDUCE_OP_KIND : "cyan",
             PREDICATE_OP_KIND : "olivedrab1",
             MUST_EPOCH_OP_KIND : "tomato",
+            REFINEMENT_OP_KIND : "royalblue",
             }[self.kind]
 
     @property
@@ -7511,15 +7516,15 @@ class Operation(object):
 
     def print_dataflow_node(self, printer):
         # Print any close operations that we have, then print ourself 
-        if self.inter_close_ops:
-            for close in self.inter_close_ops:
-                close.print_dataflow_node(printer)
+        if self.internal_ops:
+            for internal in self.internal_ops:
+                internal.print_dataflow_node(printer)
         self.print_base_node(printer, True) 
 
     def print_incoming_dataflow_edges(self, printer, previous):
-        if self.inter_close_ops:
-            for close in self.inter_close_ops:
-                close.print_incoming_dataflow_edges(printer, previous)
+        if self.internal_ops:
+            for internal in self.internal_ops:
+                internal.print_incoming_dataflow_edges(printer, previous)
         if self.incoming:
             for dep in self.incoming:
                 dep.print_dataflow_edge(printer, previous)
@@ -7570,9 +7575,9 @@ class Operation(object):
             if self.owner_shard != self.context.shard:
                 return
         # Do any of our close operations too
-        if self.inter_close_ops:
-            for close in self.inter_close_ops:
-                close.print_event_graph(printer, elevate, all_nodes, False)
+        if self.internal_ops:
+            for internal in self.internal_ops:
+                internal.print_event_graph(printer, elevate, all_nodes, False)
         # Handle index space operations specially, everything
         # else is the same
         if self.kind is INDEX_TASK_KIND or self.points:
@@ -8217,7 +8222,7 @@ class Task(object):
             return 0
         if len(self.operations) == 1:
             op = self.operations[0]
-            if not op.inter_close_ops or not op.fully_logged:
+            if not op.internal_ops or not op.fully_logged:
                 return 0
         name = str(self)
         filename = 'dataflow_'+name.replace(' ', '_')+'_'+str(self.op.uid)
@@ -8240,10 +8245,10 @@ class Task(object):
             for op in self.operations:
                 if not op.fully_logged:
                     continue
-                # Add any close operations first
-                if op.inter_close_ops:
-                    for close in op.inter_close_ops:
-                        all_ops.append(close)
+                # Add any internal operations first
+                if op.internal_ops:
+                    for internal in op.internal_ops:
+                        all_ops.append(internal)
                 # Then add the operation itself
                 all_ops.append(op)
                 # If this is an index space operation prune any
@@ -10469,6 +10474,8 @@ mapping_pat              = re.compile(
     prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 close_pat                = re.compile(
     prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
+refinement_pat           = re.compile(
+    prefix+"Refinement Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 internal_creator_pat     = re.compile(
     prefix+"Internal Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
 fence_pat                = re.compile(
@@ -11118,6 +11125,14 @@ def parse_legion_spy_line(line, state):
         # close operation, otherwise add it to the context like normal
         # because it as an actual operation
         op.set_context(context, not inter)
+        return True
+    m = refinement_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(REFINEMENT_OP_KIND)
+        op.set_name("Refinement Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context, False)
         return True
     m = internal_creator_pat.match(line)
     if m is not None:

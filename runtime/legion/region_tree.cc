@@ -1711,11 +1711,21 @@ namespace Legion {
           for (FieldMaskSet<RefinementOp>::const_iterator it =
                 refinements.begin(); it != refinements.end(); it++)
           {
-            const GenerationID refinement_gen = op->get_generation();
+            // Grab these before we end the dependence analysis which will
+            // dump the refinement op into the pipeline
+            const GenerationID refinement_gen = it->first->get_generation();
+#ifdef LEGION_SPY
+            const UniqueID refinement_uid = it->first->get_unique_op_id();
+#endif
             it->first->end_dependence_analysis();
             // Record that our operation depends on this refinement
             op->register_region_dependence(idx, it->first, refinement_gen,
               0/*index*/, LEGION_TRUE_DEPENDENCE,false/*validates*/,it->second);
+#ifdef LEGION_SPY
+            LegionSpy::log_mapping_dependence(context->get_unique_id(),
+                refinement_uid, 0/*index*/, op->get_unique_op_id(), idx,
+                LEGION_TRUE_DEPENDENCE);
+#endif
           }
         }
 #ifdef DEBUG_LEGION
@@ -14852,8 +14862,8 @@ namespace Legion {
 #else
                 RefinementOp *refinement_op = context->get_refinement_op();
 #endif
-                refinement_op->initialize(user.op, user.idx, 
-                                          trace_info, region_node);
+                refinement_op->initialize(user.op, user.idx, trace_info, 
+                                          region_node, refinement_mask);
                 // Invalidate the old disjoint complete tree
                 invalidate_disjoint_complete_tree(ctx, refinement_mask, 
                                                   false/*self*/);

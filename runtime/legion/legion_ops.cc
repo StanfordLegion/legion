@@ -9642,7 +9642,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RefinementOp::initialize(Operation *op, unsigned index,
                                   const LogicalTraceInfo &trace_info,
-                                  RegionNode *root)
+                                  RegionNode *root, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9650,6 +9650,23 @@ namespace Legion {
 #endif
       initialize_internal(op, index, trace_info);
       to_refine = root;
+      if (runtime->legion_spy_enabled)
+      {
+        LegionSpy::log_refinement_operation(parent_ctx->get_unique_id(), 
+                                            unique_op_id);
+        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, 
+                                      true/*region*/,
+                                      root->handle.index_space.id,
+                                      root->handle.field_space.id,
+                                      root->handle.tree_id, LEGION_READ_WRITE, 
+                                      LEGION_EXCLUSIVE, 0/*redop*/, 
+                                      trace_info.req.parent.index_space.id);
+        std::set<FieldID> fields;
+        root->column_source->get_field_set(mask, parent_ctx, fields);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, fields);
+        LegionSpy::log_internal_op_creator(unique_op_id, 
+                          op->get_unique_op_id(), index);
+      }
     }
 
     //--------------------------------------------------------------------------

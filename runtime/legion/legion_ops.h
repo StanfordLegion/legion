@@ -1963,7 +1963,7 @@ namespace Legion {
     public:
       void initialize(Operation *creator, unsigned idx, 
                       const LogicalTraceInfo &trace_info,
-                      RegionNode *to_refine);
+                      RegionNode *to_refine, const FieldMask &mask);
       void record_refinement(PartitionNode *node, const FieldMask &mask);
       void record_uninitialized(const FieldMask &mask);
 #ifdef DEBUG_LEGION
