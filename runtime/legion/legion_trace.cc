@@ -4841,7 +4841,7 @@ namespace Legion {
       {
         // If we've run out of generations update the local barriers and
         // send out the updates to everyone
-        if (recurrent_replays++ == Realm::Barrier::MAX_PHASES)
+        if (recurrent_replays == Realm::Barrier::MAX_PHASES)
         {
           std::map<ShardID,std::map<ApBarrier/*old**/,ApBarrier/*new*/> >
             notifications;
@@ -4935,19 +4935,24 @@ namespace Legion {
           recurrent_replays = 0;
         }
         // Now we can do the normal update of events based on our barriers
+        // Don't advance on last generation to avoid setting barriers back to 0
+        const bool advance_barriers =
+          ((++recurrent_replays) < Realm::Barrier::MAX_PHASES);
         for (std::map<unsigned,ApBarrier>::iterator it = 
               local_frontiers.begin(); it != local_frontiers.end(); it++)
         {
           Runtime::phase_barrier_arrive(it->second, 1/*count*/, 
                                         events[it->first]);
-          Runtime::advance_barrier(it->second);
+          if (advance_barriers)
+            Runtime::advance_barrier(it->second);
         }
         PhysicalTemplate::initialize(runtime, completion, recurrent);
         for (std::vector<std::pair<ApBarrier,unsigned> >::iterator it = 
               remote_frontiers.begin(); it != remote_frontiers.end(); it++)
         {
           events[it->second] = it->first;
-          Runtime::advance_barrier(it->first);
+          if (advance_barriers)
+            Runtime::advance_barrier(it->first);
         }
       }
       else
