@@ -88,22 +88,31 @@ variables:
 
 .cxx98_normal: &cxx98_normal
   CC_FLAGS: "-std=c++98"
+  CXX_STANDARD: "98"
 .cxx11_normal: &cxx11_normal
   CC_FLAGS: "-std=c++11"
+  CXX_STANDARD: "11"
 .cxx11_hardened: &cxx11_hardened
   CC_FLAGS: "-std=c++11 -D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
+  CXX_STANDARD: "11"
 .cxx14_normal: &cxx14_normal
   CC_FLAGS: "-std=c++14"
+  CXX_STANDARD: "14"
 .cxx17_normal: &cxx17_normal
   CC_FLAGS: "-std=c++17"
+  CXX_STANDARD: "17"
 .cxx98_32bit_normal: &cxx98_32bit_normal
   CC_FLAGS: "-std=c++98 -m32"
   LD_FLAGS: "-m32"
   MARCH: "i686"
+  CXX_STANDARD: "98"
 .cxx11_32bit_normal: &cxx11_32bit_normal
   CC_FLAGS: "-std=c++11 -m32"
   LD_FLAGS: "-m32 -latomic"
   MARCH: "i686"
+  CXX_STANDARD: "11"
+.shared: &shared
+  SHARED_OBJECTS: "1"
 
 .openmp: &openmp
   USE_OPENMP: "1"
@@ -286,13 +295,16 @@ before_script:
       git -C kokkos log -n 1
       mkdir kokkos/build
       cd kokkos/build
-      KOKKOS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install -DKokkos_CXX_STANDARD=11"
+      KOKKOS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install -DKokkos_CXX_STANDARD=${CXX_STANDARD}"
       # the following line is a workaround for Kokkos issue #2652
       KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DCMAKE_CXX_FLAGS=-DKOKKOS_IMPL_TURN_OFF_CUDA_HOST_INIT_CHECK"
       if [[ "$USE_OPENMP" -eq 1 ]]; then
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ENABLE_OPENMP=ON"
       else
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ENABLE_SERIAL=ON"
+      fi
+      if [[ "$SHARED_OBJECTS" -eq 1 ]]; then
+        KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DBUILD_SHARED_LIBS=ON"
       fi
       if [[ "$USE_CUDA" -eq 1 ]]; then
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_CUDA_LAMBDA=ON -DKokkos_ENABLE_CUDA_UVM=OFF"
@@ -333,6 +345,9 @@ before_script:
         cd kokkos-kernels/build
         KKERNELS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install"
         KKERNELS_CMAKE_OPTS="$KKERNELS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=${KOKKOS_CXX_COMPILER}"
+        if [[ "$SHARED_OBJECTS" -eq 1 ]]; then
+          KKERNELS_CMAKE_OPTS="$KKERNELS_CMAKE_OPTS -DBUILD_SHARED_LIBS=ON"
+        fi
         cmake $KKERNELS_CMAKE_OPTS ..
         make -j$THREADS install
         cd ../..
@@ -1052,26 +1067,30 @@ p100_clang7_cxx11_release_cmake_cuda_regent:
     <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *cmake, *regent]
 
 # Kokkos tests:
-clang38_cxx11_debug_kokkos_legion:
+clang38_cxx14_debug_kokkos_legion:
   <<: [*linux, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx11_normal, *kokkos, *cmake, *legion]
-clang8_cxx11_debug_kokkos_openmp_legion:
-  <<: [*linux, *image_clang, *tests]
+    <<: [*clang38, *terra38, *debug, *cxx14_normal, *kokkos, *cmake, *legion]
+clang9_cxx17_debug_kokkos_openmp_legion:
+  <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang8, *terra38, *debug, *cxx11_normal, *kokkos, *openmp, *cmake, *legion]
-p100_clang7_cxx11_debug_kokkos_cuda_legion:
+    <<: [*clang9, *terra38, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
+p100_clang7_cxx14_debug_kokkos_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *debug, *cxx11_normal, *cuda_p100, *kokkos, *cmake, *legion]
-p100_clang7_cxx11_debug_kokkos_cuda_openmp_legion:
+    <<: [*clang7, *debug, *cxx14_normal, *cuda_p100, *kokkos, *cmake, *legion]
+p100_clang7_cxx14_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *debug, *cxx11_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest]
-p100_gcc7_cxx11_debug_kokkos_cuda_openmp_legion:
+    <<: [*clang7, *debug, *cxx14_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest]
+p100_gcc7_cxx14_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc7, *debug, *cxx11_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest]
+    <<: [*gcc7, *debug, *cxx14_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest]
+p100_gcc7_cxx14_debug_shared_kokkos_cuda_openmp_legion:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc7, *debug, *shared, *cxx14_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest]
 
 # Darwin Power9 tests:
 darwin_power9_gcc8_cxx17_release_legion:

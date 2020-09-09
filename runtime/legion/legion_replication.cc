@@ -6444,19 +6444,7 @@ namespace Legion {
           // If we successfully identified a template for all the shards
           // to use then we record that in the trace 
           if (selected_template_index >= 0)
-          {
-            PhysicalTemplate *t = 
-              physical_trace->select_template(selected_template_index);
-#ifdef DEBUG_LEGION
-            ShardedPhysicalTemplate *tpl = 
-              dynamic_cast<ShardedPhysicalTemplate*>(t);
-            assert(tpl != NULL);
-#else
-            ShardedPhysicalTemplate *tpl = 
-              static_cast<ShardedPhysicalTemplate*>(t);
-#endif
-            tpl->record_replayed();
-          }
+            physical_trace->select_template(selected_template_index);
         }
 #ifdef DEBUG_LEGION
         assert(physical_trace->get_current_template() == NULL ||

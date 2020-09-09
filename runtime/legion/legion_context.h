@@ -2011,6 +2011,8 @@ namespace Legion {
       virtual void end_trace(TraceID tid, bool deprecated);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_future);
+      virtual void post_end_task(const void *res, size_t res_size, 
+                                 bool owned, FutureFunctor *callback_functor);
       virtual ApEvent add_to_dependence_queue(Operation *op, 
                                               bool unordered = false,
                                               bool outermost = true);
