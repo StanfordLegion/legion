@@ -16489,7 +16489,7 @@ namespace Legion {
           runtime->revoke_pending_distributed_collectable(value.did);
           runtime->free_distributed_id(value.did);
         }
-        else if (collective.first->local_shard != collective.first->origin)
+        else
         {
           // Make sure this collective is done before we delete it
           const RtEvent done = collective.first->get_done_event();
