@@ -2040,6 +2040,10 @@ namespace Legion {
       if (!right_spaces.empty())
         add_nested_resource_ref(did);
 #endif
+#ifdef LEGION_GC
+      log_garbage.info("GC Collective Manager %lld %d",
+                        LEGION_DISTRIBUTED_ID_FILTER(did), local_space); 
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3210,6 +3214,10 @@ namespace Legion {
                         0/*tree id*/, true/*register now*/)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Virtual Manager %lld %d",
+                        LEGION_DISTRIBUTED_ID_FILTER(did), local_space); 
+#endif
     }
 
     //--------------------------------------------------------------------------

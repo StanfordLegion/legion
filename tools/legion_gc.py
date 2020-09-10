@@ -50,14 +50,14 @@ remove_base_ref_pat = re.compile(prefix + r'GC Remove Base Ref (?P<kind>[0-9]+) 
 remove_nested_ref_pat = re.compile(prefix + r'GC Remove Nested Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
 # Instances
 inst_manager_pat = re.compile(prefix + r'GC Instance Manager (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
-list_manager_pat = re.compile(prefix + r'GC List Reduction Manager (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
-fold_manager_pat = re.compile(prefix + r'GC Fold Reduction Manager (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
+collective_manager_pat = re.compile(prefix + r'GC Collective Manager (?P<did>[0-9]+) (?P<node>[0-9]+)')
+virtual_manager_pat = re.compile(prefix + r'GC Virtual Manager (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Views
 materialize_pat = re.compile(prefix + r'GC Materialized View (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<inst>[0-9]+)')
-composite_pat = re.compile(prefix + r'GC Composite View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 fill_pat = re.compile(prefix + r'GC Fill View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 phi_pat = re.compile(prefix + r'GC Phi View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 reduction_pat = re.compile(prefix + r'GC Reduction View (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<inst>[0-9]+)')
+sharded_pat = re.compile(prefix + r'GC Sharded View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Equivalence Set 
 equivalence_set_pat = re.compile(prefix + r'GC Equivalence Set (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Future
@@ -731,30 +731,21 @@ class State(object):
                                           long_type(m.group('iid'),16),
                                           long_type(m.group('mem'),16))
                     continue
-                m = list_manager_pat.match(line)
+                m = collective_manager_pat.match(line)
                 if m is not None:
-                    self.log_list_manager(long_type(m.group('did')),
-                                          long_type(m.gropu('node')),
-                                          long_type(m.group('iid'),16),
-                                          long_type(m.group('mem'),16))
+                    self.log_collective_manager(long_type(m.group('did')),
+                                                long_type(m.group('node')))
                     continue
-                m = fold_manager_pat.match(line)
+                m = virtual_manager_pat.match(line)
                 if m is not None:
-                    self.log_fold_manager(long_type(m.group('did')),
-                                          long_type(m.group('node')),
-                                          long_type(m.group('iid'),16),
-                                          long_type(m.group('mem'),16))
+                    self.log_virtual_manager(long_type(m.group('did')),
+                                             long_type(m.group('node')))
                     continue
                 m = materialize_pat.match(line)
                 if m is not None:
                     self.log_materialized_view(long_type(m.group('did')),
                                                long_type(m.group('node')),
                                                long_type(m.group('inst')))
-                    continue
-                m = composite_pat.match(line)
-                if m is not None:
-                    self.log_composite_view(long_type(m.group('did')),
-                                            long_type(m.group('node')))
                     continue
                 m = fill_pat.match(line)
                 if m is not None:
@@ -770,6 +761,11 @@ class State(object):
                     self.log_reduction_view(long_type(m.group('did')),
                                             long_type(m.group('node')),
                                             long_type(m.group('inst')))
+                    continue
+                m = sharded_pat.match(line)
+                if m is not None:
+                    self.log_sharded_view(long_type(m.group('did')),
+                                          long_type(m.group('node')))
                     continue
                 m = equivalence_set_pat.match(line)
                 if m is not None:
@@ -896,17 +892,17 @@ class State(object):
         obj.remove_nested_ref(kind, src, cnt)
 
     def log_inst_manager(self, did, node, iid, mem):
-        inst = self.get_instance(iid, mem, 'Physical')
+        inst = self.get_instance(iid, mem, 'Individual')
         manager = self.get_manager(did, node)
         manager.add_inst(inst)
 
-    def log_list_manager(self, did, node, iid, mem):
-        inst = self.get_instance(iid, mem, 'List Reduction')
+    def log_collective_manager(self, did, node):
+        inst = Instance(0, 0, 'Collective')
         manager = self.get_manager(did, node)
         manager.add_inst(inst)
 
-    def log_fold_manager(self, did, node, iid, mem):
-        inst = self.get_instance(iid, mem, 'Fold Reduction')
+    def log_virtual_manager(self, did, node):
+        inst = Instance(0, 0, 'Virtual')
         manager = self.get_manager(did, node)
         manager.add_inst(inst)
 
@@ -914,9 +910,6 @@ class State(object):
         manager = self.get_manager(inst, node)
         view = self.get_view(did, node, 'Materialized')
         view.add_manager(manager)
-
-    def log_composite_view(self, did, node):
-        self.get_view(did, node, 'Composite')
 
     def log_fill_view(self, did, node):
         self.get_view(did, node, 'Fill')
@@ -928,6 +921,9 @@ class State(object):
         manager = self.get_manager(inst, node)
         view = self.get_view(did, node, 'Reduction')
         view.add_manager(manager)
+
+    def log_sharded_view(self, did, node):
+        self.get_view(did, node, 'Sharded')
 
     def log_equivalence_set(self, did, node):
         self.get_equivalence_set(did, node);

@@ -676,7 +676,8 @@ namespace Legion {
         producer_uid(uid),
 #endif
         future_complete(complete), result(NULL), result_size(0), 
-        result_set_space(local_space), empty(true), sampled(false)
+        result_set_space(local_space), callback_functor(NULL),
+        own_callback_functor(false), empty(true), sampled(false)
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
