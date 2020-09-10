@@ -1256,7 +1256,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ FutureImpl* FutureImpl::unpack_future(Runtime *runtime, 
-                                 Deserializer &derez, ReferenceMutator *mutator)
+                                Deserializer &derez, ReferenceMutator *mutator,
+                                Operation *op, GenerationID op_gen,
+#ifdef LEGION_SPY
+                                UniqueID op_uid,
+#endif
+                                int op_depth)
     //--------------------------------------------------------------------------
     {
       DistributedID future_did;
@@ -1276,7 +1281,12 @@ namespace Legion {
           derez.deserialize(coord.second);
         }
       }
-      return runtime->find_or_create_future(future_did, mutator, coordinates);
+      return runtime->find_or_create_future(future_did, mutator, coordinates,
+                                            op, op_gen,
+#ifdef LEGION_SPY
+                                            op_uid,
+#endif
+                                            op_depth);
     }
 
     //--------------------------------------------------------------------------
@@ -2525,7 +2535,12 @@ namespace Legion {
 #endif
       std::set<RtEvent> done_events;
       WrapperReferenceMutator mutator(done_events);
-      FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
+      FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator,
+                                                   target->op, target->op_gen,
+#ifdef LEGION_SPY
+                                                   target->op_uid,
+#endif
+                                                   target->op_depth);
       target->set_future(point, impl, &mutator);
       RtUserEvent done_event;
       derez.deserialize(done_event);

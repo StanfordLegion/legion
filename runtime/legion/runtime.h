@@ -266,7 +266,12 @@ namespace Legion {
         get_future_coordinates(void) const;
       void pack_future(Serializer &rez) const;
       static FutureImpl* unpack_future(Runtime *runtime, 
-          Deserializer &derez, ReferenceMutator *mutator);
+          Deserializer &derez, ReferenceMutator *mutator, 
+          Operation *op = NULL, GenerationID op_gen = 0, 
+#ifdef LEGION_SPY
+          UniqueID op_uid = 0,
+#endif
+          int op_depth = 0);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
