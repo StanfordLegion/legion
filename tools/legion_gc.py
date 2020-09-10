@@ -57,6 +57,7 @@ materialize_pat = re.compile(prefix + r'GC Materialized View (?P<did>[0-9]+) (?P
 fill_pat = re.compile(prefix + r'GC Fill View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 phi_pat = re.compile(prefix + r'GC Phi View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 reduction_pat = re.compile(prefix + r'GC Reduction View (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<inst>[0-9]+)')
+sharded_pat = re.compile(prefix + r'GC Sharded View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Equivalence Set 
 equivalence_set_pat = re.compile(prefix + r'GC Equivalence Set (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Future
@@ -761,6 +762,11 @@ class State(object):
                                             long_type(m.group('node')),
                                             long_type(m.group('inst')))
                     continue
+                m = sharded_pat.match(line)
+                if m is not None:
+                    self.log_sharded_view(long_type(m.group('did')),
+                                          long_type(m.group('node')))
+                    continue
                 m = equivalence_set_pat.match(line)
                 if m is not None:
                     self.log_equivalence_set(long_type(m.group('did')),
@@ -915,6 +921,9 @@ class State(object):
         manager = self.get_manager(inst, node)
         view = self.get_view(did, node, 'Reduction')
         view.add_manager(manager)
+
+    def log_sharded_view(self, did, node):
+        self.get_view(did, node, 'Sharded')
 
     def log_equivalence_set(self, did, node):
         self.get_equivalence_set(did, node);

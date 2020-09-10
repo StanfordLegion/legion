@@ -4365,6 +4365,10 @@ namespace Legion {
       // by the owner when no one is valid any longer
       if (!is_owner())
         add_base_gc_ref(REMOTE_DID_REF);
+#ifdef LEGION_GC
+      log_garbage.info("GC Sharded View %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
