@@ -8540,7 +8540,8 @@ namespace Legion {
           // operations at the end of a context for reduce-only cases
           // right now so by making it restricted things are eagerly
           // flushed out to the parent task's instance.
-          const bool restricted = IS_SIMULT(usage) || IS_REDUCE(usage);
+          const bool restricted = 
+            IS_SIMULT(regions[idx1]) || IS_REDUCE(regions[idx1]);
           eq_set->initialize_set(usage, user_mask, restricted, sources,
                                  corresponding, applied_events);
         }
@@ -8571,7 +8572,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::invalidate_region_tree_contexts(
-                                                     std::set<RtEvent> &applied)
+                       const bool is_top_level_task, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INVALIDATE_REGION_TREE_CONTEXTS_CALL);
@@ -8591,7 +8592,7 @@ namespace Legion {
                 true/*self*/, applied, invalidated_refinements, this);
       }
       if (!created_requirements.empty())
-        invalidate_created_requirement_contexts(applied);
+        invalidate_created_requirement_contexts(is_top_level_task, applied);
       // Clean up our instance top views
       if (!instance_top_views.empty())
         clear_instance_top_views();
@@ -8618,7 +8619,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::invalidate_created_requirement_contexts(
-                           std::set<RtEvent> &applied_events, size_t num_shards)
+        const bool is_top, std::set<RtEvent> &applied_events, size_t num_shards)
     //--------------------------------------------------------------------------
     {
       std::set<LogicalRegion> invalidated_regions, return_regions;
@@ -8632,7 +8633,7 @@ namespace Legion {
                 returnable_privileges.end());
 #endif
         // See if we're a returnable privilege or not
-        if (returnable_privileges[it->first])
+        if (returnable_privileges[it->first] && !is_top)
         {
 #ifdef DEBUG_LEGION
           assert(invalidated_regions.find(it->second.region) == 
@@ -10766,7 +10767,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::invalidate_region_tree_contexts(
-                                                     std::set<RtEvent> &applied)
+                       const bool is_top_level_task, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       // This does mostly the same thing as the InnerContext version
@@ -10789,7 +10790,8 @@ namespace Legion {
                 true/*self*/, applied, invalidated_refinements, this);
       }
       if (!created_requirements.empty())
-        invalidate_created_requirement_contexts(applied, total_shards); 
+        invalidate_created_requirement_contexts(is_top_level_task, 
+                                                applied, total_shards); 
       // Cannot clear our instance top view references until we are deleted 
       // as we might still need to help out our other sibling shards
     }
@@ -18689,7 +18691,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteContext::invalidate_region_tree_contexts(
-                                                     std::set<RtEvent> &applied)
+                       const bool is_top_level_task, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       // Should never be called
@@ -20756,7 +20758,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::invalidate_region_tree_contexts(
-                                                     std::set<RtEvent> &applied)
+                       const bool is_top_level_task, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       // Nothing to do 
@@ -22237,7 +22239,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InlineContext::invalidate_region_tree_contexts(
-                                                     std::set<RtEvent> &applied)
+                       const bool is_top_level_task, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       assert(false);

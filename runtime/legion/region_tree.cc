@@ -15012,6 +15012,9 @@ namespace Legion {
           // These fields are unversioned so there is nothing for 
           // this close operation to depend on
           const GenerationID initializer_gen = initializer->get_generation();
+#ifdef LEGION_SPY
+          const UniqueID initializer_uid = initializer->get_unique_op_id();
+#endif
           initializer->execute_dependence_analysis();
           // Make sure our operation has a dependence on this initializer
           if (!user.op->register_region_dependence(user.idx, initializer,
@@ -15022,6 +15025,11 @@ namespace Legion {
                                         RegionUsage(req), unversioned);
             register_local_user(state, init_user, trace_info);
           }
+#ifdef LEGION_SPY
+          LegionSpy::log_mapping_dependence(
+            user.op->get_context()->get_unique_id(), initializer_uid, 0/*idx*/,
+            user.op->get_unique_op_id(), user.idx, LEGION_TRUE_DEPENDENCE);
+#endif
         }
       }
     }

@@ -483,7 +483,7 @@ namespace Legion {
           const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &applied_events) = 0;
-      virtual void invalidate_region_tree_contexts(
+      virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                       std::set<RtEvent> &applied) = 0;
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
@@ -1271,9 +1271,10 @@ namespace Legion {
           const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &applied_events);
-      virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
-      void invalidate_created_requirement_contexts(std::set<RtEvent> &applied,
-                                                   size_t num_shards = 0);
+      virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
+                                                   std::set<RtEvent> &applied);
+      void invalidate_created_requirement_contexts(const bool is_top_level_task,
+                            std::set<RtEvent> &applied, size_t num_shards = 0);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
@@ -1773,7 +1774,8 @@ namespace Legion {
       virtual bool perform_semantic_attach(bool &global);
       virtual void post_semantic_attach(void);
     public:
-      virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
+      virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
+                                                   std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
@@ -2419,7 +2421,8 @@ namespace Legion {
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
-      virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
+      virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
+                                                   std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
@@ -2828,7 +2831,8 @@ namespace Legion {
           const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &applied_events);
-      virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
+      virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
+                                                   std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,
@@ -3248,7 +3252,8 @@ namespace Legion {
           const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &applied_events);
-      virtual void invalidate_region_tree_contexts(std::set<RtEvent> &applied);
+      virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
+                                                   std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                             const std::vector<RegionNode*> &created_state,
                             std::set<RtEvent> &applied_events,size_t num_shards,

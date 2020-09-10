@@ -15103,6 +15103,8 @@ namespace Legion {
             record_restriction(set_expr, true/*covers*/,view_mask,view,mutator);
         }
       }
+      // Record that this data is all valid
+      update_initialized_data(set_expr, true/*covers*/, user_mask);
       // Update any restricted fields 
       if (restricted)
         restricted_fields |= user_mask;
@@ -15192,6 +15194,8 @@ namespace Legion {
                 pit = partial_valid_instances.begin(); 
                 pit != partial_valid_instances.end(); pit++)
           {
+            if (!pit->first->is_instance_view())
+              continue;
             if (expr_covers)
             {
               const FieldMask overlap = 
@@ -15222,8 +15226,6 @@ namespace Legion {
           }
         }
       }
-      if (initialized_data.insert(set_expr, user_mask))
-        set_expr->add_expression_reference();
       if (!(user_mask * restricted_fields))
       {
         if (!expr_covers)
@@ -16994,32 +16996,43 @@ namespace Legion {
       FieldMaskSet<IndexSpaceExpression>::const_iterator finder =
         initialized_data.find(set_expr);
       if (finder != initialized_data.end())
-        uninit -= finder->second;
-      if (!!uninit)
       {
-        // All the rest of these are partial so only test them if 
-        // expr_covers is false because we know they aren't covered otherwise
-        if (!expr_covers)
-        {
-          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                initialized_data.begin(); it != initialized_data.end(); it++)
-          {
-            if (uninit * it->second)
-              continue;
-            // Don't actually need to subtract here since we don't care
-            // about the difference size, just care about domination
-            IndexSpaceExpression *overlap_expr = 
-              runtime->forest->intersect_index_spaces(it->first, expr);
-            if (overlap_expr->get_volume() != expr->get_volume())
-              continue;
-            uninit -= it->second;
-            if (!uninit)
-              break;
-          }
-        }
-        if (!!uninit)
-          analysis.record_uninitialized(uninit, applied_events);
+        uninit -= finder->second;
+        if (!uninit)
+          return;
       }
+      if (!expr_covers)
+      {
+        finder = initialized_data.find(expr);
+        if (finder != initialized_data.end())
+        {
+          uninit -= finder->second;
+          if (!uninit)
+            return;
+        }
+      }
+      // All the rest of these are partial so only test them if 
+      // expr_covers is false because we know they aren't covered otherwise
+      if (!expr_covers)
+      {
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              initialized_data.begin(); it != initialized_data.end(); it++)
+        {
+          if (uninit * it->second)
+            continue;
+          // Don't actually need to subtract here since we don't care
+          // about the difference size, just care about domination
+          IndexSpaceExpression *overlap_expr = 
+            runtime->forest->intersect_index_spaces(it->first, expr);
+          if (overlap_expr->get_volume() != expr->get_volume())
+            continue;
+          uninit -= it->second;
+          if (!uninit)
+            return;
+        }
+      }
+      // Record anything that we have left
+      analysis.record_uninitialized(uninit, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -18191,13 +18204,6 @@ namespace Legion {
                                           CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
-      // At this point we know we are going to need to issue copies
-      if (aggregator == NULL)
-        aggregator = (dst_index >= 0) ?
-          new CopyFillAggregator(runtime->forest, op, index, dst_index,
-                                 guard_event, track_events) :
-          new CopyFillAggregator(runtime->forest, op, index,
-                                 guard_event, track_events);
       // Before we do anything, if the user has provided an ordering of
       // source views, then go through and attempt to issue copies from
       // them before we do anything else
@@ -18221,6 +18227,12 @@ namespace Legion {
               const FieldMask overlap = it->second & total_finder->second;
               if (!overlap)
                 continue;
+              if (aggregator == NULL)
+                aggregator = (dst_index >= 0) ?
+                  new CopyFillAggregator(runtime->forest, op, index, dst_index,
+                                         guard_event, track_events) :
+                  new CopyFillAggregator(runtime->forest, op, index,
+                                         guard_event, track_events);
               aggregator->record_update(target, *src_it, overlap, it->first,
                   trace_info.recording ? this : NULL, applied_events, redop);
               it.filter(overlap);
@@ -18270,6 +18282,12 @@ namespace Legion {
             finder.filter(it->second);
             if (!finder->second)
               remainders.erase(finder);
+            if (aggregator == NULL)
+              aggregator = (dst_index >= 0) ?
+                new CopyFillAggregator(runtime->forest, op, index, dst_index,
+                                       guard_event, track_events) :
+                new CopyFillAggregator(runtime->forest, op, index,
+                                       guard_event, track_events);
             if (overlap_size < it->first.first->get_volume())
             {
               if (overlap_size == it->first.second->get_volume())
@@ -18333,6 +18351,12 @@ namespace Legion {
         update_mask & total_valid_instances.get_valid_mask();
       if (!!total_fields)
       {
+        if (aggregator == NULL)
+          aggregator = (dst_index >= 0) ?
+            new CopyFillAggregator(runtime->forest, op, index, dst_index,
+                                   guard_event, track_events) :
+            new CopyFillAggregator(runtime->forest, op, index,
+                                   guard_event, track_events);
         if (total_fields != total_valid_instances.get_valid_mask())
         {
           // Compute selected instances that are valid for us
@@ -18414,6 +18438,12 @@ namespace Legion {
       }
       if (!cover_instances.empty())
       {
+        if (aggregator == NULL)
+          aggregator = (dst_index >= 0) ?
+            new CopyFillAggregator(runtime->forest, op, index, dst_index,
+                                   guard_event, track_events) :
+            new CopyFillAggregator(runtime->forest, op, index,
+                                   guard_event, track_events);
         aggregator->record_updates(target, cover_instances, 
             cover_instances.get_valid_mask(), expr, 
             trace_info.recording ? this : NULL, applied_events, 
@@ -18426,9 +18456,18 @@ namespace Legion {
       // so now we need to ask the mapper which order to do them in
       // Ask the copy fll aggregator to help us out with this since
       // its probably queried the mapper about this all before
-      aggregator->record_partial_updates(target, partial_instances, update_mask,
+      if (!partial_instances.empty())
+      {
+        if (aggregator == NULL)
+          aggregator = (dst_index >= 0) ?
+            new CopyFillAggregator(runtime->forest, op, index, dst_index,
+                                   guard_event, track_events) :
+            new CopyFillAggregator(runtime->forest, op, index,
+                                   guard_event, track_events);
+        aggregator->record_partial_updates(target,partial_instances,update_mask,
                                        expr, trace_info.recording ? this : NULL,
                                        applied_events, redop, across_helper);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -18669,14 +18708,18 @@ namespace Legion {
         unique_join_on_field_mask_sets(rit->second,src_insts,restricted_copies);
         if (restricted_copies.empty())
           continue;
-        if (aggregator == NULL)
-          aggregator = new CopyFillAggregator(runtime->forest, op, index,
-                                    RtEvent::NO_RT_EVENT, true/*track*/);
         for (typename LegionMap<std::pair<InstanceView*,T*>,FieldMask>::
               aligned::const_iterator it = restricted_copies.begin();
               it != restricted_copies.end(); it++)
+        {
+          if (it->first.first == it->first.second)
+            continue;
+          if (aggregator == NULL)
+            aggregator = new CopyFillAggregator(runtime->forest, op, index,
+                                      RtEvent::NO_RT_EVENT, true/*track*/);
           aggregator->record_update(it->first.first, it->first.second, overlap,
               overlap_expr, trace_info.recording ? this : NULL, applied_events);
+        }
       }
     }
 
@@ -18707,6 +18750,8 @@ namespace Legion {
       std::vector<IndexSpaceExpression*> to_delete;
       WrapperReferenceMutator mutator(applied_events);
       std::map<IndexSpaceExpression*,IndexSpaceExpression*> to_add;
+      // Now we need to lock the analysis if we're going to do this traversal
+      AutoLock a_lock(analysis);
       for (LegionMap<IndexSpaceExpression*,
             FieldMaskSet<InstanceView> >::aligned::iterator eit = 
             restricted_instances.begin(); eit != 
@@ -18752,7 +18797,6 @@ namespace Legion {
         {
           // Total covering of expressions
           // so remove instances no longer restricted
-          
           if (overlap == eit->second.get_valid_mask())
           {
             // All instances are going to be released
@@ -18761,13 +18805,21 @@ namespace Legion {
               // Insert and remove duplicate references
               for (FieldMaskSet<InstanceView>::const_iterator it =
                     eit->second.begin(); it != eit->second.end(); it++)
+              {
+                analysis.record_instance(it->first, it->second);
                 if (release_finder->second.insert(it->first, it->second) &&
                     it->first->remove_nested_valid_ref(did))
                   assert(false); // should never delete this
+              }
               eit->second.clear();
             }
             else
+            {
+              for (FieldMaskSet<InstanceView>::const_iterator it =
+                    eit->second.begin(); it != eit->second.end(); it++)
+                analysis.record_instance(it->first, it->second);
               release_finder->second.swap(eit->second);
+            }
             to_delete.push_back(eit->first);
           }
           else
@@ -18780,6 +18832,7 @@ namespace Legion {
               const FieldMask inst_overlap = overlap & it->second;
               if (!inst_overlap)
                 continue;
+              analysis.record_instance(it->first, inst_overlap);
               // Add it to the released instances
               if (release_finder->second.insert(it->first, inst_overlap))
                 it->first->add_nested_valid_ref(did, &mutator);
@@ -18815,6 +18868,7 @@ namespace Legion {
             const FieldMask inst_overlap = overlap & it->second;
             if (!inst_overlap)
               continue;
+            analysis.record_instance(it->first, inst_overlap);
             if (release_finder->second.insert(it->first, it->second))
               it->first->add_nested_valid_ref(did, &mutator);
             // Each field should only be represented by one instance
@@ -18906,11 +18960,11 @@ namespace Legion {
       // Should only be here if we're the owner
       assert(is_logical_owner() || has_replicated_fields(release_mask));
 #endif
-      // We need to lock the analysis at this point
-      AutoLock a_lock(analysis);
       std::vector<IndexSpaceExpression*> to_delete;
       WrapperReferenceMutator mutator(applied_events);
       std::map<IndexSpaceExpression*,IndexSpaceExpression*> to_add;
+      // We need to lock the analysis at this point
+      AutoLock a_lock(analysis);
       for (LegionMap<IndexSpaceExpression*,
             FieldMaskSet<InstanceView> >::aligned::iterator eit = 
             released_instances.begin(); eit != 
@@ -18947,6 +19001,7 @@ namespace Legion {
             const FieldMask inst_overlap = overlap & it->second;
             if (!inst_overlap)
               continue;
+            analysis.record_instance(it->first, inst_overlap);
             // Record this as a restricted instance
             record_restriction(overlap_expr, overlap_covers, inst_overlap,
                                it->first, mutator);
@@ -18961,8 +19016,11 @@ namespace Legion {
           }
           for (std::vector<InstanceView*>::const_iterator it =
                 to_erase.begin(); it != to_erase.end(); it++)
+          {
+            eit->second.erase(*it);
             if ((*it)->remove_nested_valid_ref(did))
               delete (*it);
+          }
           if (!eit->second.empty())
             eit->second.tighten_valid_mask();
           else
@@ -18981,6 +19039,7 @@ namespace Legion {
             const FieldMask inst_overlap = overlap & it->second;
             if (!inst_overlap)
               continue;
+            analysis.record_instance(it->first, inst_overlap);
             // Record this as a restricted instance
             record_restriction(overlap_expr, overlap_covers, inst_overlap,
                                it->first, mutator);
@@ -20238,6 +20297,8 @@ namespace Legion {
           record_restriction(expr,expr_covers,overwrite_mask,inst_view,mutator);
         }
       }
+      // Record that there is initialized data for this equivalence set
+      update_initialized_data(expr, expr_covers, overwrite_mask); 
       if ((analysis.output_aggregator != NULL) &&
            analysis.output_aggregator->has_update_fields())
       {
@@ -22278,7 +22339,7 @@ namespace Legion {
             initialized_updates.begin(); it != initialized_updates.end(); it++)
       {
         if (it->first->get_volume() == dst_volume)
-          update_initialized_data(set_expr,true/*covers*/,it->second);
+          update_initialized_data(set_expr, true/*covers*/, it->second);
         else
           update_initialized_data(it->first, false/*covers*/, it->second);
       }

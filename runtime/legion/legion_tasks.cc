@@ -5862,8 +5862,8 @@ namespace Legion {
       std::set<RtEvent> completion_preconditions;
       if (execution_context != NULL)
       {
-        execution_context->invalidate_region_tree_contexts(
-                                  completion_preconditions);
+        execution_context->invalidate_region_tree_contexts(is_top_level_task(),
+                                                      completion_preconditions);
         if (runtime->legion_spy_enabled)
           execution_context->log_created_requirements();
       }
@@ -6783,7 +6783,7 @@ namespace Legion {
           execution_context->log_created_requirements();
         // Invalidate any context that we had so that the child
         // operations can begin committing
-        execution_context->invalidate_region_tree_contexts(preconditions);
+        execution_context->invalidate_region_tree_contexts(false,preconditions);
         // Since this point is now complete we know
         // that we can trigger it. Note we don't need to do
         // this if we're a leaf task with no virtual mappings
@@ -7383,7 +7383,8 @@ namespace Legion {
       // Invalidate any context that we had so that the child
       // operations can begin committing
       std::set<RtEvent> preconditions;
-      execution_context->invalidate_region_tree_contexts(preconditions);
+      execution_context->invalidate_region_tree_contexts(is_top_level_task(),
+                                                         preconditions);
       if (runtime->legion_spy_enabled)
         execution_context->log_created_requirements();
       // Then invoke the method on the shard manager 
