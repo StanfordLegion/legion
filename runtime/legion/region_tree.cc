@@ -19602,7 +19602,7 @@ namespace Legion {
         // children are refined the same way
         FieldMask refined_child;
         it->first->as_region_node()->update_disjoint_complete_tree(ctx,
-              refinement_op, child_overlap, refined_children, applied_events);
+              refinement_op, child_overlap, refined_child, applied_events);
         if (first_child)
         {
           refined_children = refined_child;

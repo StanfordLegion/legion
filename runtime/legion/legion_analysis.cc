@@ -17838,7 +17838,8 @@ namespace Legion {
               else if (it->second->remove_expression_reference())
                 delete it->second;
             }
-            finder->second.clear();
+            reduction_instances.erase(finder);
+            reduction_fields.unset_bit(fidx);
           }
           else
           {
@@ -18621,7 +18622,10 @@ namespace Legion {
                   runtime->forest->intersect_index_spaces(expr, it->second);
                 const size_t overlap_size = overlap->get_volume();
                 if (overlap_size == 0)
+                {
+                  it++;
                   continue;
+                }
                 if (overlap_size == expr->get_volume())
                 {
                   to_record.push_back(std::make_pair(it->first, expr));
@@ -18649,7 +18653,7 @@ namespace Legion {
               if (aggregator == NULL)
                 aggregator = new CopyFillAggregator(runtime->forest, op, index,
                                           guard_event, track_events);
-              aggregator->record_reductions(rit->first, finder->second, fidx, 
+              aggregator->record_reductions(rit->first, to_record, fidx, 
                                     fidx, trace_info.recording ? this : NULL, 
                                     applied_events, across_helper);
               if (track_exprs)
@@ -19285,6 +19289,8 @@ namespace Legion {
            std::list<std::pair<ReductionView*,IndexSpaceExpression*> > &updates)
     //--------------------------------------------------------------------------
     {
+      if (updates.empty())
+        return;
       // Check for equivalence to the dst and then add our references
       const size_t volume = set_expr->get_volume();
       for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::iterator
@@ -22985,6 +22991,7 @@ namespace Legion {
         assert(!(mask - finder->second));
 #endif
         finder.filter(mask);
+        equivalence_sets.tighten_valid_mask();
         if (!finder->second)
         {
           equivalence_sets.erase(finder);
