@@ -7727,7 +7727,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Index Space %lld %d %d",
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, handle.id);
 #endif
       // We keep a resource reference on the parent until the parent
       // removes it saying that we no longer need to traverse it as
@@ -8987,7 +8987,7 @@ namespace Legion {
         shard_mapping->add_reference();
 #ifdef LEGION_GC
       log_garbage.info("GC Index Partition %lld %d %d",
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id); 
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, handle.id); 
 #endif
     }
 
@@ -9022,7 +9022,7 @@ namespace Legion {
         shard_mapping->add_reference();
 #ifdef LEGION_GC
       log_garbage.info("GC Index Partition %lld %d %d",
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, handle.id);
 #endif
     }
 
@@ -10498,7 +10498,7 @@ namespace Legion {
         unallocated_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
 #ifdef LEGION_GC
       log_garbage.info("GC Field Space %lld %d %d",
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, handle.id);
 #endif
     }
 
@@ -10530,7 +10530,7 @@ namespace Legion {
       }
 #ifdef LEGION_GC
       log_garbage.info("GC Field Space %lld %d %d",
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, handle.id);
 #endif
     }
 
@@ -17081,7 +17081,7 @@ namespace Legion {
     {
 #ifdef LEGION_GC
       log_garbage.info("GC Region %lld %d %d %d %d",
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, 
           handle.get_index_space().get_id(),
           handle.get_field_space().get_id(),
           handle.get_tree_id());
@@ -18385,7 +18385,7 @@ namespace Legion {
     {
 #ifdef LEGION_GC
       log_garbage.info("GC Partition %lld %d %d %d %d",
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, 
           handle.get_index_partition().get_id(), 
           handle.get_field_space().get_id(),
           handle.get_tree_id());

@@ -1167,7 +1167,7 @@ namespace Legion {
       } 
 #ifdef LEGION_GC
       log_garbage.info("GC Instance Manager %lld %d " IDFMT " " IDFMT " ",
-                        LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
+                        LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, 
                         inst.id, memory->memory.id);
 #endif
       if (runtime->legion_spy_enabled)
@@ -2042,7 +2042,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Collective Manager %lld %d",
-                        LEGION_DISTRIBUTED_ID_FILTER(did), local_space); 
+                        LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space); 
 #endif
     }
 
@@ -3216,7 +3216,7 @@ namespace Legion {
     {
 #ifdef LEGION_GC
       log_garbage.info("GC Virtual Manager %lld %d",
-                        LEGION_DISTRIBUTED_ID_FILTER(did), local_space); 
+                        LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space); 
 #endif
     }
 
