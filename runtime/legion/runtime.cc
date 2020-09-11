@@ -684,7 +684,7 @@ namespace Legion {
         producer_op->add_mapping_reference(op_gen);
 #ifdef LEGION_GC
       log_garbage.info("GC Future %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -1679,7 +1679,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Future Map %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -1703,7 +1703,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Future Map %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -11498,7 +11498,7 @@ namespace Legion {
     {
 #ifdef LEGION_GC
       log_garbage.info("GC Constraints %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -11521,7 +11521,7 @@ namespace Legion {
         constraints_name = strdup(registrar.layout_name);
 #ifdef LEGION_GC
       log_garbage.info("GC Constraints %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -11539,7 +11539,7 @@ namespace Legion {
       snprintf(constraints_name,64,"layout constraints %ld", layout_id);
 #ifdef LEGION_GC
       log_garbage.info("GC Constraints %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -25414,7 +25414,7 @@ namespace Legion {
       {
         // These constraints are available on all the nodes so if we own
         // them then record that we have remote instances for everything else
-        if (constraints->is_owner())
+        if ((did > 0) && constraints->is_owner())
         {
           for (AddressSpaceID space = 0; space < total_address_spaces; space++)
             if (space != address_space)
