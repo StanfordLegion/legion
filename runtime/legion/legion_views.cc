@@ -2475,7 +2475,7 @@ namespace Legion {
         current_users = NULL;
 #ifdef LEGION_GC
       log_garbage.info("GC Materialized View %lld %d %lld", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, 
           LEGION_DISTRIBUTED_ID_FILTER(manager->did)); 
 #endif
     }
@@ -3904,7 +3904,7 @@ namespace Legion {
       value->add_reference();
 #ifdef LEGION_GC
       log_garbage.info("GC Fill View %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -4055,7 +4055,7 @@ namespace Legion {
     {
 #ifdef LEGION_GC
       log_garbage.info("GC Phi View %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -4342,7 +4342,7 @@ namespace Legion {
     {
 #ifdef LEGION_GC
       log_garbage.info("GC Reduction View %lld %d %lld", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space,
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space,
           LEGION_DISTRIBUTED_ID_FILTER(manager->did));
 #endif
     }
