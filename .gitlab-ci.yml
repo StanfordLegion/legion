@@ -1067,10 +1067,10 @@ p100_clang7_cxx11_release_cmake_cuda_regent:
     <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *cmake, *regent]
 
 # Kokkos tests:
-clang38_cxx14_debug_kokkos_legion:
+clang8_cxx14_debug_kokkos_legion:
   <<: [*linux, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx14_normal, *kokkos, *cmake, *legion]
+    <<: [*clang8, *terra38, *debug, *cxx14_normal, *kokkos, *cmake, *legion]
 clang9_cxx17_debug_kokkos_openmp_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
