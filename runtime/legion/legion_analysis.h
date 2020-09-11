@@ -3316,6 +3316,11 @@ namespace Legion {
                                     FieldMask &parent_traversal,
                                     std::set<RtEvent> &deferral_events,
                                     const bool downward_only);
+      void find_or_create_empty_equivalence_sets(EqSetTracker *target,
+                                    const AddressSpaceID target_space,
+                                    const FieldMask &mask,
+                                    const AddressSpaceID source,
+                                    std::set<RtEvent> &ready_events);
       static void handle_compute_equivalence_sets_response(
                       Deserializer &derez, Runtime *runtime);
       void record_refinement(EquivalenceSet *set, const FieldMask &mask,

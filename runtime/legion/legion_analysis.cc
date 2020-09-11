@@ -17047,16 +17047,18 @@ namespace Legion {
           initialized_data.find(set_expr);
         // Check to see if we've already initialized it for the full set_expr
         if (finder != initialized_data.end())
+        {
           subinit -= finder->second;
-        // Already initialized for full expression so we are done
-        if (!subinit)
-          return;
+          // Already initialized for full expression so we are done
+          if (!subinit)
+            return;
+        }
         std::vector<IndexSpaceExpression*> to_delete;
         FieldMaskSet<IndexSpaceExpression> to_add;
         for (FieldMaskSet<IndexSpaceExpression>::iterator it = 
               initialized_data.begin(); it != initialized_data.end(); it++)
         {
-          if (it->first == set_expr)
+          if ((it->first == set_expr) || (it->first == expr))
             continue;
           const FieldMask overlap = subinit & it->second;
           if (!overlap)
@@ -17133,8 +17135,35 @@ namespace Legion {
         if (!!subinit && initialized_data.insert(expr, subinit))
           expr->add_expression_reference();
       }
-      else if (initialized_data.insert(set_expr, user_mask))
-        set_expr->add_expression_reference();
+      else
+      {
+        // Remove all other expressions with overlapping fields
+        if (!(user_mask * initialized_data.get_valid_mask()))
+        {
+          std::vector<IndexSpaceExpression*> to_delete;
+          for (FieldMaskSet<IndexSpaceExpression>::iterator it = 
+                initialized_data.begin(); it != initialized_data.end(); it++)
+          {
+            if (it->first == set_expr)
+              continue;
+            it.filter(user_mask);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              initialized_data.erase(*it);
+              if ((*it)->remove_expression_reference())
+                delete (*it);
+            }
+          }
+        }
+        if (initialized_data.insert(set_expr, user_mask))
+          set_expr->add_expression_reference();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -22732,8 +22761,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(pending_equivalence_sets.empty());
       assert(waiting_infos.empty());
-      assert(equivalence_sets_ready.empty());
       assert(equivalence_sets.empty());
+      assert(equivalence_sets_ready.empty());
       assert(!disjoint_complete);
       assert(disjoint_complete_children.empty());
 #endif
@@ -23080,15 +23109,31 @@ namespace Legion {
           return;
         to_remove.swap(equivalence_sets);
       }
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            to_remove.begin(); it != to_remove.end(); it++)
+      // Check to see if these are empty equivalence sets or not
+      if (node->is_region() && node->as_region_node()->row_source->is_empty())
       {
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              to_remove.begin(); it != to_remove.end(); it++)
+        {
 #ifdef DEBUG_LEGION
-        assert(it->first->region_node != node);
+          assert(it->first->region_node == node);
 #endif
-        it->first->remove_tracker(this, it->second);
-        if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-          delete it->first;
+          if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
+            delete it->first;
+        }
+      }
+      else
+      {
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              to_remove.begin(); it != to_remove.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->first->region_node != node);
+#endif
+          it->first->remove_tracker(this, it->second);
+          if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+            delete it->first;
+        }
       }
     }
 
@@ -23288,6 +23333,97 @@ namespace Legion {
         mask.clear();
       assert(!mask);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::find_or_create_empty_equivalence_sets(
+                                              EqSetTracker *target,
+                                              const AddressSpaceID target_space,
+                                              const FieldMask &mask,
+                                              const AddressSpaceID source,
+                                              std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(node->is_region());
+#endif
+      RegionNode *region_node = node->as_region_node();
+#ifdef DEBUG_LEGION
+      assert(region_node->row_source->is_empty());
+#endif
+      AutoLock m_lock(manager_lock);
+      if (target_space != runtime->address_space)
+      {
+        FieldMaskSet<EquivalenceSet> to_send;
+        FieldMask remainder = mask;
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+        {
+          const FieldMask overlap = remainder & it->second;
+          if (!overlap)
+            continue;
+          to_send.insert(it->first, overlap);
+          remainder -= overlap;
+          if (!remainder)
+            break;
+        }
+        if (!!remainder)
+        {
+          EquivalenceSet *empty_set = new EquivalenceSet(runtime, 
+              runtime->get_available_distributed_id(), runtime->address_space,
+              source, region_node, true/*register now*/);
+          if (equivalence_sets.insert(empty_set, remainder))
+          {
+            WrapperReferenceMutator mutator(ready_events);
+            empty_set->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
+          } 
+          to_send.insert(empty_set, remainder);
+        }
+        // Send the result back to target
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          rez.serialize<size_t>(to_send.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                to_send.begin(); it != to_send.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize(done);
+        }
+        runtime->send_compute_equivalence_sets_response(target_space, rez);
+        ready_events.insert(done);
+      }
+      else
+      {
+        FieldMask remainder = mask;
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+        {
+          const FieldMask overlap = remainder & it->second;
+          if (!overlap)
+            continue;
+          if (target != this)
+            target->record_equivalence_set(it->first, overlap);
+          remainder -= overlap;
+          if (!remainder)
+            return;
+        }
+        // Make a new equivalence set and send it
+        EquivalenceSet *empty_set = new EquivalenceSet(runtime, 
+            runtime->get_available_distributed_id(), runtime->address_space,
+            source, region_node, true/*register now*/);
+        if (equivalence_sets.insert(empty_set, remainder))
+        {
+          WrapperReferenceMutator mutator(ready_events);
+          empty_set->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
+        }
+        if (target != this)
+          target->record_equivalence_set(empty_set, remainder);
+      }
     }
 
     //--------------------------------------------------------------------------

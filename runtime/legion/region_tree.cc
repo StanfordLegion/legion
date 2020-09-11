@@ -18150,6 +18150,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
+      // Check for the special case of having empty equivalence sets
+      if (expr->is_empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(expr == row_source);
+#endif
+        manager.find_or_create_empty_equivalence_sets(target, target_space,
+                                               mask, source, ready_events);
+        return;
+      }
       FieldMask parent_traversal;
       FieldMaskSet<PartitionNode> children_traversal;
       std::set<RtEvent> deferral_events;
