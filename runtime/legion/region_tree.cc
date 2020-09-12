@@ -14917,15 +14917,42 @@ namespace Legion {
             }
             if (!!child_disjoint_complete)
             {
-#ifdef DEBUG_LEGION
-              // There should be at most one written disjoint
-              // complete tree at a time for a region
-              assert(child_disjoint_complete * 
-                  state.written_disjoint_complete_children.get_valid_mask());
-#endif
-              state.written_disjoint_complete_children.insert(next_child, 
-                                                child_disjoint_complete);
-              written_disjoint_complete = child_disjoint_complete;
+              // Only remember the most-recent written-disjoint complete
+              // child for a region node
+              if (!(child_disjoint_complete * 
+                    state.written_disjoint_complete_children.get_valid_mask()))
+              {
+                std::vector<RegionTreeNode*> to_delete;
+                for (FieldMaskSet<RegionTreeNode>::iterator it =
+                      state.written_disjoint_complete_children.begin(); it !=
+                      state.written_disjoint_complete_children.end(); it++)
+                {
+                  if (it->first == next_child)
+                    continue;
+                  it.filter(child_disjoint_complete);
+                  if (!it->second)
+                    to_delete.push_back(it->first);
+                }
+                if (!to_delete.empty())
+                  for (std::vector<RegionTreeNode*>::const_iterator it =
+                        to_delete.begin(); it != to_delete.end(); it++)
+                    state.written_disjoint_complete_children.erase(*it);
+              }
+              FieldMaskSet<RegionTreeNode>::iterator finder = 
+                state.written_disjoint_complete_children.find(next_child);
+              if (finder != state.written_disjoint_complete_children.end())
+              {
+                written_disjoint_complete = 
+                  child_disjoint_complete - finder->second;
+                if (!!written_disjoint_complete)
+                  finder.merge(written_disjoint_complete);
+              }
+              else
+              {
+                state.written_disjoint_complete_children.insert(next_child, 
+                                                  child_disjoint_complete);
+                written_disjoint_complete = child_disjoint_complete;
+              }
             }
           }
           else
@@ -18285,7 +18312,7 @@ namespace Legion {
 #endif
         it->first->as_partition_node()->invalidate_refinement(ctx, it->second,
                                   applied_events, to_release, source_context);
-        if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+        if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
     }
@@ -19722,7 +19749,7 @@ namespace Legion {
 #endif
         it->first->as_region_node()->invalidate_refinement(ctx, it->second,
                   true/*self*/, applied_events, to_release, source_context);
-        if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+        if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
     }

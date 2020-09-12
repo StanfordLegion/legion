@@ -17077,13 +17077,6 @@ namespace Legion {
             if (!subinit)
               break;
           }
-          else if (union_size == expr->get_volume())
-          {
-            // New expression covers the old expression
-            it.filter(overlap);
-            if (!it->second)
-              to_delete.push_back(it->first);
-          }
           else if (union_size == set_expr->get_volume())
           {
             // Union is the same as the set expression
@@ -17097,6 +17090,13 @@ namespace Legion {
             subinit -= overlap;
             if (!subinit)
               break;
+          }
+          else if (union_size == expr->get_volume())
+          {
+            // New expression covers the old expression
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
           }
           else
           {
@@ -22358,7 +22358,7 @@ namespace Legion {
         return;
       }
       WrapperReferenceMutator mutator(applied_events);
-      const bool dst_volume = set_expr->get_volume();
+      const size_t dst_volume = set_expr->get_volume();
       for (LegionMap<IndexSpaceExpression*,
             FieldMaskSet<LogicalView> >::aligned::const_iterator it = 
             valid_updates.begin(); it != valid_updates.end(); it++)
@@ -23601,7 +23601,9 @@ namespace Legion {
           it.filter(overlap);
           to_traverse.insert(it->first, overlap);
           // Add a reference for to_traverse
-          it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+          // No need for a mutator here since we know that
+          // the region tree node is already valid
+          it->first->add_base_valid_ref(VERSION_MANAGER_REF);
           if (!it->second)
             to_delete.push_back(it->first);
         }
