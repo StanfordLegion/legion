@@ -10130,7 +10130,7 @@ namespace Legion {
         hasher.hash(registrar.inner_variant);
         hasher.hash(registrar.idempotent_variant);
         hasher.hash(registrar.replicable_variant);
-        if (user_data != NULL)
+        if ((user_data != NULL) && (runtime->safe_control_replication > 1))
           hasher.hash(user_data, user_data_size);
         hasher.hash(vid);
         verify_replicable(hasher, "register_task_variant");
@@ -10431,7 +10431,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void ReplicateContext::hash_future(Murmur3Hasher &hasher,
-                                                  const Future &future)
+                                const unsigned safe_level, const Future &future)
     //--------------------------------------------------------------------------
     {
       if (future.impl == NULL)
@@ -10448,7 +10448,7 @@ namespace Legion {
             hasher.hash(it->second[idx]);
         }
       }
-      else
+      else if (safe_level > 1)
       {
         const void *result =
           future.impl->get_untyped_result(true,NULL,true/*internal*/);
@@ -10533,9 +10533,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void ReplicateContext::hash_argument(Murmur3Hasher &hasher,
-                                                   const TaskArgument &argument)
+                              unsigned safe_level, const TaskArgument &argument)
     //--------------------------------------------------------------------------
     {
+      if (safe_level == 1)
+        return;
       if (argument.get_size() > 0)
         hasher.hash(argument.get_ptr(), argument.get_size());
     }
@@ -10579,7 +10581,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void ReplicateContext::hash_task_launcher(Murmur3Hasher &hasher,
-                                                   const TaskLauncher &launcher)
+                        const unsigned safe_level, const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       hasher.hash(launcher.task_id);
@@ -10587,19 +10589,19 @@ namespace Legion {
       hash_region_requirements(hasher, launcher.region_requirements);
       for (std::vector<Future>::const_iterator it = 
             launcher.futures.begin(); it != launcher.futures.end(); it++)
-        hash_future(hasher, *it);
+        hash_future(hasher, safe_level, *it);
       hash_grants(hasher, launcher.grants);
       hash_phase_barriers(hasher, launcher.wait_barriers);
       hash_phase_barriers(hasher, launcher.arrive_barriers);
-      hash_argument(hasher, launcher.argument);
+      hash_argument(hasher, safe_level, launcher.argument);
       hash_predicate(hasher, launcher.predicate);
       hasher.hash(launcher.map_id);
       hasher.hash(launcher.tag);
       for (int idx = 0; idx < launcher.point.get_dim(); idx++)
         hasher.hash(launcher.point[idx]);
       hasher.hash(launcher.sharding_space);
-      hash_future(hasher, launcher.predicate_false_future);
-      hash_argument(hasher, launcher.predicate_false_result);
+      hash_future(hasher, safe_level, launcher.predicate_false_future);
+      hash_argument(hasher, safe_level, launcher.predicate_false_result);
       hash_static_dependences(hasher, launcher.static_dependences);
       hasher.hash(launcher.enable_inlining);
       hasher.hash(launcher.local_function_task);
@@ -10609,7 +10611,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::hash_index_launcher(Murmur3Hasher &hasher,
-                                              const IndexTaskLauncher &launcher)
+                   const unsigned safe_level, const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       hasher.hash(launcher.task_id);
@@ -10620,7 +10622,7 @@ namespace Legion {
       hash_region_requirements(hasher, launcher.region_requirements);
       for (std::vector<Future>::const_iterator it =
             launcher.futures.begin(); it != launcher.futures.end(); it++)
-        hash_future(hasher, *it);
+        hash_future(hasher, safe_level, *it);
       for (std::vector<ArgumentMap>::const_iterator it =
             launcher.point_futures.begin(); it != 
             launcher.point_futures.end(); it++)
@@ -10628,15 +10630,15 @@ namespace Legion {
       hash_grants(hasher, launcher.grants);
       hash_phase_barriers(hasher, launcher.wait_barriers);
       hash_phase_barriers(hasher, launcher.arrive_barriers);
-      hash_argument(hasher, launcher.global_arg);
+      hash_argument(hasher, safe_level, launcher.global_arg);
       if (launcher.argument_map.impl != NULL)
         hash_future_map(hasher, launcher.argument_map.impl->freeze(this));
       hash_predicate(hasher, launcher.predicate);
       hasher.hash(launcher.must_parallelism);
       hasher.hash(launcher.map_id);
       hasher.hash(launcher.tag);
-      hash_future(hasher, launcher.predicate_false_future);
-      hash_argument(hasher, launcher.predicate_false_result);
+      hash_future(hasher, safe_level, launcher.predicate_false_future);
+      hash_argument(hasher, safe_level, launcher.predicate_false_result);
       hash_static_dependences(hasher, launcher.static_dependences);
       hasher.hash(launcher.enable_inlining);
       hasher.hash(launcher.independent_requirements);
@@ -11047,7 +11049,7 @@ namespace Legion {
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
-        hash_future(hasher, future);
+        hash_future(hasher, runtime->safe_control_replication, future);
         hasher.hash(type_tag);
         verify_replicable(hasher, "create_index_space");
       }
@@ -13897,7 +13899,7 @@ namespace Legion {
         hasher.hash(REPLICATE_CREATE_FIELD_SPACE);
         for (std::vector<Future>::const_iterator it = 
               sizes.begin(); it != sizes.end(); it++)
-          hash_future(hasher, *it);
+          hash_future(hasher, runtime->safe_control_replication, *it);
         for (std::vector<FieldID>::const_iterator it = 
               resulting_fields.begin(); it != resulting_fields.end(); it++)
           hasher.hash(*it);
@@ -14264,7 +14266,7 @@ namespace Legion {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ALLOCATE_FIELD);
         hasher.hash(space);
-        hash_future(hasher, field_size);
+        hash_future(hasher, runtime->safe_control_replication, field_size);
         hasher.hash(fid);
         hasher.hash(local);
         hasher.hash(serdez_id);
@@ -14509,7 +14511,7 @@ namespace Legion {
         hasher.hash(space);
         for (std::vector<Future>::const_iterator it = 
               sizes.begin(); it != sizes.end(); it++)
-          hash_future(hasher, *it);
+          hash_future(hasher, runtime->safe_control_replication, *it);
         for (std::vector<FieldID>::const_iterator it = 
               resulting_fields.begin(); it != resulting_fields.end(); it++)
           hasher.hash(*it);
@@ -15144,7 +15146,7 @@ namespace Legion {
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_EXECUTE_TASK);
-        hash_task_launcher(hasher, launcher); 
+        hash_task_launcher(hasher, runtime->safe_control_replication, launcher);
         verify_replicable(hasher, "execute_task");
       }
       // Quick out for predicate false
@@ -15225,7 +15227,7 @@ namespace Legion {
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE);
-        hash_index_launcher(hasher, launcher); 
+        hash_index_launcher(hasher, runtime->safe_control_replication,launcher);
         verify_replicable(hasher, "execute_index_space");
       }
       if (launcher.launch_domain.exists() && 
@@ -15354,7 +15356,7 @@ namespace Legion {
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE);
-        hash_index_launcher(hasher, launcher); 
+        hash_index_launcher(hasher, runtime->safe_control_replication,launcher);
         hasher.hash(redop);
         hasher.hash<bool>(deterministic);
         verify_replicable(hasher, "execute_index_space");
@@ -15562,8 +15564,9 @@ namespace Legion {
         hasher.hash(REPLICATE_FILL_FIELDS);
         hasher.hash(launcher.handle);
         hasher.hash(launcher.parent);
-        hash_argument(hasher, launcher.argument);
-        hash_future(hasher, launcher.future);
+        hash_argument(hasher, runtime->safe_control_replication, 
+                      launcher.argument);
+        hash_future(hasher, runtime->safe_control_replication, launcher.future);
         hash_predicate(hasher, launcher.predicate);
         for (std::set<FieldID>::const_iterator it = 
               launcher.fields.begin(); it != launcher.fields.end(); it++)
@@ -15630,8 +15633,9 @@ namespace Legion {
         hasher.hash(launcher.partition);
         hasher.hash(launcher.parent);
         hasher.hash(launcher.projection);
-        hash_argument(hasher, launcher.argument);
-        hash_future(hasher, launcher.future);
+        hash_argument(hasher, runtime->safe_control_replication, 
+                      launcher.argument);
+        hash_future(hasher, runtime->safe_control_replication, launcher.future);
         hash_predicate(hasher, launcher.predicate);
         for (std::set<FieldID>::const_iterator it = 
               launcher.fields.begin(); it != launcher.fields.end(); it++)
@@ -16003,11 +16007,11 @@ namespace Legion {
         for (std::vector<TaskLauncher>::const_iterator it = 
               launcher.single_tasks.begin(); it != 
               launcher.single_tasks.end(); it++)
-          hash_task_launcher(hasher, *it);
+          hash_task_launcher(hasher, runtime->safe_control_replication, *it);
         for (std::vector<IndexTaskLauncher>::const_iterator it = 
               launcher.index_tasks.begin(); it !=
               launcher.index_tasks.end(); it++)
-          hash_index_launcher(hasher, *it);
+          hash_index_launcher(hasher, runtime->safe_control_replication, *it);
         hasher.hash(launcher.launch_domain);
         hasher.hash(launcher.launch_space);
         hasher.hash(launcher.sharding_space);
@@ -16059,7 +16063,7 @@ namespace Legion {
         for (std::set<Future>::const_iterator it = 
               launcher.preconditions.begin(); it !=
               launcher.preconditions.end(); it++)
-          hash_future(hasher, *it);
+          hash_future(hasher, runtime->safe_control_replication, *it);
         verify_replicable(hasher, "issue_timing_measurement");
       }
 #ifdef DEBUG_LEGION
@@ -16470,7 +16474,8 @@ namespace Legion {
         hasher.hash(REPLICATE_CREATE_PHASE_BARRIER);
         hasher.hash(arrivals);
         hasher.hash(redop);
-        hasher.hash(init_value, init_size);
+        if (runtime->safe_control_replication > 1)
+          hasher.hash(init_value, init_size);
         verify_replicable(hasher, "create_phase_barrier");
       }
       ValueBroadcast<ApBarrier> bar_collective(this, 0/*origin*/,

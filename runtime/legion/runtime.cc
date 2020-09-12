@@ -13045,6 +13045,7 @@ namespace Legion {
                       config.max_control_replication_contexts),
         max_local_fields(config.max_local_fields),
         max_replay_parallelism(config.max_replay_parallelism),
+        safe_control_replication(config.safe_control_replication),
         program_order_execution(config.program_order_execution),
         dump_physical_traces(config.dump_physical_traces),
         no_tracing(config.no_tracing),
@@ -13066,7 +13067,6 @@ namespace Legion {
 #else
         unsafe_mapper(!config.safe_mapper),
 #endif
-        safe_control_replication(config.safe_control_replication),
         disable_independence_tests(config.disable_independence_tests),
 #ifdef LEGION_SPY
         legion_spy_enabled(true),
@@ -13253,6 +13253,7 @@ namespace Legion {
         max_control_replication_contexts(rhs.max_control_replication_contexts),
         max_local_fields(rhs.max_local_fields),
         max_replay_parallelism(rhs.max_replay_parallelism),
+        safe_control_replication(rhs.safe_control_replication),
         program_order_execution(rhs.program_order_execution),
         dump_physical_traces(rhs.dump_physical_traces),
         no_tracing(rhs.no_tracing),
@@ -13270,7 +13271,6 @@ namespace Legion {
         resilient_mode(rhs.resilient_mode),
         unsafe_launch(rhs.unsafe_launch),
         unsafe_mapper(rhs.unsafe_mapper),
-        safe_control_replication(rhs.safe_control_replication),
         disable_independence_tests(rhs.disable_independence_tests),
         legion_spy_enabled(rhs.legion_spy_enabled),
         supply_default_mapper(rhs.supply_default_mapper),
@@ -25728,7 +25728,7 @@ namespace Legion {
         .add_option_bool("-lg:unsafe_launch",config.unsafe_launch,!filter)
         .add_option_bool("-lg:unsafe_mapper",config.unsafe_mapper,!filter)
         .add_option_bool("-lg:safe_mapper",config.safe_mapper,!filter)
-        .add_option_bool("-lg:safe_ctrlrepl",
+        .add_option_int("-lg:safe_ctrlrepl",
                          config.safe_control_replication, !filter)
         .add_option_bool("-lg:inorder",config.program_order_execution,!filter)
         .add_option_bool("-lg:dump_physical_traces",
