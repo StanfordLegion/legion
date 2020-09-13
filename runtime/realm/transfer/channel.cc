@@ -19,6 +19,8 @@
 #include "realm/transfer/transfer.h"
 #include "realm/utils.h"
 
+#include <algorithm>
+
 TYPE_IS_SERIALIZABLE(Realm::XferDesKind);
 
 namespace Realm {
@@ -36,6 +38,195 @@ namespace Realm {
 
       // we use a single manager to organize all channels
       static ChannelManager *channel_manager = 0;
+
+  // fast memcpy stuff - uses std::copy instead of memcpy to communicate
+  //  alignment guarantees to the compiler
+  template <typename T>
+  static void memcpy_1d_typed(uintptr_t dst_base, uintptr_t src_base,
+			      size_t bytes)
+  {
+    std::copy(reinterpret_cast<const T *>(src_base),
+	      reinterpret_cast<const T *>(src_base + bytes),
+	      reinterpret_cast<T *>(dst_base));
+  }
+
+  template <typename T>
+  static void memcpy_2d_typed(uintptr_t dst_base, uintptr_t dst_lstride,
+			      uintptr_t src_base, uintptr_t src_lstride,
+			      size_t bytes, size_t lines)
+  {
+    for(size_t i = 0; i < lines; i++) {
+      std::copy(reinterpret_cast<const T *>(src_base),
+		reinterpret_cast<const T *>(src_base + bytes),
+		reinterpret_cast<T *>(dst_base));
+      // manual strength reduction
+      src_base += src_lstride;
+      dst_base += dst_lstride;
+    }
+  }
+
+  template <typename T>
+  static void memcpy_3d_typed(uintptr_t dst_base, uintptr_t dst_lstride,
+			      uintptr_t dst_pstride,
+			      uintptr_t src_base, uintptr_t src_lstride,
+			      uintptr_t src_pstride,
+			      size_t bytes, size_t lines, size_t planes)
+  {
+    // adjust plane stride amounts to account for line strides (so we don't have
+    //  to subtract the line strides back out in the loop)
+    uintptr_t dst_pstride_adj = dst_pstride - (lines * dst_lstride);
+    uintptr_t src_pstride_adj = src_pstride - (lines * src_lstride);
+
+    for(size_t j = 0; j < planes; j++) {
+      for(size_t i = 0; i < lines; i++) {
+	std::copy(reinterpret_cast<const T *>(src_base),
+		  reinterpret_cast<const T *>(src_base + bytes),
+		  reinterpret_cast<T *>(dst_base));
+	// manual strength reduction
+	src_base += src_lstride;
+	dst_base += dst_lstride;
+      }
+      src_base += src_pstride_adj;
+      dst_base += dst_pstride_adj;
+    }
+  }
+
+  // need types with various powers-of-2 size/alignment - we have up to
+  //  uint64_t as builtins, but we need trivially-copyable 16B and 32B things
+  struct dummy_16b_t { uint64_t a, b; };
+  struct dummy_32b_t { uint64_t a, b, c, d; };
+  REALM_ALIGNED_TYPE_CONST(aligned_16b_t, dummy_16b_t, 16);
+  REALM_ALIGNED_TYPE_CONST(aligned_32b_t, dummy_32b_t, 32);
+
+  static void memcpy_1d(uintptr_t dst_base, uintptr_t src_base,
+			size_t bytes)
+  {
+    // by subtracting 1 from bases, strides, and lengths, we get LSBs set
+    //  based on the common alignment of every parameter in the copy
+    unsigned alignment = ((dst_base - 1) & (src_base - 1) &
+			  (bytes - 1));
+//define DEBUG_MEMCPYS
+#ifdef DEBUG_MEMCPYS
+    log_xd.print() << std::hex << "memcpy_1d: dst=" << dst_base
+                   << " src=" << src_base
+                   << std::dec << " bytes=" << bytes
+                   << " align=" << (alignment & 31);
+#endif
+    // TODO: consider jump table approach?
+    if((alignment & 31) == 31)
+      memcpy_1d_typed<aligned_32b_t>(dst_base, src_base, bytes);
+    else if((alignment & 15) == 15)
+      memcpy_1d_typed<aligned_16b_t>(dst_base, src_base, bytes);
+    else if((alignment & 7) == 7)
+      memcpy_1d_typed<uint64_t>(dst_base, src_base, bytes);
+    else if((alignment & 3) == 3)
+      memcpy_1d_typed<uint32_t>(dst_base, src_base, bytes);
+    else if((alignment & 1) == 1)
+      memcpy_1d_typed<uint16_t>(dst_base, src_base, bytes);
+    else
+      memcpy_1d_typed<uint8_t>(dst_base, src_base, bytes);
+  }
+
+  static void memcpy_2d(uintptr_t dst_base, uintptr_t dst_lstride,
+			uintptr_t src_base, uintptr_t src_lstride,
+			size_t bytes, size_t lines)
+  {
+    // by subtracting 1 from bases, strides, and lengths, we get LSBs set
+    //  based on the common alignment of every parameter in the copy
+    unsigned alignment = ((dst_base - 1) & (dst_lstride - 1) &
+			  (src_base - 1) & (src_lstride - 1) &
+			  (bytes - 1));
+#ifdef DEBUG_MEMCPYS
+    log_xd.print() << std::hex << "memcpy_2d: dst=" << dst_base
+                   << "+" << dst_lstride
+                   << " src=" << src_base
+                   << "+" << src_lstride
+                   << std::dec << " bytes=" << bytes
+                   << " lines=" << lines
+                   << " align=" << (alignment & 31);
+#endif
+    // TODO: consider jump table approach?
+    if((alignment & 31) == 31)
+      memcpy_2d_typed<aligned_32b_t>(dst_base, dst_lstride,
+				     src_base, src_lstride,
+				     bytes, lines);
+    else if((alignment & 15) == 15)
+      memcpy_2d_typed<aligned_16b_t>(dst_base, dst_lstride,
+				     src_base, src_lstride,
+				     bytes, lines);
+    else if((alignment & 7) == 7)
+      memcpy_2d_typed<uint64_t>(dst_base, dst_lstride, src_base, src_lstride,
+				bytes, lines);
+    else if((alignment & 3) == 3)
+      memcpy_2d_typed<uint32_t>(dst_base, dst_lstride, src_base, src_lstride,
+				bytes, lines);
+    else if((alignment & 1) == 1)
+      memcpy_2d_typed<uint16_t>(dst_base, dst_lstride, src_base, src_lstride,
+				bytes, lines);
+    else
+      memcpy_2d_typed<uint8_t>(dst_base, dst_lstride, src_base, src_lstride,
+			       bytes, lines);
+  }
+
+  static void memcpy_3d(uintptr_t dst_base, uintptr_t dst_lstride,
+			uintptr_t dst_pstride,
+			uintptr_t src_base, uintptr_t src_lstride,
+			uintptr_t src_pstride,
+			size_t bytes, size_t lines, size_t planes)
+  {
+    // by subtracting 1 from bases, strides, and lengths, we get LSBs set
+    //  based on the common alignment of every parameter in the copy
+    unsigned alignment = ((dst_base - 1) & (dst_lstride - 1) &
+			  (dst_pstride - 1) &
+			  (src_base - 1) & (src_lstride - 1) &
+			  (src_pstride - 1) &
+			  (bytes - 1));
+#ifdef DEBUG_MEMCPYS
+    log_xd.print() << std::hex << "memcpy_3d: dst=" << dst_base
+                   << "+" << dst_lstride << "+" << dst_pstride
+                   << " src=" << src_base
+                   << "+" << src_lstride << "+" << src_pstride
+                   << std::dec << " bytes=" << bytes
+                   << " lines=" << lines
+                   << " planes=" << planes
+                   << " align=" << (alignment & 31);
+#endif
+    // performance optimization for intel (and probably other) cpus: walk
+    //  destination addresses as linearly as possible, even if that messes up
+    //  the source address pattern (probably because writebacks are more
+    //  expensive than cache fills?)
+    if(dst_pstride < dst_lstride) {
+      // switch lines and planes
+      std::swap(dst_pstride, dst_lstride);
+      std::swap(src_pstride, src_lstride);
+      std::swap(planes, lines);
+    }
+    // TODO: consider jump table approach?
+    if((alignment & 31) == 31)
+      memcpy_3d_typed<aligned_32b_t>(dst_base, dst_lstride, dst_pstride,
+				     src_base, src_lstride, src_pstride,
+				     bytes, lines, planes);
+    else if((alignment & 15) == 15)
+      memcpy_3d_typed<aligned_16b_t>(dst_base, dst_lstride, dst_pstride,
+				     src_base, src_lstride, src_pstride,
+				     bytes, lines, planes);
+    else if((alignment & 7) == 7)
+      memcpy_3d_typed<uint64_t>(dst_base, dst_lstride, dst_pstride,
+				src_base, src_lstride, src_pstride,
+				bytes, lines, planes);
+    else if((alignment & 3) == 3)
+      memcpy_3d_typed<uint32_t>(dst_base, dst_lstride, dst_pstride,
+				src_base, src_lstride, src_pstride,
+				bytes, lines, planes);
+    else if((alignment & 1) == 1)
+      memcpy_3d_typed<uint16_t>(dst_base, dst_lstride, dst_pstride,
+				src_base, src_lstride, src_pstride,
+				bytes, lines, planes);
+    else
+      memcpy_3d_typed<uint8_t>(dst_base, dst_lstride, dst_pstride,
+				src_base, src_lstride, src_pstride,
+			       bytes, lines, planes);
+  }
 
 #if 0
       static inline bool cross_ib(off_t start, size_t nbytes, size_t buf_size)
@@ -209,6 +400,243 @@ namespace Realm {
       }
     }
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class AddressList
+  //
+
+  AddressList::AddressList()
+    : total_bytes(0)
+    , write_pointer(0)
+    , read_pointer(0)
+  {}
+
+  size_t *AddressList::begin_nd_entry(int max_dim)
+  {
+    size_t entries_needed = max_dim * 2;
+
+    size_t new_wp = write_pointer + entries_needed;
+    if(new_wp > MAX_ENTRIES) {
+      // have to wrap around
+      if(read_pointer <= entries_needed)
+	return 0;
+
+      // fill remaining entries with 0's so reader skips over them
+      while(write_pointer < MAX_ENTRIES)
+	data[write_pointer++] = 0;
+
+      write_pointer = 0;
+    } else {
+      // if the write pointer would cross over the read pointer, we have to wait
+      if((write_pointer < read_pointer) && (new_wp >= read_pointer))
+	return 0;
+
+      // special case: if the write pointer would wrap and read is at 0, that'd
+      //  be a collision too
+      if((new_wp == MAX_ENTRIES) && (read_pointer == 0))
+	return 0;
+    }
+
+    // all good - return a pointer to the first available entry
+    return (data + write_pointer);
+  }
+
+  void AddressList::commit_nd_entry(int act_dim, size_t bytes)
+  {
+    size_t entries_used = act_dim * 2;
+
+    write_pointer += entries_used;
+    if(write_pointer >= MAX_ENTRIES) {
+      assert(write_pointer == MAX_ENTRIES);
+      write_pointer = 0;
+    }
+
+    total_bytes += bytes;
+  }
+
+  size_t AddressList::bytes_pending() const
+  {
+    return total_bytes;
+  }
+
+  const size_t *AddressList::read_entry()
+  {
+    assert(total_bytes > 0);
+    if(read_pointer >= MAX_ENTRIES) {
+      assert(read_pointer == MAX_ENTRIES);
+      read_pointer = 0;
+    }
+    // skip trailing 0's
+    if(data[read_pointer] == 0)
+      read_pointer = 0;
+    return (data + read_pointer);
+  }
+	 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class AddressListCursor
+  //
+
+  AddressListCursor::AddressListCursor()
+    : addrlist(0)
+    , partial(false)
+  {
+    for(int i = 0; i < MAX_DIM; i++)
+      pos[i] = 0;
+  }
+
+  void AddressListCursor::set_addrlist(AddressList *_addrlist)
+  {
+    addrlist = _addrlist;
+  }
+
+  int AddressListCursor::get_dim()
+  {
+    assert(addrlist);
+    // with partial progress, we restrict ourselves to just the rest of that dim
+    if(partial) {
+      return (partial_dim + 1);
+    } else {
+      const size_t *entry = addrlist->read_entry();
+      int act_dim = (entry[0] & 15);
+      return act_dim;
+    }
+  }
+
+  uintptr_t AddressListCursor::get_offset()
+  {
+    const size_t *entry = addrlist->read_entry();
+    int act_dim = (entry[0] & 15);
+    uintptr_t ofs = entry[1];
+    if(partial) {
+      for(int i = partial_dim; i < act_dim; i++)
+	if(i == 0) {
+	  // dim 0 is counted in bytes
+	  ofs += pos[0];
+	} else {
+	  // rest use the strides from the address list
+	  ofs += pos[i] * entry[1 + (2 * i)];
+	}
+    }
+    return ofs;
+  }
+
+  uintptr_t AddressListCursor::get_stride(int dim)
+  {
+    const size_t *entry = addrlist->read_entry();
+    int act_dim = (entry[0] & 15);
+    assert((dim > 0) && (dim < act_dim));
+    return entry[2 * dim + 1];
+  }
+
+  size_t AddressListCursor::remaining(int dim)
+  {
+    const size_t *entry = addrlist->read_entry();
+    int act_dim = (entry[0] & 15);
+    assert(dim < act_dim);
+    size_t r = entry[2 * dim];
+    if(dim == 0) r >>= 4;
+    if(partial) {
+      if(dim > partial_dim) r = 1;
+      if(dim == partial_dim) {
+	assert(r > pos[dim]);
+	r -= pos[dim];
+      }
+    }
+    return r;
+  }
+
+  void AddressListCursor::advance(int dim, size_t amount)
+  {
+    const size_t *entry = addrlist->read_entry();
+    int act_dim = (entry[0] & 15);
+    assert(dim < act_dim);
+    size_t r = entry[2 * dim];
+    if(dim == 0) r >>= 4;
+
+    size_t bytes = amount;
+    if(dim > 0) {
+#ifdef DEBUG_REALM
+      for(int i = 0; i < dim; i++)
+	assert(pos[i] == 0);
+#endif
+      bytes *= (entry[0] >> 4);
+      for(int i = 1; i < dim; i++)
+	bytes *= entry[2 * i];
+    }
+#ifdef DEBUG_REALM
+    assert(addrlist->total_bytes >= bytes);
+#endif
+    addrlist->total_bytes -= bytes;
+    
+    if(!partial) {
+      if((dim == (act_dim - 1)) && (amount == r)) {
+	// simple case - we consumed the whole thing
+	addrlist->read_pointer += 2 * act_dim;
+	return;
+      } else {
+	// record partial consumption
+	partial = true;
+	partial_dim = dim;
+	pos[partial_dim] = amount;
+      }
+    } else {
+      // update a partial consumption in progress
+      assert(dim <= partial_dim);
+      partial_dim = dim;
+      pos[partial_dim] += amount;
+    }
+
+    while(pos[partial_dim] == r) {
+      pos[partial_dim++] = 0;
+      if(partial_dim == act_dim) {
+	// all done
+	partial = false;
+	addrlist->read_pointer += 2 * act_dim;
+	break;
+      } else {
+	pos[partial_dim]++;  // carry into next dimension
+	r = entry[2 * partial_dim]; // no shift because partial_dim > 0
+      }
+    }
+  }
+
+  void AddressListCursor::skip_bytes(size_t bytes)
+  {
+    while(bytes > 0) {
+      int act_dim = get_dim();
+
+      if(act_dim == 0) {
+	assert(0);
+      } else {
+	size_t chunk = remaining(0);
+	if(chunk <= bytes) {
+	  int dim = 0;
+	  size_t count = chunk;
+	  while((dim + 1) < act_dim) {
+	    dim++;
+	    count = bytes / chunk;
+	    assert(count > 0);
+	    size_t r = remaining(dim + 1);
+	    if(count < r) {
+	      chunk *= count;
+	      break;
+	    } else {
+	      count = r;
+	      chunk *= count;
+	    }
+	  }
+	  advance(dim, count);
+	  bytes -= chunk;
+	} else {
+	  advance(0, bytes);
+	  return;
+	}
+      }
+    }
+  }
+
 
       XferDes::XferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
 		       const std::vector<XferDesPortInfo>& inputs_info,
@@ -248,6 +676,7 @@ namespace Realm {
 	  p.remote_bytes_total.store(size_t(-1));
 	  p.ib_offset = ii.ib_offset;
 	  p.ib_size = ii.ib_size;
+	  p.addrcursor.set_addrlist(&p.addrlist);
 	  switch(ii.port_type) {
 	  case XferDesPortInfo::GATHER_CONTROL_PORT:
 	    gather_control_port = i; break;
@@ -304,6 +733,7 @@ namespace Realm {
 	  p.remote_bytes_total.store(size_t(-1));
 	  p.ib_offset = oi.ib_offset;
 	  p.ib_size = oi.ib_size;
+	  p.addrcursor.set_addrlist(&p.addrlist);
 
 	  // if we're writing into an IB, the first 'ib_size' byte
 	  //  locations can be freely written
@@ -421,6 +851,224 @@ namespace Realm {
                (ssize_t)req->src_str, (ssize_t)req->dst_str,
                req->nbytes, req->nlines);
       }
+
+  size_t XferDes::update_control_info(ReadSequenceCache *rseqcache)
+  {
+    // pull control information if we need it
+    if(input_control.remaining_count == 0) {
+      XferPort& icp = input_ports[input_control.control_port_idx];
+      size_t avail = icp.seq_remote.span_exists(icp.local_bytes_total,
+						sizeof(unsigned));
+      if(avail < sizeof(unsigned))
+	return 0;  // no data right now
+
+      TransferIterator::AddressInfo c_info;
+      size_t amt = icp.iter->step(sizeof(unsigned), c_info, 0, false /*!tentative*/);
+      assert(amt == sizeof(unsigned));
+      const void *srcptr = icp.mem->get_direct_ptr(c_info.base_offset, amt);
+      assert(srcptr != 0);
+      unsigned cword;
+      memcpy(&cword, srcptr, sizeof(unsigned));
+      if(rseqcache != 0)
+	rseqcache->add_span(input_control.control_port_idx,
+			    icp.local_bytes_total, sizeof(unsigned));
+      else
+	update_bytes_read(input_control.control_port_idx,
+			  icp.local_bytes_total, sizeof(unsigned));
+      icp.local_bytes_total += sizeof(unsigned);
+      input_control.remaining_count = cword >> 8;
+      input_control.current_io_port = (cword & 0x7f) - 1;
+      input_control.eos_received = (cword & 128) != 0;
+      log_xd.info() << "input control: xd=" << std::hex << guid << std::dec
+		    << " port=" << input_control.current_io_port
+		    << " count=" << input_control.remaining_count
+		    << " done=" << input_control.eos_received;
+      // if count is still zero, we're done
+      if(input_control.remaining_count == 0) {
+	assert(input_control.eos_received);
+	iteration_completed.store_release(true);
+	return 0;
+      }
+    }
+
+    if(output_control.remaining_count == 0) {
+      // this looks wrong, but the port that controls the output is
+      //  an input port! vvv
+      XferPort& ocp = input_ports[output_control.control_port_idx];
+      size_t avail = ocp.seq_remote.span_exists(ocp.local_bytes_total,
+						sizeof(unsigned));
+      if(avail < sizeof(unsigned))
+	return 0;  // no data right now
+      TransferIterator::AddressInfo c_info;
+      size_t amt = ocp.iter->step(sizeof(unsigned), c_info, 0, false /*!tentative*/);
+      assert(amt == sizeof(unsigned));
+      const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
+      assert(srcptr != 0);
+
+      unsigned cword;
+      memcpy(&cword, srcptr, sizeof(unsigned));
+      if(rseqcache != 0)
+	rseqcache->add_span(output_control.control_port_idx,
+			    ocp.local_bytes_total, sizeof(unsigned));
+      else
+	update_bytes_read(output_control.control_port_idx,
+			  ocp.local_bytes_total, sizeof(unsigned));
+      ocp.local_bytes_total += sizeof(unsigned);
+      assert(cword != 0);
+      output_control.remaining_count = cword >> 8;
+      output_control.current_io_port = (cword & 0x7f) - 1;
+      output_control.eos_received = (cword & 128) != 0;
+      log_xd.info() << "output control: xd=" << std::hex << guid << std::dec
+		    << " port=" << output_control.current_io_port
+		    << " count=" << output_control.remaining_count
+		    << " done=" << output_control.eos_received;
+      // if count is still zero, we're done
+      if(output_control.remaining_count == 0) {
+	assert(output_control.eos_received);
+	iteration_completed.store_release(true);
+	// give all output channels a chance to indicate completion
+	for(size_t i = 0; i < output_ports.size(); i++)
+	  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+	return 0;
+      }
+    }
+
+    return std::min(input_control.remaining_count,
+		    output_control.remaining_count);
+  }
+  
+  size_t XferDes::get_addresses(size_t min_xfer_size,
+				ReadSequenceCache *rseqcache)
+  {
+    size_t control_count = update_control_info(rseqcache);
+    if(control_count == 0)
+      return 0;
+    if(control_count < min_xfer_size)
+      min_xfer_size = control_count;
+    size_t max_bytes = control_count;
+
+    // get addresses for the input, if it exists
+    if(input_control.current_io_port >= 0) {
+      XferPort *in_port = &input_ports[input_control.current_io_port];
+
+      // do we need more addresses?
+      size_t read_bytes_avail = in_port->addrlist.bytes_pending();
+      if(read_bytes_avail < min_xfer_size) {
+	if(in_port->iter->get_addresses(in_port->addrlist)) {
+	  // adjust min size to flush as requested
+	  min_xfer_size = std::min(min_xfer_size,
+				   in_port->addrlist.bytes_pending());
+	}
+	read_bytes_avail = in_port->addrlist.bytes_pending();
+      }
+
+      // if we're not the first in the chain, respect flow control too
+      if(in_port->peer_guid != XFERDES_NO_GUID) {
+	read_bytes_avail = in_port->seq_remote.span_exists(in_port->local_bytes_total,
+							   read_bytes_avail);
+	size_t pbt_limit = (in_port->remote_bytes_total.load_acquire() -
+			    in_port->local_bytes_total);
+	min_xfer_size = std::min(min_xfer_size, pbt_limit);
+      }
+
+      // we'd like to wait until there's `min_xfer_size` bytes available on the
+      //  input, but in gather copies with fork-joins in the dataflow, we
+      //  can't be guaranteed that's possible, so move whatever we've got,
+      //  relying on the upstream producer to be producing it in the largest
+      //  chunks it can
+      if((read_bytes_avail > 0) && (read_bytes_avail < min_xfer_size))
+	min_xfer_size = read_bytes_avail;
+
+      max_bytes = std::min(max_bytes, read_bytes_avail);
+    }
+
+    // get addresses for the output, if it exists
+    if(output_control.current_io_port >= 0) {
+      XferPort *out_port = &output_ports[output_control.current_io_port];
+
+      // do we need more addresses?
+      size_t write_bytes_avail = out_port->addrlist.bytes_pending();
+      if(write_bytes_avail < min_xfer_size) {
+	if(out_port->iter->get_addresses(out_port->addrlist)) {
+	  // adjust min size to flush as requested
+	  min_xfer_size = std::min(min_xfer_size,
+				   out_port->addrlist.bytes_pending());
+	}
+	write_bytes_avail = out_port->addrlist.bytes_pending();
+      }
+
+      // if we're not the last in the chain, respect flow control too
+      if(out_port->peer_guid != XFERDES_NO_GUID) {
+	write_bytes_avail = out_port->seq_remote.span_exists(out_port->local_bytes_total,
+							     write_bytes_avail);
+      }
+
+      max_bytes = std::min(max_bytes, write_bytes_avail);
+    }
+
+    if(min_xfer_size == 0) {
+      // should only happen in the absence of control ports
+      assert((input_control.control_port_idx == -1) &&
+	     (output_control.control_port_idx == -1));
+      iteration_completed.store_release(true);
+      return 0;
+    }
+
+    // if we don't have a big enough chunk, wait for more to show up
+    if(max_bytes < min_xfer_size)
+      return 0;
+
+    return max_bytes;
+  }
+
+  bool XferDes::record_address_consumption(size_t total_bytes)
+  {
+    bool in_done = false;
+    if(input_control.current_io_port >= 0) {
+      XferPort *in_port = &input_ports[input_control.current_io_port];
+
+      in_port->local_bytes_total += total_bytes;
+      in_port->local_bytes_cons.fetch_add(total_bytes);
+
+      if(in_port->peer_guid == XFERDES_NO_GUID)
+	in_done = ((in_port->addrlist.bytes_pending() == 0) &&
+		   in_port->iter->done());
+      else
+	in_done = (in_port->local_bytes_total ==
+		   in_port->remote_bytes_total.load_acquire());
+    }
+
+    bool out_done = false;
+    if(output_control.current_io_port >= 0) {
+      XferPort *out_port = &output_ports[output_control.current_io_port];
+
+      out_port->local_bytes_total += total_bytes;
+      out_port->local_bytes_cons.fetch_add(total_bytes);
+
+      if(out_port->peer_guid == XFERDES_NO_GUID)
+	out_done = ((out_port->addrlist.bytes_pending() == 0) &&
+		    out_port->iter->done());
+    }
+	  
+    input_control.remaining_count -= total_bytes;
+    output_control.remaining_count -= total_bytes;
+
+    // input or output controls override our notion of done-ness
+    if(input_control.control_port_idx >= 0)
+      in_done = ((input_control.remaining_count == 0) &&
+		 input_control.eos_received);
+
+    if(output_control.control_port_idx >= 0)
+      out_done = ((output_control.remaining_count == 0) &&
+		  output_control.eos_received);
+	  
+    if(in_done || out_done) {
+      iteration_completed.store_release(true);
+      return true;
+    } else
+      return false;
+  }
+
 
     long XferDes::default_get_requests(Request** reqs, long nr,
 				       unsigned flags)
@@ -1598,6 +2246,15 @@ namespace Realm {
         channel = channel_manager->get_memcpy_channel();
 	kind = XFER_MEM_CPY;
 
+	// scan input and output ports to see if any use serdez ops
+	has_serdez = false;
+	for(size_t i = 0; i < inputs_info.size(); i++)
+	  if(inputs_info[i].serdez_id != 0)
+	    has_serdez = true;
+	for(size_t i = 0; i < outputs_info.size(); i++)
+	  if(outputs_info[i].serdez_id != 0)
+	    has_serdez = true;
+
 	// ignore requested max_nr and always use 1
 	memcpy_req.xd = this;
       }
@@ -1712,16 +2369,246 @@ namespace Realm {
       bool MemcpyXferDes::progress_xd(MemcpyChannel *channel,
 				      TimeLimit work_until)
       {
-	Request *rq;
+	if(has_serdez) {
+	  Request *rq;
+	  bool did_work = false;
+	  do {
+	    long count = get_requests(&rq, 1);
+	    if(count > 0) {
+	      channel->submit(&rq, count);
+	      did_work = true;
+	    } else
+	      break;
+	  } while(!work_until.is_expired());
+
+	  return did_work;
+	}
+
+	// fast path - assumes no serdez
 	bool did_work = false;
-	do {
-	  long count = get_requests(&rq, 1);
-	  if(count > 0) {
-	    channel->submit(&rq, count);
-	    did_work = true;
-	  } else
+	ReadSequenceCache rseqcache(this);
+	WriteSequenceCache wseqcache(this);
+
+	while(true) {
+	  size_t min_xfer_size = 4096;  // TODO: make controllable
+	  size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
+	  if(max_bytes == 0)
 	    break;
-	} while(!work_until.is_expired());
+
+	  XferPort *in_port = 0, *out_port = 0;
+	  size_t in_span_start = 0, out_span_start = 0;
+	  if(input_control.current_io_port >= 0) {
+	    in_port = &input_ports[input_control.current_io_port];
+	    in_span_start = in_port->local_bytes_total;
+	  }
+	  if(output_control.current_io_port >= 0) {
+	    out_port = &output_ports[output_control.current_io_port];
+	    out_span_start = out_port->local_bytes_total;
+	  }
+
+	  size_t total_bytes = 0;
+	  if(in_port != 0) {
+	    if(out_port != 0) {
+	      // input and output both exist - transfer what we can
+	      log_xd.info() << "memcpy chunk: min=" << min_xfer_size
+			    << " max=" << max_bytes;
+
+	      uintptr_t in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
+	      uintptr_t out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+
+	      while(total_bytes < max_bytes) {
+		AddressListCursor& in_alc = in_port->addrcursor;
+		AddressListCursor& out_alc = out_port->addrcursor;
+
+		uintptr_t in_offset = in_alc.get_offset();
+		uintptr_t out_offset = out_alc.get_offset();
+
+		// the reported dim is reduced for partially consumed address
+		//  ranges - whatever we get can be assumed to be regular
+		int in_dim = in_alc.get_dim();
+		int out_dim = out_alc.get_dim();
+
+		size_t bytes = 0;
+		size_t bytes_left = max_bytes - total_bytes;
+
+		if(in_dim > 0) {
+		  if(out_dim > 0) {
+		    size_t icount = in_alc.remaining(0);
+		    size_t ocount = out_alc.remaining(0);
+
+		    // contig bytes is always the min of the first dimensions
+		    size_t contig_bytes = std::min(std::min(icount, ocount),
+						   bytes_left);
+
+		    // catch simple 1D case first
+		    if((contig_bytes == bytes_left) ||
+		       ((contig_bytes == icount) && (in_dim == 1)) ||
+		       ((contig_bytes == ocount) && (out_dim == 1))) {
+		      bytes = contig_bytes;
+		      memcpy_1d(out_base + out_offset,
+				in_base + in_offset,
+				contig_bytes);
+		      in_alc.advance(0, bytes);
+		      out_alc.advance(0, bytes);
+		    } else {
+		      // grow to a 2D copy
+		      int id;
+		      int iscale;
+		      uintptr_t in_lstride;
+		      if(contig_bytes < icount) {
+			// second input dim comes from splitting first
+			id = 0;
+			in_lstride = contig_bytes;
+			size_t ilines = icount / contig_bytes;
+			if((ilines * contig_bytes) != icount)
+			  in_dim = 1;  // leftover means we can't go beyond this
+			icount = ilines;
+			iscale = contig_bytes;
+		      } else {
+			assert(in_dim > 1);
+			id = 1;
+			icount = in_alc.remaining(id);
+			in_lstride = in_alc.get_stride(id);
+			iscale = 1;
+		      }
+
+		      int od;
+		      int oscale;
+		      uintptr_t out_lstride;
+		      if(contig_bytes < ocount) {
+			// second output dim comes from splitting first
+			od = 0;
+			out_lstride = contig_bytes;
+			size_t olines = ocount / contig_bytes;
+			if((olines * contig_bytes) != ocount)
+			  out_dim = 1;  // leftover means we can't go beyond this
+			ocount = olines;
+			oscale = contig_bytes;
+		      } else {
+			assert(out_dim > 1);
+			od = 1;
+			ocount = out_alc.remaining(od);
+			out_lstride = out_alc.get_stride(od);
+			oscale = 1;
+		      }
+
+		      size_t lines = std::min(std::min(icount, ocount),
+					      bytes_left / contig_bytes);
+
+		      // see if we need to stop at 2D
+		      if(((contig_bytes * lines) == bytes_left) ||
+			 ((lines == icount) && (id == (in_dim - 1))) ||
+			 ((lines == ocount) && (od == (out_dim - 1)))) {
+			bytes = contig_bytes * lines;
+			memcpy_2d(out_base + out_offset, out_lstride,
+				  in_base + in_offset, in_lstride,
+				  contig_bytes, lines);
+			in_alc.advance(id, lines * iscale);
+			out_alc.advance(od, lines * oscale);
+		      } else {
+			uintptr_t in_pstride;
+			if(lines < icount) {
+			  // third input dim comes from splitting current
+			  in_pstride = in_lstride * lines;
+			  size_t iplanes = icount / lines;
+			  // check for leftovers here if we go beyond 3D!
+			  icount = iplanes;
+			  iscale *= lines;
+			} else {
+			  id++;
+			  assert(in_dim > id);
+			  icount = in_alc.remaining(id);
+			  in_pstride = in_alc.get_stride(id);
+			  iscale = 1;
+			}
+
+			uintptr_t out_pstride;
+			if(lines < ocount) {
+			  // third output dim comes from splitting current
+			  out_pstride = out_lstride * lines;
+			  size_t oplanes = ocount / lines;
+			  // check for leftovers here if we go beyond 3D!
+			  ocount = oplanes;
+			  oscale *= lines;
+			} else {
+			  od++;
+			  assert(out_dim > od);
+			  ocount = out_alc.remaining(od);
+			  out_pstride = out_alc.get_stride(od);
+			  oscale = 1;
+			}
+
+			size_t planes = std::min(std::min(icount, ocount),
+						 (bytes_left /
+						  (contig_bytes * lines)));
+
+			bytes = contig_bytes * lines * planes;
+			memcpy_3d(out_base + out_offset, out_lstride, out_pstride,
+				  in_base + in_offset, in_lstride, in_pstride,
+				  contig_bytes, lines, planes);
+			in_alc.advance(id, planes * iscale);
+			out_alc.advance(od, planes * oscale);
+		      }
+		    }
+		  } else {
+		    // scatter adddress list
+		    assert(0);
+		  }
+		} else {
+		  if(out_dim > 0) {
+		    // gather address list
+		    assert(0);
+		  } else {
+		    // gather and scatter
+		    assert(0);
+		  }
+		}
+
+#ifdef DEBUG_REALM
+		assert(bytes <= bytes_left);
+#endif
+		total_bytes += bytes;
+
+		// stop if it's been too long, but make sure we do at least the
+		//  minimum number of bytes
+		if((total_bytes >= min_xfer_size) && work_until.is_expired()) break;
+	      }
+	    } else {
+	      // input but no output, so skip input bytes
+	      total_bytes = max_bytes;
+	      in_port->addrcursor.skip_bytes(total_bytes);
+	    }
+	  } else {
+	    if(out_port != 0) {
+	      // output but no input, so skip output bytes
+	      total_bytes = max_bytes;
+	      out_port->addrcursor.skip_bytes(total_bytes);
+	    } else {
+	      // skipping both input and output is possible for simultaneous
+	      //  gather+scatter
+	      total_bytes = max_bytes;
+	    }
+	  }
+
+	  // memcpy is always immediate, so handle both skip and copy with the
+	  //  same code
+	  rseqcache.add_span(input_control.current_io_port,
+			     in_span_start, total_bytes);
+	  in_span_start += total_bytes;
+	  wseqcache.add_span(output_control.current_io_port,
+			     out_span_start, total_bytes);
+	  out_span_start += total_bytes;
+
+	  bool done = record_address_consumption(total_bytes);
+
+	  did_work = true;
+
+	  if(done || work_until.is_expired())
+	    break;
+	}
+
+	rseqcache.flush();
+	wseqcache.flush();
 
 	return did_work;
       }

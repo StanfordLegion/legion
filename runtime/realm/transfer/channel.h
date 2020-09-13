@@ -288,6 +288,49 @@ namespace Realm {
       CustomSerdezID serdez_id;
     };
 
+    class AddressList {
+    public:
+      AddressList();
+
+      size_t *begin_nd_entry(int max_dim);
+      void commit_nd_entry(int act_dim, size_t bytes);
+
+      size_t bytes_pending() const;
+      
+    protected:
+      friend class AddressListCursor;
+
+      const size_t *read_entry();
+
+      size_t total_bytes;
+      unsigned write_pointer;
+      unsigned read_pointer;
+      static const size_t MAX_ENTRIES = 1000;
+      size_t data[MAX_ENTRIES];
+    };
+
+    class AddressListCursor {
+    public:
+      AddressListCursor();
+
+      void set_addrlist(AddressList *_addrlist);
+
+      int get_dim();
+      uintptr_t get_offset();
+      uintptr_t get_stride(int dim);
+      size_t remaining(int dim);
+      void advance(int dim, size_t amount);
+
+      void skip_bytes(size_t bytes);
+      
+    protected:
+      AddressList *addrlist;
+      bool partial;
+      static const int MAX_DIM = 8;
+      int partial_dim;
+      size_t pos[MAX_DIM];
+    };
+
     class XferDes {
     public:
       // a pointer to the DmaRequest that contains this XferDes
@@ -318,6 +361,8 @@ namespace Realm {
 	//  to complete)
 	Memory ib_mem;
 	size_t ib_offset, ib_size;
+	AddressList addrlist;
+	AddressListCursor addrcursor;
       };
       std::vector<XferPort> input_ports, output_ports;
       struct ControlPortState {
@@ -365,6 +410,7 @@ namespace Realm {
       // queue that contains all available free requests
       Mutex available_req_mutex;
       std::queue<Request*> available_reqs;
+
     public:
       XferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
 	      const std::vector<XferDesPortInfo>& inputs_info,
@@ -480,6 +526,46 @@ namespace Realm {
 	XferDes *xd; // TODO: eliminate this based on a known offset
       };
       DeferredXDEnqueue deferred_enqueue;
+
+      // helper widget to cache spans so that SequenceAssembler updates are as
+      //  large as possible
+      template <void (XferDes::*UPDATE)(int port_idx, size_t offset, size_t size)>
+      class SequenceCache {
+      public:
+	SequenceCache(XferDes *_xd);
+
+	void add_span(int port_idx, size_t offset, size_t size);
+	void flush();
+
+      protected:
+	static const size_t MAX_ENTRIES = 4;
+
+	XferDes *xd;
+	int ports[MAX_ENTRIES];
+	size_t offsets[MAX_ENTRIES];
+	size_t sizes[MAX_ENTRIES];
+      };
+      typedef SequenceCache<&XferDes::update_bytes_read> ReadSequenceCache;
+      typedef SequenceCache<&XferDes::update_bytes_write> WriteSequenceCache;
+
+      size_t update_control_info(ReadSequenceCache *rseqcache);
+
+      // a helper routine for individual XferDes implementations - tries to get
+      //  addresses and check flow control for at least 'min_xfer_size' bytes
+      //  worth of transfers from a single input to a single output, and returns
+      //  the number of bytes that can be transferred before another call to
+      //  this method
+      // returns 0 if the transfer is complete OR if there are fewer than the
+      //  minimum requested bytes available and there's reason to believe that
+      //  trying again later will result in a larger chunk
+      // as a side effect, the input/output control information is updated - the
+      //  actual input/output ports involved in the next transfer are stored there
+      size_t get_addresses(size_t min_xfer_size, ReadSequenceCache *rseqcache);
+
+      // after a call to 'get_addresses', this call updates the various data
+      //  structures to record that transfers for 'total_bytes' bytes were at
+      //  least initiated - return value is whether iteration is complete
+      bool record_address_consumption(size_t total_bytes);
     };
 
     class MemcpyChannel;
@@ -507,6 +593,7 @@ namespace Realm {
     private:
       bool memcpy_req_in_use;
       MemcpyRequest memcpy_req;
+      bool has_serdez;
       //const char *src_buf_base, *dst_buf_base;
     };
 

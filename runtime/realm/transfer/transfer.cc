@@ -87,6 +87,8 @@ namespace Realm {
     virtual void confirm_step(void);
     virtual void cancel_step(void);
 
+    virtual bool get_addresses(AddressList &addrlist);
+
   protected:
     virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
 			       size_t& offset, size_t& fsize) = 0;
@@ -455,6 +457,160 @@ namespace Realm {
   {
     assert(tentative_valid);
     tentative_valid = false;
+  }
+
+  template <int N, typename T>
+  bool TransferIteratorBase<N,T>::get_addresses(AddressList &addrlist)
+  {
+#ifdef DEBUG_REALM
+    assert(!tentative_valid);
+#endif
+
+    while(!done()) {
+      if(!have_rect)
+	return false; // no more addresses at the moment, but expect more later
+
+      // we may be able to compact dimensions, but ask for space to write a
+      //  an address record of the maximum possible dimension (i.e. N)
+      size_t *addr_data = addrlist.begin_nd_entry(N);
+      if(!addr_data)
+	return true; // out of space for now
+
+      // find the layout piece the current point is in
+      const InstanceLayoutPiece<N,T> *layout_piece;
+      size_t field_rel_offset;
+      {
+	std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(cur_field_id);
+	assert(it != inst_layout->fields.end());
+	assert((cur_field_offset + cur_field_size) <= size_t(it->second.size_in_bytes));
+	const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
+	layout_piece = piece_list.find_piece(cur_point);
+	assert(layout_piece != 0);
+	field_rel_offset = it->second.rel_offset + cur_field_offset;
+      }
+
+      // figure out the largest iteration-consistent subrectangle that fits in
+      //  the current piece
+      Rect<N,T> target_subrect;
+      target_subrect.lo = cur_point;
+      target_subrect.hi = cur_point;
+      have_rect = false;  // tentatively clear - we'll (re-)set it below if needed
+      for(int di = 0; di < N; di++) {
+	int d = dim_order[di];
+
+	// our target subrect in this dimension can be trimmed at the front by
+	//  having already done a partial step, or trimmed at the end by the layout
+	if(cur_rect.hi[d] <= layout_piece->bounds.hi[d]) {
+	  if(cur_point[d] == cur_rect.lo[d]) {
+	    // simple case - we are at the start in this dimension and the piece
+	    //  covers the entire range
+	    target_subrect.hi[d] = cur_rect.hi[d];
+	    continue;
+	  } else {
+	    // we started in the middle, so we can finish this dimension, but
+	    //  not continue to further dimensions
+	    target_subrect.hi[d] = cur_rect.hi[d];
+	    if(di < (N - 1)) {
+	      // rewind the first di+1 dimensions and any after that that are
+	      //  at the end
+	      int d2 = 0;
+	      while((d2 < N) &&
+		    ((d2 <= di) ||
+		     (cur_point[dim_order[d2]] == cur_rect.hi[dim_order[d2]]))) {
+		cur_point[dim_order[d2]] = cur_rect.lo[dim_order[d2]];
+		d2++;
+	      }
+	      if(d2 < N) {
+		// carry didn't propagate all the way, so we have some left for
+		//  next time
+		cur_point[dim_order[d2]]++;
+		have_rect = true;
+	      }
+	    }
+	    break;
+	  }
+	} else {
+	  // stopping short (doesn't matter where we started) - limit this subrect
+	  //  based on the piece and start just past it in this dimension
+	  //  (rewinding previous dimensions)
+	  target_subrect.hi[d] = layout_piece->bounds.hi[d];
+	  have_rect = true;
+	  for(int d2 = 0; d2 < di; d2++)
+	    cur_point[dim_order[d2]] = cur_rect.lo[dim_order[d2]];
+	  cur_point[d] = layout_piece->bounds.hi[d] + 1;
+	  break;
+	}
+      }
+      //log_dma.print() << "step: cr=" << cur_rect << " bounds=" << layout_piece->bounds << " tgt=" << target_subrect << " next=" << cur_point << " (" << have_rect << ")";
+#ifdef DEBUG_REALM
+      assert(layout_piece->bounds.contains(target_subrect));
+#endif
+
+      if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType) {
+	const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
+
+	// offset of initial entry is easy to compute
+	addr_data[1] = (inst_impl->metadata.inst_offset +
+			affine->offset +
+			affine->strides.dot(target_subrect.lo) +
+			field_rel_offset);
+
+	size_t bytes = cur_field_size;
+	int cur_dim = 1;
+	int di = 0;
+	// compact any dimensions that are contiguous first
+	for(; di < N; di++) {
+	  // follow the agreed-upon dimension ordering
+	  int d = dim_order[di];
+
+	  // skip degenerate dimensions
+	  if(target_subrect.lo[d] == target_subrect.hi[d])
+	    continue;
+
+	  // if the stride doesn't match the current size, stop
+	  if(affine->strides[d] != bytes)
+	    break;
+
+	  // it's contiguous - multiply total bytes by extent and continue
+	  bytes *= (target_subrect.hi[d] - target_subrect.lo[d] + 1);
+	}
+
+	// if any dimensions are left, they need to become count/stride pairs
+	size_t total_bytes = bytes;
+	while(di < N) {
+	  size_t total_count = 1;
+	  size_t stride = affine->strides[dim_order[di]];
+
+	  for(; di < N; di++) {
+	    int d = dim_order[di];
+
+	    if(target_subrect.lo[d] == target_subrect.hi[d])
+	      continue;
+
+	    size_t count = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
+
+	    if(affine->strides[d] != (stride * total_count))
+	      break;
+
+	    total_count *= count;
+	  }
+
+	  addr_data[cur_dim * 2] = total_count;
+	  addr_data[cur_dim * 2 + 1] = stride;
+	  total_bytes *= total_count;
+	  cur_dim++;
+	}
+
+	// now that we know the compacted dimension, we can finish the address
+	//  record
+	addr_data[0] = (bytes << 4) + cur_dim;
+	addrlist.commit_nd_entry(cur_dim, total_bytes);
+      } else {
+	assert(0 && "no support for non-affine pieces yet");
+      }
+    }
+
+    return true; // we have no more addresses to produce
   }
 
 

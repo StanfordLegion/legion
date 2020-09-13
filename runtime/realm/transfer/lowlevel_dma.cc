@@ -1952,6 +1952,8 @@ namespace Realm {
     virtual void confirm_step(void);
     virtual void cancel_step(void);
 
+    virtual bool get_addresses(AddressList &addrlist);
+
     static Serialization::PolymorphicSerdezSubclass<TransferIterator, WrappingFIFOIterator> serdez_subclass;
 
     template <typename S>
@@ -2039,6 +2041,22 @@ namespace Realm {
     assert(tentative_valid);
     offset = prev_offset;
     tentative_valid = false;
+  }
+
+  bool WrappingFIFOIterator::get_addresses(AddressList &addrlist)
+  {
+    // just add a single copy of our range, on the assumption it's much
+    //  bigger than what the caller actually needs right now
+    size_t *data = addrlist.begin_nd_entry(1 /*dim*/);
+    if(!data)
+      return true;  // can't add more until some is consumed
+
+    // 1-D span from [base,base+size)
+    data[0] = (size << 4) + 1 /*dim*/;
+    data[1] = base;
+    addrlist.commit_nd_entry(1 /*dim*/, size);
+
+    return false;  // we can add more if asked
   }
 
   /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator, WrappingFIFOIterator> WrappingFIFOIterator::serdez_subclass;
