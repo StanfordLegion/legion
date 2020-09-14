@@ -1072,11 +1072,9 @@ namespace Legion {
     {
       bool do_registration = true;
       if (must_epoch != NULL)
-      {
         do_registration = 
           must_epoch->record_dependence(this, gen, target, target_gen, 
                                         idx, target_idx, dtype);
-      }
       // Can never register a dependence on ourself since it means
       // that the target was recycled and will never register. Return
       // true if the generation is older than our current generation.
@@ -9640,7 +9638,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RefinementOp::initialize(Operation *op, unsigned index,
+    void RefinementOp::initialize(Operation *creator, unsigned index,
                                   const LogicalTraceInfo &trace_info,
                                   RegionNode *root, const FieldMask &mask)
     //--------------------------------------------------------------------------
@@ -9648,8 +9646,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(to_refine == NULL);
 #endif
-      initialize_internal(op, index, trace_info);
+      initialize_internal(creator, index, trace_info);
       to_refine = root;
+      MustEpochOp *must = creator->get_must_epoch_op();
+      if (must != NULL)
+        set_must_epoch(must, false/*do registration*/);
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_refinement_operation(parent_ctx->get_unique_id(), 
@@ -9665,7 +9666,7 @@ namespace Legion {
         root->column_source->get_field_set(mask, parent_ctx, fields);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, fields);
         LegionSpy::log_internal_op_creator(unique_op_id, 
-                          op->get_unique_op_id(), index);
+                    creator->get_unique_op_id(), index);
       }
     }
 
@@ -9692,6 +9693,16 @@ namespace Legion {
       assert(make_from.get_valid_mask() == refinement_mask);
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Set the must epoch op back to NULL since we know our dependence
+      // analysis is now complete and we want to run through the rest
+      // of the pipeline without being impeded by the must epoch op
+      must_epoch = NULL;
+    }
 
     //--------------------------------------------------------------------------
     void RefinementOp::trigger_ready(void)
@@ -13285,7 +13296,7 @@ namespace Legion {
     bool MustEpochOp::record_dependence(Operation *src_op, GenerationID src_gen,
                                         Operation *dst_op, GenerationID dst_gen,
                                         unsigned src_idx, unsigned dst_idx,
-                                        DependenceType dtype)
+                                        DependenceType dtype) 
     //--------------------------------------------------------------------------
     {
       // If they are the same we can ignore them 
@@ -13373,6 +13384,19 @@ namespace Legion {
         }
         // NO_DEPENDENCE and PROMOTED_DEPENDENCE are not errors
         // and do not need to be recorded
+      }
+      if ((dst_index >= 0) && src_op->is_internal_op())
+      {
+        // Refinement operations should not record dependences on previous
+        // operations in the same must epoch operation
+#ifdef DEBUG_LEGION
+        assert(src_op->get_operation_kind() == REFINEMENT_OP_KIND);
+#endif
+        // No need to do anything here, at least one point task (the creator)
+        // will record a mapping dependence on the refinement operation
+        // and that will guaranteed that none of the points will attempt to
+        // map until after the refinement is done
+        return false;
       }
       return true;
     }

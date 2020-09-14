@@ -15107,7 +15107,12 @@ namespace Legion {
       update_initialized_data(set_expr, true/*covers*/, user_mask);
       // Update any restricted fields 
       if (restricted)
+      {
+#ifdef DEBUG_LEGION
+        assert(!restricted_instances.empty());
+#endif
         restricted_fields |= user_mask;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -19197,9 +19202,10 @@ namespace Legion {
           LegionList<FieldSet<IndexSpaceExpression*> >::aligned expr_sets;
           to_union.compute_field_sets(FieldMask(), expr_sets);
           for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-                const_iterator it = expr_sets.begin(); it !=
+                iterator it = expr_sets.begin(); it !=
                 expr_sets.end(); it++)
           {
+            it->elements.insert(expr);
             IndexSpaceExpression *union_expr = 
               runtime->forest->union_index_spaces(it->elements); 
             if (union_expr->get_volume() < set_expr->get_volume())
@@ -19275,6 +19281,9 @@ namespace Legion {
             delete (*it);
         }
       }
+#ifdef DEBUG_LEGION
+      assert(!restricted_instances.empty());
+#endif
       // Always update the restricted fields
       restricted_fields |= restrict_mask;
       // Invalidate any tracing postconditions not for the restriction

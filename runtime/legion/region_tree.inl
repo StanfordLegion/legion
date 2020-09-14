@@ -2962,7 +2962,7 @@ namespace Legion {
       {
         if (itr.rect.contains(color_point))
         {
-          long long stride = 1;
+          unsigned long long stride = 1;
           for (int idx = 0; idx < DIM; idx++)
           {
             offset += (color_point[idx] - itr.rect.lo[idx]) * stride;

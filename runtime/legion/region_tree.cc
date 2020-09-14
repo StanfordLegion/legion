@@ -14643,9 +14643,7 @@ namespace Legion {
         // a close operation at the end to initialize the equivalence
         // set at the root of the tree
         if (!!unversioned)
-        {
           state.disjoint_complete_tree |= unversioned;
-        }
       }
       RegionTreeNode *next_child = NULL;
       if (!arrived)
@@ -14898,13 +14896,13 @@ namespace Legion {
                 // register_logical_user will be the function that finishes
                 // it for each of the reginement operations
                 refinement_op->begin_dependence_analysis();
+                perform_tree_dominance_analysis(ctx, refinement_user, 
+                      refinement_mask, user.op/*skip op*/, user.gen);
                 // Trigger this here so it happens in a determinsitic order
                 // for control replication. It has to happen after we've got
                 // the list of refinements to make from updating the 
                 // disjoint-complete tree
                 refinement_op->trigger_dependence_analysis();
-                perform_tree_dominance_analysis(ctx, refinement_user, 
-                    refinement_mask, user.op/*skip op*/, user.gen);
                 // Register the refinement as an operation here
                 register_local_user(state, refinement_user, trace_info); 
 #ifdef DEBUG_LEGION

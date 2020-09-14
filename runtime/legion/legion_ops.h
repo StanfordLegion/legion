@@ -295,6 +295,7 @@ namespace Legion {
       inline bool is_tracking_parent(void) const { return track_parent; } 
       inline LegionTrace* get_trace(void) const { return trace; }
       inline size_t get_ctx_index(void) const { return context_index; }
+      inline MustEpochOp* get_must_epoch_op(void) const { return must_epoch; } 
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -1979,6 +1980,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual const FieldMask& get_internal_mask(void) const;
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);

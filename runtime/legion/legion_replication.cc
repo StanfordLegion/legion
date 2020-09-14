@@ -1285,6 +1285,8 @@ namespace Legion {
           }
         }
       }
+      // Do the base call at this point
+      RefinementOp::trigger_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
