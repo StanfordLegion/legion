@@ -3721,7 +3721,8 @@ namespace Legion {
         EquivalenceSet *new_set = 
           (*it)->compute_refinement(source, runtime, applied_events);
         FieldMask dummy_parent;
-        target->record_refinement(new_set, overlap,dummy_parent,applied_events);
+        target->record_refinement(new_set, overlap,
+                                  dummy_parent, applied_events);
         if ((*it)->finalize(overlap))
         {
           delete (*it);
@@ -8557,7 +8558,7 @@ namespace Legion {
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
             eq_set->clone_from(it->first, it->second, applied_events, 
-                               true/*invalidate source overlap*/);
+                 IS_WRITE(regions[idx1])/*invalidate source overlap*/);
         }
         // Now initialize our logical and physical contexts
         region_node->initialize_disjoint_complete_tree(ctx, user_mask);
@@ -9198,13 +9199,13 @@ namespace Legion {
       // we deal with that case below
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
       {
-        // We also don't need to close up read-only instances
-        // or reduction-only instances (because they are restricted)
-        // so all changes have already been propagated
-        if (!IS_WRITE(regions[idx]))
-          continue;
         if (!virtual_mapped[idx])
         {
+          // We also don't need to close up read-only instances
+          // or reduction-only instances (because they are restricted)
+          // so all changes have already been propagated
+          if (!IS_WRITE(regions[idx]))
+            continue;
 #ifdef DEBUG_LEGION
           assert(!physical_instances[idx].empty());
 #endif

@@ -1379,6 +1379,7 @@ namespace Legion {
       ApEvent summarize(const PhysicalTraceInfo &trace_info) const;
     protected:
       void record_view(LogicalView *new_view);
+      void resize_reductions(size_t new_size);
       void update_tracing_valid_views(EquivalenceSet *tracing_eq,
             LogicalView *src, LogicalView *dst, const FieldMask &mask,
             IndexSpaceExpression *expr, ReductionOpID redop,
@@ -1660,7 +1661,7 @@ namespace Legion {
      * a set of equivalence sets
      */
     class InvalidInstAnalysis : public PhysicalAnalysis,
-                                public LegionHeapify<ValidInstAnalysis> {
+                                public LegionHeapify<InvalidInstAnalysis> {
     public:
       InvalidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
                           IndexSpaceExpression *expr,
@@ -3382,7 +3383,7 @@ namespace Legion {
       // to touch it. In that case we need a data structure to make
       // sure that there is only one call going out to the context
       // at a time for each field to make the equivalence sets.
-      LegionMap<RtUserEvent,FieldMask>::aligned disjoint_complete_ready;
+      LegionMap<RtEvent,FieldMask>::aligned disjoint_complete_ready;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator; 

@@ -393,9 +393,10 @@ namespace Legion {
       LG_FREE_INSTANCE_TASK_ID,
       LG_DEFER_TRACE_PRECONDITION_TASK_ID,
       LG_DEFER_TRACE_POSTCONDITION_TASK_ID,
+      LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID,
+      LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_YIELD_TASK_ID,
-      LG_DEFER_TRACE_UPDATE_TASK_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
       LG_BEGIN_SHUTDOWN_TASK_IDS,
       LG_RETRY_SHUTDOWN_TASK_ID = LG_BEGIN_SHUTDOWN_TASK_IDS,
@@ -511,9 +512,10 @@ namespace Legion {
         "Free Instance",                                          \
         "Defer Trace Precondition Test",                          \
         "Defer Trace Postcondition Test",                         \
+        "Defer Trace Finalize Condition Set Updates",             \
+        "Defer Trace Update",                                     \
         "Defer Consensus Match",                                  \
         "Yield",                                                  \
-        "Defer Trace Update",                                     \
         "Retry Shutdown",                                         \
         "Remote Message",                                         \
       };

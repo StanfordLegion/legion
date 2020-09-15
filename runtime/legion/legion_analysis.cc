@@ -4650,11 +4650,11 @@ namespace Legion {
             if (overlap_size < it->first.first->get_volume())
             {
               if (overlap_size == it->first.second->get_volume())
-                record_update(dst_view, inst, it->second, 
-                              it->first.second, tracing_eq, applied);
+                record_update(dst_view, inst, it->second, it->first.second, 
+                                tracing_eq, applied, redop, across_helper);
               else
                 record_update(dst_view, inst, it->second, overlap, 
-                              tracing_eq, applied);
+                              tracing_eq, applied, redop, across_helper);
               // Compute the difference
               IndexSpaceExpression *diff_expr = 
                 forest->subtract_index_spaces(it->first.first, overlap);
@@ -4840,7 +4840,7 @@ namespace Legion {
             // is going to be the one that reads the shadow instance
             shadow_epochs.resize(shadow_index + 2, 0/*no reduction*/);
             if (reductions.size() == shadow_index)
-              reductions.resize(shadow_index + 1);
+              resize_reductions(shadow_index + 1);
             update = new CopyUpdate(it->first, src_mask, it->second, 
                   0/*no reduction here*/, across_helper);
             // Also bump the redop_index for so the next application happens
@@ -4853,7 +4853,7 @@ namespace Legion {
             if (redop_index >= redop_epochs.size())
               redop_epochs.resize(redop_index + 1, 0);
             if (redop_index >= reductions.size())
-              reductions.resize(redop_index + 1);
+              resize_reductions(redop_index + 1);
             update = 
               new CopyUpdate(shadow_reduction, dst_mask, it->second, redop);
           }
@@ -4883,10 +4883,21 @@ namespace Legion {
           // Start a new redop epoch if necessary
           redop_epochs.push_back(redop);
           if (reductions.size() == redop_index)
-            reductions.resize(redop_index + 1);
+            resize_reductions(redop_index + 1);
         }
         reductions[redop_index][dst_view].insert(update, dst_mask);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::resize_reductions(size_t new_size)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned>
+        new_reductions(new_size);
+      for (unsigned idx = 0; idx < reductions.size(); idx++)
+        new_reductions[idx].swap(reductions[idx]);
+      reductions.swap(new_reductions);
     }
 
     //--------------------------------------------------------------------------
@@ -15628,131 +15639,158 @@ namespace Legion {
               bool found_covered = already_valid && 
                 total_valid_instances[red_view].is_set(fidx);
               std::set<IndexSpaceExpression*> found_exprs;
-              for (std::list<std::pair<ReductionView*,
-                    IndexSpaceExpression*> >::iterator it =
-                    field_views.begin(); it != field_views.end(); it++)
+              // We only need to do this check if it's not already-covered
+              // In the case where we know that it is already covered
+              // at this point it is restricted, so everything is being
+              // flushed to it anyway
+              if (!found_covered)
               {
-                if (it->first != red_view)
+                for (std::list<std::pair<ReductionView*,
+                      IndexSpaceExpression*> >::iterator it =
+                      field_views.begin(); it != field_views.end(); it++)
                 {
-                  if (!found_covered && found_exprs.empty())
-                    continue;
-                  if (it->first->get_redop() == view_redop)
-                    continue;
-                  // Check for intersection
-                  if (found_covered)
+                  if (it->first != red_view)
                   {
-                    if (!expr_covers && (expr != it->second))
-                    {
-                      IndexSpaceExpression *overlap = 
-                        runtime->forest->intersect_index_spaces(expr, 
-                                                                it->second);
-                      if (overlap->is_empty())
-                        continue;
-                    }
-                  }
-                  else
-                  {
-                    // Check each of the individual expressions for overlap
-                    bool all_disjoint = true;
-                    for (std::set<IndexSpaceExpression*>::const_iterator fit =
-                          found_exprs.begin(); fit != found_exprs.end(); fit++)
-                    {
-                      IndexSpaceExpression *overlap = 
-                       runtime->forest->intersect_index_spaces(it->second,*fit);
-                      if (overlap->is_empty())
-                        continue;
-                      all_disjoint = false;
-                      break;
-                    }
-                    if (all_disjoint)
+                    if (!found_covered && found_exprs.empty())
                       continue;
-                  }
-                  // If we make it here, report the ABA violation
-                  REPORT_LEGION_FATAL(LEGION_FATAL_REDUCTION_ABA_PROBLEM,
-                      "Unsafe re-use of reduction instance detected due "
-                      "to alternating un-flushed reduction operations "
-                      "%d and %d. Please report this use case to the "
-                      "Legion developer's mailing list so that we can "
-                      "help you address it.", view_redop,it->first->get_redop())
-                }
-                else if (!found_covered)
-                {
-                  if (!expr_covers)
-                  {
-                    if (expr != it->second)
+                    if (it->first->get_redop() == view_redop)
+                      continue;
+                    // Check for intersection
+                    if (found_covered)
                     {
-                      IndexSpaceExpression *overlap = 
-                       runtime->forest->intersect_index_spaces(expr,it->second);
-                      if (overlap->get_volume() < expr->get_volume())
+                      if (!expr_covers && (expr != it->second))
                       {
-                        found_exprs.insert(overlap);
-                        // Promote this to be the union of the two
-                        if (overlap->get_volume() < it->second->get_volume())
+                        IndexSpaceExpression *overlap = 
+                          runtime->forest->intersect_index_spaces(expr, 
+                                                                  it->second);
+                        if (overlap->is_empty())
+                          continue;
+                      }
+                    }
+                    else
+                    {
+                      // Check each of the individual expressions for overlap
+                      bool all_disjoint = true;
+                      for (std::set<IndexSpaceExpression*>::const_iterator fit =
+                           found_exprs.begin(); fit != found_exprs.end(); fit++)
+                      {
+                        IndexSpaceExpression *overlap = 
+                          runtime->forest->intersect_index_spaces(it->second,
+                                                                  *fit);
+                        if (overlap->is_empty())
+                          continue;
+                        all_disjoint = false;
+                        break;
+                      }
+                      if (all_disjoint)
+                        continue;
+                    }
+                    // If we make it here, report the ABA violation
+                    REPORT_LEGION_FATAL(LEGION_FATAL_REDUCTION_ABA_PROBLEM,
+                        "Unsafe re-use of reduction instance detected due "
+                        "to alternating un-flushed reduction operations "
+                        "%d and %d. Please report this use case to the "
+                        "Legion developer's mailing list so that we can "
+                        "help you address it.", view_redop,
+                        it->first->get_redop())
+                  }
+                  else if (!found_covered)
+                  {
+                    if (!expr_covers)
+                    {
+                      if (expr != it->second)
+                      {
+                        IndexSpaceExpression *overlap = 
+                          runtime->forest->intersect_index_spaces(expr,
+                                                            it->second);
+                        if (overlap->get_volume() < expr->get_volume())
                         {
-                          IndexSpaceExpression *union_expr =
-                            runtime->forest->union_index_spaces(expr,it->second);
-                          union_expr->add_expression_reference();
-                          if (it->second->remove_expression_reference())
-                            delete it->second;
-                          it->second = union_expr;
+                          found_exprs.insert(overlap);
+                          // Promote this to be the union of the two
+                          if (overlap->get_volume() < it->second->get_volume())
+                          {
+                            IndexSpaceExpression *union_expr =
+                              runtime->forest->union_index_spaces(expr,
+                                                            it->second);
+                            union_expr->add_expression_reference();
+                            if (it->second->remove_expression_reference())
+                              delete it->second;
+                            it->second = union_expr;
+                          }
+                          else
+                            it->second = expr;
                         }
                         else
-                          it->second = expr;
+                          found_covered = true;
                       }
                       else
                         found_covered = true;
                     }
                     else
-                      found_covered = true;
+                    {
+                      if ((it->second != set_expr) &&
+                          (it->second->get_volume() < set_expr->get_volume()))
+                      {
+                        found_exprs.insert(it->second);
+                        // Promote this up to the full set expression
+                        set_expr->add_expression_reference();
+                        if (it->second->remove_expression_reference())
+                          delete it->second;
+                        it->second = set_expr;
+                      }
+                      else
+                        found_covered = true;
+                    }
+                  }
+                }
+                // See if there are any fill expressions that we need to do
+                // These are also the expressions that we need to add to the
+                // fields views set since they won't be described by prior
+                // reductions already on the list
+                if (!found_covered)
+                {
+                  FieldMask fill_mask;
+                  fill_mask.set_bit(fidx);
+                  if (!found_exprs.empty())
+                  {
+                    guard_fill_mask.set_bit(fidx);
+                    // See if the union dominates the expression, if not
+                    // put in the difference
+                    IndexSpaceExpression *union_expr = 
+                      runtime->forest->union_index_spaces(found_exprs);
+                    if (union_expr->get_volume() < expr->get_volume())
+                    {
+                      IndexSpaceExpression *diff_expr =
+                        runtime->forest->subtract_index_spaces(expr,union_expr);
+                      fill_exprs.insert(diff_expr, fill_mask);
+                      red_view->add_nested_valid_ref(did, &mutator);
+                      diff_expr->add_expression_reference();
+                      field_views.push_back(std::make_pair(red_view,diff_expr));
+                    }
                   }
                   else
                   {
-                    if ((it->second != set_expr) &&
-                        (it->second->get_volume() < set_expr->get_volume()))
-                    {
-                      found_exprs.insert(it->second);
-                      // Promote this up to the full set expression
-                      set_expr->add_expression_reference();
-                      if (it->second->remove_expression_reference())
-                        delete it->second;
-                      it->second = set_expr;
-                    }
-                    else
-                      found_covered = true;
+                    fill_exprs.insert(expr, fill_mask);
+                    // No previous exprs, so record the full thing
+                    red_view->add_nested_valid_ref(did, &mutator);
+                    expr->add_expression_reference();
+                    field_views.push_back(std::make_pair(red_view, expr));
                   }
                 }
+                else
+                  guard_fill_mask.set_bit(fidx);
               }
-              // If we didn't add this to the list yet, do that now
-              if (!found_covered && found_exprs.empty())
+              else
               {
+                // This is already restricted, so just add it,
+                // we'll be flushing it here shortly
                 red_view->add_nested_valid_ref(did, &mutator);
                 expr->add_expression_reference();
                 field_views.push_back(std::make_pair(red_view, expr));
               }
-              // See if there are any fill expressions that we need to do
-              if (!found_covered)
-              {
-                FieldMask fill_mask;
-                fill_mask.set_bit(fidx);
-                if (!found_exprs.empty())
-                {
-                  guard_fill_mask.set_bit(fidx);
-                  // See if the union dominates the expression, if not
-                  // put in the difference
-                  IndexSpaceExpression *union_expr = 
-                    runtime->forest->union_index_spaces(found_exprs);
-                  if (union_expr->get_volume() < expr->get_volume())
-                  {
-                    IndexSpaceExpression *diff_expr =
-                      runtime->forest->subtract_index_spaces(expr, union_expr);
-                    fill_exprs.insert(diff_expr, fill_mask);
-                  }
-                }
-                else
-                  fill_exprs.insert(expr, fill_mask);
-              }
-              else
-                guard_fill_mask.set_bit(fidx);
+#ifdef DEBUG_LEGION
+              assert(!field_views.empty());
+#endif
               fidx = update_fields.find_next_set(fidx+1);
             }
             if (!fill_exprs.empty())
@@ -18530,6 +18568,7 @@ namespace Legion {
         const FieldMask inst_mask = rit->second & reduction_mask;
         if (!inst_mask)
           continue;
+        const bool target_is_reduction = rit->first->is_reduction_view();
         int fidx = inst_mask.find_first_set();
         while (fidx >= 0)
         {
@@ -18539,15 +18578,46 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(finder != reduction_instances.end());
           assert(!finder->second.empty());
-#endif
+#endif 
           if (expr_covers)
           {
+            // If the target is a reduction instance, check to see
+            // that we at least have one reduction to apply
+            if (target_is_reduction)
+            {
+              // Filter out all of our reductions
+              for (std::list<std::pair<ReductionView*,
+                             IndexSpaceExpression*> >::const_iterator it =
+                    finder->second.begin(); it != 
+                    finder->second.end(); /*nothing*/)
+              {
+                if (it->first == rit->first)
+                {
+                  if (it->first->remove_nested_valid_ref(did))
+                    delete it->first;
+                  if (it->second->remove_expression_reference())
+                    delete it->second;
+                  it = finder->second.erase(it);
+                }
+                else
+                  it++;
+              }
+              if (finder->second.empty())
+              {
+                // Quick out if there was nothing to apply
+                reduction_instances.erase(finder);
+                reduction_fields.unset_bit(fidx);
+                fidx = inst_mask.find_next_set(fidx+1);
+                continue;
+              }
+            }
             if (aggregator == NULL)
               aggregator = new CopyFillAggregator(runtime->forest, op, index,
                                         guard_event, track_events);
             aggregator->record_reductions(rit->first, finder->second, fidx,
-                fidx, trace_info.recording ? this : NULL, applied_events,
-                across_helper);
+              (across_helper == NULL) ? fidx : 
+                across_helper->convert_src_to_dst(fidx),
+              trace_info.recording ? this : NULL, applied_events,across_helper);
             bool has_cover = false;
             for (std::list<std::pair<ReductionView*,
                   IndexSpaceExpression*> >::const_iterator it =
@@ -18603,7 +18673,12 @@ namespace Legion {
                   iterator it = finder->second.begin();
                   it != finder->second.end(); /*nothing*/)
             {
-              if (it->second == expr)
+              if (target_is_reduction && (it->first == rit->first))
+              {
+                to_delete.push_back(*it);
+                it = finder->second.erase(it);
+              }
+              else if (it->second == expr)
               {
                 to_record.push_back(*it);
                 to_delete.push_back(*it);
@@ -18659,8 +18734,10 @@ namespace Legion {
                 aggregator = new CopyFillAggregator(runtime->forest, op, index,
                                           guard_event, track_events);
               aggregator->record_reductions(rit->first, to_record, fidx, 
-                                    fidx, trace_info.recording ? this : NULL, 
-                                    applied_events, across_helper);
+                                      (across_helper == NULL) ? fidx : 
+                                        across_helper->convert_src_to_dst(fidx),
+                                      trace_info.recording ? this : NULL, 
+                                      applied_events, across_helper);
               if (track_exprs)
               {
                 FieldMask expr_mask;
@@ -18676,17 +18753,17 @@ namespace Legion {
                 else if(applied_exprs->insert(expr, expr_mask))
                   expr->add_expression_reference();
               }
-              if (!to_delete.empty())
+            }
+            if (!to_delete.empty())
+            {
+              for (std::vector<std::pair<ReductionView*,
+                    IndexSpaceExpression*> >::const_iterator it =
+                    to_delete.begin(); it != to_delete.end(); it++)
               {
-                for (std::vector<std::pair<ReductionView*,
-                      IndexSpaceExpression*> >::const_iterator it =
-                      to_delete.begin(); it != to_delete.end(); it++)
-                {
-                  if (it->first->remove_nested_valid_ref(did))
-                    delete it->first;
-                  if (it->second->remove_expression_reference())
-                    delete it->second;
-                }
+                if (it->first->remove_nested_valid_ref(did))
+                  delete it->first;
+                if (it->second->remove_expression_reference())
+                  delete it->second;
               }
             }
             if (finder->second.empty())
@@ -20872,9 +20949,9 @@ namespace Legion {
       AutoLock eq(eq_lock);
       FieldMaskSet<EqSetTracker>::iterator finder = 
         recorded_trackers.find(tracker);
-#ifdef DEBUG_LEGION
-      assert(finder != recorded_trackers.end());
-#endif
+      // might already have been removed as part of invalidation
+      if (finder == recorded_trackers.end())
+        return;
       finder.filter(mask);
       if (!finder->second)
         recorded_trackers.erase(finder);
@@ -21017,12 +21094,12 @@ namespace Legion {
             it.filter(overlap);
             if (!it->second)
               to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
             for (std::vector<EqSetTracker*>::const_iterator it =
                   to_delete.begin(); it != to_delete.end(); it++)
               recorded_trackers.erase(*it);
-            if (!recorded_trackers.empty())
-              recorded_trackers.tighten_valid_mask();
-          }
+          recorded_trackers.tighten_valid_mask();
         }
       }
       if (!to_remove.empty())
@@ -21917,17 +21994,10 @@ namespace Legion {
             return;
         }
       }
-      // If we get here, we're performing the clone locally for these fields
-      IndexSpaceExpression *overlap = 
-        runtime->forest->intersect_index_spaces(set_expr, 
-                            dst->region_node->row_source);
-      const size_t overlap_volume = overlap->get_volume();
 #ifdef DEBUG_LEGION
-      assert(overlap_volume > 0);
       assert(update_guards.empty() || (mask * update_guards.get_valid_mask()));
 #endif
-      const bool overlap_covers = (overlap_volume == set_expr->get_volume());
-    
+      // If we get here, we're performing the clone locally for these fields
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::aligned
         valid_updates;
       FieldMaskSet<IndexSpaceExpression> initialized_updates;
@@ -21940,18 +22010,44 @@ namespace Legion {
       TraceViewSet *precondition_updates = NULL;
       TraceViewSet *anticondition_updates = NULL;
       TraceViewSet *postcondition_updates = NULL;
-      find_overlap_updates(overlap, overlap_covers, mask, valid_updates,
-                           initialized_updates, reduction_updates, 
-                           restricted_updates, released_updates,
-                           precondition_updates, anticondition_updates,
-                           postcondition_updates);
+      IndexSpaceExpression *overlap = NULL;
+      if (!set_expr->is_empty())
+      {
+        overlap = runtime->forest->intersect_index_spaces(set_expr, 
+                                      dst->region_node->row_source);
+        const size_t overlap_volume = overlap->get_volume();
+#ifdef DEBUG_LEGION
+        assert(overlap_volume > 0);
+#endif
+        const bool overlap_covers = (overlap_volume == set_expr->get_volume());
+        find_overlap_updates(overlap, overlap_covers, mask, valid_updates,
+                             initialized_updates, reduction_updates, 
+                             restricted_updates, released_updates,
+                             precondition_updates, anticondition_updates,
+                             postcondition_updates);
+      }
+      else if (dst->set_expr->is_empty())
+        find_overlap_updates(set_expr, true/*covers*/, mask, valid_updates,
+                             initialized_updates, reduction_updates, 
+                             restricted_updates, released_updates,
+                             precondition_updates, anticondition_updates,
+                             postcondition_updates);
       // We hold the lock so calling back into the destination is safe
       dst->apply_state(valid_updates, initialized_updates, reduction_updates,
                    restricted_updates, released_updates, precondition_updates,
                    anticondition_updates, postcondition_updates, 
                    applied_events, false/*no lock*/);
       if (invalidate_overlap)
-        invalidate_state(overlap, overlap_covers, mask, RtEvent::NO_RT_EVENT);
+      {
+        if (!set_expr->is_empty())
+        {
+          const bool overlap_covers = 
+            (overlap->get_volume() == set_expr->get_volume());
+          invalidate_state(overlap, overlap_covers, mask, RtEvent::NO_RT_EVENT);
+        }
+        else
+          invalidate_state(set_expr, true/*cover*/, mask, RtEvent::NO_RT_EVENT);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -23195,26 +23291,43 @@ namespace Legion {
         AutoLock m_lock(manager_lock);
         // Check to see if we need to ask the context to finalize the
         // creation of any equivalence sets at this level
-        request_mask = mask - disjoint_complete;
-        if (!!request_mask)
+        // Check to see first if there are any pending computations
+        // for disjoint complete equivalence sets
+        if (!disjoint_complete_ready.empty())
         {
-          // We'll defer this computation until it is ready
-          mask -= request_mask;
-          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
+          std::vector<RtEvent> to_delete;
+          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
                 disjoint_complete_ready.begin(); it != 
                 disjoint_complete_ready.end(); it++)
           {
-            if (it->second * request_mask)
+            if (it->first.has_triggered())
+            {
+              to_delete.push_back(it->first);
+              continue;
+            }
+            if (it->second * mask)
               continue;
             deferral_events.insert(it->first);
-            request_mask -= it->second;
-            if (!request_mask)
+            mask -= it->second;
+            if (!mask)
               break;
           }
-          // If we still have fields for which we need to make a request
-          // then fill that in now
+          if (!to_delete.empty())
+          {
+            for (std::vector<RtEvent>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+              disjoint_complete_ready.erase(*it);
+          }
+        }
+        // Now see if there are any fields left for which we still
+        // need to perform any requests to finalize equivalence sets
+        if (!!mask)
+        {
+          request_mask = mask - disjoint_complete;
           if (!!request_mask)
           {
+            // We'll defer this computation until it is ready
+            mask -= request_mask;
             request_ready = Runtime::create_rt_user_event();
             disjoint_complete_ready[request_ready] = request_mask;
             deferral_events.insert(request_ready);
@@ -23500,7 +23613,7 @@ namespace Legion {
       if (!!disjoint_complete)
         parent_mask -= disjoint_complete;
       disjoint_complete |= mask;
-    } 
+    }
 
     //--------------------------------------------------------------------------
     void VersionManager::compute_equivalence_sets(const FieldMask &mask, 

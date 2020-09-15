@@ -2857,8 +2857,10 @@ namespace Legion {
                                                    const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+      set->record_tracker(this, mask);
       AutoLock s_lock(set_lock);
-      current_sets.insert(set, mask);
+      if (current_sets.insert(set, mask))
+        set->add_base_resource_ref(TRACE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -2867,7 +2869,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(set_lock);
-      current_sets.insert(set, mask);
+      pending_sets.insert(set, mask);
     }
 
     //--------------------------------------------------------------------------
@@ -2875,16 +2877,45 @@ namespace Legion {
                                                    const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      AutoLock s_lock(set_lock);
-      FieldMaskSet<EquivalenceSet>::iterator finder = current_sets.find(set);
+      {
+        AutoLock s_lock(set_lock);
+        invalid_mask |= mask;
+        FieldMaskSet<EquivalenceSet>::iterator finder = current_sets.find(set);
+        // Might have already been removed as part of deleting the set
+        if (finder == current_sets.end())
+          return;
 #ifdef DEBUG_LEGION
-      assert(finder != current_sets.end());
-      assert(!(mask - finder->second));
+        assert(!(mask - finder->second));
 #endif
-      finder.filter(mask);
-      if (!finder->second)
-        current_sets.erase(finder);
-      invalid_mask |= mask;
+        finder.filter(mask);
+        if (!finder->second)
+          current_sets.erase(finder);
+        else
+          return;
+      }
+      // Remove the reference if we removed the set from our current sets
+      if (set->remove_base_resource_ref(TRACE_REF))
+        delete set;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::invalidate_equivalence_sets(void)
+    //--------------------------------------------------------------------------
+    {
+      FieldMaskSet<EquivalenceSet> to_remove;
+      {
+        AutoLock s_lock(set_lock);
+        if (current_sets.empty())
+          return;
+        to_remove.swap(current_sets);
+      }
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            to_remove.begin(); it != to_remove.end(); it++)
+      {
+        it->first->remove_tracker(this, it->second);
+        if (it->first->remove_base_resource_ref(TRACE_REF))
+          delete it->first;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2892,8 +2923,9 @@ namespace Legion {
                                     std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      current_sets.insert(set, condition_mask);
       set->record_tracker(this, condition_mask);
+      if (current_sets.insert(set, condition_mask))
+        set->add_base_resource_ref(TRACE_REF);
       const RtEvent ready_event = 
         set->capture_trace_conditions(this, set->local_space, condition_expr, 
                               condition_mask, RtUserEvent::NO_RT_USER_EVENT); 
@@ -2961,30 +2993,36 @@ namespace Legion {
                                        TraceViewSet::FailedPrecondition *failed)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(precondition_views != NULL);
-      assert(anticondition_views != NULL);
-      assert(postcondition_views != NULL);
-#endif
       bool replayable = true;
-      if (!precondition_views->subsumed_by(*postcondition_views, failed))
+      if ((precondition_views != NULL) && ((postcondition_views == NULL) ||
+            !precondition_views->subsumed_by(*postcondition_views, failed)))
       {
         replayable = false;
         not_subsumed = true;
       }
-      if (replayable &&
+      if (replayable && 
+          (postcondition_views != NULL) && (anticondition_views != NULL) &&
           !postcondition_views->independent_of(*anticondition_views, failed))
       {
         replayable = false;
         not_subsumed = false;
       }
       // Clean up our view objects since we no longer need them
-      delete precondition_views;
-      precondition_views = NULL;
-      delete anticondition_views;
-      anticondition_views = NULL;
-      delete postcondition_views;
-      postcondition_views = NULL;
+      if (precondition_views != NULL)
+      {
+        delete precondition_views;
+        precondition_views = NULL;
+      }
+      if (anticondition_views != NULL)
+      {
+        delete anticondition_views;
+        anticondition_views = NULL;
+      }
+      if (postcondition_views != NULL)
+      {
+        delete postcondition_views;
+        postcondition_views = NULL;
+      }
       return replayable;
     }
 
@@ -3224,6 +3262,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void TraceConditionSet::handle_finalize_sets(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferTraceFinalizeSetsArgs *dargs =
+        (const DeferTraceFinalizeSetsArgs*)args;
+      dargs->set->finalize_computed_sets(); 
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent TraceConditionSet::recompute_equivalence_sets(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -3245,8 +3292,36 @@ namespace Legion {
       }
       invalid_mask.clear();
       if (!ready_events.empty())
-        return Runtime::merge_events(ready_events);
+      {
+        const RtEvent ready = Runtime::merge_events(ready_events);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          // Launch a meta-task to finalize this trace condition set
+          DeferTraceFinalizeSetsArgs args(this, op->get_unique_op_id());
+          return forest->runtime->issue_runtime_meta_task(args, 
+                          LG_LATENCY_DEFERRED_PRIORITY, ready);
+        }
+      }
+      finalize_computed_sets();
       return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::finalize_computed_sets(void)
+    //--------------------------------------------------------------------------
+    {
+      // Don't need the lock here, there's only one thing looking at these
+      // data structures at this point
+      if (pending_sets.empty())
+        return;
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            pending_sets.begin(); it != pending_sets.end(); it++)
+      {
+        it->first->record_tracker(this, it->second);
+        if (current_sets.insert(it->first, it->second))
+          it->first->add_base_resource_ref(TRACE_REF);
+      }
+      pending_sets.clear();
     }
 
 #ifdef NEWEQ
@@ -3365,8 +3440,11 @@ namespace Legion {
           delete (*it);
         for (std::vector<TraceConditionSet*>::const_iterator it =
               conditions.begin(); it != conditions.end(); it++)
+        {
+          (*it)->invalidate_equivalence_sets();
           if ((*it)->remove_reference())
             delete (*it);
+        }
         for (std::vector<Instruction*>::iterator it = instructions.begin();
              it != instructions.end(); ++it)
           delete *it;

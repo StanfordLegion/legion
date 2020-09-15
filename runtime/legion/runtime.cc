@@ -28034,6 +28034,16 @@ namespace Legion {
             TraceConditionSet::handle_postcondition_test(args);
             break;
           }
+        case LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID:
+          {
+            TraceConditionSet::handle_finalize_sets(args);
+            break;
+          }
+        case LG_DEFER_TRACE_UPDATE_TASK_ID:
+          {
+            ShardedPhysicalTemplate::handle_deferred_trace_update(args,runtime);
+            break;
+          }
         case LG_DEFER_CONSENSUS_MATCH_TASK_ID:
           {
             ConsensusMatchBase::handle_consensus_match(args);
@@ -28041,11 +28051,6 @@ namespace Legion {
           }
         case LG_YIELD_TASK_ID:
           break; // nothing to do here
-        case LG_DEFER_TRACE_UPDATE_TASK_ID:
-          {
-            ShardedPhysicalTemplate::handle_deferred_trace_update(args,runtime);
-            break;
-          }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 

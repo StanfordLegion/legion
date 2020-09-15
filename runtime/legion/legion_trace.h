@@ -604,6 +604,16 @@ namespace Legion {
         Operation *const op;
         const RtUserEvent done_event;
       };
+      struct DeferTraceFinalizeSetsArgs :
+        public LgTaskArgs<DeferTraceFinalizeSetsArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID;
+      public:
+        DeferTraceFinalizeSetsArgs(TraceConditionSet *s, UniqueID uid)
+          : LgTaskArgs<DeferTraceFinalizeSetsArgs>(uid), set(s) { }
+      public:
+        TraceConditionSet *const set;
+      };
     public:
       TraceConditionSet(RegionTreeForest *forest, IndexSpaceExpression *expr,
                 const FieldMask &mask, const std::set<RegionNode*> &regions); 
@@ -622,6 +632,7 @@ namespace Legion {
       virtual void remove_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
     public:
+      void invalidate_equivalence_sets(void);
       void capture(EquivalenceSet *set, std::set<RtEvent> &ready_events);
       void receive_capture(TraceViewSet *pre, TraceViewSet *anti,
                            TraceViewSet *post, std::set<RtEvent> &ready);
@@ -637,8 +648,10 @@ namespace Legion {
     public:
       static void handle_precondition_test(const void *args);
       static void handle_postcondition_test(const void *args);
+      static void handle_finalize_sets(const void *args);
     private:
       RtEvent recompute_equivalence_sets(Operation *op);
+      void finalize_computed_sets(void);
     public:
       RegionTreeForest *const forest;
       IndexSpaceExpression *const condition_expr;
@@ -647,6 +660,7 @@ namespace Legion {
     private:
       mutable LocalLock set_lock;
       FieldMaskSet<EquivalenceSet> current_sets;
+      FieldMaskSet<EquivalenceSet> pending_sets;
       FieldMask invalid_mask;
     private:
       TraceViewSet *precondition_views;

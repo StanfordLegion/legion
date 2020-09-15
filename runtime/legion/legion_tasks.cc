@@ -10567,10 +10567,7 @@ namespace Legion {
       result->index_domain = this->index_domain;
       result->tpl = tpl;
       result->memo_state = memo_state;
-      // Clone the version infos at this point
       result->version_infos.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        result->version_infos[idx] = get_version_info(idx);
       // Grab any remote trace info that we need from the slice
       if (remote_trace_info != NULL)
       {
