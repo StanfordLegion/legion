@@ -12464,7 +12464,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ConsensusMatchBase::ConsensusMatchBase(ReplicateContext *ctx,
                                            CollectiveIndexLocation loc)
-      : AllGatherCollective(ctx, loc)
+      : AllGatherCollective(loc, ctx)
     //--------------------------------------------------------------------------
     {
     }
