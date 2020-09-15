@@ -2214,7 +2214,7 @@ class _FuturePoint(object):
 
 class SymbolicExpr(object):
     def __add__(self, other):
-        return SymbolicBinop(self, other)
+        return SymbolicBinop(self, other, op='+')
     def is_region(self):
         return False
 
