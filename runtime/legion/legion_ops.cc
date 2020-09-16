@@ -11641,14 +11641,16 @@ namespace Legion {
     {
       const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*initialize*/);
       // Invoke the mapper before doing anything else 
-      invoke_mapper();
+      std::vector<PhysicalManager*> source_instances;
+      invoke_mapper(source_instances);
       InstanceSet restricted_instances;
       ApEvent init_precondition = compute_init_precondition(trace_info); 
       ApEvent release_complete = 
         runtime->forest->release_restrictions(requirement, version_info,
                                               this, 0/*idx*/, init_precondition,
                                               completion_event,
-                                              restricted_instances, trace_info,
+                                              restricted_instances, 
+                                              source_instances, trace_info,
                                               map_applied_conditions
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
@@ -12070,7 +12072,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::invoke_mapper(void)
+    void ReleaseOp::invoke_mapper(std::vector<PhysicalManager*> &src_instances)
     //--------------------------------------------------------------------------
     {
       Mapper::MapReleaseInput input;
@@ -12093,6 +12095,10 @@ namespace Legion {
 #endif
         profiling_reported = Runtime::create_rt_user_event();
       }
+      if (!output.source_instances.empty())
+        runtime->forest->physical_convert_sources(this, requirement,
+            output.source_instances, src_instances,
+            !runtime->unsafe_mapper ? &acquired_instances : NULL);
     }
 
     //--------------------------------------------------------------------------

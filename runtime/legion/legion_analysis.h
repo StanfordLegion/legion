@@ -1873,10 +1873,12 @@ namespace Legion {
     public:
       ReleaseAnalysis(Runtime *rt, Operation *op, unsigned index,
                       ApEvent precondition, IndexSpaceExpression *expr,
+                      std::vector<InstanceView*> &source_views,
                       const PhysicalTraceInfo &trace_info);
       ReleaseAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                       Operation *op, unsigned index, IndexSpaceExpression *expr,
                       ApEvent precondition, ReleaseAnalysis *target, 
+                      std::vector<InstanceView*> &source_views,
                       const PhysicalTraceInfo &info);
       ReleaseAnalysis(const ReleaseAnalysis &rhs);
       virtual ~ReleaseAnalysis(void);
@@ -1902,6 +1904,7 @@ namespace Legion {
     public:
       const ApEvent precondition;
       ReleaseAnalysis *const target_analysis;
+      const std::vector<InstanceView*> source_views;
       const PhysicalTraceInfo trace_info;
     public:
       // Can only safely be accessed when analysis is locked

@@ -1233,6 +1233,7 @@ namespace Legion {
         // Nothing
       };
       struct MapReleaseOutput {
+        std::vector<PhysicalInstance>               source_instances;
         ProfilingRequest                            profiling_requests;
         TaskPriority                                profiling_priority;
       };

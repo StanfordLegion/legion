@@ -2255,7 +2255,7 @@ namespace Legion {
     protected:
       void check_release_privilege(void);
       void compute_parent_index(void);
-      void invoke_mapper(void);
+      void invoke_mapper(std::vector<PhysicalManager*> &source_instances);
       void log_release_requirement(void);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);

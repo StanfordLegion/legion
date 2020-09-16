@@ -2016,7 +2016,7 @@ namespace Legion {
       std::vector<InstanceView*> target_views;
       context->convert_target_views(targets, target_views);
       std::vector<InstanceView*> source_views;
-      if (sources.empty())
+      if (!sources.empty())
         context->convert_source_views(sources, source_views);
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
@@ -2279,32 +2279,39 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::release_restrictions(
-                                         const RegionRequirement &req,
-                                         VersionInfo &version_info,
-                                         ReleaseOp *op, unsigned index,
-                                         ApEvent precondition,
-                                         ApEvent term_event,
-                                         InstanceSet &restricted_instances,
-                                         const PhysicalTraceInfo &trace_info,
-                                         std::set<RtEvent> &map_applied_events
+                                   const RegionRequirement &req,
+                                   VersionInfo &version_info,
+                                   ReleaseOp *op, unsigned index,
+                                   ApEvent precondition,
+                                   ApEvent term_event,
+                                   InstanceSet &restricted_instances,
+                                   const std::vector<PhysicalManager*> &sources,
+                                   const PhysicalTraceInfo &trace_info,
+                                   std::set<RtEvent> &map_applied_events
 #ifdef DEBUG_LEGION
-                                         , const char *log_name
-                                         , UniqueID uid
+                                   , const char *log_name
+                                   , UniqueID uid
 #endif
-                                         )
+                                   )
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
       assert(IS_EXCLUSIVE(req));
 #endif
+      std::vector<InstanceView*> source_views;
+      if (!sources.empty())
+      {
+        InnerContext *context = op->find_physical_context(index);
+        context->convert_source_views(sources, source_views);
+      }
       // Iterate through the equivalence classes and find all the restrictions
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
       std::set<RtEvent> deferral_events;
       IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
       ReleaseAnalysis analysis(runtime, op, index, precondition, 
-                               local_expr, trace_info);
+                               local_expr, source_views, trace_info);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis.traverse(it->first, it->second, deferral_events,
