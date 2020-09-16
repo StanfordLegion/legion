@@ -5756,18 +5756,24 @@ namespace Legion {
     {
       if (!precondition.exists() || precondition.has_triggered())
       {
-        IndexSpaceExpression *expr = 
-          runtime->forest->intersect_index_spaces(set->set_expr, analysis_expr);
-        if (expr->is_empty())
-          return;
-        // Check to see this expression covers the equivalence set
-        // If it does then we can use original set expression
-        if (expr->get_volume() == set->set_expr->get_volume())
-          perform_traversal(set, set->set_expr, true/*covers*/, mask, 
-                            deferral_events, applied_events, already_deferred);
+        if (!set->set_expr->is_empty())
+        {
+          IndexSpaceExpression *expr = 
+           runtime->forest->intersect_index_spaces(set->set_expr,analysis_expr);
+          if (expr->is_empty())
+            return;
+          // Check to see this expression covers the equivalence set
+          // If it does then we can use original set expression
+          if (expr->get_volume() == set->set_expr->get_volume())
+            perform_traversal(set, set->set_expr, true/*covers*/, mask, 
+                              deferral_events, applied_events,already_deferred);
+          else
+            perform_traversal(set, expr, false/*covers*/, mask, deferral_events,
+                              applied_events, already_deferred);
+        }
         else
-          perform_traversal(set, expr, false/*covers*/, mask, deferral_events, 
-                            applied_events, already_deferred);
+          perform_traversal(set, set->set_expr, true/*covers*/, mask,
+                            deferral_events, applied_events, already_deferred);
       }
       else
         // This has to be the first time through and isn't really
@@ -20665,6 +20671,13 @@ namespace Legion {
           if ((*it)->remove_expression_reference())
             delete (*it);
         }
+        // Rebuild the restricted fields
+        restricted_fields.clear();
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::aligned::const_iterator it =
+              restricted_instances.begin(); it != 
+              restricted_instances.end(); it++)
+          restricted_fields |= it->second.get_valid_mask();
       }
       check_for_migration(analysis, applied_events);
     }

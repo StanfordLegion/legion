@@ -34,6 +34,72 @@ namespace Legion {
     typedef PredicateImpl PredicateOp;  
 
     /**
+     * \class ResourceTracker
+     * A helper class for tracking which privileges an
+     * operation owns. This is inherited by multi-tasks
+     * for aggregating the privilege results of their
+     * children as well as task contexts for tracking
+     * which privileges have been accrued or deleted
+     * as part of the execution of the task.
+     */
+    class ResourceTracker {
+    public:
+      ResourceTracker(void);
+      ResourceTracker(const ResourceTracker &rhs);
+      virtual ~ResourceTracker(void);
+    public:
+      ResourceTracker& operator=(const ResourceTracker &rhs);
+    public:
+      bool has_return_resources(void) const;
+      void return_resources(ResourceTracker *target, size_t return_index,
+                            std::set<RtEvent> &preconditions);
+      virtual void receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regions,
+              std::vector<LogicalRegion> &deleted_regions,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::map<FieldSpace,unsigned> &created_field_spaces,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
+              std::vector<FieldSpace> &deleted_field_spaces,
+              std::map<IndexSpace,unsigned> &created_index_spaces,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions) = 0;
+      void pack_resources_return(Serializer &rez, size_t return_index);
+      static RtEvent unpack_resources_return(Deserializer &derez,
+                                             ResourceTracker *target);
+    protected:
+      void merge_received_resources(
+              std::map<LogicalRegion,unsigned> &created_regions,
+              std::vector<LogicalRegion> &deleted_regions,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::map<FieldSpace,unsigned> &created_field_spaces,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
+              std::vector<FieldSpace> &deleted_field_spaces,
+              std::map<IndexSpace,unsigned> &created_index_spaces,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions);
+    protected:
+      std::map<LogicalRegion,unsigned>                 created_regions;
+      std::map<LogicalRegion,bool>                     local_regions;
+      std::set<std::pair<FieldSpace,FieldID> >         created_fields;
+      std::map<std::pair<FieldSpace,FieldID>,bool>     local_fields;
+      std::map<FieldSpace,unsigned>                    created_field_spaces;
+      std::map<IndexSpace,unsigned>                    created_index_spaces;
+      std::map<IndexPartition,unsigned>                created_index_partitions;
+    protected:
+      std::vector<LogicalRegion>                       deleted_regions;
+      std::vector<std::pair<FieldSpace,FieldID> >      deleted_fields;
+      std::vector<FieldSpace>                          deleted_field_spaces;
+      std::map<FieldSpace,std::set<LogicalRegion> >    latent_field_spaces;
+      std::vector<std::pair<IndexSpace,bool> >         deleted_index_spaces;
+      std::vector<std::pair<IndexPartition,bool> >     deleted_index_partitions;
+    };
+
+    /**
      * \class Operation
      * The operation class serves as the root of the tree
      * of all operations that can be performed in a Legion
@@ -1669,6 +1735,7 @@ namespace Legion {
     protected:
       void activate_deletion(void);
       void deactivate_deletion(void);
+      void log_deletion_requirements(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -2424,8 +2491,8 @@ namespace Legion {
      * these operations and ensures that they can all
      * be run in parallel or it reports an error.
      */
-    class MustEpochOp : public Operation, public MustEpoch,
-                        public LegionHeapify<MustEpochOp> {
+    class MustEpochOp : public Operation, public MustEpoch, 
+      public ResourceTracker, public LegionHeapify<MustEpochOp> {
     public:
       static const AllocationType alloc_type = MUST_EPOCH_OP_ALLOC;
     public:
@@ -2549,6 +2616,21 @@ namespace Legion {
       // Make this a virtual method to override it for control replication
       virtual MapperManager* invoke_mapper(void);
     public:
+      // From ResourceTracker
+      virtual void receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regions,
+              std::vector<LogicalRegion> &deleted_regions,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::map<FieldSpace,unsigned> &created_field_spaces,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
+              std::vector<FieldSpace> &deleted_field_spaces,
+              std::map<IndexSpace,unsigned> &created_index_spaces,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions);
+    public:
       void add_mapping_dependence(RtEvent precondition);
       void register_single_task(SingleTask *single, unsigned index);
       void register_slice_task(SliceTask *slice);
@@ -2586,7 +2668,7 @@ namespace Legion {
     public:
       static void handle_map_task(const void *args);
     protected:
-      void distribute_tasks(void) const;
+      void distribute_tasks(void);
       RtUserEvent compute_launch_space(const MustEpochLauncher &launcher);
     public:
       static void handle_distribute_task(const void *args);
@@ -2607,6 +2689,7 @@ namespace Legion {
       Mapper::MapMustEpochOutput   output;
     protected:
       FutureMap result_map;
+      unsigned remaining_resource_returns;
       unsigned remaining_subop_completes;
       unsigned remaining_subop_commits;
     protected:

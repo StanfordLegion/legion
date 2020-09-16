@@ -26,59 +26,7 @@
 #include "legion/legion_allocation.h"
 
 namespace Legion {
-  namespace Internal {
-
-    /**
-     * \class ResourceTracker
-     * A helper class for tracking which privileges an
-     * operation owns. This is inherited by multi-tasks
-     * for aggregating the privilege results of their
-     * children as well as task contexts for tracking
-     * which privileges have been accrued or deleted
-     * as part of the execution of the task.
-     */
-    class ResourceTracker {
-    public:
-      ResourceTracker(void);
-      ResourceTracker(const ResourceTracker &rhs);
-      virtual ~ResourceTracker(void);
-    public:
-      ResourceTracker& operator=(const ResourceTracker &rhs);
-    public:
-      void return_resources(ResourceTracker *target, size_t return_index,
-                            std::set<RtEvent> &preconditions);
-      virtual void receive_resources(size_t return_index,
-              std::map<LogicalRegion,unsigned> &created_regions,
-              std::vector<LogicalRegion> &deleted_regions,
-              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
-              std::map<FieldSpace,unsigned> &created_field_spaces,
-              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
-              std::vector<FieldSpace> &deleted_field_spaces,
-              std::map<IndexSpace,unsigned> &created_index_spaces,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
-              std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
-              std::set<RtEvent> &preconditions) = 0;
-      void pack_resources_return(Serializer &rez, size_t return_index);
-      static RtEvent unpack_resources_return(Deserializer &derez,
-                                             ResourceTracker *target);
-    protected:
-      std::map<LogicalRegion,unsigned>                 created_regions;
-      std::map<LogicalRegion,bool>                     local_regions;
-      std::set<std::pair<FieldSpace,FieldID> >         created_fields;
-      std::map<std::pair<FieldSpace,FieldID>,bool>     local_fields;
-      std::map<FieldSpace,unsigned>                    created_field_spaces;
-      std::map<IndexSpace,unsigned>                    created_index_spaces;
-      std::map<IndexPartition,unsigned>                created_index_partitions;
-    protected:
-      std::vector<LogicalRegion>                       deleted_regions;
-      std::vector<std::pair<FieldSpace,FieldID> >      deleted_fields;
-      std::vector<FieldSpace>                          deleted_field_spaces;
-      std::map<FieldSpace,std::set<LogicalRegion> >    latent_field_spaces;
-      std::vector<std::pair<IndexSpace,bool> >         deleted_index_spaces;
-      std::vector<std::pair<IndexPartition,bool> >     deleted_index_partitions;
-    };
+  namespace Internal { 
 
     /**
      * \class ExternalTask

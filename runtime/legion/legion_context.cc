@@ -3055,7 +3055,7 @@ namespace Legion {
 #endif
             if (--region_finder->second == 0)
             {
-              created_regions.erase(region_finder);
+              // No need to delete this here, it will be deleted by the op
               delete_now.push_back(*rit);
               // Check to see if we have any latent field spaces to clean up
               if (!latent_field_spaces.empty())
@@ -3168,7 +3168,8 @@ namespace Legion {
           {
             // One of ours to delete
             delete_now[fit->first].insert(fit->second);
-            created_fields.erase(field_finder);
+            // No need to delete this now, it will be deleted
+            // when the deletion op makes its region requirements
           }
         }
       }
@@ -9971,6 +9972,7 @@ namespace Legion {
       inline_mapping_barrier = manager->get_inline_mapping_barrier();
       external_resource_barrier = manager->get_external_resource_barrier();
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
+      resource_return_barrier = manager->get_resource_return_barrier();
       trace_recording_barrier = manager->get_trace_recording_barrier();
       summary_fence_barrier = manager->get_summary_fence_barrier();
       execution_fence_barrier = manager->get_execution_fence_barrier();
@@ -16578,33 +16580,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_second_gen_close_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      const unsigned close_index = (next_close_mapped_bar_index > 0) ?
-        (next_close_mapped_bar_index-1) : (close_mapped_barriers.size() - 1);
-      RtBarrier &mapped_bar = close_mapped_barriers[close_index]; 
-      const RtBarrier result = mapped_bar;
-      // Advance the phase for the next time through
-      advance_logical_barrier(mapped_bar, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_second_gen_refinement_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      const unsigned refinement_index = (next_refinement_mapped_bar_index > 0) ?
-        (next_refinement_mapped_bar_index-1) : 
-        (refinement_mapped_barriers.size() - 1);
-      RtBarrier &mapped_bar = refinement_mapped_barriers[refinement_index]; 
-      const RtBarrier result = mapped_bar;
-      // Advance the phase for the next time through
-      advance_logical_barrier(mapped_bar, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
 #ifdef DEBUG_LEGION_COLLECTIVES
     RefinementOp* ReplicateContext::get_refinement_op(const LogicalUser &user,
                                                       RegionTreeNode *node)
@@ -18291,6 +18266,15 @@ namespace Legion {
     {
       ApBarrier result = execution_fence_barrier;
       advance_replicate_barrier(execution_fence_barrier, total_shards);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier ReplicateContext::get_next_resource_return_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      RtBarrier result = resource_return_barrier;
+      advance_replicate_barrier(resource_return_barrier, total_shards);
       return result;
     }
 

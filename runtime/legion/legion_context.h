@@ -2076,8 +2076,6 @@ namespace Legion {
       virtual MergeCloseOp* get_merge_close_op(void);
       virtual RefinementOp* get_refinement_op(void);
 #endif
-      virtual RtBarrier get_second_gen_close_barrier(void);
-      virtual RtBarrier get_second_gen_refinement_barrier(void);
     public:
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target,
@@ -2155,6 +2153,7 @@ namespace Legion {
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
       ApBarrier get_next_execution_fence_barrier(void);
+      RtBarrier get_next_resource_return_barrier(void);
       RtBarrier get_next_trace_recording_barrier(void);
       RtBarrier get_next_summary_fence_barrier(void);
       inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
@@ -2249,6 +2248,7 @@ namespace Legion {
       RtBarrier inline_mapping_barrier;
       RtBarrier external_resource_barrier;
       RtBarrier mapping_fence_barrier;
+      RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
       RtBarrier summary_fence_barrier;
       ApBarrier execution_fence_barrier;

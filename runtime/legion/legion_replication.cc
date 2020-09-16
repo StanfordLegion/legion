@@ -3989,6 +3989,7 @@ namespace Legion {
       mapping_exchange = NULL;
       dependence_exchange = NULL;
       completion_exchange = NULL;
+      resource_return_barrier = RtBarrier::NO_RT_BARRIER;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -4336,6 +4337,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplMustEpochOp::receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regs,
+              std::vector<LogicalRegion> &deleted_regs,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::map<FieldSpace,unsigned> &created_fs,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
+              std::vector<FieldSpace> &deleted_fs,
+              std::map<IndexSpace,unsigned> &created_is,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // Wait until we've received all the resources before handing them
+      // back to the enclosing parent context
+      {
+        AutoLock o_lock(op_lock);
+        merge_received_resources(created_regs, deleted_regs, created_fids, 
+            deleted_fids, created_fs, latent_fs, deleted_fs, created_is,
+            deleted_is, created_partitions, deleted_partitions);
+#ifdef DEBUG_LEGION
+        assert(remaining_resource_returns > 0);
+#endif
+        if (--remaining_resource_returns > 0)
+          return;
+      }
+      // Make sure the other shards have received all their returns too
+      Runtime::phase_barrier_arrive(resource_return_barrier, 1/*count*/);
+      if (!has_return_resources())
+        return;
+      if (!resource_return_barrier.has_triggered())
+        resource_return_barrier.wait();
+      // If we get here then we can finally do the return to the parent context
+      // because we've received resources from all of our constituent operations
+      return_resources(parent_ctx, context_index, preconditions);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplMustEpochOp::map_replicate_tasks(void) const
     //--------------------------------------------------------------------------
     {
@@ -4406,7 +4447,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMustEpochOp::distribute_replicate_tasks(void) const
+    void ReplMustEpochOp::distribute_replicate_tasks(void)
     //--------------------------------------------------------------------------
     {
       // We only want to distribute the points that are owned by our shard
@@ -4414,12 +4455,14 @@ namespace Legion {
       MustEpochDistributorArgs dist_args(owner);
       MustEpochLauncherArgs launch_args(owner);
       std::set<RtEvent> wait_events;
+      // Count how many resource returns we expect to see as part of this
       for (std::vector<IndividualTask*>::const_iterator it = 
             indiv_tasks.begin(); it != indiv_tasks.end(); it++)
       {
         // Skip any points that we do not own on this shard
         if (shard_single_tasks.find(*it) == shard_single_tasks.end())
           continue;
+        remaining_resource_returns++;
         if (!runtime->is_local((*it)->target_proc))
         {
           dist_args.task = *it;
@@ -4478,6 +4521,7 @@ namespace Legion {
                               parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id())
         }
+        remaining_resource_returns++;
         (*it)->update_target_processor();
         if (!runtime->is_local((*it)->target_proc))
         {
@@ -4524,6 +4568,7 @@ namespace Legion {
         new MustEpochDependenceExchange(ctx, COLLECTIVE_LOC_70);
       completion_exchange = 
         new MustEpochCompletionExchange(ctx, COLLECTIVE_LOC_73);
+      resource_return_barrier = ctx->get_next_resource_return_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -7264,6 +7309,8 @@ namespace Legion {
         // Fence barriers need arrivals from everyone
         mapping_fence_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        resource_return_barrier =
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
         trace_recording_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         summary_fence_barrier = 
@@ -7348,6 +7395,7 @@ namespace Legion {
           inline_mapping_barrier.destroy_barrier();
           external_resource_barrier.destroy_barrier();
           mapping_fence_barrier.destroy_barrier();
+          resource_return_barrier.destroy_barrier();
           trace_recording_barrier.destroy_barrier();
           summary_fence_barrier.destroy_barrier();
           execution_fence_barrier.destroy_barrier();
@@ -7564,6 +7612,7 @@ namespace Legion {
           assert(inline_mapping_barrier.exists());
           assert(external_resource_barrier.exists());
           assert(mapping_fence_barrier.exists());
+          assert(resource_return_barrier.exists());
           assert(trace_recording_barrier.exists());
           assert(summary_fence_barrier.exists());
           assert(execution_fence_barrier.exists());
@@ -7582,6 +7631,7 @@ namespace Legion {
           rez.serialize(inline_mapping_barrier);
           rez.serialize(external_resource_barrier);
           rez.serialize(mapping_fence_barrier);
+          rez.serialize(resource_return_barrier);
           rez.serialize(trace_recording_barrier);
           rez.serialize(summary_fence_barrier);
           rez.serialize(execution_fence_barrier);
@@ -7660,6 +7710,7 @@ namespace Legion {
         derez.deserialize(inline_mapping_barrier);
         derez.deserialize(external_resource_barrier);
         derez.deserialize(mapping_fence_barrier);
+        derez.deserialize(resource_return_barrier);
         derez.deserialize(trace_recording_barrier);
         derez.deserialize(summary_fence_barrier);
         derez.deserialize(execution_fence_barrier);

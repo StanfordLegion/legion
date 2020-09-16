@@ -1613,8 +1613,22 @@ namespace Legion {
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_commit(void);
+      virtual void receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regions,
+              std::vector<LogicalRegion> &deleted_regions,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::map<FieldSpace,unsigned> &created_field_spaces,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
+              std::vector<FieldSpace> &deleted_field_spaces,
+              std::map<IndexSpace,unsigned> &created_index_spaces,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions);
+    public:
       void map_replicate_tasks(void) const;
-      void distribute_replicate_tasks(void) const;
+      void distribute_replicate_tasks(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
       Domain get_shard_domain(void) const;
@@ -1628,6 +1642,7 @@ namespace Legion {
       MustEpochDependenceExchange *dependence_exchange;
       MustEpochCompletionExchange *completion_exchange;
       std::set<SingleTask*> shard_single_tasks;
+      RtBarrier resource_return_barrier;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -2116,6 +2131,8 @@ namespace Legion {
         { return external_resource_barrier; }
       inline RtBarrier get_mapping_fence_barrier(void) const
         { return mapping_fence_barrier; }
+      inline RtBarrier get_resource_return_barrier(void) const
+        { return resource_return_barrier; }
       inline RtBarrier get_trace_recording_barrier(void) const
         { return trace_recording_barrier; }
       inline RtBarrier get_summary_fence_barrier(void) const
@@ -2295,6 +2312,7 @@ namespace Legion {
       RtBarrier inline_mapping_barrier;
       RtBarrier external_resource_barrier;
       RtBarrier mapping_fence_barrier;
+      RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
       RtBarrier summary_fence_barrier;
       ApBarrier execution_fence_barrier;
