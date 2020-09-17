@@ -43,6 +43,7 @@ public:
   complex(void) { } // empty default constructor for CUDA
   __CUDA_HD__
   complex(__half re, __half im = __half()) : _real(re), _imag(im) { }
+  __CUDA_HD__
   complex(const complex<__half> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
 #ifdef __CUDACC__
   __device__ // Device only constructor
