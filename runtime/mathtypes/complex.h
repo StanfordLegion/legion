@@ -425,6 +425,20 @@ inline bool operator>=(const complex<T>& c1, const complex<T>& c2) {
       (!(c2.real() > c1.real()) && (c1.imag() > c2.imag()));
 }
 
+template<typename T> __CUDA_HD__
+inline T abs(const complex<T>& z) {
+#ifdef __CUDA_ARCH__
+  return T{hypot(z.real(), z.imag())};
+#else
+  return std::hypot(z.real(), z.imag());
+#endif
+}
+
+template<typename T> __CUDA_HD__
+inline T fabs(const complex<T>& z) {
+  return abs(z);
+}
+
 // TODO: fill this out with full support for std::complex
 
 #endif // complex_H__ 
