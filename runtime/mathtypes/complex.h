@@ -442,7 +442,7 @@ inline T abs(const complex<T>& z) {
 template<> __CUDA_HD__
 inline double abs(const complex<double>& z) {
 #ifdef __CUDA_ARCH__
-  return hypot(z.real(), z.image());
+  return hypot(z.real(), z.imag());
 #elif __cplusplus >= 201103L
   return std::hypot(z.real(), z.imag());
 #else
