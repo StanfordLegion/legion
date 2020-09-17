@@ -24,6 +24,7 @@
 #endif
 #endif
 
+#include <cmath>
 #ifdef COMPLEX_HALF
 #include "mathtypes/half.h"
 #endif
@@ -425,12 +426,27 @@ inline bool operator>=(const complex<T>& c1, const complex<T>& c2) {
       (!(c2.real() > c1.real()) && (c1.imag() > c2.imag()));
 }
 
+// Both single and half precision go through this path
 template<typename T> __CUDA_HD__
 inline T abs(const complex<T>& z) {
 #ifdef __CUDA_ARCH__
-  return T{hypot(z.real(), z.imag())};
+  return T{hypotf(z.real(), z.imag())};
+#elif __cplusplus >= 201103L
+  return T{std::hypotf(z.real(), z.imag())};
 #else
+  return T{std::sqrt(z.real() * z.real() + z.imag() * z.imag())};
+#endif
+}
+
+// Double precision uses this version of the specialization
+template<> __CUDA_HD__
+inline double abs(const complex<double>& z) {
+#ifdef __CUDA_ARCH__
+  return hypot(z.real(), z.image());
+#elif __cplusplus >= 201103L
   return std::hypot(z.real(), z.imag());
+#else
+  return std::sqrt(z.real() * z.real() + z.imag() * z.imag());
 #endif
 }
 
