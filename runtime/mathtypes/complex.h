@@ -430,11 +430,11 @@ inline bool operator>=(const complex<T>& c1, const complex<T>& c2) {
 template<typename T> __CUDA_HD__
 inline T abs(const complex<T>& z) {
 #ifdef __CUDA_ARCH__
-  return T{hypotf(z.real(), z.imag())};
+  return (T)(hypotf(z.real(), z.imag()));
 #elif __cplusplus >= 201103L
   return T{std::hypotf(z.real(), z.imag())};
 #else
-  return T{std::sqrt(z.real() * z.real() + z.imag() * z.imag())};
+  return (T)(std::sqrt(z.real() * z.real() + z.imag() * z.imag()));
 #endif
 }
 
