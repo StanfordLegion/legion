@@ -1230,6 +1230,7 @@ namespace Legion {
       }
       replicated_partitions.clear();
       sharded_region_version_infos.clear();
+      refinement_regions.clear();
       runtime->free_repl_refinement_op(this);
     }
 
@@ -1327,6 +1328,7 @@ namespace Legion {
           // Only compute equivalence sets for the subregions that
           // are sharded to this particular shard
           IndexPartNode *index_part = it->first->row_source;
+          std::vector<RegionNode*> &children = refinement_regions[it->first];
           if (index_part->total_children == index_part->max_linearized_color)
           {
             for (LegionColor color = repl_ctx->owner_shard->shard_id; 
@@ -1338,6 +1340,7 @@ namespace Legion {
               info.relax_valid_mask(it->second);
               child->perform_versioning_analysis(ctx, parent_ctx, &info,
                     version_mask, unique_op_id, local_space, ready_events);
+              children.push_back(child);
             }
           }
           else
@@ -1358,6 +1361,7 @@ namespace Legion {
               info.relax_valid_mask(it->second);
               child->perform_versioning_analysis(ctx, parent_ctx, &info,
                     version_mask, unique_op_id, local_space, ready_events);
+              children.push_back(child);
               // Skip ahead to the next color
               for (unsigned idx = 0; idx < (repl_ctx->total_shards-1); idx++)
               {
@@ -1442,7 +1446,7 @@ namespace Legion {
           // actual owner of the initial equivalence set will be done
           // with a first touch policy so that the first writer will
           // the one to make the equivalence sets
-          it->first->propagate_refinement(ctx, NULL/*no child*/, 
+          it->first->propagate_refinement(ctx, refinement_regions[it->first],
                                           it->second, map_applied_conditions);
         }
       }

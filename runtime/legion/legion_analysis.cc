@@ -22879,10 +22879,7 @@ namespace Legion {
     bool PendingEquivalenceSet::finalize(const FieldMask &done_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!(done_mask - previous_sets.get_valid_mask()));
-#endif
-      if (done_mask != previous_sets.get_valid_mask())
+      if (!!(previous_sets.get_valid_mask() - done_mask))
       {
         std::vector<EquivalenceSet*> to_delete;
         for (FieldMaskSet<EquivalenceSet>::iterator it =
@@ -22899,10 +22896,7 @@ namespace Legion {
           if ((*it)->remove_base_valid_ref(PENDING_REFINEMENT_REF))
             delete (*it);
         }
-        previous_sets.tighten_valid_mask();
-#ifdef DEBUG_LEGION
-        assert(!previous_sets.empty());
-#endif
+        previous_sets.filter_valid_mask(done_mask);
         return false;
       }
       else
@@ -23424,6 +23418,10 @@ namespace Legion {
           deferral_events.erase(request_ready);
         }
         // Record that this is now a disjoint complete child for invalidation
+        // We propagate once when we make the pending refinement object and
+        // again here because this might be a pending refinement from a remote
+        // shard in a control replication context, so we have to do it again
+        // in order to be sure that the parent knows about it
         region_node->parent->propagate_refinement(ctx, region_node, 
                                                   request_mask, ready_events);
         // If we don't have any local fields remaining then we are done
@@ -23709,6 +23707,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VersionManager::propagate_refinement(
+                const std::vector<RegionNode*> &children, const FieldMask &mask,
+                FieldMask &parent_mask, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!node->is_region());
+#endif
+      AutoLock m_lock(manager_lock);
+      for (std::vector<RegionNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert((disjoint_complete_children.find(*it) ==
+                disjoint_complete_children.end()) ||
+            (disjoint_complete_children[*it] * mask));
+#endif
+        if (disjoint_complete_children.insert(*it, mask))
+        {
+          WrapperReferenceMutator mutator(applied_events);
+          (*it)->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
+        }
+      }
+      parent_mask = mask;
+      if (!!disjoint_complete)
+        parent_mask -= disjoint_complete;
+      disjoint_complete |= mask;
+    }
+
+    //--------------------------------------------------------------------------
     void VersionManager::propagate_refinement(RegionTreeNode *child,
                                               const FieldMask &mask, 
                                               FieldMask &parent_mask, 
@@ -23718,11 +23746,8 @@ namespace Legion {
       AutoLock m_lock(manager_lock);
       if (child != NULL)
       {
-#ifdef DEBUG_LEGION
-        assert((disjoint_complete_children.find(child) == 
-                disjoint_complete_children.end()) ||
-               (disjoint_complete_children[child] * mask));
-#endif
+        // We can get duplicate propagations of refinements here because
+        // of control replication. See VersionManager::compute_equivalence_sets 
         if (disjoint_complete_children.insert(child, mask))
         {
           WrapperReferenceMutator mutator(applied_events);
@@ -23736,7 +23761,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::invalidate_refinement(const FieldMask &mask, bool self,
+    void VersionManager::invalidate_refinement(InnerContext *context,
+                                      const FieldMask &mask, bool self,
                                       FieldMaskSet<RegionTreeNode> &to_traverse,
                                       FieldMaskSet<EquivalenceSet> &to_untrack,
                                       std::vector<EquivalenceSet*> &to_release)
@@ -23747,7 +23773,24 @@ namespace Legion {
       assert(to_traverse.empty());
 #endif
       if (self)
+      {
+        if (node->is_region())
+        {
+          // Check to see if we have pending refinements we need
+          // to tell the context that it can invalidate
+          const FieldMask invalidate_mask = mask - disjoint_complete;
+          if (!!invalidate_mask)
+            context->invalidate_disjoint_complete_sets(node->as_region_node(), 
+                                                       invalidate_mask);
+        }
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        else
+          assert(!(mask - disjoint_complete));
+#endif
+#endif
         disjoint_complete -= mask;
+      }
       // Always invalidate any equivalence sets that we might have
       if (!equivalence_sets.empty() && 
           !(mask * equivalence_sets.get_valid_mask()))

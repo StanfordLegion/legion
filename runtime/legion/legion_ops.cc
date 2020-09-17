@@ -9509,7 +9509,7 @@ namespace Legion {
             set->clone_from(it->first, it->second, map_applied_conditions);
         }
         region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
-                               map_applied_conditions, to_release, parent_ctx);
+                                map_applied_conditions, to_release, parent_ctx);
         region_node->record_refinement(ctx, set, refinement_mask,
                                        map_applied_conditions);
         if (!map_applied_conditions.empty())
@@ -10311,12 +10311,15 @@ namespace Legion {
       // Go through and build the pending refinements so we get valid
       // references on all the old equivalence sets before they are invalidated
       std::set<RtEvent> map_applied_conditions;
+      std::map<PartitionNode*,std::vector<RegionNode*> > refinement_regions;
       for (FieldMaskSet<PartitionNode>::const_iterator it = 
             make_from.begin(); it != make_from.end(); it++)
       {
         // Make pending refinements for each of the child regions and
         // register them with the context so it can find them later
         IndexPartNode *index_part = it->first->row_source;
+        std::vector<RegionNode*> &children = refinement_regions[it->first];
+        children.reserve(index_part->total_children);
         // Iterate over each child and make an equivalence set  
         if (index_part->total_children == index_part->max_linearized_color)
         {
@@ -10329,6 +10332,7 @@ namespace Legion {
             initialize_pending(pending, it->second, map_applied_conditions);
             // Parent context takes ownership here
             parent_ctx->record_pending_disjoint_complete_set(pending);
+            children.push_back(child);
           }
         }
         else
@@ -10344,6 +10348,7 @@ namespace Legion {
             initialize_pending(pending, it->second, map_applied_conditions);
             // Parent context takes ownership here
             parent_ctx->record_pending_disjoint_complete_set(pending);
+            children.push_back(child);
           }
           delete itr;
         }
@@ -10359,14 +10364,14 @@ namespace Legion {
                                 map_applied_conditions, to_release, parent_ctx);
       }
       else
-        to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
-           false/*self*/, map_applied_conditions, to_release, parent_ctx);
+        to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(), 
+            false/*self*/, map_applied_conditions, to_release, parent_ctx);
       // Finally propagate the new refinements up from the partitions
       for (FieldMaskSet<PartitionNode>::const_iterator it = 
             make_from.begin(); it != make_from.end(); it++)
         // Propagate this refinement up from the partition
-        it->first->propagate_refinement(ctx, NULL, it->second, 
-                                        map_applied_conditions);
+        it->first->propagate_refinement(ctx, refinement_regions[it->first], 
+                                        it->second, map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else

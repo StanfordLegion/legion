@@ -915,6 +915,8 @@ namespace Legion {
                     VersionManager *target, FieldMask mask,
                     const UniqueID opid, const AddressSpaceID source, 
                     RtUserEvent ready_event, std::set<RtEvent> &applied_events);
+      void invalidate_disjoint_complete_sets(RegionNode *region,
+                                             const FieldMask &mask);
       virtual void deduplicate_invalidate_trackers(
                     const FieldMaskSet<EquivalenceSet> &to_untrack,
                     std::set<RtEvent> &applied_events);

@@ -3334,13 +3334,18 @@ namespace Legion {
       void compute_equivalence_sets(const FieldMask &mask,
                                     FieldMask &parent_traversal, 
                                     FieldMask &children_traversal) const;
+      void propagate_refinement(const std::vector<RegionNode*> &children,
+                                const FieldMask &child_mask, 
+                                FieldMask &parent_mask,
+                                std::set<RtEvent> &applied_events);
     public:
       // Call these from either type of region tree node
       void propagate_refinement(RegionTreeNode *child, 
                                 const FieldMask &child_mask, 
                                 FieldMask &parent_mask,
                                 std::set<RtEvent> &applied_events);
-      void invalidate_refinement(const FieldMask &mask, bool invalidate_self,
+      void invalidate_refinement(InnerContext *context,
+                                 const FieldMask &mask, bool invalidate_self,
                                  FieldMaskSet<RegionTreeNode> &to_traverse,
                                  FieldMaskSet<EquivalenceSet> &to_untrack,
                                  std::vector<EquivalenceSet*> &to_release);

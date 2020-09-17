@@ -1204,6 +1204,9 @@ namespace Legion {
       // Version information objects for each of our local regions
       // that we are own after sharding non-replicated partitions
       LegionMap<RegionNode*,VersionInfo>::aligned sharded_region_version_infos;
+      // Regions for which we need to propagate refinements for
+      // non-replicated partition refinements
+      std::map<PartitionNode*,std::vector<RegionNode*> > refinement_regions;
     };
 
     /**

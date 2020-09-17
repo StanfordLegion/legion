@@ -3744,6 +3744,28 @@ namespace Legion {
       Runtime::trigger_event(ready_event);
       return true;
     }
+    
+    //--------------------------------------------------------------------------
+    void InnerContext::invalidate_disjoint_complete_sets(RegionNode *region,
+                                                         const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(pending_set_lock);
+      std::map<RegionNode*,std::list<PendingEquivalenceSet*> >::iterator
+        finder = pending_equivalence_sets.find(region);
+      if (finder == pending_equivalence_sets.end())
+        return;
+      for (std::list<PendingEquivalenceSet*>::iterator it = 
+            finder->second.begin(); it != finder->second.end(); /*nothing*/)
+      {
+        if ((*it)->finalize(mask))
+          it = finder->second.erase(it);
+        else
+          it++;
+      }
+      if (finder->second.empty())
+        pending_equivalence_sets.erase(finder);
+    }
 
     //--------------------------------------------------------------------------
     void InnerContext::deduplicate_invalidate_trackers(
@@ -8591,7 +8613,7 @@ namespace Legion {
         const FieldMask close_mask = 
           node->column_source->get_field_mask(regions[idx].privilege_fields);
         node->invalidate_refinement(tree_context.get_id(), close_mask,
-                true/*self*/, applied, invalidated_refinements, this);
+                      true/*self*/, applied, invalidated_refinements, this);
       }
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(is_top_level_task, applied);

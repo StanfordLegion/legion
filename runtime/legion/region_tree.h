@@ -3962,6 +3962,10 @@ namespace Legion {
       void propagate_refinement(ContextID ctx, RegionNode *child,
                                 const FieldMask &mask,
                                 std::set<RtEvent> &applied_events);
+      void propagate_refinement(ContextID ctx, 
+                                const std::vector<RegionNode*> &children,
+                                const FieldMask &mask,
+                                std::set<RtEvent> &applied_events);
     public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 

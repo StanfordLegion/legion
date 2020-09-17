@@ -18283,8 +18283,8 @@ namespace Legion {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
-      manager.invalidate_refinement(mask, self, to_traverse, 
-                                    to_untrack, to_release);
+      manager.invalidate_refinement(source_context, mask, self, 
+                                    to_traverse, to_untrack, to_release);
       if (!to_untrack.empty())
       {
         if (source_context == NULL)
@@ -18315,7 +18315,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!it->first->is_region());
 #endif
-        it->first->as_partition_node()->invalidate_refinement(ctx, it->second,
+        it->first->as_partition_node()->invalidate_refinement(ctx, it->second, 
                                   applied_events, to_release, source_context);
         if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
           delete it->first;
@@ -19741,7 +19741,7 @@ namespace Legion {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
-      manager.invalidate_refinement(mask, true/*delete self*/, 
+      manager.invalidate_refinement(source_context, mask, true/*delete self*/,
                                     to_traverse, to_untrack, to_release);
 #ifdef DEBUG_LEGION
       assert(to_untrack.empty());
@@ -19752,7 +19752,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(it->first->is_region());
 #endif
-        it->first->as_region_node()->invalidate_refinement(ctx, it->second,
+        it->first->as_region_node()->invalidate_refinement(ctx, it->second, 
                   true/*self*/, applied_events, to_release, source_context);
         if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
           delete it->first;
@@ -19767,6 +19767,19 @@ namespace Legion {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
       manager.propagate_refinement(child, mask, parent_mask, applied_events);
+      if (!!parent_mask)
+        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::propagate_refinement(ContextID ctx,
+                       const std::vector<RegionNode*> &children,
+                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      FieldMask parent_mask;
+      manager.propagate_refinement(children, mask, parent_mask, applied_events);
       if (!!parent_mask)
         parent->propagate_refinement(ctx, this, parent_mask, applied_events);
     }
