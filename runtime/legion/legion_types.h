@@ -1031,7 +1031,8 @@ namespace Legion {
         "Send Remote Context Free",                                   \
         "Send Remote Context Physical Request",                       \
         "Send Remote Context Physical Response",                      \
-        "Compute Equivalence Sets Request",                           \
+        "Send Compute Equivalence Sets Request",                      \
+        "Send Compute Equivalence Sets Response",                     \
         "Send Equivalence Set Request",                               \
         "Send Equivalence Set Response",                              \
         "Send Equivalence Set Invalidate Trackers",                   \

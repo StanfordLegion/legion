@@ -17350,6 +17350,7 @@ namespace Legion {
       // doing the subtraction to figure out what we can record
       LegionList<FieldSet<IndexSpaceExpression*> >::aligned restricted_sets;
       restrictions.compute_field_sets(record_mask, restricted_sets);
+      bool need_partial_rebuild = false;
       for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::const_iterator
             rit = restricted_sets.begin(); rit != restricted_sets.end(); rit++)
       {
@@ -17370,16 +17371,9 @@ namespace Legion {
             const FieldMask valid_mask = it->second & rit->set_mask; 
             if (!valid_mask)
               continue;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-            bool need_rebuild = 
-#endif
-#endif
-            record_partial_valid_instance(it->first, diff_expr, 
-                                          valid_mask, mutator);
-#ifdef DEBUG_LEGION
-            assert(!need_rebuild);
-#endif
+            if (record_partial_valid_instance(it->first, diff_expr, 
+                                              valid_mask, mutator))
+              need_partial_rebuild = true;
           }
         }
 #ifdef DEBUG_LEGION
@@ -17389,6 +17383,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!record_mask);
 #endif
+      if (need_partial_rebuild)
+      {
+        partial_valid_fields.clear();
+        for (LegionMap<LogicalView*,
+              FieldMaskSet<IndexSpaceExpression> >::aligned::const_iterator
+              it = partial_valid_instances.begin(); 
+              it != partial_valid_instances.end(); it++)
+          partial_valid_fields |= it->second.get_valid_mask();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -17477,7 +17480,10 @@ namespace Legion {
             }
             else
               finder->second.tighten_valid_mask();
-            need_rebuild = true;
+            if (!partial_valid_instances.empty())
+              need_rebuild = true;
+            else
+              partial_valid_fields.clear();
           }
         }
         else if (finder->second.insert(expr, valid_mask))
@@ -17851,9 +17857,9 @@ namespace Legion {
           filter_valid_instances(expr, expr_covers, it->set_mask, mutator);
           continue;
         }
-        IndexSpaceExpression *union_expr = 
+        IndexSpaceExpression *union_expr =
           runtime->forest->union_index_spaces(it->elements);
-        IndexSpaceExpression *diff_expr = 
+        IndexSpaceExpression *diff_expr =
           runtime->forest->subtract_index_spaces(expr, union_expr);
         if (!diff_expr->is_empty())
           filter_valid_instances(diff_expr, false/*covers*/, 
@@ -18928,9 +18934,9 @@ namespace Legion {
             released_instances.find(overlap_expr);
         if (release_finder == released_instances.end())
         {
-          eit->first->add_expression_reference();
-          released_instances[eit->first];
-          release_finder = released_instances.find(eit->first);
+          overlap_expr->add_expression_reference();
+          released_instances[overlap_expr];
+          release_finder = released_instances.find(overlap_expr);
         }
         if (overlap_expr == eit->first)
         {
@@ -18946,7 +18952,7 @@ namespace Legion {
                     eit->second.begin(); it != eit->second.end(); it++)
               {
                 analysis.record_instance(it->first, it->second);
-                if (release_finder->second.insert(it->first, it->second) &&
+                if (!release_finder->second.insert(it->first, it->second) &&
                     it->first->remove_nested_valid_ref(did))
                   assert(false); // should never delete this
               }
@@ -19024,10 +19030,10 @@ namespace Legion {
       for (std::map<IndexSpaceExpression*,IndexSpaceExpression*>::const_iterator
             eit = to_add.begin(); eit != to_add.end(); eit++)
       {
-        if (restricted_instances.find(eit->first) == restricted_instances.end())
-          eit->first->add_expression_reference();
-        FieldMaskSet<InstanceView> &new_insts =restricted_instances[eit->first];
-        FieldMaskSet<InstanceView> &old_insts=restricted_instances[eit->second];
+        if (restricted_instances.find(eit->second) ==restricted_instances.end())
+          eit->second->add_expression_reference();
+        FieldMaskSet<InstanceView> &old_insts =restricted_instances[eit->first];
+        FieldMaskSet<InstanceView> &new_insts=restricted_instances[eit->second];
         if (!new_insts.empty() || !!(old_insts.get_valid_mask() & acquire_mask))
         {
           std::vector<InstanceView*> to_erase;

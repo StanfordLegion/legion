@@ -2614,7 +2614,7 @@ namespace Legion {
         if (entries.single_entry == NULL)
         {
           entries.single_entry = entry;
-          valid_fields = mask;
+          valid_fields |= mask;
         }
         else if (entries.single_entry == entry)
         {
