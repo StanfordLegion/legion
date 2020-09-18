@@ -3778,13 +3778,34 @@ namespace Legion {
         assert(layout != NULL);
 #endif
 
+        LayoutConstraints *manager_cons = manager->layout->constraints;
+
+        size_t alignment = 0;
+        if (!manager_cons->alignment_constraints.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(manager_cons->alignment_constraints.size() == 1);
+          assert(manager_cons->alignment_constraints[0].fid == field_id);
+#endif
+          alignment = manager_cons->alignment_constraints[0].alignment;
+        }
         // If no alignment is given, set it to the field size
-        size_t alignment = info.alignment;
         if (alignment == 0)
           alignment = field_size;
         size_t bytes_used =
           (num_elements * field_size + alignment - 1) / alignment * alignment;
         layout->bytes_used = bytes_used;
+
+        if (!manager_cons->offset_constraints.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(manager_cons->offset_constraints.size() == 1);
+          assert(manager_cons->offset_constraints[0].fid == field_id);
+#endif
+          Realm::InstanceLayoutGeneric::FieldLayout &fl =
+            layout->fields[field_id];
+          fl.rel_offset = manager_cons->offset_constraints[0].offset;
+        }
 
         // Create an external Realm instance
         Realm::RegionInstance instance;
