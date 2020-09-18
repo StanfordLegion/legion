@@ -94,8 +94,6 @@ namespace Legion {
                                 ReferenceMutator *mutator);
     public:
       virtual void set_context_index(size_t index) = 0;
-    public:
-      std::vector<OutputRequirement> output_regions;
     protected:
       AllocManager *arg_manager;
     };
@@ -495,7 +493,8 @@ namespace Legion {
     protected:
       void prepare_output_instance(InstanceSet &instance_set,
                                    const OutputRequirement &req,
-                                   Memory target);
+                                   Memory target,
+                                   const LayoutConstraintSet &constraints);
       void finalize_output_regions(void);
     public:
       void replay_map_task_output(void);

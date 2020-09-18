@@ -2608,6 +2608,7 @@ namespace Legion {
       input.valid_instances.resize(regions.size());
       output.chosen_instances.resize(regions.size());
       output.output_targets.resize(output_regions.size());
+      output.output_constraints.resize(output_regions.size());
       // If we have must epoch owner, we have to check for any 
       // constrained mappings which must be heeded
       if (must_epoch_owner != NULL)
@@ -3187,7 +3188,8 @@ namespace Legion {
       {
         prepare_output_instance(output_instances[idx],
                                 output_regions[idx],
-                                output.output_targets[idx]);
+                                output.output_targets[idx],
+                                output.output_constraints[idx]);
       }
       if (runtime->legion_spy_enabled)
       {
@@ -3240,27 +3242,56 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void SingleTask::prepare_output_instance(InstanceSet &instance_set,
                                              const OutputRequirement &req,
-                                             Memory target)
+                                             Memory target,
+                                             const LayoutConstraintSet &c)
     //--------------------------------------------------------------------------
     {
-      RegionNode *node = runtime->forest->get_node(req.region);
-      IndexSpaceNode *index_node =
-        node->get_row_source()->as_index_space_node();
       MemoryManager *memory_manager = runtime->find_memory_manager(target);
-
-      std::vector<DimensionKind> ordering;
-      for (unsigned idx = 0; idx < index_node->get_num_dims(); ++idx)
-        ordering.push_back(static_cast<DimensionKind>(DIM_X + idx));
-      ordering.push_back(DIM_F);
-
-      LayoutConstraintSet constraints;
-      constraints.add_constraint(MemoryConstraint(target.kind()))
-        .add_constraint(OrderingConstraint(ordering, false))
-        .add_constraint(
-            SpecializedConstraint(LEGION_AFFINE_SPECIALIZE, 0, false, true));
 
       std::map<PhysicalManager*,unsigned> *acquired_instances =
         get_acquired_instances_ref();
+
+      LayoutConstraintSet constraints;
+      constraints.add_constraint(MemoryConstraint(target.kind()))
+        .add_constraint(
+            SpecializedConstraint(LEGION_AFFINE_SPECIALIZE, 0, false, true))
+        .add_constraint(c.ordering_constraint);
+
+      if (constraints.ordering_constraint.ordering.empty())
+      {
+        IndexSpace is = req.region.get_index_space();
+        int dim = is.get_dim();
+        std::vector<DimensionKind> dimension_ordering(dim + 1);
+        for (int i = 0; i < dim; ++i)
+          dimension_ordering[i] =
+            static_cast<DimensionKind>(static_cast<int>(LEGION_DIM_X) + i);
+        dimension_ordering[dim] = LEGION_DIM_F;
+        constraints.add_constraint(OrderingConstraint(dimension_ordering,
+                                                      false/*contigous*/));
+      }
+
+      std::map<FieldID, std::pair<EqualityKind, size_t> > alignments;
+      std::map<FieldID, off_t> offsets;
+
+      for (std::vector<AlignmentConstraint>::const_iterator it =
+           c.alignment_constraints.begin(); it !=
+           c.alignment_constraints.end(); ++it)
+      {
+#ifdef DEBUG_LEGION
+        assert(alignments.find(it->fid) == alignments.end());
+#endif
+        alignments[it->fid] = std::make_pair(it->eqk, it->alignment);
+      }
+
+      for (std::vector<OffsetConstraint>::const_iterator it =
+           c.offset_constraints.begin(); it !=
+           c.offset_constraints.end(); ++it)
+      {
+#ifdef DEBUG_LEGION
+        assert(offsets.find(it->fid) == offsets.end());
+#endif
+        offsets[it->fid] = it->offset;
+      }
 
       for (std::set<FieldID>::iterator it = req.privilege_fields.begin();
            it != req.privilege_fields.end(); ++it)
@@ -3268,6 +3299,22 @@ namespace Legion {
         // Create a layout description with a single field
         std::vector<FieldID> fields(1, *it);
         constraints.field_constraint = FieldConstraint(fields, false, false);
+
+        {
+          std::map<FieldID, std::pair<EqualityKind, size_t> >::iterator finder =
+            alignments.find(*it);
+          if (finder != alignments.end())
+            constraints.add_constraint(
+              AlignmentConstraint(
+                finder->first, finder->second.first, finder->second.second));
+        }
+
+        {
+          std::map<FieldID, off_t>::iterator finder = offsets.find(*it);
+          if (finder != offsets.end())
+            constraints.add_constraint(
+              OffsetConstraint(finder->first, finder->second));
+        }
 
         // Create a physical manager that is not bound to any instance
         PhysicalManager *manager =
@@ -3285,6 +3332,9 @@ namespace Legion {
         // Add the manager to the map of acquired instances so that
         // later we can release it properly
         acquired_instances->insert(std::make_pair(manager, 1));
+
+        constraints.alignment_constraints.clear();
+        constraints.offset_constraints.clear();
       }
     }
 
