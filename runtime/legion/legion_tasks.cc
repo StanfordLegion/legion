@@ -2085,6 +2085,7 @@ namespace Legion {
         remote_trace_info = 
           TraceInfo::unpack_remote_trace_info(derez, this, runtime); 
         derez.deserialize(deferred_complete_mapping);
+        version_infos.resize(regions.size());
       }
       update_no_access_regions();
     } 

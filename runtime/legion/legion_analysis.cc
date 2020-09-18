@@ -18669,16 +18669,18 @@ namespace Legion {
               expr_mask.set_bit(fidx);
               if (!has_cover)
               {
-                // Expression references flow back
+                // Expression references flow back but remove duplicates
                 for (std::list<std::pair<ReductionView*,
                       IndexSpaceExpression*> >::const_iterator it =
                       finder->second.begin(); it != finder->second.end(); it++)
-                  applied_exprs->insert(it->second, expr_mask);
+                  if (!applied_exprs->insert(it->second, expr_mask) &&
+                      it->second->remove_expression_reference())
+                    assert(false); // should never hit this
               }
               else
               {
-                set_expr->add_expression_reference();
-                applied_exprs->insert(set_expr, expr_mask); 
+                if (applied_exprs->insert(set_expr, expr_mask))
+                  set_expr->add_expression_reference();
                 // Now we can remove the remaining expression references
                 for (std::list<std::pair<ReductionView*,
                       IndexSpaceExpression*> >::const_iterator it =
@@ -18722,8 +18724,11 @@ namespace Legion {
                 if (track_exprs)
                   has_cover = true;
                 IndexSpaceExpression *remainder = 
-                  runtime->forest->subtract_index_spaces(it->second, expr);
+                  runtime->forest->subtract_index_spaces(set_expr, expr);
+                remainder->add_expression_reference();
                 it->second = remainder;
+                if (set_expr->remove_expression_reference())
+                  assert(false); // should never hit this
                 it++;
               }
               else
@@ -18753,6 +18758,9 @@ namespace Legion {
                 {
                   IndexSpaceExpression *remainder = 
                     runtime->forest->subtract_index_spaces(it->second, expr);
+                  remainder->add_expression_reference();
+                  if (it->second->remove_expression_reference())
+                    delete it->second;
                   it->second = remainder;
                   it++;
                 }
@@ -18780,7 +18788,7 @@ namespace Legion {
                     if (applied_exprs->insert(it->second, expr_mask))
                       it->second->add_expression_reference();
                 }
-                else if(applied_exprs->insert(expr, expr_mask))
+                else if (applied_exprs->insert(expr, expr_mask))
                   expr->add_expression_reference();
               }
             }
