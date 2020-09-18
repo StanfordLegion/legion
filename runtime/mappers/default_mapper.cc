@@ -1539,6 +1539,7 @@ namespace Legion {
             // might invalidate our iterator
             output.chosen_instances = it->mapping;
             output.output_targets = it->output_targets;
+            output.output_constraints = it->output_constraints;
             found = true;
             break;
           }
@@ -1655,8 +1656,12 @@ namespace Legion {
       // Finally we set a target memory for output instances
       Memory target_memory =
         default_policy_select_output_target(ctx, task.target_proc);
-      for (unsigned i = 0; i < output.output_targets.size(); ++i)
+      for (unsigned i = 0; i < task.output_regions.size(); ++i)
+      {
         output.output_targets[i] = target_memory;
+        default_policy_select_output_constraints(
+            task, output.output_constraints[i], task.output_regions[i]);
+      }
 
       if (cache_policy == DEFAULT_CACHE_POLICY_ENABLE) {
         // Now that we are done, let's cache the result so we can use it later
@@ -1667,6 +1672,7 @@ namespace Legion {
         cached_result.variant = output.chosen_variant;
         cached_result.mapping = output.chosen_instances;
         cached_result.output_targets = output.output_targets;
+        cached_result.output_constraints = output.output_constraints;
       }
     }
 
@@ -2368,6 +2374,24 @@ namespace Legion {
                                                         false/*contigous*/));
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::default_policy_select_output_constraints(
+                                               const Task &task,
+                                               LayoutConstraintSet &constraints,
+                                               const OutputRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpace is = req.region.get_index_space();
+      int dim = is.get_dim();
+      std::vector<DimensionKind> dimension_ordering(dim + 1);
+      for (int i = 0; i < dim; ++i)
+        dimension_ordering[i] =
+          static_cast<DimensionKind>(static_cast<int>(LEGION_DIM_X) + i);
+      dimension_ordering[dim] = LEGION_DIM_F;
+      constraints.add_constraint(OrderingConstraint(dimension_ordering,
+                                                    false/*contigous*/));
     }
 
     //--------------------------------------------------------------------------
