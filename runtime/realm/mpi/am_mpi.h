@@ -54,7 +54,7 @@ void AM_init_long_messages(MPI_Win win, void *am_base,
 			   Realm::IncomingMessageManager *message_manager);
 void AMPoll();
 void AMPoll_cancel();
-void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int has_dest, MPI_Aint dest);
+void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int payload_lines, int payload_line_stride, int has_dest, MPI_Aint dest);
 
 
 } /* namespace MPI */

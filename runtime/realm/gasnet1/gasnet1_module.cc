@@ -361,11 +361,17 @@ namespace Realm {
 		       unsigned short _msgid,
 		       size_t _header_size,
 		       size_t _max_payload_size,
+		       const void *_src_payload_addr,
+		       size_t _src_payload_lines,
+		       size_t _src_payload_line_stride,
 		       void *_dest_payload_addr);
     GASNet1MessageImpl(const Realm::NodeSet &_targets,
 		       unsigned short _msgid,
 		       size_t _header_size,
-		       size_t _max_payload_size);
+		       size_t _max_payload_size,
+		       const void *_src_payload_addr,
+		       size_t _src_payload_lines,
+		       size_t _src_payload_line_stride);
   
     virtual ~GASNet1MessageImpl();
 
@@ -376,6 +382,9 @@ namespace Realm {
     NodeID target;
     Realm::NodeSet targets;
     bool is_multicast;
+    const void *src_payload_addr;
+    size_t src_payload_lines;
+    size_t src_payload_line_stride;
     void *dest_payload_addr;
     size_t header_size;
     struct FullHeader : public BaseMedium {
@@ -391,13 +400,19 @@ namespace Realm {
 					 unsigned short _msgid,
 					 size_t _header_size,
 					 size_t _max_payload_size,
+					 const void *_src_payload_addr,
+					 size_t _src_payload_lines,
+					 size_t _src_payload_line_stride,
 					 void *_dest_payload_addr)
     : target(_target)
     , is_multicast(false)
+    , src_payload_addr(_src_payload_addr)
+    , src_payload_lines(_src_payload_lines)
+    , src_payload_line_stride(_src_payload_line_stride)
     , dest_payload_addr(_dest_payload_addr)
     , header_size(_header_size)
   {
-    if(_max_payload_size) {
+    if(_max_payload_size && (src_payload_addr == 0)) {
       payload_base = reinterpret_cast<char *>(malloc(_max_payload_size));
     } else {
       payload_base = 0;
@@ -411,13 +426,19 @@ namespace Realm {
   GASNet1MessageImpl::GASNet1MessageImpl(const Realm::NodeSet &_targets,
 					 unsigned short _msgid,
 					 size_t _header_size,
-					 size_t _max_payload_size)
+					 size_t _max_payload_size,
+					 const void *_src_payload_addr,
+					 size_t _src_payload_lines,
+					 size_t _src_payload_line_stride)
     : targets(_targets)
     , is_multicast(true)
+    , src_payload_addr(_src_payload_addr)
+    , src_payload_lines(_src_payload_lines)
+    , src_payload_line_stride(_src_payload_line_stride)
     , dest_payload_addr(0)
     , header_size(_header_size)
   {
-    if(_max_payload_size) {
+    if(_max_payload_size && (src_payload_addr == 0)) {
       payload_base = reinterpret_cast<char *>(malloc(_max_payload_size));
     } else {
       payload_base = 0;
@@ -445,28 +466,55 @@ namespace Realm {
 	for(NodeSet::const_iterator it = targets.begin();
 	    it != targets.end();
 	    ++it) {
-	  enqueue_message(*it, MSGID_NEW_ACTIVEMSG,
-			  &args, header_size+24,
-			  payload_base, act_payload_size,
-			  ((count > 0) ? PAYLOAD_COPY : PAYLOAD_FREE));
+	  if(src_payload_addr != 0) {
+	    if(src_payload_lines > 1)
+	      enqueue_message(*it, MSGID_NEW_ACTIVEMSG,
+			      &args, header_size+24,
+			      src_payload_addr,
+			      act_payload_size / src_payload_lines,
+			      src_payload_line_stride, src_payload_lines,
+			      PAYLOAD_KEEP);
+	    else
+	      enqueue_message(*it, MSGID_NEW_ACTIVEMSG,
+			      &args, header_size+24,
+			      src_payload_addr, act_payload_size,
+			      PAYLOAD_KEEP);
+	  } else
+	    enqueue_message(*it, MSGID_NEW_ACTIVEMSG,
+			    &args, header_size+24,
+			    payload_base, act_payload_size,
+			    ((count > 0) ? PAYLOAD_COPY : PAYLOAD_FREE));
 	  count--;
 	}
       } else {
 	// free the (unused) payload ourselves
-	if(payload_size > 0)
+	if((payload_size > 0) && (src_payload_addr == 0))
 	  free(payload_base);
       }
     } else {
-      enqueue_message(target, MSGID_NEW_ACTIVEMSG,
-		      &args, header_size+24,
-		      payload_base, act_payload_size, PAYLOAD_FREE,
-		      dest_payload_addr);
+      if(src_payload_addr != 0) {
+	if(src_payload_lines > 1)
+	  enqueue_message(target, MSGID_NEW_ACTIVEMSG,
+			  &args, header_size+24,
+			  src_payload_addr, (act_payload_size / src_payload_lines),
+			  src_payload_line_stride, src_payload_lines,
+			  PAYLOAD_KEEP, dest_payload_addr);
+	else
+	  enqueue_message(target, MSGID_NEW_ACTIVEMSG,
+			  &args, header_size+24,
+			  src_payload_addr, act_payload_size, PAYLOAD_KEEP,
+			  dest_payload_addr);
+      } else
+	enqueue_message(target, MSGID_NEW_ACTIVEMSG,
+			&args, header_size+24,
+			payload_base, act_payload_size, PAYLOAD_FREE,
+			dest_payload_addr);
     }
   }
 
   void GASNet1MessageImpl::cancel()
   {
-    if(payload_size)
+    if((payload_size > 0) && (src_payload_addr == 0))
       free(payload_base);
   }
 
@@ -722,6 +770,9 @@ namespace Realm {
 							       unsigned short msgid,
 							       size_t header_size,
 							       size_t max_payload_size,
+							       const void *src_payload_addr,
+							       size_t src_payload_lines,
+							       size_t src_payload_line_stride,
 							       void *dest_payload_addr,
 							       void *storage_base,
 							       size_t storage_size)
@@ -731,6 +782,9 @@ namespace Realm {
 								    msgid,
 								    header_size,
 								    max_payload_size,
+								    src_payload_addr,
+								    src_payload_lines,
+								    src_payload_line_stride,
 								    dest_payload_addr);
     return impl;
   }
@@ -739,6 +793,9 @@ namespace Realm {
 							       unsigned short msgid,
 							       size_t header_size,
 							       size_t max_payload_size,
+							       const void *src_payload_addr,
+							       size_t src_payload_lines,
+							       size_t src_payload_line_stride,
 							       void *storage_base,
 							       size_t storage_size)
   {
@@ -746,7 +803,10 @@ namespace Realm {
     GASNet1MessageImpl *impl = new(storage_base) GASNet1MessageImpl(targets,
 								    msgid,
 								    header_size,
-								    max_payload_size);
+								    max_payload_size,
+								    src_payload_addr,
+								    src_payload_lines,
+								    src_payload_line_stride);
     return impl;
   }
 

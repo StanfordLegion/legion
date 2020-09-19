@@ -29,14 +29,15 @@
 void enqueue_message(int target, int msgid,
                      const void *args, size_t arg_size,
                      const void *payload, size_t payload_size,
+		     size_t payload_lines, size_t payload_line_stride,
                      void *dstptr)
 {
     MPI_Aint disp = (MPI_Aint)dstptr;
     if (disp) {
         /* Displacement is shifted by DISP_OFFSET */
-        Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, 1, disp - DISP_OFFSET);
+        Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, payload_lines, payload_line_stride, 1, disp - DISP_OFFSET);
     } else {
-        Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, 0, 0);
+        Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, payload_lines, payload_line_stride, 0, 0);
     }
 }
 
@@ -333,11 +334,17 @@ namespace Realm {
                         unsigned short _msgid,
                         size_t _header_size,
                         size_t _max_payload_size,
+		        const void *_src_payload_addr,
+		        size_t _src_payload_lines,
+		        size_t _src_payload_line_stride,
                         void *_dest_payload_addr);
         MPIMessageImpl(const Realm::NodeSet &_targets,
                         unsigned short _msgid,
                         size_t _header_size,
-                        size_t _max_payload_size);
+		        size_t _max_payload_size,
+		        const void *_src_payload_addr,
+		        size_t _src_payload_lines,
+		        size_t _src_payload_line_stride);
 
         virtual ~MPIMessageImpl();
 
@@ -349,6 +356,9 @@ namespace Realm {
         NodeID target;
         Realm::NodeSet targets;
         bool is_multicast;
+        const void *src_payload_addr;
+        size_t src_payload_lines;
+        size_t src_payload_line_stride;
         void *dest_payload_addr;
         size_t header_size;
 
@@ -360,14 +370,20 @@ namespace Realm {
                                      unsigned short _msgid,
                                      size_t _header_size,
                                      size_t _max_payload_size,
+				     const void *_src_payload_addr,
+				     size_t _src_payload_lines,
+				     size_t _src_payload_line_stride,
                                      void *_dest_payload_addr)
         : target(_target)
         , is_multicast(false)
+	, src_payload_addr(_src_payload_addr)
+	, src_payload_lines(_src_payload_lines)
+	, src_payload_line_stride(_src_payload_line_stride)
         , dest_payload_addr(_dest_payload_addr)
         , header_size(_header_size)
         , msgid(_msgid)
     {
-        if(_max_payload_size) {
+        if(_max_payload_size && (src_payload_addr == 0)) {
             payload_base = reinterpret_cast<char *>(malloc(_max_payload_size));
         } else {
             payload_base = 0;
@@ -379,14 +395,20 @@ namespace Realm {
     MPIMessageImpl::MPIMessageImpl(const Realm::NodeSet &_targets,
                                      unsigned short _msgid,
                                      size_t _header_size,
-                                     size_t _max_payload_size)
+				     size_t _max_payload_size,
+				     const void *_src_payload_addr,
+				     size_t _src_payload_lines,
+				     size_t _src_payload_line_stride)
         : targets(_targets)
         , is_multicast(true)
+	, src_payload_addr(_src_payload_addr)
+	, src_payload_lines(_src_payload_lines)
+	, src_payload_line_stride(_src_payload_line_stride)
         , dest_payload_addr(0)
         , header_size(_header_size)
         , msgid(_msgid)
     {
-        if(_max_payload_size) {
+        if(_max_payload_size && (src_payload_addr == 0)) {
             payload_base = reinterpret_cast<char *>(malloc(_max_payload_size));
         } else {
             payload_base = 0;
@@ -406,18 +428,32 @@ namespace Realm {
 	    for(NodeSet::const_iterator it = targets.begin();
 		it != targets.end();
 		++it)
-	       enqueue_message(*it, msgid, &msg_header, header_size,
-			       payload_base, act_payload_size, NULL);
+	      if(src_payload_addr != 0)
+		enqueue_message(*it, msgid, &msg_header, header_size,
+				src_payload_addr, act_payload_size,
+				src_payload_lines, src_payload_line_stride,
+				NULL);
+	      else
+		enqueue_message(*it, msgid, &msg_header, header_size,
+				payload_base, act_payload_size, 0, 0, NULL);
         } else {
-            enqueue_message(target, msgid, &msg_header, header_size,
-                            payload_base, act_payload_size, dest_payload_addr);
+	    if(src_payload_addr != 0)
+	      enqueue_message(target, msgid, &msg_header, header_size,
+			      src_payload_addr, act_payload_size,
+			      src_payload_lines, src_payload_line_stride,
+			      dest_payload_addr);
+	    else
+	      enqueue_message(target, msgid, &msg_header, header_size,
+			      payload_base, act_payload_size, 0, 0,
+			      dest_payload_addr);
         }
-        free(payload_base);
+	if(payload_size && (src_payload_addr == 0))
+	  free(payload_base);
     }
 
     void MPIMessageImpl::cancel()
     {
-        if(payload_size)
+	if(payload_size && (src_payload_addr == 0))
             free(payload_base);
     }
 
@@ -646,6 +682,9 @@ namespace Realm {
 							    unsigned short msgid,
 							    size_t header_size,
 							    size_t max_payload_size,
+							    const void *src_payload_addr,
+							    size_t src_payload_lines,
+							    size_t src_payload_line_stride,
 							    void *dest_payload_addr,
 							    void *storage_base,
 							    size_t storage_size)
@@ -655,6 +694,9 @@ namespace Realm {
 						              msgid,
 							      header_size,
 							      max_payload_size,
+							      src_payload_addr,
+							      src_payload_lines,
+							      src_payload_line_stride,
 							      dest_payload_addr);
     return impl;
   }
@@ -663,6 +705,9 @@ namespace Realm {
 							    unsigned short msgid,
 							    size_t header_size,
 							    size_t max_payload_size,
+							    const void *src_payload_addr,
+							    size_t src_payload_lines,
+							    size_t src_payload_line_stride,
 							    void *storage_base,
 							    size_t storage_size)
   {
@@ -670,7 +715,10 @@ namespace Realm {
     MPIMessageImpl *impl = new(storage_base) MPIMessageImpl(targets,
 							      msgid,
 							      header_size,
-							      max_payload_size);
+							      max_payload_size,
+							      src_payload_addr,
+							      src_payload_lines,
+							      src_payload_line_stride);
     return impl;
   }
 
