@@ -1178,7 +1178,6 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
-      std::map<PhysicalManager*,unsigned> acquired_instances;
     protected:
       std::map<DomainPoint,RtUserEvent> pending_intra_space_dependences;
     protected:
@@ -1357,7 +1356,6 @@ namespace Legion {
       TraceInfo *remote_trace_info;
       ApUserEvent effects_postcondition;
     protected:
-      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
