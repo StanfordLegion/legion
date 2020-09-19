@@ -1073,6 +1073,8 @@ namespace Legion {
           const bool notify_remote = true, IndexSpaceExprID expr_id = 0) = 0;
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                     size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
+      virtual bool is_below_in_tree(IndexPartNode *p, LegionColor &child) const
+        { return false; }
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -1936,6 +1938,7 @@ namespace Legion {
       virtual void create_sharded_alias(IndexSpace alias,DistributedID did) = 0;
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                     size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
+      virtual bool is_below_in_tree(IndexPartNode *p, LegionColor &child) const;
     public:
       virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union) = 0;

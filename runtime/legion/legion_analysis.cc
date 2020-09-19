@@ -14760,6 +14760,9 @@ namespace Legion {
       // to become valid at some point and therefore remove it eventually
       if (!is_owner())
         add_base_gc_ref(REMOTE_DID_REF);
+#ifdef LEGION_GC
+      log_garbage.info("GC Equivalence Set %lld %d", id, local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -22759,6 +22762,9 @@ namespace Legion {
       : region_node(node), new_set(NULL)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!node->row_source->is_empty());
+#endif
       region_node->add_base_resource_ref(PENDING_REFINEMENT_REF);
       previous_sets.relax_valid_mask(mask);
     }
@@ -23076,11 +23082,8 @@ namespace Legion {
         // empty equivalence sets directly from the region itself.
         // Otherwise, bounce this computation off the context so that we know
         // that we are on the right node to perform it
-        const RtEvent ready = region_node->row_source->is_empty() ? 
-          region_node->find_or_create_empty_equivalence_sets(this, 
-              runtime->address_space, remaining_mask, source) :
-          context->compute_equivalence_sets(this, runtime->address_space, 
-              region_node, remaining_mask, opid, source);
+        const RtEvent ready = context->compute_equivalence_sets(this, 
+            runtime->address_space, region_node, remaining_mask, opid, source);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
@@ -23116,7 +23119,8 @@ namespace Legion {
     {
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
-      assert(set->region_node != node);
+      assert((set->region_node != node) || 
+              set->region_node->row_source->is_empty());
 #endif
       if (equivalence_sets.insert(set, mask))
         set->add_base_resource_ref(VERSION_MANAGER_REF);
@@ -23278,7 +23282,8 @@ namespace Legion {
             to_remove.begin(); it != to_remove.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(it->first->region_node != node);
+        assert((it->first->region_node != node) ||
+                it->first->region_node->row_source->is_empty());
 #endif
         it->first->remove_tracker(this, it->second);
         if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
@@ -23323,6 +23328,7 @@ namespace Legion {
 #endif
       FieldMask request_mask;
       RtUserEvent request_ready;
+      RegionNode *region_node = node->as_region_node();
       if (downward_only)
       {
         AutoLock m_lock(manager_lock);
@@ -23374,7 +23380,6 @@ namespace Legion {
       // Release the lock before doing the call out to the context
       if (!!request_mask)
       {
-        RegionNode *region_node = node->as_region_node();
 #ifdef DEBUG_LEGION
         assert(request_ready.exists());
         assert(region_node->parent != NULL);
@@ -23403,6 +23408,16 @@ namespace Legion {
       // If we have deferral events then save this traversal for another time
       if (!deferral_events.empty())
         return;
+      // Check for the case where this is an empty region node
+      if (region_node->row_source->is_empty())
+      {
+        const RtEvent ready_event = 
+          region_node->find_or_create_empty_equivalence_sets(target,
+              target_space, mask, original_source);
+        if (ready_event.exists() && !ready_event.has_triggered())
+          ready_events.insert(ready_event);
+        return;
+      }
       // Do the local analysis on our owned equivalence sets
       AutoLock m_lock(manager_lock,1,false/*exclusive*/);
       if (!downward_only)

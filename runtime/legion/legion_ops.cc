@@ -10328,6 +10328,10 @@ namespace Legion {
                 color < index_part->total_children; color++)
           {
             RegionNode *child = it->first->get_child(color);
+            // Skip empty regions since those are handled separately with 
+            // their own explicit empty equivalence sets
+            if (child->row_source->is_empty())
+              continue;
             PendingEquivalenceSet *pending = 
               new PendingEquivalenceSet(child, it->second);
             initialize_pending(pending, it->second, map_applied_conditions);
@@ -10344,6 +10348,10 @@ namespace Legion {
           {
             const LegionColor color = itr->yield_color();
             RegionNode *child = it->first->get_child(color);
+            // Skip empty regions since those are handled separately with 
+            // their own explicit empty equivalence sets
+            if (child->row_source->is_empty())
+              continue;
             PendingEquivalenceSet *pending = 
               new PendingEquivalenceSet(child, it->second);
             initialize_pending(pending, it->second, map_applied_conditions);

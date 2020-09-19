@@ -1336,6 +1336,10 @@ namespace Legion {
                   color += repl_ctx->total_shards)
             {
               RegionNode *child = it->first->get_child(color);
+              // Skip empty regions since those are handled separately with 
+              // their own explicit empty equivalence sets
+              if (child->row_source->is_empty())
+                continue;
               VersionInfo &info = sharded_region_version_infos[child];
               info.relax_valid_mask(it->second);
               child->perform_versioning_analysis(ctx, parent_ctx, &info,
@@ -1357,11 +1361,16 @@ namespace Legion {
             while (itr->is_valid())
             {
               RegionNode *child = it->first->get_child(itr->yield_color());
-              VersionInfo &info = sharded_region_version_infos[child];
-              info.relax_valid_mask(it->second);
-              child->perform_versioning_analysis(ctx, parent_ctx, &info,
-                    version_mask, unique_op_id, local_space, ready_events);
-              children.push_back(child);
+              // Skip empty regions since those are handled separately with 
+              // their own explicit empty equivalence sets
+              if (!child->row_source->is_empty())
+              {
+                VersionInfo &info = sharded_region_version_infos[child];
+                info.relax_valid_mask(it->second);
+                child->perform_versioning_analysis(ctx, parent_ctx, &info,
+                      version_mask, unique_op_id, local_space, ready_events);
+                children.push_back(child);
+              }
               // Skip ahead to the next color
               for (unsigned idx = 0; idx < (repl_ctx->total_shards-1); idx++)
               {

@@ -8636,6 +8636,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool IndexSpaceNode::is_below_in_tree(IndexPartNode *partition, 
+                                          LegionColor &child) const
+    //--------------------------------------------------------------------------
+    {
+      const IndexSpaceNode *node = this;
+      while ((node->parent != NULL) && 
+              (node->parent->depth <= partition->depth))
+      {
+        if (node->parent == partition)
+        {
+          child = node->color;
+          return true;
+        }
+        node = node->parent->parent;
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     bool IndexSpaceNode::intersects_with(IndexSpaceNode *rhs, bool compute)
     //--------------------------------------------------------------------------
     {
@@ -10013,7 +10032,7 @@ namespace Legion {
       assert(is_disjoint());
       assert(is_complete());
       assert(colors.empty());
-#endif
+#endif 
       // Check to see if we have this in the cache
       {
         AutoLock n_lock(node_lock);
@@ -10040,33 +10059,44 @@ namespace Legion {
           return;
         }
       }
-      // TODO: compute this using a distributed algorithm with K-D trees
-      // If not, test this against all the children
-      if (total_children == max_linearized_color)
+      // Do a quick test to see if this expression is below us in the 
+      // index space tree which makes this computation simple
+      LegionColor below_color = 0;
+      if (!expr->is_below_in_tree(this, below_color))
       {
-        for (LegionColor color = 0; color < total_children; color++)
+#ifdef DEBUG_LEGION
+        assert(!expr->is_empty());   
+#endif
+        // TODO: compute this using a distributed algorithm with K-D trees
+        // If not, test this against all the children
+        if (total_children == max_linearized_color)
         {
-          IndexSpaceNode *child = get_child(color);
-          IndexSpaceExpression *intersection = 
-            context->intersect_index_spaces(expr, child);
-          if (!intersection->is_empty())
-            colors.push_back(color);
+          for (LegionColor color = 0; color < total_children; color++)
+          {
+            IndexSpaceNode *child = get_child(color);
+            IndexSpaceExpression *intersection = 
+              context->intersect_index_spaces(expr, child);
+            if (!intersection->is_empty())
+              colors.push_back(color);
+          }
+        }
+        else
+        {
+          ColorSpaceIterator *itr = color_space->create_color_space_iterator();
+          while (itr->is_valid())
+          {
+            const LegionColor color = itr->yield_color();
+            IndexSpaceNode *child = get_child(color);
+            IndexSpaceExpression *intersection = 
+              context->intersect_index_spaces(expr, child);
+            if (!intersection->is_empty())
+              colors.push_back(color);
+          }
+          delete itr;
         }
       }
       else
-      {
-        ColorSpaceIterator *itr = color_space->create_color_space_iterator();
-        while (itr->is_valid())
-        {
-          const LegionColor color = itr->yield_color();
-          IndexSpaceNode *child = get_child(color);
-          IndexSpaceExpression *intersection = 
-            context->intersect_index_spaces(expr, child);
-          if (!intersection->is_empty())
-            colors.push_back(color);
-        }
-        delete itr;
-      }
+        colors.push_back(below_color);
       // Save the result in the cache for the future
       AutoLock n_lock(node_lock);
       // If someone else beat us to it then we are done
@@ -18195,9 +18225,6 @@ namespace Legion {
                                               bool downward_only)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!row_source->is_empty());
-#endif
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_traversal;
       FieldMaskSet<PartitionNode> children_traversal;

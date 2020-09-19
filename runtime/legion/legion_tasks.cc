@@ -3993,7 +3993,8 @@ namespace Legion {
 
       // STEP 2: Set up the task's context
       {
-        if (!variant->is_leaf())
+        const bool is_leaf_variant = variant->is_leaf();
+        if (!is_leaf_variant)
           execution_context = initialize_inner_execution_context(variant);
         else
           execution_context = new LeafContext(runtime, this);
@@ -4016,7 +4017,7 @@ namespace Legion {
             execution_context->add_physical_region(clone_requirements[idx],
                 false/*mapped*/, map_id, tag, unmap_events[idx],
                 virtual_mapped[idx], physical_instances[idx]);
-            if (virtual_mapped[idx])
+            if (virtual_mapped[idx] && !no_access_regions[idx])
               equivalence_sets[idx] = create_initial_equivalence_set(idx);
           }
           else if (do_inner_task_optimization)
@@ -4056,7 +4057,8 @@ namespace Legion {
             execution_context->add_physical_region(clone_requirements[idx],
                     true/*mapped*/, map_id, tag, unmap_events[idx],
                     false/*virtual mapped*/, physical_instances[idx]);
-            equivalence_sets[idx] = create_initial_equivalence_set(idx);
+            if (!is_leaf_variant)
+              equivalence_sets[idx] = create_initial_equivalence_set(idx);
             // We reset the reference below after we've
             // initialized the local contexts and received
             // back the local instance references
