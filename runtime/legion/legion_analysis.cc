@@ -14756,6 +14756,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       active_once = true;
 #endif
+      // Add the gc ref here with the requirement that the owner is guaranteed
+      // to become valid at some point and therefore remove it eventually
+      if (!is_owner())
+        add_base_gc_ref(REMOTE_DID_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -14807,21 +14811,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(active_once);
 #endif
-      // Don't do anything if we're initializing the collective refs
-      if (init_collective_refs)
-        return;
-      // We don't send these if we don't have a mutator because that is our
-      // signal that we are doing parallel creation of this equivalence set
-      if ((collective_mapping != NULL) && !is_owner())
-      {
-        // Add references down the tree
-        std::vector<AddressSpaceID> children;
-        collective_mapping->get_children(owner_space, local_space, 
-            runtime->legion_collective_radix, children);
-        for (std::vector<AddressSpaceID>::const_iterator it =
-              children.begin(); it != children.end(); it++)
-          send_remote_gc_increment(*it, mutator);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -14963,27 +14952,7 @@ namespace Legion {
 #endif
         return;
       }
-      if (is_owner())
-      {
-        // We don't send these if we don't have a mutator because that is our
-        // signal that we are doing parallel creation of this equivalence set
-        if (collective_mapping != NULL)
-        {
-          // Add references down the tree
-          std::vector<AddressSpaceID> children;
-          collective_mapping->get_children(owner_space, local_space, 
-              runtime->legion_collective_radix, children);
-          for (std::vector<AddressSpaceID>::const_iterator it =
-                children.begin(); it != children.end(); it++)
-            send_remote_gc_increment(*it, mutator);
-        }
-        if (has_remote_instances())
-        {
-          ValidityFunctor<true/*inc*/> functor(this, mutator);
-          map_over_remote_instances(functor);
-        }
-      }
-      else
+      if (!is_owner())
       {
         if (collective_mapping != NULL)
         {
@@ -21134,7 +21103,7 @@ namespace Legion {
           }
         }
       }
-      if (has_remote_instances())
+      if (is_owner() && has_remote_instances())
       {
         InvalidateFunctor functor(did, mask, applied_events, origin_space,
                                   invalidate_mapping, runtime);
@@ -21345,21 +21314,24 @@ namespace Legion {
         // we know that we should just do the unpack there. This will
         // break the cycle and allow forward progress. Analysis messages
         // may go round and round a few times, but they have lower
-        // priority and therefore shouldn't create an livelock.
+        // priority and therefore shouldn't create a livelock.
+        AutoLock eq(eq_lock,1,false/*exclusive*/);
+        if (!set_expr->is_empty())
         {
-          AutoLock eq(eq_lock,1,false/*exclusive*/);
           if (target == logical_owner_space)
             rez.serialize(local_space);
           else
             rez.serialize(logical_owner_space);
-          // Also pack up any replicated states to send
-          rez.serialize<size_t>(replicated_states.size());
-          for (FieldMaskSet<CollectiveMapping>::const_iterator it =
-                replicated_states.begin(); it != replicated_states.end(); it++)
-          {
-            it->first->pack(rez);
-            rez.serialize(it->second);
-          }
+        }
+        else // Empty equivalence sets are already valid
+          rez.serialize(logical_owner_space);
+        // Also pack up any replicated states to send
+        rez.serialize<size_t>(replicated_states.size());
+        for (FieldMaskSet<CollectiveMapping>::const_iterator it =
+              replicated_states.begin(); it != replicated_states.end(); it++)
+        {
+          it->first->pack(rez);
+          rez.serialize(it->second);
         }
       }
       runtime->send_equivalence_set_response(target, rez);
@@ -21427,22 +21399,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::clone_from(EquivalenceSet *src, const FieldMask &mask,
+    void EquivalenceSet::clone_from(const AddressSpaceID target_space,
+                                    EquivalenceSet *src, const FieldMask &mask,
                                     std::set<RtEvent> &applied_events,
-                                    const bool invalidate_overlap,
-                                    const bool target_local)
+                                    const bool invalidate_overlap)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock); 
-      if (!is_logical_owner() && !target_local)
+      if (target_space != local_space)
       {
         const RtUserEvent done_event = Runtime::create_rt_user_event();
-        src->clone_to_remote(did, logical_owner_space, region_node->row_source,
+        src->clone_to_remote(did, target_space, region_node->row_source,
                              mask, done_event, invalidate_overlap);
         applied_events.insert(done_event);
       }
       else
+      {
+        AutoLock eq(eq_lock); 
         src->clone_to_local(this, mask, applied_events, invalidate_overlap);  
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -22643,8 +22617,8 @@ namespace Legion {
         std::set<RtEvent> applied_events;   
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
-        dst->clone_from(set, mask, applied_events, 
-            invalidate_overlap, true/*target local*/);
+        dst->clone_from(target_space, set, mask, 
+                        applied_events, invalidate_overlap);
         if (!applied_events.empty())
           Runtime::trigger_event(done_event, 
               Runtime::merge_events(applied_events));
@@ -22866,7 +22840,8 @@ namespace Legion {
         std::set<RtEvent> preconditions;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               previous_sets.begin(); it != previous_sets.end(); it++)
-          new_set->clone_from(it->first, it->second, preconditions);
+          new_set->clone_from(suggested_owner, it->first, 
+                              it->second, preconditions);
         if (!preconditions.empty())
           clone_event = new_set->make_owner(suggested_owner, 
               Runtime::merge_events(preconditions));
@@ -23097,10 +23072,15 @@ namespace Legion {
       }
       if (compute_event.exists())
       {
-        // Bounce this computation off the context so that we know
+        // If we're an empty region then we can just get the names of any
+        // empty equivalence sets directly from the region itself.
+        // Otherwise, bounce this computation off the context so that we know
         // that we are on the right node to perform it
-        const RtEvent ready = context->compute_equivalence_sets(this, 
-            runtime->address_space, region_node, remaining_mask, opid, source);
+        const RtEvent ready = region_node->row_source->is_empty() ? 
+          region_node->find_or_create_empty_equivalence_sets(this, 
+              runtime->address_space, remaining_mask, source) :
+          context->compute_equivalence_sets(this, runtime->address_space, 
+              region_node, remaining_mask, opid, source);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
@@ -23209,9 +23189,6 @@ namespace Legion {
             // Once it's valid for any field then it's valid for all of them
             if (it->second * finder->second)
               continue;
-#ifdef DEBUG_LEGION
-            assert(it->first->region_node != node);
-#endif
             if (equivalence_sets.insert(it->first, it->second))
               it->first->add_base_resource_ref(VERSION_MANAGER_REF);
             it->first->record_tracker(this, it->second);
@@ -23294,31 +23271,18 @@ namespace Legion {
           return;
         to_remove.swap(equivalence_sets);
       }
-      // Check to see if these are empty equivalence sets or not
-      if (node->is_region() && node->as_region_node()->row_source->is_empty())
-      {
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              to_remove.begin(); it != to_remove.end(); it++)
-        {
 #ifdef DEBUG_LEGION
-          assert(it->first->region_node == node);
+      assert(node->is_region());
 #endif
-          if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
-            delete it->first;
-        }
-      }
-      else
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            to_remove.begin(); it != to_remove.end(); it++)
       {
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              to_remove.begin(); it != to_remove.end(); it++)
-        {
 #ifdef DEBUG_LEGION
-          assert(it->first->region_node != node);
+        assert(it->first->region_node != node);
 #endif
-          it->first->remove_tracker(this, it->second);
-          if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-            delete it->first;
-        }
+        it->first->remove_tracker(this, it->second);
+        if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+          delete it->first;
       }
     }
 
@@ -23539,97 +23503,6 @@ namespace Legion {
         mask.clear();
       assert(!mask);
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::find_or_create_empty_equivalence_sets(
-                                              EqSetTracker *target,
-                                              const AddressSpaceID target_space,
-                                              const FieldMask &mask,
-                                              const AddressSpaceID source,
-                                              std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(node->is_region());
-#endif
-      RegionNode *region_node = node->as_region_node();
-#ifdef DEBUG_LEGION
-      assert(region_node->row_source->is_empty());
-#endif
-      AutoLock m_lock(manager_lock);
-      if (target_space != runtime->address_space)
-      {
-        FieldMaskSet<EquivalenceSet> to_send;
-        FieldMask remainder = mask;
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        {
-          const FieldMask overlap = remainder & it->second;
-          if (!overlap)
-            continue;
-          to_send.insert(it->first, overlap);
-          remainder -= overlap;
-          if (!remainder)
-            break;
-        }
-        if (!!remainder)
-        {
-          EquivalenceSet *empty_set = new EquivalenceSet(runtime, 
-              runtime->get_available_distributed_id(), runtime->address_space,
-              source, region_node, true/*register now*/);
-          if (equivalence_sets.insert(empty_set, remainder))
-          {
-            WrapperReferenceMutator mutator(ready_events);
-            empty_set->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
-          } 
-          to_send.insert(empty_set, remainder);
-        }
-        // Send the result back to target
-        const RtUserEvent done = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(target);
-          rez.serialize<size_t>(to_send.size());
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                to_send.begin(); it != to_send.end(); it++)
-          {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
-          }
-          rez.serialize(done);
-        }
-        runtime->send_compute_equivalence_sets_response(target_space, rez);
-        ready_events.insert(done);
-      }
-      else
-      {
-        FieldMask remainder = mask;
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        {
-          const FieldMask overlap = remainder & it->second;
-          if (!overlap)
-            continue;
-          if (target != this)
-            target->record_equivalence_set(it->first, overlap);
-          remainder -= overlap;
-          if (!remainder)
-            return;
-        }
-        // Make a new equivalence set and send it
-        EquivalenceSet *empty_set = new EquivalenceSet(runtime, 
-            runtime->get_available_distributed_id(), runtime->address_space,
-            source, region_node, true/*register now*/);
-        if (equivalence_sets.insert(empty_set, remainder))
-        {
-          WrapperReferenceMutator mutator(ready_events);
-          empty_set->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
-        }
-        if (target != this)
-          target->record_equivalence_set(empty_set, remainder);
-      }
     }
 
     //--------------------------------------------------------------------------

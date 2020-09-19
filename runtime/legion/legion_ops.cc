@@ -9506,7 +9506,8 @@ namespace Legion {
           // the clone operation is finished.
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 previous_sets.begin(); it != previous_sets.end(); it++)
-            set->clone_from(it->first, it->second, map_applied_conditions);
+            set->clone_from(runtime->address_space, it->first, 
+                            it->second, map_applied_conditions);
         }
         region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
                                 map_applied_conditions, to_release, parent_ctx);
@@ -10089,8 +10090,8 @@ namespace Legion {
                 src_it->first->region_node->row_source);
           if (overlap_expr->is_empty())
             continue;
-          dst_it->first->clone_from(src_it->first, overlap, 
-                                    map_applied_conditions);
+          dst_it->first->clone_from(runtime->address_space, src_it->first, 
+                                    overlap, map_applied_conditions);
         }
       }
       if (!map_applied_conditions.empty())

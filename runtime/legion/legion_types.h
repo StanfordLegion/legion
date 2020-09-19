@@ -849,6 +849,7 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES,
       SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
+      SEND_EQUIVALENCE_SET_EMPTY_CREATE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_CREATE_REQUEST,
@@ -1056,6 +1057,7 @@ namespace Legion {
         "Send Equivalence Set Remote Overwrites",                     \
         "Send Equivalence Set Remote Filters",                        \
         "Send Equivalence Set Remote Instances",                      \
+        "Send Equivalence Set Empty Find or Create",                  \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Create Request",                               \

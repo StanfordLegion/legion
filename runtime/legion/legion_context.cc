@@ -8578,10 +8578,11 @@ namespace Legion {
           // into our current one
           const FieldMaskSet<EquivalenceSet> &eq_sets = 
             version_infos[idx1].get_equivalence_sets();
+          const AddressSpaceID space = runtime->address_space;
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
-            eq_set->clone_from(it->first, it->second, applied_events, 
-                 IS_WRITE(regions[idx1])/*invalidate source overlap*/);
+            eq_set->clone_from(space, it->first, it->second, applied_events,
+                       IS_WRITE(regions[idx1])/*invalidate source overlap*/);
         }
         // Now initialize our logical and physical contexts
         region_node->initialize_disjoint_complete_tree(ctx, user_mask);

@@ -9858,6 +9858,11 @@ namespace Legion {
               runtime->handle_equivalence_set_remote_instances(derez);
               break;
             }
+          case SEND_EQUIVALENCE_SET_EMPTY_CREATE:
+            {
+              runtime->handle_equivalence_set_empty_create(derez);
+              break;
+            }
           case SEND_INSTANCE_REQUEST:
             {
               runtime->handle_instance_request(derez, remote_address_space);
@@ -19613,6 +19618,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_empty_create(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_EMPTY_CREATE, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_instance_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -21458,6 +21473,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalAnalysis::handle_remote_instances(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_empty_create(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode::handle_empty_equivalence_set_create(derez, forest);
     }
 
     //--------------------------------------------------------------------------

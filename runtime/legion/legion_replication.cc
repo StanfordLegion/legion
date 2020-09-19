@@ -1148,8 +1148,8 @@ namespace Legion {
             version_info.get_equivalence_sets();
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 previous_sets.begin(); it != previous_sets.end(); it++)
-            set->clone_from(it->first, it->second, map_applied_conditions,
-                false/*invalidate overlap*/, true/*target local*/);
+            set->clone_from(runtime->address_space, it->first, it->second,
+                      map_applied_conditions, false/*invalidate overlap*/);
         }
         // Invalidate the old refinement
         region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,

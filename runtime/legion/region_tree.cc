@@ -17653,6 +17653,20 @@ namespace Legion {
             delete (*it);
         partition_trackers.clear();
       }
+      if (!empty_equivalence_sets.empty())
+      {
+        std::set<RtEvent> applied_events;
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              empty_equivalence_sets.begin(); it != 
+              empty_equivalence_sets.end(); it++)
+        {
+          it->first->invalidate_trackers(it->second, applied_events,
+              context->runtime->address_space, NULL/*collective mapping*/);
+          if (it->first->remove_nested_valid_ref(did))
+            delete it->first;
+        }
+        empty_equivalence_sets.clear();
+      }
       for (unsigned idx = 0; idx < current_versions.max_entries(); idx++)
         if (current_versions.has_entry(idx))
           get_current_version_manager(idx).finalize_manager();
@@ -18181,17 +18195,10 @@ namespace Legion {
                                               bool downward_only)
     //--------------------------------------------------------------------------
     {
-      VersionManager &manager = get_current_version_manager(ctx);
-      // Check for the special case of having empty equivalence sets
-      if (expr->is_empty())
-      {
 #ifdef DEBUG_LEGION
-        assert(expr == row_source);
+      assert(!row_source->is_empty());
 #endif
-        manager.find_or_create_empty_equivalence_sets(target, target_space,
-                                               mask, source, ready_events);
-        return;
-      }
+      VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_traversal;
       FieldMaskSet<PartitionNode> children_traversal;
       std::set<RtEvent> deferral_events;
@@ -18370,6 +18377,137 @@ namespace Legion {
       }
       partitions.insert(partitions.end(), 
                         unique_partitions.begin(), unique_partitions.end());
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent RegionNode::find_or_create_empty_equivalence_sets(
+                        EqSetTracker *target, const AddressSpaceID target_space,
+                        const FieldMask &mask, const AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(row_source->is_empty());
+#endif
+      if (!is_owner())
+      {
+        const RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize(target);
+          rez.serialize(target_space);
+          rez.serialize(mask);
+          rez.serialize(source);
+          rez.serialize(done_event);
+        }
+        context->runtime->send_equivalence_set_empty_create(owner_space, rez);
+        return done_event;
+      }
+      std::set<RtEvent> ready_events;
+      Runtime *runtime = context->runtime;
+      AutoLock n_lock(node_lock);
+      if (target_space != runtime->address_space)
+      {
+        FieldMaskSet<EquivalenceSet> to_send;
+        FieldMask remainder = mask;
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              empty_equivalence_sets.begin(); it != 
+              empty_equivalence_sets.end(); it++)
+        {
+          const FieldMask overlap = remainder & it->second;
+          if (!overlap)
+            continue;
+          to_send.insert(it->first, overlap);
+          remainder -= overlap;
+          if (!remainder)
+            break;
+        }
+        if (!!remainder)
+        {
+          EquivalenceSet *empty_set = new EquivalenceSet(runtime, 
+              runtime->get_available_distributed_id(), runtime->address_space,
+              source, this, true/*register now*/);
+          if (empty_equivalence_sets.insert(empty_set, remainder))
+          {
+            WrapperReferenceMutator mutator(ready_events);
+            empty_set->add_nested_valid_ref(did, &mutator);
+          } 
+          to_send.insert(empty_set, remainder);
+        }
+        // Send the result back to target
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          rez.serialize<size_t>(to_send.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                to_send.begin(); it != to_send.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize(done);
+        }
+        runtime->send_compute_equivalence_sets_response(target_space, rez);
+        ready_events.insert(done);
+      }
+      else
+      {
+        FieldMask remainder = mask;
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              empty_equivalence_sets.begin(); it != 
+              empty_equivalence_sets.end(); it++)
+        {
+          const FieldMask overlap = remainder & it->second;
+          if (!overlap)
+            continue;
+          target->record_equivalence_set(it->first, overlap);
+          remainder -= overlap;
+          if (!remainder)
+            return RtEvent::NO_RT_EVENT;
+        }
+        // Make a new equivalence set and send it
+        EquivalenceSet *empty_set = new EquivalenceSet(runtime, 
+            runtime->get_available_distributed_id(), runtime->address_space,
+            source, this, true/*register now*/);
+        if (empty_equivalence_sets.insert(empty_set, remainder))
+        {
+          WrapperReferenceMutator mutator(ready_events);
+          empty_set->add_nested_valid_ref(did, &mutator);
+        }
+        target->record_equivalence_set(empty_set, remainder);
+      }
+      if (!ready_events.empty())
+        return Runtime::merge_events(ready_events);
+      else
+        return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RegionNode::handle_empty_equivalence_set_create(
+                                  Deserializer &derez, RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      EqSetTracker *target;
+      derez.deserialize(target);
+      AddressSpaceID target_space;
+      derez.deserialize(target_space);
+      FieldMask mask;
+      derez.deserialize(mask);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      RegionNode *node = forest->get_node(handle);
+      RtEvent done = node->find_or_create_empty_equivalence_sets(target,
+                                            target_space, mask, source);
+      Runtime::trigger_event(done_event, done);
     }
 
     //--------------------------------------------------------------------------

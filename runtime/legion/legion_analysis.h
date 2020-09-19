@@ -2894,10 +2894,10 @@ namespace Legion {
                                std::set<RtEvent> &applied_events,
                                const AddressSpaceID origin_space,
                                const CollectiveMapping *collective_mapping);
-      void clone_from(EquivalenceSet *src, const FieldMask &clone_mask,
+      void clone_from(const AddressSpaceID target_space, EquivalenceSet *src,
+                      const FieldMask &clone_mask,
                       std::set<RtEvent> &applied_events, 
-                      const bool invalidate_overlap = false, 
-                      const bool target_local = false);
+                      const bool invalidate_overlap = false);
       RtEvent make_owner(AddressSpaceID owner, 
                          RtEvent precondition = RtEvent::NO_RT_EVENT);
       void update_tracing_valid_views(LogicalView *view,

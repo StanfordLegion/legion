@@ -3853,12 +3853,19 @@ namespace Legion {
                                          const FieldMask &mask,
                     std::vector<LogicalPartition> &partitions);
     public:
+      RtEvent find_or_create_empty_equivalence_sets(EqSetTracker *target,
+                        const AddressSpaceID target_space, 
+                        const FieldMask &mask, const AddressSpaceID source);
+      static void handle_empty_equivalence_set_create(Deserializer &derez,
+                                                  RegionTreeForest *forest);
+    public:
       const LogicalRegion handle;
       PartitionNode *const parent;
       IndexSpaceNode *const row_source;
     protected:
       std::map<LegionColor,PartitionNode*> color_map;
       std::list<PartitionTracker*> partition_trackers;
+      FieldMaskSet<EquivalenceSet> empty_equivalence_sets;
 #ifdef DEBUG_LEGION
       bool currently_valid;
 #endif
