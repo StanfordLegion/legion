@@ -161,7 +161,7 @@ void StencilMapper::map_task(const MapperContext      ctx,
       if ((req.privilege == NO_ACCESS) || (req.privilege_fields.empty()))
         continue;
 
-      assert(input.valid_instances[idx].size() == 1);
+      assert(!input.valid_instances[idx].empty());
       output.chosen_instances[idx] = input.valid_instances[idx];
       bool ok = runtime->acquire_and_filter_instances(ctx, output.chosen_instances);
       if (!ok) {
