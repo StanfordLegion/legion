@@ -3058,7 +3058,8 @@ namespace Legion {
       void update_owner(const AddressSpaceID new_logical_owner); 
       void broadcast_replicated_state_updates(const FieldMask &mask,
               CollectiveMapping *mapping, const AddressSpaceID origin,
-              std::set<RtEvent> &applied_events, const bool need_lock = false);
+              std::set<RtEvent> &applied_events, const bool need_lock = false,
+              const bool perform_updates = true);
       void make_replicated_state(CollectiveMapping *mapping,
                                  FieldMask mask, const AddressSpaceID source,
                                  std::set<RtEvent> &deferral_events);

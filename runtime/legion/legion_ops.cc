@@ -10388,8 +10388,8 @@ namespace Legion {
         if (children.empty())
           continue;
         // Propagate this refinement up from the partition
-        it->first->propagate_refinement(ctx, refinement_regions[it->first], 
-                                        it->second, map_applied_conditions);
+        it->first->propagate_refinement(ctx, children, it->second, 
+                                        map_applied_conditions);
       }
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));

@@ -18202,7 +18202,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(region->parent != NULL);
-      assert(replicate_partition_equivalence_sets(region->parent));
+      assert(!replicate_partition_equivalence_sets(region->parent));
 #endif
       // Determine whether we should own the equivalence set data for
       // this region node or not

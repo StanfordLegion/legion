@@ -15024,9 +15024,6 @@ namespace Legion {
         add_base_valid_ref(REMOTE_DID_REF, NULL, children.size());
       if (is_owner())
       {
-#ifdef DEBUG_LEGION
-        assert(!children.empty());
-#endif
         if (local_valid > 0) 
           add_base_valid_ref(CONTEXT_REF, NULL, local_valid);
       }
@@ -16432,7 +16429,7 @@ namespace Legion {
                 if (is_logical_owner())
                 {
                   broadcast_replicated_state_updates(overlap, NULL, local_space,
-                                                     applied_events);
+                          applied_events, false/*need lock*/, false/*updates*/);
                   it.filter(overlap);
                   if (!it->second)
                     to_delete.push_back(it->first);
@@ -16523,7 +16520,7 @@ namespace Legion {
               if (!overlap)
                 continue;
               broadcast_replicated_state_updates(overlap, NULL, local_space,
-                                                 applied_events);
+                       applied_events, false/*need lock*/, false/*updates*/);
               it.filter(overlap);
               if (!it->second)
                 to_delete.push_back(it->first);
@@ -16622,14 +16619,14 @@ namespace Legion {
     void EquivalenceSet::broadcast_replicated_state_updates(
                  const FieldMask &mask, CollectiveMapping *mapping,
                  const AddressSpaceID origin, std::set<RtEvent> &applied_events,
-                 const bool need_lock)
+                 const bool need_lock, const bool perform_updates)
     //--------------------------------------------------------------------------
     {
       if (need_lock)
       {
         AutoLock eq(eq_lock);
         broadcast_replicated_state_updates(mask, mapping, origin, 
-                                           applied_events, false/*need lock*/);
+            applied_events, false/*need lock*/, perform_updates);
         return;
       }
       // If we're the owner, send messages to all the remote instances
@@ -16688,7 +16685,8 @@ namespace Legion {
         applied_events.insert(done_event);
       }
       // Once we get down here then we can just do our local updates 
-      update_replicated_state(mapping, mask);
+      if (perform_updates)
+        update_replicated_state(mapping, mask);
     }
 
     //--------------------------------------------------------------------------

@@ -1322,9 +1322,7 @@ namespace Legion {
       for (FieldMaskSet<PartitionNode>::const_iterator it =
             make_from.begin(); it != make_from.end(); it++)
       {
-        const FieldMask version_mask = it->second - uninitialized_fields;
-        if (!version_mask)
-          continue;
+        const FieldMask &version_mask = it->second - uninitialized_fields;
         if (replicated_partitions.find(it->first->handle) == 
             replicated_partitions.end())
         {
@@ -1345,8 +1343,9 @@ namespace Legion {
                 continue;
               VersionInfo &info = sharded_region_version_infos[child];
               info.relax_valid_mask(it->second);
-              child->perform_versioning_analysis(ctx, parent_ctx, &info,
-                    version_mask, unique_op_id, local_space, ready_events);
+              if (!!version_mask)
+                child->perform_versioning_analysis(ctx, parent_ctx, &info,
+                      version_mask, unique_op_id, local_space, ready_events);
               children.push_back(child);
             }
           }
@@ -1370,8 +1369,9 @@ namespace Legion {
               {
                 VersionInfo &info = sharded_region_version_infos[child];
                 info.relax_valid_mask(it->second);
-                child->perform_versioning_analysis(ctx, parent_ctx, &info,
-                      version_mask, unique_op_id, local_space, ready_events);
+                if (!!version_mask)
+                  child->perform_versioning_analysis(ctx, parent_ctx, &info,
+                        version_mask, unique_op_id, local_space, ready_events);
                 children.push_back(child);
               }
               // Skip ahead to the next color
@@ -1451,6 +1451,9 @@ namespace Legion {
           if (replicated_partitions.find(it->first->handle) != 
               replicated_partitions.end())
             continue;
+          std::vector<RegionNode*> &children = refinement_regions[it->first];
+          if (children.empty())
+            continue;
           // We're not actually going to make the equivalence sets here
           // Instead we're going to just fill in the right data structure
           // on the partition so that any traversals of the children
@@ -1458,8 +1461,8 @@ namespace Legion {
           // actual owner of the initial equivalence set will be done
           // with a first touch policy so that the first writer will
           // the one to make the equivalence sets
-          it->first->propagate_refinement(ctx, refinement_regions[it->first],
-                                          it->second, map_applied_conditions);
+          it->first->propagate_refinement(ctx, children, it->second, 
+                                          map_applied_conditions);
         }
       }
       if (!replicated_partitions.empty())
@@ -1479,6 +1482,8 @@ namespace Legion {
                   color < index_part->total_children; color++)
             {
               RegionNode *child = it->second->get_child(color);
+              if (child->row_source->is_empty())
+                continue;
               const DistributedID did = 
                 collective_dids[did_index++]->get_value(false/*block*/);
               EquivalenceSet *set = 
@@ -1498,6 +1503,8 @@ namespace Legion {
             {
               const LegionColor color = itr->yield_color();
               RegionNode *child = it->second->get_child(color);
+              if (child->row_source->is_empty())
+                continue;
               const DistributedID did = 
                 collective_dids[did_index++]->get_value(false/*block*/);
               EquivalenceSet *set = 
@@ -1511,9 +1518,13 @@ namespace Legion {
             delete itr;
           }
         }
-#ifdef DEBUG_LEGION
-        assert(did_index == collective_dids.size());
-#endif
+        if (did_index < collective_dids.size())
+        {
+          for (unsigned idx = did_index; idx < collective_dids.size(); idx++)
+            if (collective_dids[idx]->is_origin())
+              runtime->free_distributed_id(
+                  collective_dids[idx]->get_value(false/*block*/));
+        }
       }
       if (!map_applied_conditions.empty())
         Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
