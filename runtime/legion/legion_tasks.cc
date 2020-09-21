@@ -4472,9 +4472,11 @@ namespace Legion {
 #endif
       // This is the normal equivalence set creation pathway for single tasks
       RegionNode *node = runtime->forest->get_node(regions[idx].region);
-      EquivalenceSet *result = new EquivalenceSet(runtime, 
-          runtime->get_available_distributed_id(), runtime->address_space,
-          runtime->address_space, node, true/*register now*/);
+      EquivalenceSet *result = node->row_source->is_empty() ?
+        node->find_or_create_empty_equivalence_set() :
+        new EquivalenceSet(runtime, runtime->get_available_distributed_id(), 
+            runtime->address_space, runtime->address_space, node, 
+            true/*register now*/);
       // Add a context ref that will be removed after this is registered
       result->add_base_valid_ref(CONTEXT_REF);
       return result;

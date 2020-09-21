@@ -3727,6 +3727,28 @@ namespace Legion {
         RegionNode *const node;
         ReferenceMutator *const mutator;
       };
+      class EmptySetTracker : public EqSetTracker {
+      public:
+        EmptySetTracker(void) : set(NULL) { }
+        virtual ~EmptySetTracker(void) { }
+      public:
+        virtual void add_tracker_reference(unsigned cnt) { assert(false); }
+        virtual bool remove_tracker_reference(unsigned cnt)
+          { assert(false); return false; }
+      public:
+        virtual void record_equivalence_set(EquivalenceSet *set, 
+                                            const FieldMask &mask);
+        virtual void record_pending_equivalence_set(EquivalenceSet *set,
+                                                    const FieldMask &mask)
+          { record_equivalence_set(set, mask); }
+        virtual void remove_equivalence_set(EquivalenceSet *set,
+                                            const FieldMask &mask)
+          { assert(false); }
+      public:
+        EquivalenceSet* get_set(void) const;
+      private:
+        EquivalenceSet *set;
+      };
     public:
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
              FieldSpaceNode *col_src, RegionTreeForest *ctx, 
@@ -3856,9 +3878,10 @@ namespace Legion {
                                          const FieldMask &mask,
                     std::vector<LogicalPartition> &partitions);
     public:
-      RtEvent find_or_create_empty_equivalence_sets(EqSetTracker *target,
-                        const AddressSpaceID target_space, 
-                        const FieldMask &mask, const AddressSpaceID source);
+      EquivalenceSet* find_or_create_empty_equivalence_set(void);
+      RtEvent find_or_create_empty_equivalence_set(EqSetTracker *target,
+          const AddressSpaceID target_space, const FieldMask &mask,
+          const AddressSpaceID source);
       static void handle_empty_equivalence_set_create(Deserializer &derez,
                                                   RegionTreeForest *forest);
     public:
@@ -3868,7 +3891,7 @@ namespace Legion {
     protected:
       std::map<LegionColor,PartitionNode*> color_map;
       std::list<PartitionTracker*> partition_trackers;
-      FieldMaskSet<EquivalenceSet> empty_equivalence_sets;
+      EquivalenceSet *empty_equivalence_set;
 #ifdef DEBUG_LEGION
       bool currently_valid;
 #endif

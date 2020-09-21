@@ -1136,30 +1136,33 @@ namespace Legion {
         std::set<RtEvent> map_applied_conditions;
         const ContextID ctx = parent_ctx->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region); 
-        // Make a new equivalence set and record it at this node
-        const DistributedID did = did_collective->get_value(false/*block*/);
-        EquivalenceSet *set = 
-          repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                      region_node, refinement_mask, did);
-        // Merge over the state from the old equivalence sets if not overwriting
-        if (!refinement_overwrite)
+        if (!region_node->row_source->is_empty())
         {
-          const FieldMaskSet<EquivalenceSet> &previous_sets = 
-            version_info.get_equivalence_sets();
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                previous_sets.begin(); it != previous_sets.end(); it++)
-            set->clone_from(runtime->address_space, it->first, it->second,
-                      map_applied_conditions, false/*invalidate overlap*/);
+          // Make a new equivalence set and record it at this node
+          const DistributedID did = did_collective->get_value(false/*block*/);
+          EquivalenceSet *set = 
+            repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
+                                        region_node, refinement_mask, did);
+          // Merge the state from the old equivalence sets if not overwriting
+          if (!refinement_overwrite)
+          {
+            const FieldMaskSet<EquivalenceSet> &previous_sets = 
+              version_info.get_equivalence_sets();
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                  previous_sets.begin(); it != previous_sets.end(); it++)
+              set->clone_from(runtime->address_space, it->first, it->second,
+                        map_applied_conditions, false/*invalidate overlap*/);
+          }
+          // Invalidate the old refinement
+          region_node->invalidate_refinement(ctx, refinement_mask,
+              false/*self*/, map_applied_conditions, to_release, repl_ctx);
+          // Register this refinement in the tree 
+          region_node->record_refinement(ctx, set, refinement_mask, 
+                                         map_applied_conditions);
+          // Remove the CONTEXT_REF on the set now that it is registered
+          if (set->remove_base_valid_ref(CONTEXT_REF))
+            assert(false); // should never actually hit this
         }
-        // Invalidate the old refinement
-        region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
-                                 map_applied_conditions, to_release, repl_ctx);
-        // Register this refinement in the tree 
-        region_node->record_refinement(ctx, set, refinement_mask, 
-                                       map_applied_conditions);
-        // Remove the CONTEXT_REF on the set now that it is registered
-        if (set->remove_base_valid_ref(CONTEXT_REF))
-          assert(false); // should never actually hit this
         if (!map_applied_conditions.empty())
           Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
               Runtime::merge_events(map_applied_conditions));
@@ -7566,10 +7569,11 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(req.region);
         const FieldMask mask = 
           node->column_source->get_field_mask(req.privilege_fields);
-        mapped_equivalence_sets[idx] = new EquivalenceSet(runtime,
-            runtime->get_available_distributed_id(), runtime->address_space,
-            runtime->address_space, node, true/*reg now*/, 
-            collective_mapping, &mask);
+        mapped_equivalence_sets[idx] = node->row_source->is_empty() ?
+          node->find_or_create_empty_equivalence_set() :
+          new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
+              runtime->address_space, runtime->address_space, node, 
+              true/*reg now*/, collective_mapping, &mask);
       }
       // Now either send the shards to the remote nodes or record them locally
       for (std::map<AddressSpaceID,std::vector<ShardTask*> >::const_iterator 

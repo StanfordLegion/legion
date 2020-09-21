@@ -17533,7 +17533,7 @@ namespace Legion {
                            RegionTreeForest *ctx, DistributedID id,
                            RtEvent init, RtEvent tree)
       : RegionTreeNode(ctx, col_src, init, tree, id), handle(r),
-        parent(par), row_source(row_src)
+        parent(par), row_source(row_src), empty_equivalence_set(NULL)
 #ifdef DEBUG_LEGION
         , currently_valid(true)
 #endif
@@ -17586,6 +17586,9 @@ namespace Legion {
         // Unregister ourselves with the context
         context->remove_node(handle, top_level);
       }
+#ifdef DEBUG_LEGION
+      assert(empty_equivalence_set == NULL);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -17683,19 +17686,18 @@ namespace Legion {
             delete (*it);
         partition_trackers.clear();
       }
-      if (!empty_equivalence_sets.empty())
+      if (empty_equivalence_set != NULL)
       {
         std::set<RtEvent> applied_events;
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              empty_equivalence_sets.begin(); it != 
-              empty_equivalence_sets.end(); it++)
-        {
-          it->first->invalidate_trackers(it->second, applied_events,
-              context->runtime->address_space, NULL/*collective mapping*/);
-          if (it->first->remove_nested_valid_ref(did))
-            delete it->first;
-        }
-        empty_equivalence_sets.clear();
+        const FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+        empty_equivalence_set->invalidate_trackers(all_ones, applied_events,
+                  context->runtime->address_space, NULL/*collective mapping*/);
+        if (empty_equivalence_set->remove_nested_valid_ref(did))
+          delete empty_equivalence_set;
+        empty_equivalence_set = NULL;
+        for (std::set<RtEvent>::const_iterator it = 
+              applied_events.begin(); it != applied_events.end(); it++)
+          mutator->record_reference_mutation_effect(*it);
       }
       for (unsigned idx = 0; idx < current_versions.max_entries(); idx++)
         if (current_versions.has_entry(idx))
@@ -18373,6 +18375,9 @@ namespace Legion {
                        const FieldMask &mask, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!row_source->is_empty());
+#endif
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
       manager.propagate_refinement(child, mask, parent_mask, applied_events);
@@ -18407,7 +18412,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent RegionNode::find_or_create_empty_equivalence_sets(
+    void RegionNode::EmptySetTracker::record_equivalence_set(EquivalenceSet *s,
+                                                          const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!mask);
+      assert(s != NULL);
+      assert(set == NULL);
+#endif
+      set = s;
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* RegionNode::EmptySetTracker::get_set(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(set != NULL);
+#endif
+      return set;
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* RegionNode::find_or_create_empty_equivalence_set(void)
+    //--------------------------------------------------------------------------
+    {
+      EmptySetTracker tracker;
+      const FieldMask dummy_mask;
+      const AddressSpaceID space = context->runtime->address_space; 
+      const RtEvent wait_on = 
+        find_or_create_empty_equivalence_set(&tracker, space, dummy_mask,space);
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      return tracker.get_set();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent RegionNode::find_or_create_empty_equivalence_set(
                         EqSetTracker *target, const AddressSpaceID target_space,
                         const FieldMask &mask, const AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -18434,78 +18476,32 @@ namespace Legion {
       std::set<RtEvent> ready_events;
       Runtime *runtime = context->runtime;
       AutoLock n_lock(node_lock);
+      if (empty_equivalence_set == NULL)
+      {
+        empty_equivalence_set = new EquivalenceSet(runtime, 
+            runtime->get_available_distributed_id(), runtime->address_space,
+            source, this, true/*register now*/);
+        WrapperReferenceMutator mutator(ready_events);
+        empty_equivalence_set->add_nested_valid_ref(did, &mutator);
+      }
       if (target_space != runtime->address_space)
       {
-        FieldMaskSet<EquivalenceSet> to_send;
-        FieldMask remainder = mask;
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              empty_equivalence_sets.begin(); it != 
-              empty_equivalence_sets.end(); it++)
-        {
-          const FieldMask overlap = remainder & it->second;
-          if (!overlap)
-            continue;
-          to_send.insert(it->first, overlap);
-          remainder -= overlap;
-          if (!remainder)
-            break;
-        }
-        if (!!remainder)
-        {
-          EquivalenceSet *empty_set = new EquivalenceSet(runtime, 
-              runtime->get_available_distributed_id(), runtime->address_space,
-              source, this, true/*register now*/);
-          if (empty_equivalence_sets.insert(empty_set, remainder))
-          {
-            WrapperReferenceMutator mutator(ready_events);
-            empty_set->add_nested_valid_ref(did, &mutator);
-          } 
-          to_send.insert(empty_set, remainder);
-        }
         // Send the result back to target
         const RtUserEvent done = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(target);
-          rez.serialize<size_t>(to_send.size());
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                to_send.begin(); it != to_send.end(); it++)
-          {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
-          }
+          rez.serialize<size_t>(1);
+          rez.serialize(empty_equivalence_set->did);
+          rez.serialize(mask);
           rez.serialize(done);
         }
         runtime->send_compute_equivalence_sets_response(target_space, rez);
         ready_events.insert(done);
       }
       else
-      {
-        FieldMask remainder = mask;
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              empty_equivalence_sets.begin(); it != 
-              empty_equivalence_sets.end(); it++)
-        {
-          const FieldMask overlap = remainder & it->second;
-          if (!overlap)
-            continue;
-          target->record_equivalence_set(it->first, overlap);
-          remainder -= overlap;
-          if (!remainder)
-            return RtEvent::NO_RT_EVENT;
-        }
-        // Make a new equivalence set and send it
-        EquivalenceSet *empty_set = new EquivalenceSet(runtime, 
-            runtime->get_available_distributed_id(), runtime->address_space,
-            source, this, true/*register now*/);
-        if (empty_equivalence_sets.insert(empty_set, remainder))
-        {
-          WrapperReferenceMutator mutator(ready_events);
-          empty_set->add_nested_valid_ref(did, &mutator);
-        }
-        target->record_equivalence_set(empty_set, remainder);
-      }
+        target->record_equivalence_set(empty_equivalence_set, mask);
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
       else
@@ -18532,7 +18528,7 @@ namespace Legion {
       derez.deserialize(done_event);
 
       RegionNode *node = forest->get_node(handle);
-      RtEvent done = node->find_or_create_empty_equivalence_sets(target,
+      RtEvent done = node->find_or_create_empty_equivalence_set(target,
                                             target_space, mask, source);
       Runtime::trigger_event(done_event, done);
     }

@@ -17428,17 +17428,19 @@ namespace Legion {
             if (!valid_mask)
               break;
           }
-          for (std::vector<IndexSpaceExpression*>::const_iterator it =
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            finder->second.erase(*it);
-            if ((*it)->remove_expression_reference())
-              delete (*it);
-          }
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 to_add.begin(); it != to_add.end(); it++)
             if (finder->second.insert(it->first, it->second))
               it->first->add_expression_reference();
+          for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            if (to_add.find(*it) != to_add.end())
+              continue;
+            finder->second.erase(*it);
+            if ((*it)->remove_expression_reference())
+              delete (*it);
+          }
           if (!!valid_mask && finder->second.insert(expr, valid_mask))
             expr->add_expression_reference();
           if (need_tighten)
@@ -18799,6 +18801,8 @@ namespace Legion {
                                   CopyFillAggregator *&aggregator)
     //--------------------------------------------------------------------------
     {
+      if (expr->is_empty())
+        return;
       // Iterate through the restrictions looking for overlaps
       for (LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::
             aligned::const_iterator rit = restricted_instances.begin();
@@ -19275,7 +19279,7 @@ namespace Legion {
       {
         // No need to check for merging, we should be independent
 #ifdef DEBUG_LEGION
-        assert(restricted_fields * restrict_mask);
+        assert((restricted_fields * restrict_mask) || set_expr->is_empty());
 #endif
         LegionMap<IndexSpaceExpression*,
           FieldMaskSet<InstanceView> >::aligned::iterator 
@@ -21408,6 +21412,14 @@ namespace Legion {
                                     const bool invalidate_overlap)
     //--------------------------------------------------------------------------
     {
+      if (this == src)
+      {
+        // Empty equivalence sets can sometimes be asked to clone to themself
+#ifdef DEBUG_LEGION
+        assert(region_node->row_source->is_empty());
+#endif
+        return;
+      }
       if (target_space != local_space)
       {
         const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -23301,12 +23313,18 @@ namespace Legion {
       assert(node == set->region_node);
       assert(disjoint_complete * mask);
 #endif
-      disjoint_complete |= mask;
-      if (equivalence_sets.insert(set, mask))
+      if (!set->region_node->row_source->is_empty())
       {
-        WrapperReferenceMutator mutator(applied_events);
-        set->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+        disjoint_complete |= mask;
+        if (equivalence_sets.insert(set, mask))
+        {
+          WrapperReferenceMutator mutator(applied_events);
+          set->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+        }
       }
+      // Empty equivalence sets are treated differently
+      else if (equivalence_sets.insert(set, mask))
+        set->add_base_resource_ref(VERSION_MANAGER_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -23412,8 +23430,8 @@ namespace Legion {
       if (region_node->row_source->is_empty())
       {
         const RtEvent ready_event = 
-          region_node->find_or_create_empty_equivalence_sets(target,
-              target_space, mask, original_source);
+          region_node->find_or_create_empty_equivalence_set(target,
+                              target_space, mask, original_source);
         if (ready_event.exists() && !ready_event.has_triggered())
           ready_events.insert(ready_event);
         return;
@@ -23566,6 +23584,7 @@ namespace Legion {
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
       assert(set->region_node == node);
+      assert(!set->region_node->row_source->is_empty());
       // There should not be any other equivalence sets for these fields
       assert(equivalence_sets.get_valid_mask() * mask);
 #endif

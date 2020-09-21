@@ -9489,30 +9489,33 @@ namespace Legion {
         std::set<RtEvent> map_applied_conditions;
         const ContextID ctx = parent_ctx->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region);
-        // Make a new equivalence set and record it at this node
-        const AddressSpaceID local_space = runtime->address_space;
-        EquivalenceSet *set = new EquivalenceSet(runtime,
-            runtime->get_available_distributed_id(),
-            local_space, local_space, region_node, true/*register now*/);
-        // Merge over the state from the old equivalence sets if not overwriting
-        if (!refinement_overwrite)
+        if (!region_node->row_source->is_empty())
         {
-          const FieldMaskSet<EquivalenceSet> &previous_sets = 
-            version_info.get_equivalence_sets();
-          // Note that we'll explicitly get back any of these previous sets
-          // that are going to be released from the call to invalidate the
-          // refinement. We'll hold on to their references until we get to
-          // the complete stage to make sure they are not collected before
-          // the clone operation is finished.
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                previous_sets.begin(); it != previous_sets.end(); it++)
-            set->clone_from(runtime->address_space, it->first, 
-                            it->second, map_applied_conditions);
+          // Make a new equivalence set and record it at this node
+          const AddressSpaceID local_space = runtime->address_space;
+          EquivalenceSet *set = new EquivalenceSet(runtime,
+              runtime->get_available_distributed_id(),
+              local_space, local_space, region_node, true/*register now*/);
+          // Merge the state from the old equivalence sets if not overwriting
+          if (!refinement_overwrite)
+          {
+            const FieldMaskSet<EquivalenceSet> &previous_sets = 
+              version_info.get_equivalence_sets();
+            // Note that we'll explicitly get back any of these previous sets
+            // that are going to be released from the call to invalidate the
+            // refinement. We'll hold on to their references until we get to
+            // the complete stage to make sure they are not collected before
+            // the clone operation is finished.
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                  previous_sets.begin(); it != previous_sets.end(); it++)
+              set->clone_from(runtime->address_space, it->first, 
+                              it->second, map_applied_conditions);
+          }
+          region_node->invalidate_refinement(ctx, refinement_mask, 
+              false/*self*/, map_applied_conditions, to_release, parent_ctx);
+          region_node->record_refinement(ctx, set, refinement_mask,
+                                         map_applied_conditions);
         }
-        region_node->invalidate_refinement(ctx, refinement_mask, false/*self*/,
-                                map_applied_conditions, to_release, parent_ctx);
-        region_node->record_refinement(ctx, set, refinement_mask,
-                                       map_applied_conditions);
         if (!map_applied_conditions.empty())
           complete_mapping(Runtime::merge_events(map_applied_conditions));
         else
@@ -10320,6 +10323,8 @@ namespace Legion {
         // register them with the context so it can find them later
         IndexPartNode *index_part = it->first->row_source;
         std::vector<RegionNode*> &children = refinement_regions[it->first];
+        if (it->first->parent->row_source->is_empty())
+          continue;
         children.reserve(index_part->total_children);
         // Iterate over each child and make an equivalence set  
         if (index_part->total_children == index_part->max_linearized_color)
@@ -10378,9 +10383,14 @@ namespace Legion {
       // Finally propagate the new refinements up from the partitions
       for (FieldMaskSet<PartitionNode>::const_iterator it = 
             make_from.begin(); it != make_from.end(); it++)
+      {
+        std::vector<RegionNode*> &children = refinement_regions[it->first];
+        if (children.empty())
+          continue;
         // Propagate this refinement up from the partition
         it->first->propagate_refinement(ctx, refinement_regions[it->first], 
                                         it->second, map_applied_conditions);
+      }
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else

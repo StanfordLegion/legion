@@ -8609,6 +8609,10 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(regions[idx].region);
         runtime->forest->invalidate_current_context(tree_context,
                                        false/*users only*/, node);
+        // Stupid empty equivalence set case
+        // These do not get invalidated because they weren't disjoint anyway
+        if (node->row_source->is_empty())
+          continue;
         // State is copied out by the virtual close ops if this is a
         // virtual mapped region so we invalidate like normal now
         const FieldMask close_mask = 
@@ -8683,8 +8687,9 @@ namespace Legion {
             RegionNode *node = runtime->forest->get_node(it->second.region);
             runtime->forest->invalidate_current_context(tree_context,
                                           false/*users only*/, node);
-            node->invalidate_refinement(tree_context.get_id(), all_ones_mask,
-                true/*self*/, applied_events, invalidated_refinements, this);
+            if (!node->row_source->is_empty())
+              node->invalidate_refinement(tree_context.get_id(), all_ones_mask,
+                  true/*self*/, applied_events, invalidated_refinements, this);
             invalidated_regions.insert(it->second.region);
           }
         }
@@ -8729,9 +8734,12 @@ namespace Legion {
       RegionNode *node = runtime->forest->get_node(handle);
       runtime->forest->invalidate_current_context(tree_context,
                                           false/*users only*/, node);
-      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      node->invalidate_refinement(tree_context.get_id(), all_ones_mask, 
-                        true/*self*/, applied_events, to_release, this);
+      if (!node->row_source->is_empty())
+      {
+        const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+        node->invalidate_refinement(tree_context.get_id(), all_ones_mask, 
+                          true/*self*/, applied_events, to_release, this);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10810,6 +10818,10 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(regions[idx].region);
         runtime->forest->invalidate_current_context(tree_context,
                                       false/*users only*/, node);
+        // Stupid empty equivalence set case
+        // These do not get invalidated because they weren't disjoint anyway
+        if (node->row_source->is_empty())
+          continue;
         // State is copied out by the virtual close ops if this is a
         // virtual mapped region so we invalidate like normal now
         const FieldMask close_mask = 
