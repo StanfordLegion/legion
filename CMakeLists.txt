@@ -256,7 +256,12 @@ if(Legion_USE_CUDA)
   # define variable for realm_defines.h
   set(REALM_USE_CUDA ON)
 
-  option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
+  # default is to use hijack unless Kokkos interop is enabled
+  if(Legion_USE_Kokkos)
+    option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" OFF)
+  else()
+    option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
+  endif()
   if(Legion_HIJACK_CUDART)
     set(REALM_USE_CUDART_HIJACK ON)
   endif()
