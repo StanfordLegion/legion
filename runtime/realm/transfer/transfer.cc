@@ -1829,118 +1829,133 @@ namespace Realm {
   {
     assert(!iteration_completed.load());
 
-    size_t output_bytes = 0;
-    bool input_done = false;
+    ReadSequenceCache rseqcache(this);
+    WriteSequenceCache wseqcache(this);
+
+    bool did_work = false;
     while(true) {
-      // step 1: get some points if we are out
-      if(point_index >= point_count) {
-	if(input_ports[0].iter->done()) {
-	  input_done = true;
-	  break;
-	}
-	
-	TransferIterator::AddressInfo p_info;
-	size_t max_bytes = MAX_POINTS * sizeof(Point<N,T>);
-	if(input_ports[0].peer_guid != XFERDES_NO_GUID) {
-	  max_bytes = input_ports[0].seq_remote.span_exists(input_ports[0].local_bytes_total, max_bytes);
-	  if(max_bytes < sizeof(Point<N,T>))
+      size_t output_bytes = 0;
+      bool input_done = false;
+      while(true) {
+	// step 1: get some points if we are out
+	if(point_index >= point_count) {
+	  if(input_ports[0].iter->done()) {
+	    input_done = true;
 	    break;
+	  }
+	
+	  TransferIterator::AddressInfo p_info;
+	  size_t max_bytes = MAX_POINTS * sizeof(Point<N,T>);
+	  if(input_ports[0].peer_guid != XFERDES_NO_GUID) {
+	    max_bytes = input_ports[0].seq_remote.span_exists(input_ports[0].local_bytes_total, max_bytes);
+	    if(max_bytes < sizeof(Point<N,T>))
+	      break;
+	  }
+	  size_t bytes = input_ports[0].iter->step(max_bytes, p_info,
+						   0, false /*!tentative*/);
+	  if(bytes == 0) break;
+	  point_count = bytes / sizeof(Point<N,T>);
+	  assert(bytes == (point_count * sizeof(Point<N,T>)));
+	  const void *srcptr = input_ports[0].mem->get_direct_ptr(p_info.base_offset,
+								  bytes);
+	  assert(srcptr != 0);
+	  memcpy(points, srcptr, bytes);
+	  point_index = 0;
+	  rseqcache.add_span(0, input_ports[0].local_bytes_total, bytes);
+	  input_ports[0].local_bytes_total += bytes;
+	  did_work = true;
 	}
-	size_t bytes = input_ports[0].iter->step(max_bytes, p_info,
-						 0, false /*!tentative*/);
-	if(bytes == 0) break;
-	point_count = bytes / sizeof(Point<N,T>);
-	assert(bytes == (point_count * sizeof(Point<N,T>)));
-	const void *srcptr = input_ports[0].mem->get_direct_ptr(p_info.base_offset,
-								bytes);
-	assert(srcptr != 0);
-	memcpy(points, srcptr, bytes);
-	point_index = 0;
-	update_bytes_read(0, input_ports[0].local_bytes_total, bytes);
-	input_ports[0].local_bytes_total += bytes;
+
+	// step 2: process the first point we've got on hand
+	int new_space_id = find_point_in_spaces(points[point_index],
+						output_space_id);
+
+	// can only extend an existing run with another point from the same
+	//  space
+	if(output_count == 0)
+	  output_space_id = new_space_id;
+	else
+	  if(new_space_id != output_space_id)
+	    break;
+
+	// can't let our count overflow a 24-bit value
+	if((((output_count + 1) * element_size) >> 24) > 0)
+	  break;
+
+	// if it matched a space, we have to emit the point to that space's
+	//  output address stream before we can accept the point
+	if(output_space_id != -1) {
+	  XferPort &op = output_ports[output_space_id];
+	  if(op.seq_remote.span_exists(op.local_bytes_total + output_bytes,
+				       sizeof(Point<N,T>)) < sizeof(Point<N,T>))
+	    break;
+	  TransferIterator::AddressInfo o_info;
+	  size_t bytes = op.iter->step(sizeof(Point<N,T>), o_info,
+				       0, false /*!tentative*/);
+	  assert(bytes == sizeof(Point<N,T>));
+	  void *dstptr = op.mem->get_direct_ptr(o_info.base_offset,
+						sizeof(Point<N,T>));
+	  assert(dstptr != 0);
+	  memcpy(dstptr, &points[point_index], sizeof(Point<N,T>));
+	  output_bytes += sizeof(Point<N,T>);
+	}
+	output_count++;
+	point_index++;
+      }
+        
+      // if we wrote any points out, update their validity now
+      if(output_bytes > 0) {
+	assert(output_space_id >= 0);
+	wseqcache.add_span(output_space_id,
+			   output_ports[output_space_id].local_bytes_total,
+			   output_bytes);
+	output_ports[output_space_id].local_bytes_total += output_bytes;
+	did_work = true;
       }
 
-      // step 2: process the first point we've got on hand
-      int new_space_id = find_point_in_spaces(points[point_index],
-					      output_space_id);
+      // now try to write the control information
+      if((output_count > 0) || input_done) {
+	unsigned cword = (((output_count * element_size) << 8) +
+			  (input_done ? 128 : 0) + // bit 7
+			  (output_space_id + 1));
+	assert(cword != 0);
+      
+	XferPort &cp = output_ports[spaces.size()];
+	if(cp.seq_remote.span_exists(cp.local_bytes_total,
+				     sizeof(unsigned)) < sizeof(unsigned))
+	  break;  // no room to write control work
 
-      // can only extend an existing run with another point from the same
-      //  space
-      if(output_count == 0)
-	output_space_id = new_space_id;
-      else
-	if(new_space_id != output_space_id)
-	  break;
+	TransferIterator::AddressInfo c_info;
+	size_t bytes = cp.iter->step(sizeof(unsigned), c_info,
+				     0, false /*!tentative*/);
+	assert(bytes == sizeof(unsigned));
+	void *dstptr = cp.mem->get_direct_ptr(c_info.base_offset, sizeof(unsigned));
+	assert(dstptr != 0);
+	memcpy(dstptr, &cword, sizeof(unsigned));
 
-      // can't let our count overflow a 24-bit value
-      if((((output_count + 1) * element_size) >> 24) > 0)
+	if(input_done) {
+	  iteration_completed.store_release(true);
+	  // mark all address streams as done (dummy write update)
+	  for(size_t i = 0; i < spaces.size(); i++)
+	    wseqcache.add_span(i, output_ports[i].local_bytes_total, 0);
+	}
+	size_t old_lbt = cp.local_bytes_total;
+	cp.local_bytes_total += sizeof(unsigned);
+	wseqcache.add_span(spaces.size(), old_lbt, sizeof(unsigned));
+	output_space_id = -1;
+	output_count = 0;
+	did_work = true;
+      } else
 	break;
 
-      // if it matched a space, we have to emit the point to that space's
-      //  output address stream before we can accept the point
-      if(output_space_id != -1) {
-	XferPort &op = output_ports[output_space_id];
-	if(op.seq_remote.span_exists(op.local_bytes_total + output_bytes,
-				     sizeof(Point<N,T>)) < sizeof(Point<N,T>))
-	  break;
-	TransferIterator::AddressInfo o_info;
-	size_t bytes = op.iter->step(sizeof(Point<N,T>), o_info,
-				     0, false /*!tentative*/);
-	assert(bytes == sizeof(Point<N,T>));
-	void *dstptr = op.mem->get_direct_ptr(o_info.base_offset,
-					      sizeof(Point<N,T>));
-	assert(dstptr != 0);
-	memcpy(dstptr, &points[point_index], sizeof(Point<N,T>));
-	output_bytes += sizeof(Point<N,T>);
-      }
-      output_count++;
-      point_index++;
-    }
-    
-    // if we wrote any points out, update their validity now
-    if(output_bytes > 0) {
-      assert(output_space_id >= 0);
-      update_bytes_write(output_space_id,
-			 output_ports[output_space_id].local_bytes_total,
-			 output_bytes);
-      output_ports[output_space_id].local_bytes_total += output_bytes;
+      if(iteration_completed.load() || work_until.is_expired())
+	break;
     }
 
-    // now try to write the control information
-    if((output_count > 0) || input_done) {
-      unsigned cword = (((output_count * element_size) << 8) +
-			(input_done ? 128 : 0) + // bit 7
-			(output_space_id + 1));
-      assert(cword != 0);
+    rseqcache.flush();
+    wseqcache.flush();
 
-      XferPort &cp = output_ports[spaces.size()];
-      if(cp.seq_remote.span_exists(cp.local_bytes_total,
-				   sizeof(unsigned)) < sizeof(unsigned))
-	return false;  // temporarily blocked
-      TransferIterator::AddressInfo c_info;
-      size_t bytes = cp.iter->step(sizeof(unsigned), c_info,
-				   0, false /*!tentative*/);
-      assert(bytes == sizeof(unsigned));
-      void *dstptr = cp.mem->get_direct_ptr(c_info.base_offset, sizeof(unsigned));
-      assert(dstptr != 0);
-      memcpy(dstptr, &cword, sizeof(unsigned));
-
-      if(input_done) {
-	iteration_completed.store_release(true);
-	// mark all address streams as done (dummy write update)
-	for(size_t i = 0; i < spaces.size(); i++)
-	  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
-      }
-      size_t old_lbt = cp.local_bytes_total;
-      cp.local_bytes_total += sizeof(unsigned);
-      update_bytes_write(spaces.size(), old_lbt, sizeof(unsigned));
-      output_space_id = -1;
-      output_count = 0;
-
-      return !input_done;
-    }
-
-    return false;
+    return did_work;
   }
   
   
