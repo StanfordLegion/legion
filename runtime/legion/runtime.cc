@@ -676,14 +676,15 @@ namespace Legion {
         producer_uid(uid),
 #endif
         future_complete(complete), result(NULL), result_size(0), 
-        result_set_space(local_space), empty(true), sampled(false)
+        result_set_space(local_space), callback_functor(NULL),
+        own_callback_functor(false), empty(true), sampled(false)
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
         producer_op->add_mapping_reference(op_gen);
 #ifdef LEGION_GC
       log_garbage.info("GC Future %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -1256,7 +1257,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ FutureImpl* FutureImpl::unpack_future(Runtime *runtime, 
-                                 Deserializer &derez, ReferenceMutator *mutator)
+                                Deserializer &derez, ReferenceMutator *mutator,
+                                Operation *op, GenerationID op_gen,
+#ifdef LEGION_SPY
+                                UniqueID op_uid,
+#endif
+                                int op_depth)
     //--------------------------------------------------------------------------
     {
       DistributedID future_did;
@@ -1276,7 +1282,12 @@ namespace Legion {
           derez.deserialize(coord.second);
         }
       }
-      return runtime->find_or_create_future(future_did, mutator, coordinates);
+      return runtime->find_or_create_future(future_did, mutator, coordinates,
+                                            op, op_gen,
+#ifdef LEGION_SPY
+                                            op_uid,
+#endif
+                                            op_depth);
     }
 
     //--------------------------------------------------------------------------
@@ -1668,7 +1679,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Future Map %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -1692,7 +1703,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Future Map %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -2525,7 +2536,12 @@ namespace Legion {
 #endif
       std::set<RtEvent> done_events;
       WrapperReferenceMutator mutator(done_events);
-      FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
+      FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator,
+                                                   target->op, target->op_gen,
+#ifdef LEGION_SPY
+                                                   target->op_uid,
+#endif
+                                                   target->op_depth);
       target->set_future(point, impl, &mutator);
       RtUserEvent done_event;
       derez.deserialize(done_event);
@@ -12119,7 +12135,7 @@ namespace Legion {
     {
 #ifdef LEGION_GC
       log_garbage.info("GC Constraints %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -12142,7 +12158,7 @@ namespace Legion {
         constraints_name = strdup(registrar.layout_name);
 #ifdef LEGION_GC
       log_garbage.info("GC Constraints %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -12160,7 +12176,7 @@ namespace Legion {
       snprintf(constraints_name,64,"layout constraints %ld", layout_id);
 #ifdef LEGION_GC
       log_garbage.info("GC Constraints %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -13660,6 +13676,7 @@ namespace Legion {
                       config.max_control_replication_contexts),
         max_local_fields(config.max_local_fields),
         max_replay_parallelism(config.max_replay_parallelism),
+        safe_control_replication(config.safe_control_replication),
         program_order_execution(config.program_order_execution),
         dump_physical_traces(config.dump_physical_traces),
         no_tracing(config.no_tracing),
@@ -13681,7 +13698,6 @@ namespace Legion {
 #else
         unsafe_mapper(!config.safe_mapper),
 #endif
-        safe_control_replication(config.safe_control_replication),
         disable_independence_tests(config.disable_independence_tests),
 #ifdef LEGION_SPY
         legion_spy_enabled(true),
@@ -13869,6 +13885,7 @@ namespace Legion {
         max_control_replication_contexts(rhs.max_control_replication_contexts),
         max_local_fields(rhs.max_local_fields),
         max_replay_parallelism(rhs.max_replay_parallelism),
+        safe_control_replication(rhs.safe_control_replication),
         program_order_execution(rhs.program_order_execution),
         dump_physical_traces(rhs.dump_physical_traces),
         no_tracing(rhs.no_tracing),
@@ -13886,7 +13903,6 @@ namespace Legion {
         resilient_mode(rhs.resilient_mode),
         unsafe_launch(rhs.unsafe_launch),
         unsafe_mapper(rhs.unsafe_mapper),
-        safe_control_replication(rhs.safe_control_replication),
         disable_independence_tests(rhs.disable_independence_tests),
         legion_spy_enabled(rhs.legion_spy_enabled),
         supply_default_mapper(rhs.supply_default_mapper),
@@ -25995,7 +26011,7 @@ namespace Legion {
       {
         // These constraints are available on all the nodes so if we own
         // them then record that we have remote instances for everything else
-        if (constraints->is_owner())
+        if ((did > 0) && constraints->is_owner())
         {
           for (AddressSpaceID space = 0; space < total_address_spaces; space++)
             if (space != address_space)
@@ -26383,7 +26399,7 @@ namespace Legion {
         .add_option_bool("-lg:unsafe_launch",config.unsafe_launch,!filter)
         .add_option_bool("-lg:unsafe_mapper",config.unsafe_mapper,!filter)
         .add_option_bool("-lg:safe_mapper",config.safe_mapper,!filter)
-        .add_option_bool("-lg:safe_ctrlrepl",
+        .add_option_int("-lg:safe_ctrlrepl",
                          config.safe_control_replication, !filter)
         .add_option_bool("-lg:inorder",config.program_order_execution,!filter)
         .add_option_bool("-lg:dump_physical_traces",

@@ -2130,7 +2130,8 @@ namespace Legion {
       void create_new_replicate_barrier(RtBarrier &bar, size_t arrivals);
       void create_new_replicate_barrier(ApBarrier &bar, size_t arrivals);
     public:
-      static void hash_future(Murmur3Hasher &hasher, const Future &future);
+      static void hash_future(Murmur3Hasher &hasher, 
+                              const unsigned safe_level, const Future &future);
       static void hash_future_map(Murmur3Hasher &hasher, const FutureMap &map);
       static void hash_index_space_requirements(Murmur3Hasher &hasher,
           const std::vector<IndexSpaceRequirement> &index_requirements);
@@ -2140,14 +2141,15 @@ namespace Legion {
           const std::vector<Grant> &grants);
       static void hash_phase_barriers(Murmur3Hasher &hasher,
           const std::vector<PhaseBarrier> &phase_barriers);
-      static void hash_argument(Murmur3Hasher &hasher, const TaskArgument &arg);
+      static void hash_argument(Murmur3Hasher &hasher, 
+                           const unsigned safe_level, const TaskArgument &arg);
       static void hash_predicate(Murmur3Hasher &hasher, const Predicate &pred);
       static void hash_static_dependences(Murmur3Hasher &hasher,
           const std::vector<StaticDependence> *dependences);
       static void hash_task_launcher(Murmur3Hasher &hasher, 
-          const TaskLauncher &launcher);
+          const unsigned safe_level, const TaskLauncher &launcher);
       void hash_index_launcher(Murmur3Hasher &hasher,
-          const IndexTaskLauncher &launcher);
+          const unsigned safe_level, const IndexTaskLauncher &launcher);
       void verify_replicable(Murmur3Hasher &hasher, const char *func_name);
     public:
       // A little help for ConsensusMatchExchange since it is templated

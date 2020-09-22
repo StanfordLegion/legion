@@ -356,6 +356,102 @@ class Rect(object):
                         point.vals[1] = y
                         point.vals[2] = z
                         yield point
+        elif self.dim == 4:
+            for x in xrange(self.lo.vals[0], self.hi.vals[0]+1):
+                for y in xrange(self.lo.vals[1], self.hi.vals[1]+1):
+                    for z in xrange(self.lo.vals[2], self.hi.vals[2]+1):
+                        for w in xrange(self.lo.vals[3], self.hi.vals[3]+1):
+                            point = Point(4)
+                            point.vals[0] = x
+                            point.vals[1] = y
+                            point.vals[2] = z
+                            point.vals[3] = w
+                            yield point
+        elif self.dim == 5:
+            for x in xrange(self.lo.vals[0], self.hi.vals[0]+1):
+                for y in xrange(self.lo.vals[1], self.hi.vals[1]+1):
+                    for z in xrange(self.lo.vals[2], self.hi.vals[2]+1):
+                        for w in xrange(self.lo.vals[3], self.hi.vals[3]+1):
+                            for v in xrange(self.lo.vals[4], self.hi.vals[4]+1):
+                                point = Point(5)
+                                point.vals[0] = x
+                                point.vals[1] = y
+                                point.vals[2] = z
+                                point.vals[3] = w
+                                point.vals[4] = v
+                                yield point
+        elif self.dim == 6:
+            for x in xrange(self.lo.vals[0], self.hi.vals[0]+1):
+                for y in xrange(self.lo.vals[1], self.hi.vals[1]+1):
+                    for z in xrange(self.lo.vals[2], self.hi.vals[2]+1):
+                        for w in xrange(self.lo.vals[3], self.hi.vals[3]+1):
+                            for v in xrange(self.lo.vals[4], self.hi.vals[4]+1):
+                                for u in xrange(self.lo.vals[5], self.hi.vals[5]+1):
+                                    point = Point(6)
+                                    point.vals[0] = x
+                                    point.vals[1] = y
+                                    point.vals[2] = z
+                                    point.vals[3] = w
+                                    point.vals[4] = v
+                                    point.vals[5] = u
+                                    yield point
+        elif self.dim == 7:
+            for x in xrange(self.lo.vals[0], self.hi.vals[0]+1):
+                for y in xrange(self.lo.vals[1], self.hi.vals[1]+1):
+                    for z in xrange(self.lo.vals[2], self.hi.vals[2]+1):
+                        for w in xrange(self.lo.vals[3], self.hi.vals[3]+1):
+                            for v in xrange(self.lo.vals[4], self.hi.vals[4]+1):
+                                for u in xrange(self.lo.vals[5], self.hi.vals[5]+1):
+                                    for t in xrange(self.lo.vals[6], self.hi.vals[6]+1):
+                                        point = Point(7)
+                                        point.vals[0] = x
+                                        point.vals[1] = y
+                                        point.vals[2] = z
+                                        point.vals[3] = w
+                                        point.vals[4] = v
+                                        point.vals[5] = u
+                                        point.vals[6] = t
+                                        yield point
+        elif self.dim == 8:
+            for x in xrange(self.lo.vals[0], self.hi.vals[0]+1):
+                for y in xrange(self.lo.vals[1], self.hi.vals[1]+1):
+                    for z in xrange(self.lo.vals[2], self.hi.vals[2]+1):
+                        for w in xrange(self.lo.vals[3], self.hi.vals[3]+1):
+                            for v in xrange(self.lo.vals[4], self.hi.vals[4]+1):
+                                for u in xrange(self.lo.vals[5], self.hi.vals[5]+1):
+                                    for t in xrange(self.lo.vals[6], self.hi.vals[6]+1):
+                                        for s in xrange(self.lo.vals[7], self.hi.vals[7]+1):
+                                            point = Point(8)
+                                            point.vals[0] = x
+                                            point.vals[1] = y
+                                            point.vals[2] = z
+                                            point.vals[3] = w
+                                            point.vals[4] = v
+                                            point.vals[5] = u
+                                            point.vals[6] = t
+                                            point.vals[7] = s
+                                            yield point
+        elif self.dim == 9:
+            for x in xrange(self.lo.vals[0], self.hi.vals[0]+1):
+                for y in xrange(self.lo.vals[1], self.hi.vals[1]+1):
+                    for z in xrange(self.lo.vals[2], self.hi.vals[2]+1):
+                        for w in xrange(self.lo.vals[3], self.hi.vals[3]+1):
+                            for v in xrange(self.lo.vals[4], self.hi.vals[4]+1):
+                                for u in xrange(self.lo.vals[5], self.hi.vals[5]+1):
+                                    for t in xrange(self.lo.vals[6], self.hi.vals[6]+1):
+                                        for s in xrange(self.lo.vals[7], self.hi.vals[7]+1):
+                                            for r in xrange(self.lo.vals[8], self.hi.vals[8]+1):
+                                                point = Point(9)
+                                                point.vals[0] = x
+                                                point.vals[1] = y
+                                                point.vals[2] = z
+                                                point.vals[3] = w
+                                                point.vals[4] = v
+                                                point.vals[5] = u
+                                                point.vals[6] = t
+                                                point.vals[7] = s
+                                                point.vals[8] = r
+                                                yield point
         else:
             raise NotImplementedError("Need support for more dimensions")
 
@@ -503,9 +599,16 @@ class Shape(object):
         result -= other
         return result
 
-    def rect_sub_helper(self, rect, other, to_add):
-        #print('%s - %s' % (rect, other))
+    @classmethod
+    def rect_sub_helper(cls, rect, other, to_add, dim=0):
         # We are guaranteed to intersect but not dominate
+        # We have fast, explicit methods for dimensions 1-3 that will
+        # not use the recursive method for better performance. For all
+        # dimensions larger than that we use a recursive method that 
+        # will make a bunch of intermediate Python objects that will 
+        # need to garbage collected. It's still asymptotically fast 
+        # but the constant factors are significant (> 50% slower)
+        #print('%s - %s' % (rect, other))
         if rect.lo.dim == 1:
             # 3 cases: 2 edges, 1 center 
             if other.lo.vals[0] <= rect.lo.vals[0]:
@@ -1881,7 +1984,78 @@ class Shape(object):
                         hi.vals[2] = rect.hi.vals[2]
                         to_add.append(Rect(lo,hi))
         else:
-            raise NotImplementedError("Need support for >3 dimensions")
+            # This is the recursive method for dimensions >3
+            if dim == rect.lo.dim:
+                # Base case, check to see if the rectangle is contained or not
+                # rect should either be totally separate or totally contained
+                if other.intersects(rect):
+                    assert other.dominates(rect)
+                else:
+                    to_add.append(rect)
+            else:
+                # Figure out how to break this rectangle along this dimension
+                if other.lo.vals[dim] <= rect.lo.vals[dim]:
+                    if other.hi.vals[dim] < rect.hi.vals[dim]:
+                        # Dominate lower edge, two outputs
+                        hi = Point(rect.hi.dim)
+                        for d in xrange(rect.hi.dim):
+                            if d == dim:
+                                hi.vals[d] = other.hi.vals[d]
+                            else:
+                                hi.vals[d] = rect.hi.vals[d]
+                        cls.rect_sub_helper(Rect(rect.lo,hi), other, to_add, dim+1)
+                        lo = Point(rect.lo.dim)
+                        for d in xrange(rect.lo.dim):
+                            if d == dim:
+                                lo.vals[d] = other.hi.vals[d]+1
+                            else:
+                                lo.vals[d] = rect.lo.vals[d]
+                        cls.rect_sub_helper(Rect(lo,rect.hi), other, to_add, dim+1)
+                    else:
+                        # Dominate both edges, one output
+                        cls.rect_sub_helper(rect, other, to_add, dim+1)
+                elif other.hi.vals[dim] >= rect.hi.vals[dim]:
+                    # Dominate upper edge, two outputs
+                    hi = Point(rect.hi.dim)
+                    for d in xrange(rect.hi.dim):
+                        if d == dim:
+                            hi.vals[d] = other.lo.vals[d]-1
+                        else:
+                            hi.vals[d] = rect.hi.vals[d]
+                    cls.rect_sub_helper(Rect(rect.lo,hi), other, to_add, dim+1)
+                    lo = Point(rect.lo.dim)
+                    for d in xrange(rect.lo.dim):
+                        if d == dim:
+                            lo.vals[d] = other.lo.vals[d]
+                        else:
+                            lo.vals[d] = rect.lo.vals[d]
+                    cls.rect_sub_helper(Rect(lo,rect.hi), other, to_add, dim+1)
+                else:
+                    # No domination, three outputs
+                    hi = Point(rect.hi.dim) 
+                    for d in xrange(rect.hi.dim):
+                        if d == dim:
+                            hi.vals[d] = other.lo.vals[d]-1
+                        else:
+                            hi.vals[d] = rect.hi.vals[d]
+                    cls.rect_sub_helper(Rect(rect.lo,hi), other, to_add, dim+1)
+                    lo = Point(rect.lo.dim)
+                    hi = Point(rect.hi.dim)
+                    for d in xrange(rect.lo.dim):
+                        if d == dim:
+                            lo.vals[d] = other.lo.vals[d]
+                            hi.vals[d] = other.hi.vals[d]
+                        else:
+                            lo.vals[d] = rect.lo.vals[d]
+                            hi.vals[d] = rect.hi.vals[d]
+                    cls.rect_sub_helper(Rect(lo,hi), other, to_add, dim+1)
+                    lo = Point(rect.lo.dim)
+                    for d in xrange(rect.lo.dim):
+                        if d == dim:
+                            lo.vals[d] = other.hi.vals[d]+1
+                        else:
+                            lo.vals[d] = rect.lo.vals[d]
+                    cls.rect_sub_helper(Rect(lo,rect.hi), other, to_add, dim+1)
 
     def __isub__(self, other):
         for orect in other.rects:
@@ -12733,7 +12907,8 @@ def run_geometry_tests(num_tests=10000):
     for dim in xrange(1,4):
         print("Testing dimension... "+str(dim))
         for i in xrange(num_tests):
-            print('  Running test '+str(i))
+            if i % 100 == 0:
+                print('  Running test '+str(i))
             success = perform_geometry_test(dim)
             if not success:
                 break

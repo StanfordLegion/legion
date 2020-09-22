@@ -266,7 +266,12 @@ namespace Legion {
         get_future_coordinates(void) const;
       void pack_future(Serializer &rez) const;
       static FutureImpl* unpack_future(Runtime *runtime, 
-          Deserializer &derez, ReferenceMutator *mutator);
+          Deserializer &derez, ReferenceMutator *mutator, 
+          Operation *op = NULL, GenerationID op_gen = 0, 
+#ifdef LEGION_SPY
+          UniqueID op_uid = 0,
+#endif
+          int op_depth = 0);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
@@ -2055,6 +2060,7 @@ namespace Legion {
                         LEGION_DEFAULT_MAX_CONTROL_REPLICATION_CONTEXTS),
             max_local_fields(LEGION_DEFAULT_LOCAL_FIELDS),
             max_replay_parallelism(LEGION_DEFAULT_MAX_REPLAY_PARALLELISM),
+            safe_control_replication(0),
             program_order_execution(false),
             dump_physical_traces(false),
             no_tracing(false),
@@ -2073,7 +2079,6 @@ namespace Legion {
             unsafe_launch(false),
             unsafe_mapper(false),
             safe_mapper(false),
-            safe_control_replication(false),
             disable_independence_tests(false),
             legion_spy_enabled(false),
             enable_test_mapper(false),
@@ -2104,6 +2109,7 @@ namespace Legion {
         unsigned max_control_replication_contexts;
         unsigned max_local_fields;
         unsigned max_replay_parallelism;
+        unsigned safe_control_replication;
       public:
         bool program_order_execution;
         bool dump_physical_traces;
@@ -2123,7 +2129,6 @@ namespace Legion {
         bool unsafe_launch;
         bool unsafe_mapper;
         bool safe_mapper;
-        bool safe_control_replication;
         bool disable_independence_tests;
         bool legion_spy_enabled;
         bool enable_test_mapper;
@@ -2252,6 +2257,7 @@ namespace Legion {
       const unsigned max_control_replication_contexts;
       const unsigned max_local_fields;
       const unsigned max_replay_parallelism;
+      const unsigned safe_control_replication;
     public:
       const bool program_order_execution;
       const bool dump_physical_traces;
@@ -2270,7 +2276,6 @@ namespace Legion {
       const bool resilient_mode;
       const bool unsafe_launch;
       const bool unsafe_mapper;
-      const bool safe_control_replication;
       const bool disable_independence_tests;
       const bool legion_spy_enabled;
       const bool supply_default_mapper;

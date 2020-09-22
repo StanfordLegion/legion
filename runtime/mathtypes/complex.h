@@ -24,6 +24,7 @@
 #endif
 #endif
 
+#include <cmath>
 #ifdef COMPLEX_HALF
 #include "mathtypes/half.h"
 #endif
@@ -42,8 +43,6 @@ public:
   complex(void) { } // empty default constructor for CUDA
   __CUDA_HD__
   complex(__half re, __half im = __half()) : _real(re), _imag(im) { }
-  __CUDA_HD__
-  complex(const __half val[2]) : _real(val[0]), _imag(val[1]) { }
   __CUDA_HD__
   complex(const complex<__half> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
 #ifdef __CUDACC__
@@ -154,8 +153,6 @@ public:
   __CUDA_HD__
   complex(float re, float im = 0.f) : _real(re), _imag(im) { }
   __CUDA_HD__
-  complex(const float val[2]) : _real(val[0]), _imag(val[1]) { }
-  __CUDA_HD__
   complex(const complex<float> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
 #ifdef __CUDACC__
   __device__ // Device only constructor
@@ -253,8 +250,6 @@ public:
   complex(void) { } // empty default constructor for CUDA
   __CUDA_HD__
   complex(double re, double im = 0.0) : _real(re), _imag(im) { }
-  __CUDA_HD__
-  complex(const double val[2]) : _real(val[0]), _imag(val[1]) { }
   __CUDA_HD__
   complex(const complex<double> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
 #ifdef __CUDACC__
@@ -423,6 +418,35 @@ template<typename T> __CUDA_HD__
 inline bool operator>=(const complex<T>& c1, const complex<T>& c2) {
     return (c1 == c2) || (c1.real() > c2.real()) || 
       (!(c2.real() > c1.real()) && (c1.imag() > c2.imag()));
+}
+
+// Both single and half precision go through this path
+template<typename T> __CUDA_HD__
+inline T abs(const complex<T>& z) {
+#ifdef __CUDA_ARCH__
+  return (T)(hypotf(z.real(), z.imag()));
+#elif __cplusplus >= 201103L
+  return T{std::hypotf(z.real(), z.imag())};
+#else
+  return (T)(std::sqrt(z.real() * z.real() + z.imag() * z.imag()));
+#endif
+}
+
+// Double precision uses this version of the specialization
+template<> __CUDA_HD__
+inline double abs(const complex<double>& z) {
+#ifdef __CUDA_ARCH__
+  return hypot(z.real(), z.imag());
+#elif __cplusplus >= 201103L
+  return std::hypot(z.real(), z.imag());
+#else
+  return std::sqrt(z.real() * z.real() + z.imag() * z.imag());
+#endif
+}
+
+template<typename T> __CUDA_HD__
+inline T fabs(const complex<T>& z) {
+  return abs(z);
 }
 
 // TODO: fill this out with full support for std::complex

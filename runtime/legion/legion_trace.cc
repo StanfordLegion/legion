@@ -5029,8 +5029,8 @@ namespace Legion {
         }
         if (wait_on.exists() && !wait_on.has_triggered())
           wait_on.wait();
-        // Reset it back to zero after updating our barriers
-        total_replays = 0;
+        // Reset it back to one after updating our barriers
+        total_replays = 1;
       }
     }
 

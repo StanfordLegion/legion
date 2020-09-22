@@ -560,7 +560,7 @@ function specialize.expr_field_access(cx, node, allow_lists)
   assert(#node.field_names == 1)
   local field_names = specialize.field_names(cx, node.field_names[1])
 
-  if type(field_names[1]) == "string" then
+  if type(field_names[1]) == "string" or data.is_tuple(field_names[1]) then
     if #field_names > 1 then
       report.error(expr, "multi-field access is not allowed")
     end
@@ -572,6 +572,16 @@ function specialize.expr_field_access(cx, node, allow_lists)
       report.error(node, "unable to specialize multi-field access")
     end
     return convert_lua_value(cx, node, value.value[field_names])
+  elseif data.is_tuple(field_names) then
+    for _, field_name in ipairs(field_names) do
+      value = ast.specialized.expr.FieldAccess {
+        value = value,
+        field_name = field_name,
+        annotations = node.annotations,
+        span = node.span,
+      }
+    end
+    return value
   else
     return ast.specialized.expr.FieldAccess {
       value = value,
