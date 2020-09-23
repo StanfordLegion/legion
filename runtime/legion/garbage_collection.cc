@@ -1498,8 +1498,7 @@ namespace Legion {
       assert(collective_mapping != NULL);
 #endif
       std::vector<AddressSpaceID> children;
-      collective_mapping->get_children(owner_space, local_space, 
-          runtime->legion_collective_radix, children);
+      collective_mapping->get_children(owner_space, local_space, children);
       for (std::vector<AddressSpaceID>::const_iterator it =
             children.begin(); it != children.end(); it++)
       {

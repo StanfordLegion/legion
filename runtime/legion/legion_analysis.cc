@@ -14829,8 +14829,7 @@ namespace Legion {
       {
         // Remove references down the tree
         std::vector<AddressSpaceID> children;
-        collective_mapping->get_children(owner_space, local_space, 
-            runtime->legion_collective_radix, children);
+        collective_mapping->get_children(owner_space, local_space, children);
         for (std::vector<AddressSpaceID>::const_iterator it =
               children.begin(); it != children.end(); it++)
           send_remote_gc_decrement(*it, mutator);
@@ -14951,7 +14950,7 @@ namespace Legion {
       if (init_collective_refs)
       {
 #ifdef DEBUG_LEGION
-        assert(!has_remote_instances());
+        assert(!has_remote_instances() || !is_owner());
 #endif
         return;
       }
@@ -14963,8 +14962,7 @@ namespace Legion {
           // signal that we are doing parallel creation of this equivalence set
           if (mutator != NULL)
             send_remote_valid_increment(
-                collective_mapping->get_parent(owner_space, local_space,
-                  runtime->legion_collective_radix), mutator);
+             collective_mapping->get_parent(owner_space, local_space), mutator);
         }
         else
           send_remote_valid_increment(owner_space, mutator);
@@ -14984,8 +14982,7 @@ namespace Legion {
         {
           // Remove references down the tree
           std::vector<AddressSpaceID> children;
-          collective_mapping->get_children(owner_space, local_space, 
-              runtime->legion_collective_radix, children);
+          collective_mapping->get_children(owner_space, local_space, children);
           for (std::vector<AddressSpaceID>::const_iterator it =
                 children.begin(); it != children.end(); it++)
             send_remote_gc_decrement(*it, mutator);
@@ -15000,8 +14997,7 @@ namespace Legion {
       {
         if (collective_mapping != NULL)
           send_remote_valid_decrement(
-              collective_mapping->get_parent(owner_space, local_space,
-                runtime->legion_collective_radix), mutator);
+             collective_mapping->get_parent(owner_space, local_space), mutator);
         else
           send_remote_valid_decrement(owner_space, mutator);
       }
@@ -15018,8 +15014,7 @@ namespace Legion {
       init_collective_refs = true;
       // Add remote valid references for however many children we have
       std::vector<AddressSpaceID> children;
-      collective_mapping->get_children(owner_space, local_space,
-          runtime->legion_collective_radix, children);
+      collective_mapping->get_children(owner_space, local_space, children);
       if (!children.empty())
         add_base_valid_ref(REMOTE_DID_REF, NULL, children.size());
       if (is_owner())
@@ -16640,8 +16635,7 @@ namespace Legion {
       {
         // Send it along to the other locations
         std::vector<AddressSpaceID> children;
-        collective_mapping->get_children(origin, local_space, 
-            runtime->legion_collective_radix, children);
+        collective_mapping->get_children(origin, local_space, children);
         for (std::vector<AddressSpaceID>::const_iterator it =
               children.begin(); it != children.end(); it++)
         {
@@ -21089,8 +21083,7 @@ namespace Legion {
         {
           // Send it to each of the children
           std::vector<AddressSpaceID> children;
-          collective_mapping->get_children(origin_space, local_space, 
-              runtime->legion_collective_radix, children);
+          collective_mapping->get_children(origin_space, local_space, children);
           for (std::vector<AddressSpaceID>::const_iterator it =
                 children.begin(); it != children.end(); it++)
           {
@@ -23158,8 +23151,11 @@ namespace Legion {
         AutoLock m_lock(manager_lock);
         FieldMaskSet<EquivalenceSet>::iterator finder = 
           equivalence_sets.find(set);
+        // This can happen if the version manager is finalized but has not
+        // finished removing the tracker before we get this call back 
+        if (finder == equivalence_sets.end())
+          return;
 #ifdef DEBUG_LEGION
-        assert(finder != equivalence_sets.end());
         assert(!(mask - finder->second));
 #endif
         finder.filter(mask);
@@ -23899,17 +23895,17 @@ namespace Legion {
           {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
-            if (invalidate)
-            {
-              it->first->add_base_resource_ref(VERSION_MANAGER_REF);
-              to_untrack.insert(it->first, it->second);
-            }
             // Add a remote valid reference on these nodes to keep
             // them live until we can add on remotely. No need for
             // a mutator since we know that they are already valid 
             it->first->add_base_valid_ref(REMOTE_DID_REF, 
                       NULL/*mutator*/, destination_count);
-            it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
+            if (invalidate)
+            {
+              if (to_untrack.insert(it->first, it->second))
+                it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+              it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
+            }
           }
         }
         else if (!!eq_overlap)
@@ -23928,14 +23924,17 @@ namespace Legion {
             else
             {
               to_send.push_back(it->first);
-              to_untrack.insert(it->first, it->second);
-              it->first->add_base_resource_ref(VERSION_MANAGER_REF);
               // Add a remote valid reference on these nodes to keep
               // them live until we can add on remotely. No need for
               // a mutator since we know that they are already valid 
               it->first->add_base_valid_ref(REMOTE_DID_REF, 
                         NULL/*mutator*/, destination_count);
-              it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
+              if (invalidate)
+              {
+                if (to_untrack.insert(it->first, it->second))
+                  it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+                it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
+              }
             }
           }
           rez.serialize<size_t>(to_send.size());

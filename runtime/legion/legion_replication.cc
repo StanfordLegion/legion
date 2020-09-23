@@ -7113,7 +7113,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CollectiveMapping::CollectiveMapping(
-                                      const std::vector<AddressSpaceID> &spaces)
+                            const std::vector<AddressSpaceID> &spaces, size_t r)
+      : radix(r)
     //--------------------------------------------------------------------------
     {
       std::set<AddressSpaceID> unique_spaces(spaces.begin(), spaces.end());
@@ -7122,12 +7123,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveMapping::CollectiveMapping(const ShardMapping &shard_mapping)
+    CollectiveMapping::CollectiveMapping(const ShardMapping &mapping, size_t r)
+      : radix(r)
     //--------------------------------------------------------------------------
     {
       std::set<AddressSpaceID> unique_spaces;
-      for (unsigned idx = 0; idx < shard_mapping.size(); idx++)
-        unique_spaces.insert(shard_mapping[idx]);
+      for (unsigned idx = 0; idx < mapping.size(); idx++)
+        unique_spaces.insert(mapping[idx]);
       unique_sorted_spaces.insert(unique_sorted_spaces.end(),
                                   unique_spaces.begin(), unique_spaces.end());
     }
@@ -7141,12 +7143,16 @@ namespace Legion {
       unique_sorted_spaces.resize(num_spaces);
       for (unsigned idx = 0; idx < num_spaces; idx++)
         derez.deserialize(unique_sorted_spaces[idx]);
+      if (num_spaces > 0)
+        derez.deserialize(radix);
     }
 
     //--------------------------------------------------------------------------
     bool CollectiveMapping::operator==(const CollectiveMapping &rhs) const
     //--------------------------------------------------------------------------
     {
+      if (radix != rhs.radix)
+        return false;
       if (size() != rhs.size())
         return false;
       for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
@@ -7164,7 +7170,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AddressSpaceID CollectiveMapping::get_parent(const AddressSpaceID origin, 
-                         const AddressSpaceID local, const unsigned radix) const
+                                               const AddressSpaceID local) const
     //--------------------------------------------------------------------------
     {
       const unsigned local_index = find_index(local);
@@ -7180,8 +7186,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveMapping::get_children(const AddressSpaceID origin,
-                               const AddressSpaceID local, const unsigned radix,
-                               std::vector<AddressSpaceID> &children) const
+        const AddressSpaceID local, std::vector<AddressSpaceID> &children) const
     //--------------------------------------------------------------------------
     {
       const unsigned local_index = find_index(local);
@@ -7217,6 +7222,8 @@ namespace Legion {
       rez.serialize<size_t>(unique_sorted_spaces.size());
       for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
         rez.serialize(unique_sorted_spaces[idx]);
+      if (!unique_sorted_spaces.empty())
+        rez.serialize(radix);
     }
 
     //--------------------------------------------------------------------------
@@ -7500,7 +7507,14 @@ namespace Legion {
 #endif
       address_spaces = new ShardMapping(spaces);
       address_spaces->add_reference();
-      collective_mapping = new CollectiveMapping(spaces);
+      // We just need the collective radix, but use the existing routine
+      int collective_radix = runtime->legion_collective_radix;
+      int collective_log_radix, collective_stages;
+      int participating_spaces, collective_last_radix;
+      configure_collective_settings(spaces.size(), runtime->address_space,
+          collective_radix, collective_log_radix, collective_stages,
+          participating_spaces, collective_last_radix);
+      collective_mapping = new CollectiveMapping(spaces, collective_radix);
       collective_mapping->add_reference();
     }
 
@@ -7565,8 +7579,18 @@ namespace Legion {
         (*address_spaces)[(*it)->shard_id] = target;
       }
       local_shards.clear();
-      collective_mapping = new CollectiveMapping(*address_spaces);
-      collective_mapping->add_reference();
+      {
+        // We just need the collective radix, but use the existing routine
+        int collective_radix = runtime->legion_collective_radix;
+        int collective_log_radix, collective_stages;
+        int participating_spaces, collective_last_radix;
+        configure_collective_settings(address_spaces->size(), 
+            runtime->address_space, collective_radix, collective_log_radix,
+            collective_stages, participating_spaces, collective_last_radix);
+        collective_mapping = 
+          new CollectiveMapping(*address_spaces, collective_radix);
+        collective_mapping->add_reference();
+      }
       // Compute the unique shard spaces and make callback barrier
       // which has as many arrivers as unique shard spaces
       callback_barrier = 
@@ -7726,8 +7750,18 @@ namespace Legion {
       address_spaces = new ShardMapping();
       address_spaces->add_reference();
       address_spaces->unpack_mapping(derez);
-      collective_mapping = new CollectiveMapping(*address_spaces);
-      collective_mapping->add_reference();
+      {
+        // We just need the collective radix, but use the existing routine
+        int collective_radix = runtime->legion_collective_radix;
+        int collective_log_radix, collective_stages;
+        int participating_spaces, collective_last_radix;
+        configure_collective_settings(address_spaces->size(), 
+            runtime->address_space, collective_radix, collective_log_radix, 
+            collective_stages, participating_spaces, collective_last_radix);
+        collective_mapping = 
+          new CollectiveMapping(*address_spaces, collective_radix);
+        collective_mapping->add_reference();
+      }
       if (control_replicated)
       {
         derez.deserialize(pending_partition_barrier);

@@ -17465,7 +17465,8 @@ namespace Legion {
 #endif
             if (--region_finder->second == 0)
             {
-              created_regions.erase(region_finder);
+              // Don't remove this from created regions yet,
+              // That will happen when we make the deletion operation
               delete_now.push_back(*rit);
               // Check to see if we have any latent field spaces to clean up
               if (!latent_field_spaces.empty())
@@ -17474,7 +17475,7 @@ namespace Legion {
                   latent_field_spaces.find(rit->get_field_space());
                 if (finder != latent_field_spaces.end())
                 {
-                  std::set<LogicalRegion>::iterator latent_finder = 
+                  std::set<LogicalRegion>::iterator latent_finder =
                     finder->second.find(*rit);
 #ifdef DEBUG_LEGION
                   assert(latent_finder != finder->second.end());
@@ -17485,12 +17486,12 @@ namespace Legion {
                     // Now that all the regions using this field space have
                     // been deleted we can clean up all the created_fields
                     for (std::set<std::pair<FieldSpace,FieldID> >::iterator it =
-                          created_fields.begin(); it != 
+                          created_fields.begin(); it !=
                           created_fields.end(); /*nothing*/)
                     {
                       if (it->first == finder->first)
                       {
-                        std::set<std::pair<FieldSpace,FieldID> >::iterator 
+                        std::set<std::pair<FieldSpace,FieldID> >::iterator
                           to_delete = it++;
                         created_fields.erase(to_delete);
                       }
@@ -18268,16 +18269,21 @@ namespace Legion {
           // This was an equivalence set that was made on just one shard
           RegionNode *region = it->first->region_node;
           const LegionColor color = region->get_color();
-          IndexPartNode *index_part = region->parent->row_source;
           ShardID target_shard;
-          if (index_part->total_children != index_part->max_linearized_color)
+          if (region->parent != NULL)
           {
-            // Have to do this the hard way
-            const size_t index_offset = 
-              index_part->color_space->compute_color_offset(color);
-            target_shard = index_offset % total_shards;
+            IndexPartNode *index_part = region->parent->row_source;
+            if (index_part->total_children != index_part->max_linearized_color)
+            {
+              // Have to do this the hard way
+              const size_t index_offset = 
+                index_part->color_space->compute_color_offset(color);
+              target_shard = index_offset % total_shards;
+            }
+            else // This is the easy way, we can just linearize the color 
+              target_shard = color % total_shards;
           }
-          else // This is the easy way, we can just linearize the color 
+          else
             target_shard = color % total_shards;
           if (target_shard == owner_shard->shard_id)
             it->first->invalidate_trackers(it->second, applied_events,

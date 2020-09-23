@@ -2045,8 +2045,8 @@ namespace Legion {
      */
     class CollectiveMapping : public Collectable {
     public:
-      CollectiveMapping(const std::vector<AddressSpaceID> &spaces);
-      CollectiveMapping(const ShardMapping &shard_mapping);
+      CollectiveMapping(const std::vector<AddressSpaceID> &spaces,size_t radix);
+      CollectiveMapping(const ShardMapping &shard_mapping, size_t radix);
       CollectiveMapping(Deserializer &derez);
     public:
       inline AddressSpaceID operator[](unsigned idx) const
@@ -2056,10 +2056,8 @@ namespace Legion {
       bool operator!=(const CollectiveMapping &rhs) const;
     public:
       AddressSpaceID get_parent(const AddressSpaceID origin, 
-                                const AddressSpaceID local,
-                                const unsigned radix) const;
-      void get_children(const AddressSpaceID origin, 
-                        const AddressSpaceID local, const unsigned radix,
+                                const AddressSpaceID local) const;
+      void get_children(const AddressSpaceID origin, const AddressSpaceID local,
                         std::vector<AddressSpaceID> &children) const;
       bool contains(const AddressSpaceID space) const;
     public:
@@ -2070,6 +2068,7 @@ namespace Legion {
       unsigned convert_to_index(unsigned offset, unsigned origin) const;
     protected:
       std::vector<AddressSpaceID> unique_sorted_spaces;
+      size_t radix;
     };
 
     /**
