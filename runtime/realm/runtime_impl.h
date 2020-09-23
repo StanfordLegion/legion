@@ -65,19 +65,19 @@ namespace Realm {
       static const size_t LEAF_BITS = _LEAF_BITS;
 
       typedef Mutex LT;
-      typedef int IT;
+      typedef ID::IDType IT;
       typedef DynamicTableNode<atomic<DynamicTableNodeBase<LT, IT> *>, 1 << INNER_BITS, LT, IT> INNER_TYPE;
       typedef DynamicTableNode<ET, 1 << LEAF_BITS, LT, IT> LEAF_TYPE;
       typedef DynamicTableFreeList<DynamicTableAllocator<ET, _INNER_BITS, _LEAF_BITS> > FreeList;
 
       // hack for now - these should be factored out
-      static ID make_id(const GenEventImpl& dummy, int owner, int index) { return ID::make_event(owner, index, 0); }
-      static ID make_id(const BarrierImpl& dummy, int owner, int index) { return ID::make_barrier(owner, index, 0); }
-      static Reservation make_id(const ReservationImpl& dummy, int owner, int index) { return ID::make_reservation(owner, index).convert<Reservation>(); }
-      static Processor make_id(const ProcessorGroupImpl& dummy, int owner, int index) { return ID::make_procgroup(owner, 0, index).convert<Processor>(); }
-      static ID make_id(const SparsityMapImplWrapper& dummy, int owner, int index) { return ID::make_sparsity(owner, 0, index); }
-      static CompletionQueue make_id(const CompQueueImpl& dummy, int owner, int index) { return ID::make_compqueue(owner, index).convert<CompletionQueue>(); }
-      static ID make_id(const SubgraphImpl& dummy, int owner, int index) { return ID::make_subgraph(owner, 0, index); }
+      static ID make_id(const GenEventImpl& dummy, int owner, IT index) { return ID::make_event(owner, index, 0); }
+      static ID make_id(const BarrierImpl& dummy, int owner, IT index) { return ID::make_barrier(owner, index, 0); }
+      static Reservation make_id(const ReservationImpl& dummy, int owner, IT index) { return ID::make_reservation(owner, index).convert<Reservation>(); }
+      static Processor make_id(const ProcessorGroupImpl& dummy, int owner, IT index) { return ID::make_procgroup(owner, 0, index).convert<Processor>(); }
+      static ID make_id(const SparsityMapImplWrapper& dummy, int owner, IT index) { return ID::make_sparsity(owner, 0, index); }
+      static CompletionQueue make_id(const CompQueueImpl& dummy, int owner, IT index) { return ID::make_compqueue(owner, index).convert<CompletionQueue>(); }
+      static ID make_id(const SubgraphImpl& dummy, int owner, IT index) { return ID::make_subgraph(owner, 0, index); }
       
       static LEAF_TYPE *new_leaf_node(IT first_index, IT last_index, 
 				      int owner, FreeList *free_list)
