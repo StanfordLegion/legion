@@ -20,7 +20,7 @@
 
 using namespace Legion::Mapping::Utilities;
 
-Realm::Logger log_mapper("mapper");
+Realm::Logger log_maplog("mapper");
 
 namespace Legion {
 namespace Mapping {
@@ -34,7 +34,7 @@ class MessageBuffer {
   ~MessageBuffer() {
     for (std::vector<std::stringstream*>::iterator it = lines.begin();
          it != lines.end(); ++it) {
-      log_mapper.info() << (*it)->str();
+      log_maplog.info() << (*it)->str();
       delete(*it);
     }
   }
