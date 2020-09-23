@@ -389,6 +389,7 @@ namespace Legion {
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
+      LG_DEFER_FINALIZE_PENDING_SET_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
       LG_DEFER_TRACE_PRECONDITION_TASK_ID,
@@ -508,6 +509,7 @@ namespace Legion {
         "Defer Verify Partition",                                 \
         "Defer Release Acquired Instances",                       \
         "Defer Disjoint Complete Response",                       \
+        "Defer Finalize Pending Equivalence Set",                 \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Defer Trace Precondition Test",                          \

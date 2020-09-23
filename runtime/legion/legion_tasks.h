@@ -748,7 +748,7 @@ namespace Legion {
                                    bool owned, FutureFunctor *functor);
     protected:
       void pack_remote_versions(Serializer &rez);
-      void pack_remote_complete(Serializer &rez);
+      void pack_remote_complete(Serializer &rez, RtEvent precondition);
       void pack_remote_commit(Serializer &rez);
       void unpack_remote_complete(Deserializer &derez);
       void unpack_remote_commit(Deserializer &derez);

@@ -5586,7 +5586,14 @@ namespace Legion {
       else
       {
         Serializer rez;
-        pack_remote_complete(rez);
+        if (!completion_preconditions.empty())
+        {
+          const RtEvent complete_precondition =
+            Runtime::merge_events(completion_preconditions);
+          pack_remote_complete(rez, complete_precondition);
+        }
+        else
+          pack_remote_complete(rez, RtEvent::NO_RT_EVENT);
         runtime->send_individual_remote_complete(orig_proc,rez);
       }
       // See if we need to trigger that our children are complete
@@ -5609,9 +5616,9 @@ namespace Legion {
       else
       {
         // Mark that this operation is complete
-        if (!completion_preconditions.empty())
+        if (!completion_preconditions.empty() && !is_remote())
         {
-          RtEvent complete_precondition =
+          const RtEvent complete_precondition =
             Runtime::merge_events(completion_preconditions);
           complete_operation(complete_precondition);
         }
@@ -5916,7 +5923,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::pack_remote_complete(Serializer &rez)
+    void IndividualTask::pack_remote_complete(Serializer &rez, RtEvent pre)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PACK_REMOTE_COMPLETE_CALL);
@@ -5924,6 +5931,7 @@ namespace Legion {
       // everything else that needs to be sent back
       rez.serialize(orig_task);
       RezCheck z(rez);
+      rez.serialize(pre);
       // Pack the privilege state
       if (execution_context != NULL)
       {
@@ -5940,17 +5948,28 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_UNPACK_REMOTE_COMPLETE_CALL);
       DerezCheck z(derez);
+      RtEvent remote_precondition;
+      derez.deserialize(remote_precondition);
       // First unpack the privilege state
       bool has_privilege_state;
       derez.deserialize(has_privilege_state);
-      RtEvent resources_returned;
       if (has_privilege_state)
-        resources_returned = (must_epoch == NULL) ? 
+      {
+        const RtEvent resources_returned = (must_epoch == NULL) ? 
           ResourceTracker::unpack_resources_return(derez, parent_ctx) :
           ResourceTracker::unpack_resources_return(derez, must_epoch);
+        if (resources_returned.exists())
+        {
+          if (remote_precondition.exists())
+            remote_precondition = 
+              Runtime::merge_events(remote_precondition, resources_returned);
+          else
+            remote_precondition = resources_returned;
+        }
+      }
       // Mark that we have both finished executing and that our
       // children are complete
-      complete_execution(resources_returned);
+      complete_execution(remote_precondition);
       trigger_children_complete();
     }
 

@@ -19270,9 +19270,6 @@ namespace Legion {
       if (expr_covers)
       {
         // No need to check for merging, we should be independent
-#ifdef DEBUG_LEGION
-        assert((restricted_fields * restrict_mask) || set_expr->is_empty());
-#endif
         LegionMap<IndexSpaceExpression*,
           FieldMaskSet<InstanceView> >::aligned::iterator 
             restricted_finder = restricted_instances.find(set_expr);
@@ -21612,8 +21609,8 @@ namespace Legion {
       rez.serialize<size_t>(restricted_updates.size());
       for (LegionMap<IndexSpaceExpression*,
             FieldMaskSet<InstanceView> >::aligned::const_iterator rit =
-            restricted_instances.begin(); rit != 
-            restricted_instances.end(); rit++)
+            restricted_updates.begin(); rit != 
+            restricted_updates.end(); rit++)
       {
         rit->first->pack_expression(rez, target);
         rez.serialize<size_t>(rit->second.size());
@@ -21627,7 +21624,7 @@ namespace Legion {
       rez.serialize<size_t>(released_updates.size());
       for (LegionMap<IndexSpaceExpression*,
             FieldMaskSet<InstanceView> >::aligned::const_iterator rit =
-            released_instances.begin(); rit != released_instances.end(); rit++)
+            released_updates.begin(); rit != released_updates.end(); rit++)
       {
         rit->first->pack_expression(rez, target);
         rez.serialize<size_t>(rit->second.size());
@@ -22161,13 +22158,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!overlap->is_empty());
 #endif
-      const bool overlap_covers = 
-        (overlap->get_volume() == set_expr->get_volume());
+      const size_t overlap_volume = overlap->get_volume();
+      const size_t set_volume = set_expr->get_volume();
+      const bool overlap_covers = (overlap_volume == set_volume); 
+      if (overlap_covers)
+        overlap = set_expr;
+      else if (overlap_volume == target_node->get_volume())
+        overlap = target_node;
       // If we make it here, then we've got valid data for the all the fields
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(did);
+        rez.serialize(target);
         rez.serialize(local_space);
         rez.serialize(done_event);
         pack_state(rez, target_space, overlap, overlap_covers, mask);
@@ -22868,7 +22870,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PendingEquivalenceSet::finalize(const FieldMask &done_mask)
+    bool PendingEquivalenceSet::finalize(const FieldMask &done_mask, 
+                                         bool &delete_now)
     //--------------------------------------------------------------------------
     {
       if (!!(previous_sets.get_valid_mask() - done_mask))
@@ -22881,25 +22884,60 @@ namespace Legion {
           if (!it->second)
             to_delete.push_back(it->first);
         }
-        for (std::vector<EquivalenceSet*>::const_iterator it =
-              to_delete.begin(); it != to_delete.end(); it++)
+        // We can't actually remove these until the clone event has triggered
+        if (!clone_event.exists() || clone_event.has_triggered())
         {
-          previous_sets.erase(*it);
-          if ((*it)->remove_base_valid_ref(PENDING_REFINEMENT_REF))
-            delete (*it);
+          for (std::vector<EquivalenceSet*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            previous_sets.erase(*it);
+            if ((*it)->remove_base_valid_ref(PENDING_REFINEMENT_REF))
+              delete (*it);
+          }
         }
         previous_sets.filter_valid_mask(done_mask);
+        delete_now = false;
         return false;
       }
       else
       {
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              previous_sets.begin(); it != previous_sets.end(); it++)
-          if (it->first->remove_base_valid_ref(PENDING_REFINEMENT_REF))
-            delete it->first;
-        previous_sets.clear();
+        if (!clone_event.exists() || clone_event.has_triggered())
+        {
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                previous_sets.begin(); it != previous_sets.end(); it++)
+            if (it->first->remove_base_valid_ref(PENDING_REFINEMENT_REF))
+              delete it->first;
+          previous_sets.clear();
+          delete_now = true;
+        }
+        else
+        {
+          // Launch a meta-task to remove these references and delete
+          // the object once we know that the clone event has triggered
+          DeferFinalizePendingSetArgs args(this);
+          region_node->context->runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, clone_event);
+          delete_now = false;
+        }
+        // Safe to remove this from the list since it is finalized
         return true;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PendingEquivalenceSet::handle_defer_finalize(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferFinalizePendingSetArgs *dargs = 
+        (const DeferFinalizePendingSetArgs*)args;
+      bool delete_now = false;
+      const FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      dargs->pending->finalize(all_ones, delete_now);
+#ifdef DEBUG_LEGION
+      assert(delete_now);
+#endif
+      delete dargs->pending;
     }
 
     /////////////////////////////////////////////////////////////
@@ -23121,10 +23159,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-#ifdef DEBUG_LEGION
-      assert((set->region_node != node) || 
-              set->region_node->row_source->is_empty());
-#endif
       if (equivalence_sets.insert(set, mask))
         set->add_base_resource_ref(VERSION_MANAGER_REF);
       set->record_tracker(this, mask);
@@ -23398,7 +23432,8 @@ namespace Legion {
 #endif
         // Ask the context to fill in the disjoint complete sets here
         if (context->finalize_disjoint_complete_sets(region_node, this,
-              request_mask, opid, original_source, request_ready, ready_events))
+                    request_mask, opid, original_source, request_ready) &&
+            request_ready.has_triggered())
         {
           // Special case where the context did this right away
           // so we can restore the request fields and remove the

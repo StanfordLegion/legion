@@ -17662,7 +17662,7 @@ namespace Legion {
       {
         column_source->remove_nested_valid_ref(did, mutator);
         row_source->parent->remove_nested_valid_ref(did, mutator);
-      }
+      } 
     }
 
     //--------------------------------------------------------------------------
@@ -17685,19 +17685,20 @@ namespace Legion {
           if ((*it)->remove_partition_reference(mutator))
             delete (*it);
         partition_trackers.clear();
-      }
+      } 
       if (empty_equivalence_set != NULL)
       {
         std::set<RtEvent> applied_events;
         const FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         empty_equivalence_set->invalidate_trackers(all_ones, applied_events,
                   context->runtime->address_space, NULL/*collective mapping*/);
-        if (empty_equivalence_set->remove_nested_valid_ref(did))
+        if (empty_equivalence_set->remove_nested_valid_ref(did, mutator))
           delete empty_equivalence_set;
         empty_equivalence_set = NULL;
-        for (std::set<RtEvent>::const_iterator it = 
-              applied_events.begin(); it != applied_events.end(); it++)
-          mutator->record_reference_mutation_effect(*it);
+        if (mutator != NULL)
+          for (std::set<RtEvent>::const_iterator it = 
+                applied_events.begin(); it != applied_events.end(); it++)
+            mutator->record_reference_mutation_effect(*it);
       }
       for (unsigned idx = 0; idx < current_versions.max_entries(); idx++)
         if (current_versions.has_entry(idx))

@@ -3699,11 +3699,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool InnerContext::finalize_disjoint_complete_sets(RegionNode *region, 
-                     VersionManager *target, FieldMask request_mask,
-                     const UniqueID opid, const AddressSpaceID source, 
-                     RtUserEvent ready_event, std::set<RtEvent> &applied_events)
+            VersionManager *target, FieldMask request_mask, const UniqueID opid,
+            const AddressSpaceID source, RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
+      std::set<RtEvent> applied_events;
       AutoLock p_lock(pending_set_lock);
       std::map<RegionNode*,std::list<PendingEquivalenceSet*> >::iterator
         finder = pending_equivalence_sets.find(region);
@@ -3724,9 +3724,11 @@ namespace Legion {
         FieldMask dummy_parent;
         target->record_refinement(new_set, overlap,
                                   dummy_parent, applied_events);
-        if ((*it)->finalize(overlap))
+        bool delete_now = false;
+        if ((*it)->finalize(overlap, delete_now))
         {
-          delete (*it);
+          if (delete_now)
+            delete (*it);
           it = finder->second.erase(it);
         }
         else
@@ -3741,7 +3743,11 @@ namespace Legion {
       if (finder->second.empty())
         pending_equivalence_sets.erase(finder);
       // We're done now so trigger the ready event and tell the caller too
-      Runtime::trigger_event(ready_event);
+      if (!applied_events.empty())
+        Runtime::trigger_event(ready_event, 
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(ready_event);
       return true;
     }
     
@@ -3758,8 +3764,13 @@ namespace Legion {
       for (std::list<PendingEquivalenceSet*>::iterator it = 
             finder->second.begin(); it != finder->second.end(); /*nothing*/)
       {
-        if ((*it)->finalize(mask))
+        bool delete_now = false;
+        if ((*it)->finalize(mask, delete_now))
+        {
+          if (delete_now)
+            delete (*it);
           it = finder->second.erase(it);
+        }
         else
           it++;
       }
@@ -8740,6 +8751,31 @@ namespace Legion {
         node->invalidate_refinement(tree_context.get_id(), all_ones_mask, 
                           true/*self*/, applied_events, to_release, this);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::report_leaks_and_duplicates(std::set<RtEvent> &preconds)
+    //--------------------------------------------------------------------------
+    {
+      // If we have any leaked regions, we need to invalidate their contexts
+      // before we do anything else, make sure this is done before we start
+      // removing valid references
+      if (!created_regions.empty())
+      {
+        std::set<RtEvent> invalidated_events;
+        for (std::map<LogicalRegion,unsigned>::const_iterator it =
+              created_regions.begin(); it != created_regions.end(); it++)
+          invalidate_region_tree_context(it->first, invalidated_events, 
+                                         invalidated_refinements);
+        if (!invalidated_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(invalidated_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
+      }
+      // Now we can do the base call
+      TaskContext::report_leaks_and_duplicates(preconds);
     }
 
     //--------------------------------------------------------------------------
@@ -18196,9 +18232,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ReplicateContext::finalize_disjoint_complete_sets(RegionNode *region, 
-                     VersionManager *target, FieldMask request_mask,
-                     const UniqueID opid, const AddressSpaceID source, 
-                     RtUserEvent ready_event, std::set<RtEvent> &applied_events)
+            VersionManager *target, FieldMask request_mask, const UniqueID opid,
+            const AddressSpaceID source, RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18238,7 +18273,7 @@ namespace Legion {
       }
       else // we're the owner so just handle this here
         return InnerContext::finalize_disjoint_complete_sets(region, target,
-                    request_mask, opid, source, ready_event, applied_events);
+                                    request_mask, opid, source, ready_event);
     }
 
     //--------------------------------------------------------------------------

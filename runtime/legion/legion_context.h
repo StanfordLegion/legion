@@ -538,7 +538,7 @@ namespace Legion {
       void destroy_user_lock(Reservation r);
       void destroy_user_barrier(ApBarrier b);
     public:
-      void report_leaks_and_duplicates(std::set<RtEvent> &preconditions);
+      virtual void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
     public:
       void analyze_destroy_fields(FieldSpace handle,
                                   const std::set<FieldID> &to_delete,
@@ -912,9 +912,8 @@ namespace Legion {
                       const AddressSpaceID original_source);
       void record_pending_disjoint_complete_set(PendingEquivalenceSet *set);
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
-                    VersionManager *target, FieldMask mask,
-                    const UniqueID opid, const AddressSpaceID source, 
-                    RtUserEvent ready_event, std::set<RtEvent> &applied_events);
+                    VersionManager *target, FieldMask mask, const UniqueID opid,
+                    const AddressSpaceID source, RtUserEvent ready_event);
       void invalidate_disjoint_complete_sets(RegionNode *region,
                                              const FieldMask &mask);
       virtual void deduplicate_invalidate_trackers(
@@ -1284,6 +1283,7 @@ namespace Legion {
       void invalidate_region_tree_context(LogicalRegion handle,
                                       std::set<RtEvent> &applied_events,
                                       std::vector<EquivalenceSet*> &to_release);
+      virtual void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
       virtual void free_region_tree_context(void);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
@@ -2145,9 +2145,8 @@ namespace Legion {
       ShardID get_next_equivalence_set_origin(void);
       bool replicate_partition_equivalence_sets(PartitionNode *node) const;
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
-                    VersionManager *target, FieldMask mask,
-                    const UniqueID opid, const AddressSpaceID source, 
-                    RtUserEvent ready_event, std::set<RtEvent> &applied_events);
+                    VersionManager *target, FieldMask mask, const UniqueID opid,
+                    const AddressSpaceID source, RtUserEvent ready_event);
       virtual void deduplicate_invalidate_trackers(
                     const FieldMaskSet<EquivalenceSet> &to_untrack,
                     std::set<RtEvent> &applied_events);

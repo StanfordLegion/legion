@@ -3214,6 +3214,18 @@ namespace Legion {
      */
     class PendingEquivalenceSet : public LegionHeapify<PendingEquivalenceSet> {
     public:
+      struct DeferFinalizePendingSetArgs : 
+        public LgTaskArgs<DeferFinalizePendingSetArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_FINALIZE_PENDING_SET_TASK_ID;
+      public:
+        DeferFinalizePendingSetArgs(PendingEquivalenceSet *p)
+          : LgTaskArgs<DeferFinalizePendingSetArgs>(implicit_provenance), 
+            pending(p) { }
+      public:
+        PendingEquivalenceSet *const pending;
+      };
+    public:
       PendingEquivalenceSet(RegionNode *region_node, const FieldMask &mask);
       PendingEquivalenceSet(const PendingEquivalenceSet &rhs);
       ~PendingEquivalenceSet(void);
@@ -3229,7 +3241,8 @@ namespace Legion {
         { return previous_sets.get_valid_mask(); }
       EquivalenceSet* compute_refinement(AddressSpaceID suggested_owner,
                       Runtime *runtime, std::set<RtEvent> &ready_events);
-      bool finalize(const FieldMask &done_mask);
+      bool finalize(const FieldMask &done_mask, bool &delete_now);
+      static void handle_defer_finalize(const void *args);
     public:
       RegionNode *const region_node;
     protected:

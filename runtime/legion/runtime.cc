@@ -28038,6 +28038,11 @@ namespace Legion {
             ReplicateContext::handle_defer_disjoint_complete_response(args);
             break;
           }
+        case LG_DEFER_FINALIZE_PENDING_SET_TASK_ID:
+          {
+            PendingEquivalenceSet::handle_defer_finalize(args);
+            break;
+          }
 #ifdef LEGION_MALLOC_INSTANCES
         // LG_MALLOC_INSTANCE_TASK_ID should always run app processor
         case LG_FREE_INSTANCE_TASK_ID:
