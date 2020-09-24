@@ -27,13 +27,16 @@ matrix:
   exclude:
     - os: osx
       compiler: gcc
+    - os: osx
+      env: CC_FLAGS="-std=c++98" DEBUG=0 TEST_LEGION_CXX=0 TEST_REALM=0 REGENT_JOBS=4
+    - os: osx
+      env: CC_FLAGS="-std=c++98" DEBUG=1 USE_SPY=1 TEST_LEGION_CXX=0 TEST_REALM=0 REGENT_INCREMENTAL=1
 # blacklist some branches
 branches:
   only:
     - stable
     - master
-    - dma
-    - deppart
+    - travis_debug
 before_install:
   - export THREADS=2
   - |
