@@ -2221,6 +2221,8 @@ class SymbolicExpr(object):
         #     a = other
         #     b = self
         return SymbolicBinop(self, other, op='+')
+    def __radd__():
+        
     def is_region(self):
         return False
 

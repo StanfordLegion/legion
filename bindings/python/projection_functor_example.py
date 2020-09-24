@@ -42,7 +42,7 @@ def main():
     pygion.fill(R, "x", 0)
 
     for i in IndexLaunch([3]):
-        hello(P[i+5], i)
+        hello(P[i], i)
 
 
 if __name__ == "__main__":
