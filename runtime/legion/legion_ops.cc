@@ -9406,12 +9406,27 @@ namespace Legion {
     void MergeCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_merge();
+    }
+
+    //--------------------------------------------------------------------------
+    void MergeCloseOp::activate_merge(void)
+    //--------------------------------------------------------------------------
+    {
       activate_close();
       refinement_overwrite = false;
     }
-    
+
     //--------------------------------------------------------------------------
     void MergeCloseOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_merge();
+      runtime->free_merge_close_op(this);
+    }
+    
+    //--------------------------------------------------------------------------
+    void MergeCloseOp::deactivate_merge(void)
     //--------------------------------------------------------------------------
     {
       deactivate_close();
@@ -9419,7 +9434,6 @@ namespace Legion {
       version_info.clear();
       to_release.clear();
       refinement_mask.clear();
-      runtime->free_merge_close_op(this);
     }
 
     //--------------------------------------------------------------------------

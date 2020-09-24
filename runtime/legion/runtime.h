@@ -1799,10 +1799,12 @@ namespace Legion {
     public:
       bool find_elide_close_result(const ProjectionInfo &info, 
                   const std::set<ProjectionSummary> &projections, 
-                  RegionTreeNode *node, bool &result) const;
+                  RegionTreeNode *node, bool &result,
+                  std::set<RtEvent> &applied_events) const;
       void record_elide_close_result(const ProjectionInfo &info,
                   const std::set<ProjectionSummary> &projections,
-                  RegionTreeNode *node, bool result);
+                  RegionTreeNode *node, bool result,
+                  std::set<RtEvent> &applied_events);
       // From scratch
       ProjectionTree* construct_projection_tree(Operation *op, unsigned index,
                   RegionTreeNode *root, IndexSpaceNode *launch_domain, 

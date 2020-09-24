@@ -9526,6 +9526,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::remove_remote_references(
+                          const std::vector<DistributedCollectable*> &to_remove)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<DistributedCollectable*>::const_iterator it = 
+            to_remove.begin(); it != to_remove.end(); it++)
+        if ((*it)->remove_base_valid_ref(REMOTE_DID_REF))
+          delete (*it);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_remove_remote_references(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferRemoveRemoteReferenceArgs *dargs = 
+        (const DeferRemoveRemoteReferenceArgs*)args;
+      InnerContext::remove_remote_references(*(dargs->to_remove));
+      delete dargs->to_remove;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void InnerContext::handle_prepipeline_stage(const void *args)
     //--------------------------------------------------------------------------
     {
@@ -10904,18 +10926,39 @@ namespace Legion {
       rez.serialize(runtime->address_space);
       rez.serialize<size_t>(num_shards);
       rez.serialize<size_t>(created_state.size());
-      const size_t destination_count = shard_manager->total_shards - 1; 
+      std::vector<DistributedCollectable*> remove_remote_references;
       for (std::vector<RegionNode*>::const_iterator it = 
             created_state.begin(); it != created_state.end(); it++)
       {
         rez.serialize((*it)->handle);
-        (*it)->pack_logical_state(ctx.get_id(), rez, 
-            destination_count, false/*invalidate*/);
-        (*it)->pack_version_state(ctx.get_id(), rez, destination_count, 
-                  false/*invalidate*/, applied_events, source_context);
+        (*it)->pack_logical_state(ctx.get_id(), rez, false/*invalidate*/, 
+                                  remove_remote_references);
+        (*it)->pack_version_state(ctx.get_id(), rez, false/*invalidate*/, 
+                applied_events, source_context, remove_remote_references);
       }
+      std::set<RtEvent> broadcast_events;
       shard_manager->broadcast_created_region_contexts(owner_shard, rez,
-                                                       applied_events);
+                                                       broadcast_events);
+      if (!remove_remote_references.empty())
+      {
+        RtEvent precondition;
+        if (!broadcast_events.empty())
+          precondition = Runtime::merge_events(broadcast_events);
+        if (precondition.exists() && !precondition.has_triggered())
+        {
+          std::vector<DistributedCollectable*> *to_remove =
+            new std::vector<DistributedCollectable*>();
+          to_remove->swap(remove_remote_references);
+          DeferRemoveRemoteReferenceArgs args(context_uid, to_remove);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, precondition);
+          applied_events.insert(precondition);
+        }
+        else
+          InnerContext::remove_remote_references(remove_remote_references);
+      }
+      else
+        applied_events.insert(broadcast_events.begin(), broadcast_events.end());
       receive_replicate_created_region_contexts(ctx, created_state, 
                         applied_events, num_shards, source_context);
     }
@@ -18771,6 +18814,7 @@ namespace Legion {
                            InnerContext *source_context)
     //--------------------------------------------------------------------------
     {
+      std::vector<DistributedCollectable*> remove_remote_references;
       const RtUserEvent done_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
@@ -18782,16 +18826,30 @@ namespace Legion {
               created_state.begin(); it != created_state.end(); it++)
         {
           rez.serialize((*it)->handle);
-          (*it)->pack_logical_state(ctx.get_id(), rez, 
-                                    1/*count*/, true/*invalidate*/);
-          (*it)->pack_version_state(ctx.get_id(), rez, 1/*count*/, 
-                true/*invalidate*/, applied_events, source_context);
+          (*it)->pack_logical_state(ctx.get_id(), rez, true/*invalidate*/, 
+                                    remove_remote_references);
+          (*it)->pack_version_state(ctx.get_id(), rez, true/*invalidate*/, 
+                applied_events, source_context, remove_remote_references);
         }
         rez.serialize(done_event);
       }
       const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
       runtime->send_created_region_contexts(target, rez);
       applied_events.insert(done_event);
+      if (!remove_remote_references.empty())
+      { 
+        if (!done_event.has_triggered())
+        {
+          std::vector<DistributedCollectable*> *to_remove = 
+            new std::vector<DistributedCollectable*>();
+          to_remove->swap(remove_remote_references);
+          DeferRemoveRemoteReferenceArgs args(context_uid, to_remove);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, done_event); 
+        }
+        else
+          InnerContext::remove_remote_references(remove_remote_references);
+      }
     }
 
     //--------------------------------------------------------------------------

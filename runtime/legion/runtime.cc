@@ -12589,13 +12589,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool ProjectionFunction::find_elide_close_result(const ProjectionInfo &info,
                                  const std::set<ProjectionSummary> &projections, 
-                                 RegionTreeNode *node, bool &result) const
+                                 RegionTreeNode *node, bool &result,
+                                 std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
     {
       // No memoizing if we're not functional
       if (!is_functional)
         return false;
-      ProjectionSummary key(info);
+      ProjectionSummary key(info, applied_events);
       IndexTreeNode *row_source = node->get_row_source();
       AutoLock p_lock(projection_reservation,1,false/*exclusive*/);
       std::map<ProjectionSummary,std::vector<ElideCloseResult> >::const_iterator
@@ -12618,12 +12619,13 @@ namespace Legion {
     void ProjectionFunction::record_elide_close_result(
                                 const ProjectionInfo &info,
                                 const std::set<ProjectionSummary> &projections,
-                                RegionTreeNode *node, bool result)
+                                RegionTreeNode *node, bool result,
+                                std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (!is_functional)
         return;
-      ProjectionSummary key(info);
+      ProjectionSummary key(info, applied_events);
       IndexTreeNode *row_source = node->get_row_source();
       AutoLock p_lock(projection_reservation);
       std::vector<ElideCloseResult> &close_results = elide_close_results[key];
@@ -28026,6 +28028,11 @@ namespace Legion {
         case LG_DEFER_VERIFY_PARTITION_TASK_ID:
           {
             InnerContext::handle_partition_verification(args);
+            break;
+          }
+        case LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID:
+          {
+            InnerContext::handle_remove_remote_references(args);
             break;
           }
         case LG_DEFER_RELEASE_ACQUIRED_TASK_ID:

@@ -2589,18 +2589,75 @@ namespace Legion {
     ProjectionSummary::ProjectionSummary(IndexSpaceNode *is, 
                                          ProjectionFunction *p, 
                                          ShardingFunction *s,
-                                         IndexSpaceNode *sd)
+                                         IndexSpaceNode *sd,
+                                         std::set<RtEvent> &applied_events)
       : domain(is), projection(p), sharding(s), sharding_domain(sd)
     //--------------------------------------------------------------------------
     {
+      WrapperReferenceMutator mutator(applied_events);
+      if (domain != NULL)
+        domain->add_base_valid_ref(FIELD_STATE_REF, &mutator);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_valid_ref(FIELD_STATE_REF, &mutator);
     }
 
     //--------------------------------------------------------------------------
-    ProjectionSummary::ProjectionSummary(const ProjectionInfo &info) 
+    ProjectionSummary::ProjectionSummary(const ProjectionInfo &info,
+                                         std::set<RtEvent> &applied_events) 
       : domain(info.projection_space), projection(info.projection), 
         sharding(info.sharding_function), sharding_domain(info.sharding_space)
     //--------------------------------------------------------------------------
     {
+      WrapperReferenceMutator mutator(applied_events);
+      if (domain != NULL)
+        domain->add_base_valid_ref(FIELD_STATE_REF, &mutator);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_valid_ref(FIELD_STATE_REF, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::ProjectionSummary(const ProjectionSummary &rhs)
+      : domain(rhs.domain), projection(rhs.projection),
+        sharding(rhs.sharding), sharding_domain(rhs.sharding_domain)
+    //--------------------------------------------------------------------------
+    {
+      // No need for a mutator here, we know they're already valid from rhs
+      if (domain != NULL)
+        domain->add_base_valid_ref(FIELD_STATE_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_valid_ref(FIELD_STATE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::~ProjectionSummary(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((domain != NULL) && domain->remove_base_valid_ref(FIELD_STATE_REF))
+        delete domain;
+      if ((sharding_domain != NULL) && 
+            sharding_domain->remove_base_valid_ref(FIELD_STATE_REF))
+        delete sharding_domain;
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary& ProjectionSummary::operator=(const ProjectionSummary &ps)
+    //--------------------------------------------------------------------------
+    {
+      if ((domain != NULL) && domain->remove_base_valid_ref(FIELD_STATE_REF))
+        delete domain;
+      if ((sharding_domain != NULL) && 
+            sharding_domain->remove_base_valid_ref(FIELD_STATE_REF))
+        delete sharding_domain;
+      domain = ps.domain;
+      projection = ps.projection;
+      sharding = ps.sharding;
+      sharding_domain = ps.sharding_domain;
+      // No need for a mutator here, we know they're already valid from ps
+      if (domain != NULL)
+        domain->add_base_valid_ref(FIELD_STATE_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_valid_ref(FIELD_STATE_REF);
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2658,23 +2715,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionSummary::pack_summary(Serializer &rez) const
+    void ProjectionSummary::pack_summary(Serializer &rez, 
+                          std::vector<DistributedCollectable*> &to_remove) const
     //--------------------------------------------------------------------------
     {
       rez.serialize(domain->handle);
       rez.serialize(projection->projection_id);
-      // We don't handle packing the sharding information
+      // No need for a mutator here since we know we already hold a valid ref
+      domain->add_base_valid_ref(REMOTE_DID_REF);
+      to_remove.push_back(domain);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ ProjectionSummary ProjectionSummary::unpack_summary(
-                                 Deserializer &derez, RegionTreeForest *context)
+                                 Deserializer &derez, RegionTreeForest *context,
+                                 std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       ProjectionSummary result;
       IndexSpace handle;
       derez.deserialize(handle);
       result.domain = context->get_node(handle);
+      WrapperReferenceMutator mutator(applied_events);
+      result.domain->add_base_valid_ref(FIELD_STATE_REF, &mutator);
       ProjectionID pid;
       derez.deserialize(pid);
       result.projection = context->runtime->find_projection_function(pid);
@@ -2719,6 +2782,7 @@ namespace Legion {
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
                            ProjectionFunction *proj, IndexSpaceNode *proj_space,
                            ShardingFunction *fn, IndexSpaceNode *shard_space,
+                           std::set<RtEvent> &applied_events,
                            RegionTreeNode *node, bool dirty_reduction)
       : redop(0), rebuild_timeout(1), disjoint_shallow(false)
     //--------------------------------------------------------------------------
@@ -2740,7 +2804,8 @@ namespace Legion {
       else
       {
         open_state = OPEN_READ_WRITE_PROJ;
-        projections.insert(ProjectionSummary(proj_space, proj, fn,shard_space));
+        projections.insert(ProjectionSummary(proj_space, proj, fn,
+                                             shard_space, applied_events));
         // Check for disjoint shallow completeness
         if ((fn == NULL) && (proj->depth == 0) && !node->is_region() &&
             node->are_all_children_disjoint())
@@ -2962,7 +3027,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool FieldState::can_elide_close_operation(Operation *op, unsigned index,
-         const ProjectionInfo &info, RegionTreeNode *node, bool reduction) const
+                        const ProjectionInfo &info, RegionTreeNode *node, 
+                        bool reduction, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3012,12 +3078,12 @@ namespace Legion {
             // Next we're going to need to compute the actual interference
             // sets so check to see if we've memoized the result or not
             if (!info.projection->find_elide_close_result(info, projections,
-                                                          node, elide))
+                                                node, elide, applied_events))
             {
               elide = expensive_elide_test(op, index, info, node, reduction);
               // Now memoize the results for later
               info.projection->record_elide_close_result(info, projections,
-                                                         node, elide);
+                                               node, elide, applied_events);
             }
           }
         }
@@ -3061,12 +3127,12 @@ namespace Legion {
           // Next we're going to need to compute the actual interference
           // set so check to see if we've memoized the result or not
           if (!info.projection->find_elide_close_result(info, projections,
-                                                        node, elide))
+                                              node, elide, applied_events))
           {
             elide = expensive_elide_test(op, index, info, node, reduction);
             // Now memoize the results for later
             info.projection->record_elide_close_result(info, projections,
-                                                       node, elide);
+                                               node, elide, applied_events);
           }
         }
       }
@@ -3075,7 +3141,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldState::record_projection_summary(const ProjectionInfo &info,
-                                               RegionTreeNode *node)
+                        RegionTreeNode *node, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (disjoint_shallow || projections.empty())
@@ -3087,7 +3153,7 @@ namespace Legion {
         else
           disjoint_shallow = false;
       }
-      projections.insert(ProjectionSummary(info));
+      projections.insert(ProjectionSummary(info, applied_events));
     }
 
     //--------------------------------------------------------------------------
@@ -8371,6 +8437,11 @@ namespace Legion {
       RtEvent ready_event;
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
+      // If we're not perfect we need to wait on the ready event here
+      // because we need the dst_instances to be valid to construct
+      // the copy-across helpers
+      if (!perfect && ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
       // This takes ownership of the op and the across helpers
       CopyAcrossAnalysis *analysis = new CopyAcrossAnalysis(runtime, 
           original_source, previous, op, src_index, dst_index,
@@ -8737,7 +8808,7 @@ namespace Legion {
       size_t num_reductions;
       derez.deserialize(num_reductions);
       FieldMaskSet<ReductionView> reductions;
-      for (unsigned idx = 0; idx < num_views; idx++)
+      for (unsigned idx = 0; idx < num_reductions; idx++)
       {
         DistributedID did;
         derez.deserialize(did);
@@ -23615,7 +23686,9 @@ namespace Legion {
       assert(set->region_node == node);
       assert(!set->region_node->row_source->is_empty());
       // There should not be any other equivalence sets for these fields
-      assert(equivalence_sets.get_valid_mask() * mask);
+      // This is a valid assertion in general, but not with control replication
+      // where you can get two merge close ops updating subsets
+      //assert(equivalence_sets.get_valid_mask() * mask);
 #endif
       if (equivalence_sets.insert(set, mask))
       {
@@ -23907,10 +23980,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::pack_manager(Serializer &rez, 
-                          const size_t destination_count, const bool invalidate,
+    void VersionManager::pack_manager(Serializer &rez, const bool invalidate,
                           std::map<LegionColor,RegionTreeNode*> &to_traverse,
-                          FieldMaskSet<EquivalenceSet> &to_untrack)
+                          FieldMaskSet<EquivalenceSet> &to_untrack,
+                          std::vector<DistributedCollectable*> &to_remove)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -23933,8 +24006,8 @@ namespace Legion {
             // Add a remote valid reference on these nodes to keep
             // them live until we can add on remotely. No need for
             // a mutator since we know that they are already valid 
-            it->first->add_base_valid_ref(REMOTE_DID_REF, 
-                      NULL/*mutator*/, destination_count);
+            it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/);
+            to_remove.push_back(it->first);
             if (invalidate)
             {
               if (to_untrack.insert(it->first, it->second))
@@ -23962,8 +24035,8 @@ namespace Legion {
               // Add a remote valid reference on these nodes to keep
               // them live until we can add on remotely. No need for
               // a mutator since we know that they are already valid 
-              it->first->add_base_valid_ref(REMOTE_DID_REF, 
-                        NULL/*mutator*/, destination_count);
+              it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/);
+              to_remove.push_back(it->first);
               if (invalidate)
               {
                 if (to_untrack.insert(it->first, it->second))
@@ -24012,8 +24085,8 @@ namespace Legion {
         // Add a remote valid reference on these nodes to keep
         // them live until we can add on remotely. No need for
         // a mutator since we know that they are already valid 
-        it->first->add_base_valid_ref(REMOTE_DID_REF, 
-                  NULL/*mutator*/, destination_count);
+        it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/);
+        to_remove.push_back(it->first);
         if (invalidate && 
             it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
           assert(false); // should never get here
@@ -24066,8 +24139,6 @@ namespace Legion {
         disjoint_complete_children.insert(child, child_mask);
         LocalReferenceMutator mutator;
         child->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
-        child->send_remote_valid_decrement(source, NULL, 
-                                           mutator.get_done_event());
         to_traverse[child_color] = child;
       }
       if (!ready_events.empty())
@@ -24085,8 +24156,6 @@ namespace Legion {
 #endif
         LocalReferenceMutator mutator;
         it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
-        it->first->send_remote_valid_decrement(source, NULL,
-                                               mutator.get_done_event());
       }
     }
 

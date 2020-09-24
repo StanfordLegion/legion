@@ -818,6 +818,17 @@ namespace Legion {
         const PartitionKind kind;
         const char *const func;
       };
+      struct DeferRemoveRemoteReferenceArgs : 
+        public LgTaskArgs<DeferRemoveRemoteReferenceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID;
+      public:
+        DeferRemoveRemoteReferenceArgs(UniqueID uid, 
+               std::vector<DistributedCollectable*> *r) 
+          : LgTaskArgs<DeferRemoveRemoteReferenceArgs>(uid), to_remove(r) { }
+      public:
+        std::vector<DistributedCollectable*> *const to_remove;
+      };
       struct LocalFieldInfo {
       public:
         LocalFieldInfo(void)
@@ -1317,6 +1328,9 @@ namespace Legion {
     public:
       static void handle_compute_equivalence_sets_request(Deserializer &derez,
                                      Runtime *runtime, AddressSpaceID source);
+      static void remove_remote_references(
+                       const std::vector<DistributedCollectable*> &to_remove);
+      static void handle_remove_remote_references(const void *args);
     public:
       void clear_instance_top_views(void); 
     public:

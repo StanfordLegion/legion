@@ -3577,14 +3577,15 @@ namespace Legion {
                                  std::set<RtEvent> &applied, bool merge,
                                  InnerContext *source_context);
       void pack_logical_state(ContextID ctx, Serializer &rez, 
-          const size_t destination_count, const bool invalidate);
+                              const bool invalidate, 
+                              std::vector<DistributedCollectable*> &to_remove);
       void unpack_logical_state(ContextID ctx, Deserializer &derez,
                                 AddressSpaceID source);
       void pack_version_state(ContextID ctx, Serializer &rez, 
-                              const size_t destination_count, 
                               const bool invalidate,
                               std::set<RtEvent> &applied_events, 
-                              InnerContext *source_context);
+                              InnerContext *source_context,
+                              std::vector<DistributedCollectable*> &to_remove);
       void unpack_version_state(ContextID ctx, Deserializer &derez, 
                                 AddressSpaceID source);
     public:

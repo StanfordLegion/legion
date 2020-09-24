@@ -665,16 +665,22 @@ namespace Legion {
       ProjectionSummary(IndexSpaceNode *is, 
                         ProjectionFunction *p, 
                         ShardingFunction *s,
-                        IndexSpaceNode *sd);
-      ProjectionSummary(const ProjectionInfo &info);
+                        IndexSpaceNode *sd,
+                        std::set<RtEvent> &applied);
+      ProjectionSummary(const ProjectionInfo &info, std::set<RtEvent> &applied);
+      ProjectionSummary(const ProjectionSummary &rhs);
+      ~ProjectionSummary(void);
+    public:
+      ProjectionSummary& operator=(const ProjectionSummary &rhs);
     public:
       bool operator<(const ProjectionSummary &rhs) const;
       bool operator==(const ProjectionSummary &rhs) const;
       bool operator!=(const ProjectionSummary &rhs) const;
     public:
-      void pack_summary(Serializer &rez) const;
+      void pack_summary(Serializer &rez,
+                        std::vector<DistributedCollectable*> &to_remove) const;
       static ProjectionSummary unpack_summary(Deserializer &derez,
-                                              RegionTreeForest *context);
+                        RegionTreeForest *context, std::set<RtEvent> &applied);
     public:
       IndexSpaceNode *domain;
       ProjectionFunction *projection;
@@ -697,6 +703,7 @@ namespace Legion {
                  ProjectionFunction *proj, IndexSpaceNode *proj_space, 
                  ShardingFunction *sharding_function, 
                  IndexSpaceNode *sharding_space,
+                 std::set<RtEvent> &applied,
                  RegionTreeNode *node, bool dirty_reduction = false);
       FieldState(const FieldState &rhs);
       FieldState& operator=(const FieldState &rhs);
@@ -726,9 +733,11 @@ namespace Legion {
     public:
       bool can_elide_close_operation(Operation *op, unsigned index,
                                      const ProjectionInfo &info,
-                                     RegionTreeNode *node,bool reduction) const;
+                                     RegionTreeNode *node, bool reduction,
+                                     std::set<RtEvent> &applied_events) const;
       void record_projection_summary(const ProjectionInfo &info,
-                                     RegionTreeNode *node);
+                                     RegionTreeNode *node,
+                                     std::set<RtEvent> &applied_events);
     protected:
       bool expensive_elide_test(Operation *op, unsigned index,
                                 const ProjectionInfo &info,
@@ -3367,10 +3376,10 @@ namespace Legion {
                  FieldMaskSet<EquivalenceSet> &to_untrack);
       void swap(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
                 FieldMaskSet<EquivalenceSet> &to_untrack);
-      void pack_manager(Serializer &rez, const size_t destination_count,
-                        const bool invalidate, 
+      void pack_manager(Serializer &rez, const bool invalidate, 
                         std::map<LegionColor,RegionTreeNode*> &to_traverse,
-                        FieldMaskSet<EquivalenceSet> &to_untrack);
+                        FieldMaskSet<EquivalenceSet> &to_untrack,
+                        std::vector<DistributedCollectable*> &to_remove);
       void unpack_manager(Deserializer &derez, AddressSpaceID source,
                           std::map<LegionColor,RegionTreeNode*> &to_traverse);
     public:

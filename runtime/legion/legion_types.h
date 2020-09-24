@@ -387,6 +387,7 @@ namespace Legion {
       LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID,
       LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
+      LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
       LG_DEFER_FINALIZE_PENDING_SET_TASK_ID,
@@ -507,6 +508,7 @@ namespace Legion {
         "Defer Instance Manager Registration",                    \
         "Defer Reduction Manager Registration",                   \
         "Defer Verify Partition",                                 \
+        "Defer Remove Remote Region Tree Flow Back References",   \
         "Defer Release Acquired Instances",                       \
         "Defer Disjoint Complete Response",                       \
         "Defer Finalize Pending Equivalence Set",                 \

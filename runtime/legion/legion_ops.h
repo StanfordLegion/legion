@@ -1888,6 +1888,8 @@ namespace Legion {
                       const LogicalTraceInfo &trace_info, int close_idx,
                       const FieldMask &close_mask, Operation *create_op);
       void record_refinements(const FieldMask &refinement_mask, bool overwrite);
+      void activate_merge(void);
+      void deactivate_merge(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

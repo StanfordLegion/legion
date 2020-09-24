@@ -15130,7 +15130,7 @@ namespace Legion {
       {
         FieldState new_state(user.usage, open_mask, proj_info.projection,
            proj_info.projection_space, proj_info.sharding_function, 
-           proj_info.sharding_space, this);
+           proj_info.sharding_space, applied_events, this);
         merge_new_field_state(state, new_state);
       }
       else if (next_child != NULL)
@@ -15720,7 +15720,7 @@ namespace Legion {
               // same projection function with the same or smaller
               // size domain as the original index space launch
               if (it->can_elide_close_operation(closer.user.op, closer.user.idx,
-                                proj_info, this, IS_REDUCE(closer.user.usage)))
+                    proj_info,this,IS_REDUCE(closer.user.usage),applied_events))
               {
                 // If we're a reduction we have to go into a dirty 
                 // reduction mode since we know we're already open below
@@ -15734,7 +15734,7 @@ namespace Legion {
                   FieldState new_state(closer.user.usage, overlap, 
                            proj_info.projection, proj_info.projection_space, 
                            proj_info.sharding_function,proj_info.sharding_space,
-                           this, true/*dirty reduce*/);
+                           applied_events, this, true/*dirty reduce*/);
                   new_states.emplace(new_state);
                   // If we are a reduction, we can go straight there
                   it->filter(overlap);
@@ -15747,7 +15747,8 @@ namespace Legion {
                 {
                   // If we're a write we need to update the projection space
                   if (IS_WRITE(closer.user.usage))
-                    it->record_projection_summary(proj_info, this);
+                    it->record_projection_summary(proj_info, this, 
+                                                  applied_events);
                   open_below |= (it->valid_fields() & current_mask);
                   it++;
                 }
@@ -15777,7 +15778,7 @@ namespace Legion {
                     FieldState new_state(close_usage, overlap,
                         context->runtime->find_projection_function(0),
                         color_space, NULL/*sharding func*/, 
-                        NULL/*sharding space*/, this);
+                        NULL/*sharding space*/, applied_events, this);
                     new_states.emplace(new_state);
                   }
                   else
@@ -15821,7 +15822,7 @@ namespace Legion {
                     FieldState new_state(close_usage, overlap,
                         context->runtime->find_projection_function(0),
                         color_space, NULL/*sharding func*/, 
-                        NULL/*sharding space*/, this);
+                        NULL/*sharding space*/, applied_events, this);
                     new_states.emplace(new_state);
                   }
                   else
@@ -15852,7 +15853,8 @@ namespace Legion {
       {
         FieldState new_state(closer.user.usage, open_mask, 
               proj_info.projection, proj_info.projection_space, 
-              proj_info.sharding_function, proj_info.sharding_space, this);
+              proj_info.sharding_function, proj_info.sharding_space, 
+              applied_events, this);
         new_states.emplace(new_state);
       }
       merge_new_field_states(state, new_states);
@@ -16923,7 +16925,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::pack_logical_state(ContextID ctx, Serializer &rez,
-                          const size_t destination_count, const bool invalidate)
+         const bool invalidate, std::vector<DistributedCollectable*> &to_remove)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
@@ -16951,7 +16953,7 @@ namespace Legion {
           rez.serialize<size_t>(fit->projections.size());
           for (std::set<ProjectionSummary>::const_iterator it = 
                 fit->projections.begin(); it != fit->projections.end(); it++)
-            it->pack_summary(rez);
+            it->pack_summary(rez, to_remove);
         }
 #ifdef DEBUG_LEGION
         else
@@ -16969,8 +16971,7 @@ namespace Legion {
           // them live until we can add on remotely. No need for
           // a mutator since we know that they are already valid
           if (to_traverse.insert(std::make_pair(child_color, it->first)).second)
-            it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/,
-                                          destination_count);
+            it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/);
 
           to_traverse[child_color] = it->first;
         }
@@ -16985,8 +16986,7 @@ namespace Legion {
         rez.serialize(child_color);
         rez.serialize(it->second);
         if (to_traverse.insert(std::make_pair(child_color, it->first)).second)
-          it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/,
-                                        destination_count);
+          it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/);
       }
       rez.serialize<size_t>(state.written_disjoint_complete_children.size());
       for (FieldMaskSet<RegionTreeNode>::const_iterator it =
@@ -17005,7 +17005,10 @@ namespace Legion {
       // Now recurse down the tree in a deterministic way
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
-        it->second->pack_logical_state(ctx, rez, destination_count, invalidate);
+      {
+        it->second->pack_logical_state(ctx, rez, invalidate, to_remove);
+        to_remove.push_back(it->second);
+      }
       // If we were asked to invalidate then do that now
       if (invalidate)
         state.reset();
@@ -17049,7 +17052,7 @@ namespace Legion {
           derez.deserialize(num_summaries);
           for (unsigned idx = 0; idx < num_summaries; idx++)
             fit->projections.insert(
-                ProjectionSummary::unpack_summary(derez, context));
+             ProjectionSummary::unpack_summary(derez, context, applied_events));
         }
         size_t num_open_children;
         derez.deserialize(num_open_children);
@@ -17102,23 +17105,20 @@ namespace Legion {
       // Traverse and remove remote references after we are done
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it =
             to_traverse.begin(); it != to_traverse.end(); it++)
-      {
         it->second->unpack_logical_state(ctx, derez, source);
-        it->second->send_remote_valid_decrement(source, NULL, applied);
-      }
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::pack_version_state(ContextID ctx, Serializer &rez,
-                const size_t destination_count, const bool invalidate,
-                std::set<RtEvent> &applied_events, InnerContext *source_context) 
+                       const bool invalidate, std::set<RtEvent> &applied_events,
+                       InnerContext *source_context, 
+                       std::vector<DistributedCollectable*> &to_remove) 
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);  
       FieldMaskSet<EquivalenceSet> to_untrack;
       std::map<LegionColor,RegionTreeNode*> to_traverse;
-      manager.pack_manager(rez, destination_count, invalidate, 
-                           to_traverse, to_untrack);
+      manager.pack_manager(rez, invalidate, to_traverse, to_untrack, to_remove);
       if (!to_untrack.empty())
       {
         if (source_context == NULL)
@@ -17146,8 +17146,8 @@ namespace Legion {
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
-        it->second->pack_version_state(ctx, rez, destination_count, invalidate,
-                                       applied_events, source_context);
+        it->second->pack_version_state(ctx, rez, invalidate, applied_events, 
+                                       source_context, to_remove);
         if (it->second->remove_base_resource_ref(VERSION_MANAGER_REF))
           delete it->second;
       }

@@ -1035,7 +1035,7 @@ namespace Legion {
     void ReplMergeCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_close();
+      activate_merge();
       mapped_barrier = RtBarrier::NO_RT_BARRIER;
       did_collective = NULL;
     }
@@ -1044,7 +1044,7 @@ namespace Legion {
     void ReplMergeCloseOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_close();
+      deactivate_merge();
       if (did_collective != NULL)
         delete did_collective;
       runtime->free_repl_merge_close_op(this);
