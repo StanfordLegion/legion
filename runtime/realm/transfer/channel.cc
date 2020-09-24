@@ -671,6 +671,7 @@ namespace Realm {
 	  p.peer_port_idx = ii.peer_port_idx;
 	  p.indirect_port_idx = ii.indirect_port_idx;
 	  p.is_indirect_port = false;  // we'll set these below as needed
+	  p.needs_pbt_update = false;  // never needed for inputs
 	  p.local_bytes_total = 0;
 	  p.local_bytes_cons.store(0);
 	  p.remote_bytes_total.store(size_t(-1));
@@ -728,6 +729,9 @@ namespace Realm {
 					    inputs_info[oi.indirect_port_idx].iter);
 	    input_ports[p.indirect_port_idx].is_indirect_port = true;
 	  }
+	  // TODO: further refine this to exclude peers that can figure out
+	  //  the end of a tranfer some othe way
+	  p.needs_pbt_update = (oi.peer_guid != XFERDES_NO_GUID);
 	  p.local_bytes_total = 0;
 	  p.local_bytes_cons.store(0);
 	  p.remote_bytes_total.store(size_t(-1));
@@ -2039,6 +2043,16 @@ namespace Realm {
       for(std::vector<XferPort>::iterator it = output_ports.begin();
 	  it != output_ports.end();
 	  ++it) {
+	// see if we still need to send the total bytes
+	if(it->needs_pbt_update) {
+#ifdef DEBUG_REALM
+	  assert(it->peer_guid != XFERDES_NO_GUID);
+#endif
+	  it->needs_pbt_update = false;
+	  xferDes_queue->update_pre_bytes_total(it->peer_guid,
+						it->peer_port_idx,
+						it->local_bytes_total);
+	}
 	size_t lbc_snapshot = it->local_bytes_cons.load();
 	if(it->seq_local.span_exists(0, lbc_snapshot) != lbc_snapshot)
 	  return false;
@@ -2110,17 +2124,19 @@ namespace Realm {
 	//  is just waiting for all writes to complete
 	if(inc_amt > 0) update_progress();
 	if(out_port->peer_guid != XFERDES_NO_GUID) {
-	  // we can skip an update if this was empty _and_ we're not done yet
-	  if((inc_amt > 0) || (offset == out_port->local_bytes_total)) {
-	    // this update carries our bytes_total amount, if we know it
-	    //  to be final
+	  // update bytes total if needed (and available)
+	  if(out_port->needs_pbt_update && iteration_completed.load_acquire()) {
+	    out_port->needs_pbt_update = false;
+	    xferDes_queue->update_pre_bytes_total(out_port->peer_guid,
+						  out_port->peer_port_idx,
+						  out_port->local_bytes_total);
+	  }
+	  // we can skip an update if this was empty
+	  if(inc_amt > 0) {
             xferDes_queue->update_pre_bytes_write(out_port->peer_guid,
 						  out_port->peer_port_idx,
 						  offset,
-						  inc_amt,
-						  (iteration_completed.load_acquire() ?
-						     out_port->local_bytes_total :
-						     (size_t)-1));
+						  inc_amt);
 	  } else {
 	    // TODO: mode to send non-contiguous updates?
 	  }
@@ -2163,28 +2179,35 @@ namespace Realm {
       }
 #endif
 
-      void XferDes::update_pre_bytes_write(int port_idx, size_t offset, size_t size, size_t pre_bytes_total)
+      void XferDes::update_pre_bytes_write(int port_idx, size_t offset, size_t size)
       {
 	XferPort *in_port = &input_ports[port_idx];
 
-	// do this before we add the span
-	bool pbt_updated = false;
-	if(pre_bytes_total != (size_t)-1) {
-	  // try to swap -1 for the given total
-	  size_t val = (size_t)-1;
-	  pbt_updated = in_port->remote_bytes_total.compare_exchange(val, pre_bytes_total);
-	  if(!pbt_updated) {
-	    // failure should only happen if we already had the same value
-	    assert(val == pre_bytes_total);
-	  }
-	}
-
 	size_t inc_amt = in_port->seq_remote.add_span(offset, size);
 	log_xd.info() << "pre_write: " << std::hex << guid << std::dec
-		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt << " (" << pre_bytes_total << ")";
+		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt << " (" << in_port->remote_bytes_total.load() << ")";
 	// if we got new data at the current pointer OR if we now know the
 	//  total incoming bytes, update progress
-	if((inc_amt > 0) || pbt_updated) update_progress();
+	if(inc_amt > 0) update_progress();
+      }
+
+      void XferDes::update_pre_bytes_total(int port_idx, size_t pre_bytes_total)
+      {
+	XferPort *in_port = &input_ports[port_idx];
+
+	// should always be exchanging -1 -> (not -1)
+#ifdef DEBUG_REALM
+	size_t oldval =
+#endif
+	  in_port->remote_bytes_total.exchange(pre_bytes_total);
+#ifdef DEBUG_REALM
+	assert((oldval == size_t(-1)) && (pre_bytes_total != size_t(-1)));
+#endif
+	log_xd.info() << "pre_total: " << std::hex << guid << std::dec
+		      << "(" << port_idx << ") = " << pre_bytes_total;
+	// this may unblock an xd that has consumed all input but didn't
+	//  realize there was no more
+	update_progress();
       }
 
       void XferDes::update_next_bytes_read(int port_idx, size_t offset, size_t size)
@@ -2805,16 +2828,7 @@ namespace Realm {
 	// if our oldest write was ack'd, update progress in case the xd
 	//  is just waiting for all writes to complete
 	if(inc_amt > 0) update_progress();
-	if((size == 0) && iteration_completed.load_acquire() &&
-	   (out_port->peer_guid != XFERDES_NO_GUID)) {
-	  // have to send an update in this case
-	  assert(offset == out_port->local_bytes_total);
-	  xferDes_queue->update_pre_bytes_write(out_port->peer_guid,
-						out_port->peer_port_idx,
-						out_port->local_bytes_total,
-						0,
-						out_port->local_bytes_total);
-	}
+	// pre_bytes_write update was handled in the remote AM handler
       }
 
 #ifdef REALM_USE_CUDA
@@ -4048,9 +4062,11 @@ namespace Realm {
 	  // no serdez support
 	  assert((in_port->serdez_op == 0) && (out_port->serdez_op == 0));
 	  NodeID dst_node = ID(out_port->mem->me).memory_owner_node();
-	  size_t write_bytes_total = (req->xd->iteration_completed.load_acquire() ?
-				        out_port->local_bytes_total :
-					size_t(-1));
+	  size_t write_bytes_total = (size_t)-1;
+	  if(out_port->needs_pbt_update && req->xd->iteration_completed.load_acquire()) {
+	    out_port->needs_pbt_update = false;
+	    write_bytes_total = out_port->local_bytes_total;
+	  }
 	  // send a request if there's data or if there's a next XD to update
 	  if((req->nbytes > 0) ||
 	     (out_port->peer_guid != XferDes::XFERDES_NO_GUID)) {
@@ -4348,18 +4364,23 @@ namespace Realm {
         // assert data copy is in right position
         //assert(data == args.dst_buf);
 
-	log_xd.info() << "remote write recieved: next=" << args.next_xd_guid
+	log_xd.info() << "remote write recieved: next="
+		      << std::hex << args.next_xd_guid << std::dec
 		      << " start=" << args.span_start
 		      << " size=" << args.span_size
 		      << " pbt=" << args.pre_bytes_total;
 
 	// if requested, notify (probably-local) next XD
-	if(args.next_xd_guid != XferDes::XFERDES_NO_GUID)
+	if(args.next_xd_guid != XferDes::XFERDES_NO_GUID) {
+	  if(args.pre_bytes_total != size_t(-1))
+	    xferDes_queue->update_pre_bytes_total(args.next_xd_guid,
+						  args.next_port_idx,
+						  args.pre_bytes_total);
 	  xferDes_queue->update_pre_bytes_write(args.next_xd_guid,
 						args.next_port_idx,
 						args.span_start,
-						args.span_size,
-						args.pre_bytes_total);
+						args.span_size);
+	}
 
 	// don't ack empty requests
 	if(datalen > 0)
@@ -4385,6 +4406,16 @@ namespace Realm {
         xferDes_queue->destroy_xferDes(args.guid);
       }
 
+      /*static*/ void UpdateBytesTotalMessage::handle_message(NodeID sender,
+							      const UpdateBytesTotalMessage &args,
+							      const void *msgdata,
+							      size_t msglen)
+      {
+        xferDes_queue->update_pre_bytes_total(args.guid,
+					      args.port_idx,
+					      args.pre_bytes_total);
+      }
+
       /*static*/ void UpdateBytesWriteMessage::handle_message(NodeID sender,
 							      const UpdateBytesWriteMessage &args,
 							      const void *msgdata,
@@ -4393,8 +4424,7 @@ namespace Realm {
         xferDes_queue->update_pre_bytes_write(args.guid,
 					      args.port_idx,
 					      args.span_start,
-					      args.span_size,
-					      args.pre_bytes_total);
+					      args.span_size);
       }
 
       /*static*/ void UpdateBytesReadMessage::handle_message(NodeID sender,
@@ -4506,6 +4536,91 @@ namespace Realm {
         assert(disk_channel == NULL);
         disk_channel = new DiskChannel(bgwork);
         return disk_channel;
+      }
+
+      void XferDesQueue::update_pre_bytes_write(XferDesID xd_guid, int port_idx,
+						size_t span_start, size_t span_size)
+      {
+        NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
+        if (execution_node == Network::my_node_id) {
+	  RWLock::AutoWriterLock al(guid_lock);
+          std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
+          if (it != guid_to_xd.end()) {
+            if (it->second.xd != NULL) {
+	      it->second.xd->update_pre_bytes_write(port_idx, span_start, span_size);
+            } else {
+	      it->second.seq_pre_write[port_idx].add_span(span_start, span_size);
+            }
+          } else {
+            XferDesWithUpdates& xdup = guid_to_xd[xd_guid];
+	    xdup.seq_pre_write[port_idx].add_span(span_start, span_size);
+          }
+        }
+        else {
+	  // this should never happen?  (i.e. it should be built into whatever
+	  //  message delivered the data)
+	  assert(0);
+#if 0
+          // send a active message to remote node
+          UpdateBytesWriteMessage::send_request(execution_node, xd_guid,
+						port_idx,
+						span_start, span_size,
+						pre_bytes_total);
+#endif
+        }
+      }
+
+      void XferDesQueue::update_pre_bytes_total(XferDesID xd_guid, int port_idx,
+						size_t pre_bytes_total)
+      {
+        NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
+        if (execution_node == Network::my_node_id) {
+	  RWLock::AutoWriterLock al(guid_lock);
+          std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
+          if (it != guid_to_xd.end()) {
+            if (it->second.xd != NULL) {
+	      it->second.xd->update_pre_bytes_total(port_idx, pre_bytes_total);
+            } else {
+	      // should never get more than one update
+	      assert(it->second.pre_bytes_total.count(port_idx) == 0);
+	      it->second.pre_bytes_total[port_idx] = pre_bytes_total;
+            }
+          } else {
+            XferDesWithUpdates& xdup = guid_to_xd[xd_guid];
+	    xdup.pre_bytes_total[port_idx] = pre_bytes_total;
+          }
+        }
+        else {
+          // send an active message to remote node
+	  ActiveMessage<UpdateBytesTotalMessage> amsg(execution_node);
+	  amsg->guid = xd_guid;
+	  amsg->port_idx = port_idx;
+	  amsg->pre_bytes_total = pre_bytes_total;
+	  amsg.commit();
+        }
+      }
+
+      void XferDesQueue::update_next_bytes_read(XferDesID xd_guid, int port_idx,
+						size_t span_start, size_t span_size)
+      {
+        NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
+        if (execution_node == Network::my_node_id) {
+	  RWLock::AutoReaderLock al(guid_lock);
+          std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
+          if (it != guid_to_xd.end()) {
+	    assert(it->second.xd != NULL);
+	    it->second.xd->update_next_bytes_read(port_idx, span_start, span_size);
+	  } else {
+            // This means this update goes slower than future updates, which marks
+            // completion of xfer des (ID = xd_guid). In this case, it is safe to drop the update
+	  }
+        }
+        else {
+          // send a active message to remote node
+          UpdateBytesReadMessage::send_request(execution_node, xd_guid,
+					       port_idx,
+					       span_start, span_size);
+        }
       }
 
       bool XferDesQueue::enqueue_xferDes_local(XferDes* xd,
@@ -4657,6 +4772,7 @@ ActiveMessageHandlerReg<NotifyXferDesCompleteMessage> notify_xfer_des_complete_h
 ActiveMessageHandlerReg<XferDesRemoteWriteMessage> xfer_des_remote_write_handler;
 ActiveMessageHandlerReg<XferDesRemoteWriteAckMessage> xfer_des_remote_write_ack_handler;
 ActiveMessageHandlerReg<XferDesDestroyMessage> xfer_des_destroy_message_handler;
+ActiveMessageHandlerReg<UpdateBytesTotalMessage> update_bytes_total_message_handler;
 ActiveMessageHandlerReg<UpdateBytesWriteMessage> update_bytes_write_message_handler;
 ActiveMessageHandlerReg<UpdateBytesReadMessage> update_bytes_read_message_handler;
 

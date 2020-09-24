@@ -353,6 +353,7 @@ namespace Realm {
 	int peer_port_idx;
 	int indirect_port_idx;
 	bool is_indirect_port;
+	bool needs_pbt_update;
 	size_t local_bytes_total;
 	atomic<size_t> local_bytes_cons, remote_bytes_total;
 	SequenceAssembler seq_local, seq_remote;
@@ -444,7 +445,8 @@ namespace Realm {
 
       virtual void update_bytes_read(int port_idx, size_t offset, size_t size);
       virtual void update_bytes_write(int port_idx, size_t offset, size_t size);
-      void update_pre_bytes_write(int port_idx, size_t offset, size_t size, size_t pre_bytes_total);
+      void update_pre_bytes_write(int port_idx, size_t offset, size_t size);
+      void update_pre_bytes_total(int port_idx, size_t pre_bytes_total);
       void update_next_bytes_read(int port_idx, size_t offset, size_t size);
 
       bool is_completed(void);
@@ -1269,6 +1271,17 @@ namespace Realm {
       }
     };
 
+    struct UpdateBytesTotalMessage {
+      XferDesID guid;
+      int port_idx;
+      size_t pre_bytes_total;
+
+      static void handle_message(NodeID sender,
+				 const UpdateBytesTotalMessage &args,
+				 const void *data,
+				 size_t datalen);
+    };
+      
     struct UpdateBytesWriteMessage {
       XferDesID guid;
       int port_idx;
@@ -1409,68 +1422,11 @@ namespace Realm {
       }
 
       void update_pre_bytes_write(XferDesID xd_guid, int port_idx,
-				  size_t span_start, size_t span_size,
-				  size_t pre_bytes_total)
-      {
-        NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
-        if (execution_node == Network::my_node_id) {
-	  RWLock::AutoWriterLock al(guid_lock);
-          std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
-          if (it != guid_to_xd.end()) {
-            if (it->second.xd != NULL) {
-              //it->second.xd->update_pre_bytes_write(bytes_write);
-	      it->second.xd->update_pre_bytes_write(port_idx, span_start, span_size, pre_bytes_total);
-            } else {
-	      it->second.seq_pre_write[port_idx].add_span(span_start, span_size);
-
-	      std::map<int, size_t>::iterator it2 = it->second.pre_bytes_total.find(port_idx);
-	      if(it2 != it->second.pre_bytes_total.end()) {
-		if(pre_bytes_total != size_t(-1)) {
-		  assert((it2->second == pre_bytes_total) ||
-			 (it2->second == size_t(-1)));
-		  it2->second = pre_bytes_total;
-		}
-	      } else
-		it->second.pre_bytes_total[port_idx] = pre_bytes_total;
-
-            }
-          } else {
-            XferDesWithUpdates& xdup = guid_to_xd[xd_guid];
-	    xdup.seq_pre_write[port_idx].add_span(span_start, span_size);
-	    xdup.pre_bytes_total[port_idx] = pre_bytes_total;
-          }
-        }
-        else {
-          // send a active message to remote node
-          UpdateBytesWriteMessage::send_request(execution_node, xd_guid,
-						port_idx,
-						span_start, span_size,
-						pre_bytes_total);
-        }
-      }
-
+				  size_t span_start, size_t span_size);
+      void update_pre_bytes_total(XferDesID xd_guid, int port_idx,
+				  size_t pre_bytes_total);
       void update_next_bytes_read(XferDesID xd_guid, int port_idx,
-				  size_t span_start, size_t span_size)
-      {
-        NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
-        if (execution_node == Network::my_node_id) {
-	  RWLock::AutoReaderLock al(guid_lock);
-          std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
-          if (it != guid_to_xd.end()) {
-	    assert(it->second.xd != NULL);
-	    it->second.xd->update_next_bytes_read(port_idx, span_start, span_size);
-	  } else {
-            // This means this update goes slower than future updates, which marks
-            // completion of xfer des (ID = xd_guid). In this case, it is safe to drop the update
-	  }
-        }
-        else {
-          // send a active message to remote node
-          UpdateBytesReadMessage::send_request(execution_node, xd_guid,
-					       port_idx,
-					       span_start, span_size);
-        }
-      }
+				  size_t span_start, size_t span_size);
 
       void destroy_xferDes(XferDesID guid) {
 	XferDes *xd;
