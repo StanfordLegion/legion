@@ -2214,6 +2214,12 @@ class _FuturePoint(object):
 
 class SymbolicExpr(object):
     def __add__(self, other):
+        # if isinstance(other, int):
+        #     a = self
+        #     b = other
+        # else:
+        #     a = other
+        #     b = self
         return SymbolicBinop(self, other, op='+')
     def is_region(self):
         return False
@@ -2316,6 +2322,9 @@ class ProjectionFunctor(object):
         if not isinstance(expr, SymbolicExpr):
             raise Exception('ProjectionFunctor requires a symbolic expression as an argument')
         self.expr = expr
+        # self.binop = expr.__str__()
+        # self.rhs = expr.rhs
+        # self.lhs = expr.lhs
         self.compile_and_register()
 
     def __call__(self, *args, **kwargs):
@@ -2329,6 +2338,16 @@ class ProjectionFunctor(object):
         proj_name = "proj_functor_%s" % self.proj_id
 
         import petra as pt
+
+        rhs = self.expr.rhs
+        lhs = self.expr.lhs
+
+        if isinstance(lhs, int):
+            nbr = lhs
+        elif isinstance(rhs, int):
+            nbr = rhs
+
+        print("GOT THIS NUMBER:  ", nbr)
 
         LEGION_MAX_DIM = _max_dim
         MAX_DOMAIN_DIM = 2 * LEGION_MAX_DIM
@@ -2452,7 +2471,7 @@ class ProjectionFunctor(object):
                             attributes=("byval",),
                         ),
                     ),
-                    pt.DefineVar(point1d_x_plus_1, pt.Add(pt.Var(point1d), pt.Int64(1))),
+                    pt.DefineVar(point1d_x_plus_1, pt.Add(pt.Var(point1d), pt.Int64(nbr))),
                     pt.DefineVar(
                         domain_point_x_plus_1_ptr,
                         pt.Call(
