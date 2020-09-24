@@ -294,6 +294,8 @@ namespace Realm {
 
       void create_xfer_descriptors(void);
 
+      virtual void mark_completed(void);
+
     public:
       void forward_request(NodeID target_node);
 
@@ -411,6 +413,8 @@ namespace Realm {
       // deletion performed when reference count goes to zero
       virtual ~ReduceRequest(void);
 
+      virtual void mark_completed(void);
+
     public:
       void forward_request(NodeID target_node);
 
@@ -454,6 +458,8 @@ namespace Realm {
     protected:
       // deletion performed when reference count goes to zero
       virtual ~FillRequest(void);
+
+      virtual void mark_completed(void);
 
     public:
       void forward_request(NodeID target_node);
