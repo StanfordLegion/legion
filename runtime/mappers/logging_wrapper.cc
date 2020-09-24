@@ -189,7 +189,8 @@ void LoggingWrapper::map_inline(const MapperContext ctx,
                                 MapInlineOutput& output) {
   MessageBuffer buf(runtime, ctx);
   buf.line() << "MAP_INLINE in "
-             << to_string(runtime, ctx, *(inline_op.parent_task));
+             << (inline_op.parent_task == NULL ? "(remote task)" :
+                 to_string(runtime, ctx, *(inline_op.parent_task)));
   buf.line() << "  INPUT:";
   buf.report(inline_op.requirement, input.valid_instances, 0);
   mapper->map_inline(ctx, inline_op, input, output);
@@ -203,7 +204,8 @@ void LoggingWrapper::select_inline_sources(const MapperContext ctx,
                                            SelectInlineSrcOutput& output) {
   MessageBuffer buf(runtime, ctx);
   buf.line() << "SELECT_INLINE_SOURCES in "
-             << to_string(runtime, ctx, *(inline_op.parent_task));
+             << (inline_op.parent_task == NULL ? "(remote task)" :
+                 to_string(runtime, ctx, *(inline_op.parent_task)));
   buf.line() << "  INPUT:";
   buf.report(inline_op.requirement, input.source_instances, 0);
   buf.line() << "  TARGET:";
