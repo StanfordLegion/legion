@@ -140,25 +140,6 @@ namespace Realm {
       std::vector<atomic<DynamicTable<ProcessorGroupTableAllocator> *> > proc_groups;
     };
 
-    class RemoteIDAllocator {
-    public:
-      RemoteIDAllocator(void);
-      ~RemoteIDAllocator(void);
-
-      void set_request_size(ID::ID_Types id_type, int batch_size, int low_water_mark);
-      void make_initial_requests(void);
-
-      ID::IDType get_remote_id(NodeID target, ID::ID_Types id_type);
-
-      void add_id_range(NodeID target, ID::ID_Types id_type, ID::IDType first, ID::IDType last);
-
-    protected:
-      Mutex mutex;
-      std::map<ID::ID_Types, int> batch_sizes, low_water_marks;
-      std::map<ID::ID_Types, std::set<NodeID> > reqs_in_flight;
-      std::map<ID::ID_Types, std::map<NodeID, std::vector<std::pair<ID::IDType, ID::IDType> > > > id_ranges;
-    };
-
     // the "core" module provides the basic memories and processors used by Realm
     class CoreModule : public Module {
     public:
@@ -315,7 +296,6 @@ namespace Realm {
       std::vector<SparsityMapTableAllocator::FreeList *> local_sparsity_map_free_lists;
       std::vector<SubgraphTableAllocator::FreeList *> local_subgraph_free_lists;
       std::vector<ProcessorGroupTableAllocator::FreeList *> local_proc_group_free_lists;
-      RemoteIDAllocator remote_id_allocator;
 
       // legacy behavior if Runtime::run() is used
       bool run_method_called;
@@ -397,22 +377,6 @@ namespace Realm {
     inline BarrierImpl *get_barrier_impl(Event e) { return get_runtime()->get_barrier_impl(e); }
 
     // active messages
-
-    struct RemoteIDRequestMessage {
-      ID::ID_Types id_type;
-      int count;
-
-      static void handle_message(NodeID sender,const RemoteIDRequestMessage &msg,
-				 const void *data, size_t datalen);
-    };
-
-    struct RemoteIDResponseMessage {
-      ID::ID_Types id_type;
-      ID::IDType first_id, last_id;
-
-      static void handle_message(NodeID sender,const RemoteIDResponseMessage &msg,
-				 const void *data, size_t datalen);
-    };
 
     struct RuntimeShutdownRequest {
       Event wait_on;

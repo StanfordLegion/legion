@@ -536,155 +536,6 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class RemoteIDAllocator
-  //
-
-  Logger log_remote_id("remoteid");
-
-  RemoteIDAllocator::RemoteIDAllocator(void)
-  {}
-
-  RemoteIDAllocator::~RemoteIDAllocator(void)
-  {}
-
-  void RemoteIDAllocator::set_request_size(ID::ID_Types id_type, int batch_size, int low_water_mark)
-  {
-    batch_sizes[id_type] = batch_size;
-    low_water_marks[id_type] = low_water_mark;
-  }
-
-  void RemoteIDAllocator::make_initial_requests(void)
-  {
-    AutoLock<> al(mutex);
-
-    for(std::map<ID::ID_Types, int>::const_iterator it = batch_sizes.begin();
-	it != batch_sizes.end();
-	it++) {
-      ID::ID_Types id_type = it->first;
-      int batch_size = it->second;
-      NodeSet targets;
-      for(NodeID i = 0; i <= Network::max_node_id; i++) {
-	if(i == Network::my_node_id) continue;
-
-	reqs_in_flight[id_type].insert(i);
-	targets.add(i);
-      }
-      // use a collective i.e. broadcast?
-      ActiveMessage<RemoteIDRequestMessage> amsg(targets);
-      amsg->id_type = id_type;
-      amsg->count = batch_size;
-      amsg.commit();
-      }
-  }
-
-  ID::IDType RemoteIDAllocator::get_remote_id(NodeID target, ID::ID_Types id_type)
-  {
-    assert(batch_sizes.count(id_type) > 0);
-
-    ID::IDType id;
-    bool request_more = false;
-    {
-      AutoLock<> al(mutex);
-      std::vector<std::pair<ID::IDType, ID::IDType> >& tgt_ranges = id_ranges[id_type][target];
-      assert(!tgt_ranges.empty());
-      id = tgt_ranges[0].first;
-      if(tgt_ranges[0].first == tgt_ranges[0].second) {
-	tgt_ranges.erase(tgt_ranges.begin());
-      } else {
-	tgt_ranges[0].first++;
-      }
-      if(tgt_ranges.empty() || 
-	 ((tgt_ranges.size() == 1) && 
-	  ((tgt_ranges[0].second - tgt_ranges[0].first) < (ID::IDType)low_water_marks[id_type]))) {
-	// want to request more ids, as long as a request isn't already in flight
-	if(reqs_in_flight[id_type].count(target) == 0) {
-	  reqs_in_flight[id_type].insert(target);
-	  request_more = true;
-	}
-      }
-    }
-
-    if(request_more) {
-      ActiveMessage<RemoteIDRequestMessage> amsg(target);
-      amsg->id_type = id_type;
-      amsg->count = batch_sizes[id_type];
-      amsg.commit();
-    }
-    log_remote_id.debug() << "assigned remote ID: target=" << target << " type=" << id_type << " id=" << id;
-    return id;
-  }
-
-  void RemoteIDAllocator::add_id_range(NodeID target, ID::ID_Types id_type, ID::IDType first, ID::IDType last)
-  {
-    AutoLock<> al(mutex);
-
-    std::set<NodeID>::iterator it = reqs_in_flight[id_type].find(target);
-    assert(it != reqs_in_flight[id_type].end());
-    reqs_in_flight[id_type].erase(it);
-
-    id_ranges[id_type][target].push_back(std::make_pair(first, last));
-  }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class RemoteIDRequestMessage
-  //
-
-  /*static*/ void RemoteIDRequestMessage::handle_message(NodeID sender,const RemoteIDRequestMessage &args,
-							 const void *data, size_t datalen)
-  {
-    log_remote_id.debug() << "received remote id request: sender=" << sender
-			  << " type=" << args.id_type << " count=" << args.count;
-
-    int first = 0;
-    int last = 0;
-    ID first_id;
-    ID last_id;
-
-    switch(args.id_type) {
-    case ID::ID_SPARSITY: {
-      assert(0);
-      //get_runtime()->local_sparsity_map_free_list->alloc_range(args.count, first, last);
-      first_id = ID::make_sparsity(Network::my_node_id, 0, first);
-      last_id = ID::make_sparsity(Network::my_node_id, 0, last);
-      break;
-    }
-    default: assert(0);
-    }
-
-    ActiveMessage<RemoteIDResponseMessage> amsg(sender);
-    log_remote_id.debug() << "sending remote id response: target=" << sender
-			  << " type=" << args.id_type
-			  << " first=" << std::hex << first_id << " last=" << last_id << std::dec;
-    amsg->id_type = args.id_type;
-    amsg->first_id = first_id.id;
-    amsg->last_id = last_id.id;
-    amsg.commit();
-
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class RemoteIDResponseMessage
-  //
-
-  /*static*/ void RemoteIDResponseMessage::handle_message(NodeID sender,
-							  const RemoteIDResponseMessage &args,
-							  const void *data, size_t datalen)
-  {
-    log_remote_id.debug() << "received remote id response: responder=" << sender
-			  << " type=" << args.id_type
-			  << " first=" << std::hex << args.first_id << " last=" << args.last_id << std::dec;
-
-    get_runtime()->remote_id_allocator.add_id_range(sender,
-						    args.id_type,
-						    args.first_id,
-						    args.last_id);
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class CoreModule
   //
 
@@ -1310,9 +1161,6 @@ namespace Realm {
 	Realm::Clock::set_zero_time();
 	Network::barrier();
       }
-
-      //remote_id_allocator.set_request_size(ID::ID_SPARSITY, 4096, 3072);
-      remote_id_allocator.make_initial_requests();
 
 #ifdef DEADLOCK_TRACE
       next_thread = 0;
@@ -2728,8 +2576,6 @@ namespace Realm {
     r_impl->initiate_shutdown();
   }
 
-  ActiveMessageHandlerReg<RemoteIDRequestMessage> remote_id_request_message_handler;
-  ActiveMessageHandlerReg<RemoteIDResponseMessage> remote_id_response_message_handler;
   ActiveMessageHandlerReg<RuntimeShutdownRequest> runtime_shutdown_request_handler;
   ActiveMessageHandlerReg<RuntimeShutdownMessage> runtime_shutdown_message_handler;
 
