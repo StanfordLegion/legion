@@ -653,6 +653,23 @@ namespace Realm {
 
       bool progress_xd(RemoteWriteChannel *channel, TimeLimit work_until);
 
+      // writes directly to a contiguous chunk of destination
+      struct Write1DMessage {
+	XferDesID next_xd_guid;
+	int next_port_idx;
+	size_t span_start, pre_bytes_total;
+
+	static void handle_message(NodeID sender,
+				   const Write1DMessage &args,
+				   const void *data,
+				   size_t datalen);
+	static bool handle_inline(NodeID sender,
+				  const Write1DMessage &args,
+				  const void *data,
+				  size_t datalen,
+				  TimeLimit work_until);
+      };
+
     private:
       RemoteWriteRequest* requests;
       //char *dst_buf_base;

@@ -2779,9 +2779,48 @@ namespace Realm {
         return new_nr;
       }
 
+      // callbacks for updating read/write spans
+      class ReadBytesUpdater {
+      public:
+	ReadBytesUpdater(XferDes *_xd, int _port_idx,
+			 size_t _offset, size_t _size)
+	  : xd(_xd), port_idx(_port_idx), offset(_offset), size(_size)
+	{}
+
+	void operator()() const
+	{
+	  xd->update_bytes_read(port_idx, offset, size);
+	  xd->remove_reference();
+	}
+
+      protected:
+	XferDes *xd;
+	int port_idx;
+	size_t offset, size;
+      };
+
+      class WriteBytesUpdater {
+      public:
+	WriteBytesUpdater(XferDes *_xd, int _port_idx,
+			  size_t _offset, size_t _size)
+	  : xd(_xd), port_idx(_port_idx), offset(_offset), size(_size)
+	{}
+
+	void operator()() const
+	{
+	  xd->update_bytes_write(port_idx, offset, size);
+	}
+
+      protected:
+	XferDes *xd;
+	int port_idx;
+	size_t offset, size;
+      };
+
       bool RemoteWriteXferDes::progress_xd(RemoteWriteChannel *channel,
 					   TimeLimit work_until)
       {
+#if 0
 	Request *rq;
 	bool did_work = false;
 	do {
@@ -2794,6 +2833,308 @@ namespace Realm {
 	} while(!work_until.is_expired());
 
 	return did_work;
+#else
+	bool did_work = false;
+	// immediate acks for reads happen when we assemble or skip input,
+	//  while immediate acks for writes happen only if we skip output
+	ReadSequenceCache rseqcache(this);
+	WriteSequenceCache wseqcache(this);
+
+	const size_t MAX_ASSEMBLY_SIZE = 4096;
+	while(true) {
+	  size_t min_xfer_size = 4096;  // TODO: make controllable
+	  size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
+	  if(max_bytes == 0)
+	    break;
+
+	  XferPort *in_port = 0, *out_port = 0;
+	  size_t in_span_start = 0, out_span_start = 0;
+	  if(input_control.current_io_port >= 0) {
+	    in_port = &input_ports[input_control.current_io_port];
+	    in_span_start = in_port->local_bytes_total;
+	  }
+	  if(output_control.current_io_port >= 0) {
+	    out_port = &output_ports[output_control.current_io_port];
+	    out_span_start = out_port->local_bytes_total;
+	  }
+
+	  size_t total_bytes = 0;
+	  if(in_port != 0) {
+	    if(out_port != 0) {
+	      // input and output both exist - transfer what we can
+	      log_xd.info() << "remote write chunk: min=" << min_xfer_size
+			    << " max=" << max_bytes;
+
+	      while(total_bytes < max_bytes) {
+		AddressListCursor& in_alc = in_port->addrcursor;
+		AddressListCursor& out_alc = out_port->addrcursor;
+		int in_dim = in_alc.get_dim();
+		int out_dim = out_alc.get_dim();
+		size_t icount = in_alc.remaining(0);
+		size_t ocount = out_alc.remaining(0);
+
+		size_t bytes = 0;
+		size_t bytes_left = max_bytes - total_bytes;
+
+		// look at the output first, because that controls the message
+		//  size
+		size_t dst_1d_maxbytes = ((out_dim > 0) ?
+					    std::min(bytes_left, ocount) :
+					    0);
+		size_t dst_2d_maxbytes = (((out_dim > 1) &&
+					   (ocount <= (MAX_ASSEMBLY_SIZE / 2))) ?
+					    (ocount * std::min(MAX_ASSEMBLY_SIZE / ocount,
+							       out_alc.remaining(1))) :
+					    0);
+		// would have to scan forward through the dst address list to
+		//  get the exact number of bytes that we can fit into
+		//  MAX_ASSEMBLY_SIZE after considering address info overhead,
+		//  but this is a last resort anyway, so just use a probably-
+		//  pessimistic estimate;
+		size_t dst_sc_maxbytes = std::min(bytes_left,
+						  MAX_ASSEMBLY_SIZE / 4);
+		// TODO: actually implement 2d and sc
+		dst_2d_maxbytes = 0;
+		dst_sc_maxbytes = 0;
+
+		// favor 1d >> 2d >> sc
+		if((dst_1d_maxbytes >= dst_2d_maxbytes) &&
+		   (dst_1d_maxbytes >= dst_sc_maxbytes)) {
+		  // 1D target
+		  NodeID dst_node = ID(out_port->mem->me).memory_owner_node();
+		  RemoteMemory *remote = checked_cast<RemoteMemory *>(out_port->mem);
+		  void *dst_buf = remote->get_remote_addr(out_alc.get_offset());
+
+		  // now look at the input
+		  size_t src_1d_maxbytes = ((in_dim > 0) ?
+					      std::min(dst_1d_maxbytes, icount) :
+					      0);
+		  // TODO: remove MAX_ASSEMBLY_SIZE limit if we can get an
+		  //  actual "2d source" limit from the network code
+		  size_t src_2d_maxbytes = (((in_dim > 1) &&
+					     ((icount * 2) <= dst_1d_maxbytes)) ?
+					      (icount * std::min(std::min(dst_1d_maxbytes,
+									  MAX_ASSEMBLY_SIZE) / icount,
+								 in_alc.remaining(1))) :
+					      0);
+		  size_t src_ga_maxbytes = std::min(dst_1d_maxbytes,
+						    MAX_ASSEMBLY_SIZE);
+
+		  // source also favors 1d >> 2d >> gather
+		  if((src_1d_maxbytes >= src_2d_maxbytes) &&
+		     (src_1d_maxbytes >= src_ga_maxbytes)) {
+		    // 1D source
+		    bytes = src_1d_maxbytes;
+		    // TODO: get soft/hard limits from network code and unroll
+		    //  here
+		    bytes = std::min(size_t(1 << 20),
+				     bytes);
+		    const void *src_buf = in_port->mem->get_direct_ptr(in_alc.get_offset(), bytes);
+		    //log_xd.info() << "remote write 1d: guid=" << guid
+		    //              << " src=" << src_buf << " dst=" << dst_buf
+		    //              << " bytes=" << bytes;
+		    ActiveMessage<Write1DMessage> amsg(dst_node,
+						       src_buf, bytes,
+						       dst_buf);
+		    amsg->next_xd_guid = out_port->peer_guid;
+		    amsg->next_port_idx = out_port->peer_port_idx;
+		    amsg->span_start = out_span_start;
+
+		    // reads aren't consumed until local completion, but
+		    //  only ask if we have a previous xd that's going to
+		    //  care
+		    if(in_port->peer_guid != XFERDES_NO_GUID) {
+		      // a ReadBytesUpdater holds a reference to the xd
+		      add_reference();
+		      amsg.add_local_completion(ReadBytesUpdater(this,
+								 input_control.current_io_port,
+								 in_span_start,
+								 bytes));
+		    }
+		    in_span_start += bytes;
+		    // the write isn't complete until it's ack'd by the target
+		    amsg.add_remote_completion(WriteBytesUpdater(this,
+								 output_control.current_io_port,
+								 out_span_start,
+								 bytes));
+		    out_span_start += bytes;
+
+		    amsg.commit();
+		    in_alc.advance(0, bytes);
+		    out_alc.advance(0, bytes);
+		  }
+		  else if(src_2d_maxbytes >= src_ga_maxbytes) {
+		    // 2D source
+		    size_t bytes_per_line = icount;
+		    size_t lines = src_2d_maxbytes / icount;
+		    bytes = bytes_per_line * lines;
+		    assert(bytes == src_2d_maxbytes);
+		    const void *src_buf = in_port->mem->get_direct_ptr(in_alc.get_offset(), bytes);
+		    size_t src_stride = in_alc.get_stride(1);
+		    //log_xd.info() << "remote write 2d: guid=" << guid
+		    //              << " src=" << src_buf << " dst=" << dst_buf
+		    //              << " bytes=" << bytes << " lines=" << lines
+		    //              << " stride=" << src_stride;
+		    ActiveMessage<Write1DMessage> amsg(dst_node,
+						       src_buf, bytes_per_line,
+						       lines, src_stride,
+						       dst_buf);
+		    amsg->next_xd_guid = out_port->peer_guid;
+		    amsg->next_port_idx = out_port->peer_port_idx;
+		    amsg->span_start = out_span_start;
+
+		    // reads aren't consumed until local completion, but
+		    //  only ask if we have a previous xd that's going to
+		    //  care
+		    if(in_port->peer_guid != XFERDES_NO_GUID) {
+		      // a ReadBytesUpdater holds a reference to the xd
+		      add_reference();
+		      amsg.add_local_completion(ReadBytesUpdater(this,
+								 input_control.current_io_port,
+								 in_span_start,
+								 bytes));
+		    }
+		    in_span_start += bytes;
+		    // the write isn't complete until it's ack'd by the target
+		    amsg.add_remote_completion(WriteBytesUpdater(this,
+								 output_control.current_io_port,
+								 out_span_start,
+								 bytes));
+		    out_span_start += bytes;
+
+		    amsg.commit();
+		    in_alc.advance(1, lines);
+		    out_alc.advance(0, bytes);
+		  } else {
+		    // gather: assemble data
+		    bytes = src_ga_maxbytes;
+		    ActiveMessage<Write1DMessage> amsg(dst_node,
+						       bytes,
+						       dst_buf);
+		    amsg->next_xd_guid = out_port->peer_guid;
+		    amsg->next_port_idx = out_port->peer_port_idx;
+		    amsg->span_start = out_span_start;
+
+		    size_t todo = bytes;
+		    while(true) {
+		      if(in_dim > 0) {
+			if((icount >= todo/2) || (in_dim == 1)) {
+			  size_t chunk = std::min(todo, icount);
+			  uintptr_t src = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(in_alc.get_offset(), chunk));
+			  uintptr_t dst = reinterpret_cast<uintptr_t>(amsg.payload_ptr(chunk));
+			  memcpy_1d(dst, src, chunk);
+			  in_alc.advance(0, chunk);
+			  todo -= chunk;
+			} else {
+			  size_t lines = std::min(todo / icount,
+						  in_alc.remaining(1));
+
+			  if(((icount * lines) >= todo/2) || (in_dim == 2)) {
+			    uintptr_t src = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(in_alc.get_offset(), icount));
+			    uintptr_t dst = reinterpret_cast<uintptr_t>(amsg.payload_ptr(icount * lines));
+			    memcpy_2d(dst, icount /*lstride*/,
+				      src, in_alc.get_stride(1),
+				      icount, lines);
+			    in_alc.advance(1, lines);
+			    todo -= icount * lines;
+			  } else {
+			    size_t planes = std::min(todo / (icount * lines),
+						     in_alc.remaining(2));
+			    uintptr_t src = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(in_alc.get_offset(), icount));
+			    uintptr_t dst = reinterpret_cast<uintptr_t>(amsg.payload_ptr(icount * lines * planes));
+			    memcpy_3d(dst,
+				      icount /*lstride*/,
+				      (icount * lines) /*pstride*/,
+				      src,
+				      in_alc.get_stride(1),
+				      in_alc.get_stride(2),
+				      icount, lines, planes);
+			    in_alc.advance(2, planes);
+			    todo -= icount * lines * planes;
+			  }
+			}
+		      } else {
+			assert(0);
+		      }
+
+		      if(todo == 0) break;
+
+		      // read next entry
+		      in_dim = in_alc.get_dim();
+		      icount = in_alc.remaining(0);
+		    }
+
+		    // the write isn't complete until it's ack'd by the target
+		    amsg.add_remote_completion(WriteBytesUpdater(this,
+								 output_control.current_io_port,
+								 out_span_start,
+								 bytes));
+		    out_span_start += bytes;
+
+		    // assembly complete - send message
+		    amsg.commit();
+
+		    // we made a copy of input data, so "read" is complete
+		    rseqcache.add_span(input_control.current_io_port,
+				       in_span_start, bytes);
+		    in_span_start += bytes;
+
+		    out_alc.advance(0, bytes);
+		  }
+		}
+		else if(dst_2d_maxbytes >= dst_sc_maxbytes) {
+		  // 2D target
+		  assert(0);
+		} else {
+		  // scatter target
+		  assert(0);
+		}
+
+#ifdef DEBUG_REALM
+		assert((bytes > 0) && (bytes <= bytes_left));
+#endif
+		total_bytes += bytes;
+
+		// stop if it's been too long, but make sure we do at least the
+		//  minimum number of bytes
+		if((total_bytes >= min_xfer_size) && work_until.is_expired()) break;
+	      }
+	    } else {
+	      // input but no output, so skip input bytes
+	      total_bytes = max_bytes;
+	      in_port->addrcursor.skip_bytes(total_bytes);
+	      rseqcache.add_span(input_control.current_io_port,
+				 in_span_start, total_bytes);
+	      in_span_start += total_bytes;
+	    }
+	  } else {
+	    if(out_port != 0) {
+	      // output but no input, so skip output bytes
+	      total_bytes = max_bytes;
+	      out_port->addrcursor.skip_bytes(total_bytes);
+	      wseqcache.add_span(output_control.current_io_port,
+				 out_span_start, total_bytes);
+	      out_span_start += total_bytes;
+	    } else {
+	      // skipping both input and output is possible for simultaneous
+	      //  gather+scatter
+	      total_bytes = max_bytes;
+	    }
+	  }
+
+	  bool done = record_address_consumption(total_bytes);
+
+	  did_work = true;
+
+	  if(done || work_until.is_expired())
+	    break;
+	}
+
+	rseqcache.flush();
+	wseqcache.flush();
+
+	return did_work;
+#endif
       }
 
       void RemoteWriteXferDes::notify_request_read_done(Request* req)
@@ -2829,6 +3170,37 @@ namespace Realm {
 	//  is just waiting for all writes to complete
 	if(inc_amt > 0) update_progress();
 	// pre_bytes_write update was handled in the remote AM handler
+      }
+
+      /*static*/
+      void RemoteWriteXferDes::Write1DMessage::handle_message(NodeID sender,
+							      const RemoteWriteXferDes::Write1DMessage &args,
+							      const void *data,
+							      size_t datalen)
+      {
+        // assert data copy is in right position
+        //assert(data == args.dst_buf);
+
+	log_xd.info() << "remote write recieved: next=" << args.next_xd_guid
+		      << " start=" << args.span_start
+		      << " size=" << datalen;
+
+	// if requested, notify (probably-local) next XD
+	if(args.next_xd_guid != XferDes::XFERDES_NO_GUID)
+	  xferDes_queue->update_pre_bytes_write(args.next_xd_guid,
+						args.next_port_idx,
+						args.span_start,
+						datalen);
+      }
+
+      /*static*/ bool RemoteWriteXferDes::Write1DMessage::handle_inline(NodeID sender,
+									const RemoteWriteXferDes::Write1DMessage &args,
+									const void *data,
+									size_t datalen,
+									TimeLimit work_until)
+      {
+	handle_message(sender, args, data, datalen);
+	return true;
       }
 
 #ifdef REALM_USE_CUDA
@@ -4775,6 +5147,7 @@ ActiveMessageHandlerReg<XferDesDestroyMessage> xfer_des_destroy_message_handler;
 ActiveMessageHandlerReg<UpdateBytesTotalMessage> update_bytes_total_message_handler;
 ActiveMessageHandlerReg<UpdateBytesWriteMessage> update_bytes_write_message_handler;
 ActiveMessageHandlerReg<UpdateBytesReadMessage> update_bytes_read_message_handler;
+ActiveMessageHandlerReg<RemoteWriteXferDes::Write1DMessage> remote_write_1d_message_handler;
 
 }; // namespace Realm
 
