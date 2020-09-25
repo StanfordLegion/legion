@@ -260,6 +260,32 @@ namespace Realm {
     return curpos;
   }
 
+  template <typename T>
+  template <typename CALLABLE>
+  void ActiveMessage<T>::add_local_completion(const CALLABLE& callable)
+  {
+    assert(impl != 0);
+
+    size_t bytes = sizeof(CompletionCallback<CALLABLE>);
+    // round up
+    bytes = (((bytes - 1) / CompletionCallbackBase::ALIGNMENT) + 1) * CompletionCallbackBase::ALIGNMENT;
+    void *ptr = impl->add_local_completion(bytes);
+    new(ptr) CompletionCallback<CALLABLE>(callable);
+  }
+
+  template <typename T>
+  template <typename CALLABLE>
+  void ActiveMessage<T>::add_remote_completion(const CALLABLE& callable)
+  {
+    assert(impl != 0);
+
+    size_t bytes = sizeof(CompletionCallback<CALLABLE>);
+    // round up
+    bytes = (((bytes - 1) / CompletionCallbackBase::ALIGNMENT) + 1) * CompletionCallbackBase::ALIGNMENT;
+    void *ptr = impl->add_remote_completion(bytes);
+    new(ptr) CompletionCallback<CALLABLE>(callable);
+  }
+
   // every active message must eventually be commit()'ed or cancel()'ed
   template <typename T>
   void ActiveMessage<T>::commit(void)
@@ -290,6 +316,42 @@ namespace Realm {
     header->~T();
     impl->~ActiveMessageImpl();
     impl = 0;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class CompletionCallback<CALLABLE>
+  //
+
+  template <typename CALLABLE>
+  CompletionCallback<CALLABLE>::CompletionCallback(const CALLABLE &_callable)
+    : callable(_callable)
+  {}
+
+  template <typename CALLABLE>
+  void CompletionCallback<CALLABLE>::invoke()
+  {
+    callable();
+  }
+
+  template <typename CALLABLE>
+  size_t CompletionCallback<CALLABLE>::size() const
+  {
+    // double-check that our alignment is satisfactory
+#ifdef DEBUG_REALM
+    assert(REALM_ALIGNOF(CompletionCallback<CALLABLE>) <= ALIGNMENT);
+#endif
+    size_t bytes = sizeof(CompletionCallback<CALLABLE>);
+    // round up to ALIGNMENT boundary
+    bytes = (((bytes - 1) / ALIGNMENT) + 1) * ALIGNMENT;
+    return bytes;
+  }
+
+  template <typename CALLABLE>
+  CompletionCallbackBase *CompletionCallback<CALLABLE>::clone_at(void *p) const
+  {
+    return new(p) CompletionCallback<CALLABLE>(callable);
   }
 
 

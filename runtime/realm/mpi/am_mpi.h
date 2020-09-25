@@ -45,6 +45,7 @@ struct AM_msg {
     int msgid;
     int header_size;
     int payload_size;
+    uintptr_t comp_ptr;
     char stuff[1];
 };
 
@@ -54,8 +55,10 @@ void AM_init_long_messages(MPI_Win win, void *am_base,
 			   Realm::IncomingMessageManager *message_manager);
 void AMPoll();
 void AMPoll_cancel();
-void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int payload_lines, int payload_line_stride, int has_dest, MPI_Aint dest);
+void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int payload_lines, int payload_line_stride, int has_dest, MPI_Aint dest, void *remote_comp);
 
+// must be defined by caller of AMSend
+void AMComplete(void *remote_comp);
 
 } /* namespace MPI */
 } /* namespace Realm */

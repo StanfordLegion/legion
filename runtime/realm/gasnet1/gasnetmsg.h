@@ -31,6 +31,7 @@
 #include "realm/mutex.h"
 #include "realm/activemsg.h"
 #include "realm/bgwork.h"
+#include "realm/atomics.h"
 
     enum ActiveMessageIDs {
       FIRST_AVAILABLE = 140,
@@ -137,16 +138,15 @@ extern size_t get_lmb_size(Realm::NodeID target_node);
 
 /* Necessary base structure for all medium and long active messages */
 struct BaseMedium {
-  static const handlerarg_t MESSAGE_ID_MAGIC = 0x0bad0bad;
-  static const handlerarg_t MESSAGE_CHUNKS_MAGIC = 0x0a550a55;
+  static const handlerarg_t FRAG_INFO_MAGIC = 0x0bad0bad;
+  static const handlerarg_t COMP_INFO_MAGIC = 0x0a550a55;
   void set_magic(void) {
-    message_id = MESSAGE_ID_MAGIC;
-    message_chunks = MESSAGE_CHUNKS_MAGIC;
-    srcptr = 0;
+    frag_info = FRAG_INFO_MAGIC;
+    comp_info = COMP_INFO_MAGIC;
   }
-  handlerarg_t message_id;
-  handlerarg_t message_chunks;
-  void *srcptr;
+  handlerarg_t frag_info;
+  handlerarg_t comp_info;
+  handlerarg_t pad1, pad2;
 };
 
 struct BaseReply {
@@ -154,8 +154,6 @@ struct BaseReply {
 };
 
 extern void release_srcptr(void *ptr);
-
-enum { MSGID_RELEASE_SRCPTR = 252 };
 
 class PayloadSource {
 public:
@@ -207,28 +205,33 @@ protected:
   int mode;
 };
 
+struct PendingCompletion;
+
 extern void enqueue_message(Realm::NodeID target, int msgid,
 			    const void *args, size_t arg_size,
 			    const void *payload, size_t payload_size,
-			    int payload_mode, void *dstptr = 0);
+			    int payload_mode, PendingCompletion *comp,
+			    void *dstptr = 0);
 
 extern void enqueue_message(Realm::NodeID target, int msgid,
 			    const void *args, size_t arg_size,
 			    const void *payload, size_t line_size,
 			    off_t line_stride, size_t line_count,
-			    int payload_mode, void *dstptr = 0);
+			    int payload_mode, PendingCompletion *comp,
+			    void *dstptr = 0);
 
 extern void enqueue_message(Realm::NodeID target, int msgid,
 			    const void *args, size_t arg_size,
 			    const SpanList& spans, size_t payload_size,
-			    int payload_mode, void *dstptr = 0);
+			    int payload_mode, PendingCompletion *comp,
+			    void *dstptr = 0);
 
 //extern void enqueue_incoming(Realm::NodeID sender, Realm::IncomingMessage *msg);
 
-extern void handle_long_msgptr(Realm::NodeID source, const void *ptr);
+extern void handle_long_msgptr(Realm::NodeID source, int msgptr_index);
 //extern size_t adjust_long_msgsize(gasnet_node_t source, void *ptr, size_t orig_size);
 extern bool adjust_long_msgsize(Realm::NodeID source, void *&ptr, size_t &buffer_size,
-				int message_id, int chunks);
+				int frag_info);
 extern void record_message(Realm::NodeID source, bool sent_reply);
 
 #ifdef REALM_PROFILE_AM_HANDLERS
@@ -433,7 +436,7 @@ struct MessageRawArgs<MSGTYPE, MSGID, SHORT_HNDL_PTR, MED_HNDL_PTR, n> { \
   { \
     Realm::NodeID src = get_message_source(token);	\
     /*printf("handling medium message from node %d (id=%d)\n", src, MSGID);*/ \
-    bool handle_now = adjust_long_msgsize(src, buf, nbytes, arg0, arg1); \
+    bool handle_now = adjust_long_msgsize(src, buf, nbytes, arg0/*, arg1*/); \
     if(handle_now) { \
       IMED *imsg = new IMED(src, buf, nbytes);			\
       HANDLERARG_COPY_ ## n(imsg->u);				\
@@ -499,6 +502,66 @@ public:
 };
 
 extern QuiescenceChecker quiescence_checker;
+
+struct PendingCompletion {
+  PendingCompletion();
+
+  void *add_local_completion(size_t bytes);
+  void *add_remote_completion(size_t bytes);
+
+  // marks ready and returns true if non-empty, else resets and returns false
+  bool mark_ready();
+
+  // these two calls can be concurrent, which complicates the determination of
+  //  who can free the entry
+  bool invoke_local_completions();
+  bool invoke_remote_completions();
+
+  int index;
+  PendingCompletion *next_free;
+  // these three bits need to be in a single atomic location
+  static const unsigned LOCAL_PENDING_BIT = 1;
+  static const unsigned REMOTE_PENDING_BIT = 2;
+  static const unsigned READY_BIT = 4;
+  Realm::atomic<unsigned> state;
+  size_t local_bytes, remote_bytes;
+
+  static const size_t TOTAL_CAPACITY = 256;
+  typedef char Storage_unaligned[TOTAL_CAPACITY];
+  REALM_ALIGNED_TYPE_CONST(Storage_aligned, Storage_unaligned,
+			   Realm::CompletionCallbackBase::ALIGNMENT);
+  Storage_aligned storage;
+};
+
+struct PendingCompletionGroup {
+  static const size_t LOG2_GROUPSIZE = 8; // 256 per group
+
+  PendingCompletion entries[1 << LOG2_GROUPSIZE];
+};
+
+class PendingCompletionManager {
+public:
+  PendingCompletionManager();
+  ~PendingCompletionManager();
+
+  PendingCompletion *get_available();
+
+  // marks a completion ready or recycles an empty completion
+  bool mark_ready(PendingCompletion *comp);
+
+  void invoke_completions(int index, bool do_local, bool do_remote);
+  
+protected:
+  static const size_t LOG2_MAXGROUPS = 12; // 4K groups -> 1M completions
+
+  // protects pops from the free list (to avoid A-B-A problem), but NOT pushes
+  Realm::Mutex mutex;
+  Realm::atomic<PendingCompletion *> first_free;
+  Realm::atomic<size_t> num_groups; // number of groups currently allocated
+  Realm::atomic<PendingCompletionGroup *> groups[1 << LOG2_MAXGROUPS];
+};
+
+extern PendingCompletionManager completion_manager;
 
 #endif
 
