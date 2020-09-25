@@ -2774,7 +2774,8 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_APPLY_STATE_TASK_ID;
       public:
-        DeferApplyStateArgs(EquivalenceSet *set, RtUserEvent done_event);
+        DeferApplyStateArgs(EquivalenceSet *set, RtUserEvent done_event, 
+                            const bool foward_to_owner);
       public:
         EquivalenceSet *const set;
         LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::aligned
@@ -2790,6 +2791,7 @@ namespace Legion {
         TraceViewSet *anticondition_updates;
         TraceViewSet *postcondition_updates;
         const RtUserEvent done_event;
+        const bool forward_to_owner;
       };
       struct DeferReleaseRefArgs : public LgTaskArgs<DeferReleaseRefArgs> {
       public:
@@ -2903,8 +2905,12 @@ namespace Legion {
                                std::set<RtEvent> &applied_events,
                                const AddressSpaceID origin_space,
                                const CollectiveMapping *collective_mapping);
+      void clone_owner(EquivalenceSet *src, const FieldMask &clone_mask,
+                      std::set<RtEvent> &applied_events, 
+                      const bool invalidate_overlap = false);
       void clone_from(const AddressSpaceID target_space, EquivalenceSet *src,
                       const FieldMask &clone_mask,
+                      const bool forward_to_owner,
                       std::set<RtEvent> &applied_events, 
                       const bool invalidate_overlap = false);
       RtEvent make_owner(AddressSpaceID owner, 
@@ -3087,14 +3093,18 @@ namespace Legion {
       void pack_state(Serializer &rez, const AddressSpaceID target,
        IndexSpaceExpression *expr,const bool expr_covers,const FieldMask &mask);
       void unpack_state_and_apply(Deserializer &derez, 
-          const AddressSpaceID source, std::set<RtEvent> &ready_events);
+          const AddressSpaceID source, const bool forward_to_owner,
+          std::set<RtEvent> &ready_events);
       void invalidate_state(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &mask, RtEvent remove_ref_event);
       void clone_to_local(EquivalenceSet *dst, FieldMask mask,
-                    std::set<RtEvent> &applied_events, bool invalidate_overlap);
+                          std::set<RtEvent> &applied_events,
+                          const bool invalidate_overlap,
+                          const bool forward_to_owner);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
                     IndexSpaceNode *target_node, const FieldMask &mask,
-                    RtUserEvent done_event, bool invalidate_overlap);
+                    RtUserEvent done_event, const bool invalidate_overlap,
+                    const bool forward_to_owner);
       void find_overlap_updates(IndexSpaceExpression *overlap, 
             const bool overlap_covers, const FieldMask &mask, 
             LegionMap<IndexSpaceExpression*,
@@ -3121,7 +3131,21 @@ namespace Legion {
             TraceViewSet *precondition_updates,
             TraceViewSet *anticondition_updates,
             TraceViewSet *postcondition_updates,
-            std::set<RtEvent> &applied_events, const bool needs_lock); 
+            std::set<RtEvent> &applied_events, 
+            const bool needs_lock, const bool forward_to_owner); 
+      static void pack_updates(Serializer &rez, const AddressSpaceID target,
+            const LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<LogicalView> >::aligned &valid_updates,
+            const FieldMaskSet<IndexSpaceExpression> &initialized_updates,
+            const std::map<unsigned,std::list<std::pair<ReductionView*,
+                IndexSpaceExpression*> > > &reduction_updates,
+            const LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned &restricted_updates,
+            const LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<InstanceView> >::aligned &released_updates,
+            const TraceViewSet *precondition_updates,
+            const TraceViewSet *anticondition_updates,
+            const TraceViewSet *postcondition_updates);
     public:
       static void handle_make_owner(const void *args);
       static void handle_pending_replication(const void *args);

@@ -1887,7 +1887,9 @@ namespace Legion {
       void initialize(InnerContext *ctx, const RegionRequirement &req,
                       const LogicalTraceInfo &trace_info, int close_idx,
                       const FieldMask &close_mask, Operation *create_op);
-      void record_refinements(const FieldMask &refinement_mask, bool overwrite);
+      // Make this virtual so we can override for ReplMergeCloseOp
+      virtual void record_refinements(const FieldMask &refinement_mask, 
+                                      const bool overwrite);
       void activate_merge(void);
       void deactivate_merge(void);
     public:

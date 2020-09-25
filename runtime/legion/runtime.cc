@@ -12093,6 +12093,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ProjectionFunction::prepare_for_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+      // This will remove the index space references we are holding
+      elide_close_results.clear();
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunction::project_point(Task *task, unsigned idx, 
         Runtime *runtime, const Domain &launch_domain, const DomainPoint &point)
     //--------------------------------------------------------------------------
@@ -13311,16 +13319,10 @@ namespace Legion {
       {
         delete profiler;
         profiler = NULL;
-      }
+      } 
       delete forest;
       delete external;
       delete mapper_runtime;
-      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-            proc_managers.begin(); it != proc_managers.end(); it++)
-      {
-        delete it->second;
-      }
-      proc_managers.clear();
       // Avoid duplicate deletions on these for separate runtime
       // instances by just leaking them for now
       if (!separate_runtime_instances)
@@ -13340,6 +13342,12 @@ namespace Legion {
         }
         sharding_functors.clear();
       }
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+      {
+        delete it->second;
+      }
+      proc_managers.clear(); 
       for (std::deque<IndividualTask*>::const_iterator it = 
             available_individual_tasks.begin(); 
             it != available_individual_tasks.end(); it++)
@@ -14503,7 +14511,7 @@ namespace Legion {
       // Have the memory managers for deletion of all their instances
       for (std::map<Memory,MemoryManager*>::const_iterator it =
            memory_managers.begin(); it != memory_managers.end(); it++)
-        it->second->finalize();
+        it->second->finalize(); 
       if (profiler != NULL)
         profiler->finalize();
     }
@@ -23198,6 +23206,9 @@ namespace Legion {
       for (std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator it =
             index_slice_spaces.begin(); it != index_slice_spaces.end(); it++)
         forest->destroy_index_space(it->second, applied);
+      for (std::map<ProjectionID,ProjectionFunction*>::const_iterator it =
+           projection_functions.begin(); it != projection_functions.end(); it++)
+        it->second->prepare_for_shutdown();
       // If there are still any layout constraints that the application
       // failed to remove its references to then we can remove the reference
       // for them and make sure it's effects propagate

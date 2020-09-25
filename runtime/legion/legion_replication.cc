@@ -1037,6 +1037,7 @@ namespace Legion {
     {
       activate_merge();
       mapped_barrier = RtBarrier::NO_RT_BARRIER;
+      refinement_barrier = RtBarrier::NO_RT_BARRIER;
       did_collective = NULL;
     }
 
@@ -1058,6 +1059,28 @@ namespace Legion {
       assert(!mapped_barrier.exists());
 #endif
       mapped_barrier = mapped;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMergeCloseOp::record_refinements(const FieldMask &refinement_mask,
+                                              const bool overwrite)
+    //--------------------------------------------------------------------------
+    {
+      // Call the base version of this
+      MergeCloseOp::record_refinements(refinement_mask, overwrite);
+      // Now see if we need to get a barrier for a refinement invalidation
+      RegionNode *region_node = runtime->forest->get_node(requirement.region);
+      if (!region_node->row_source->is_empty())
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        refinement_barrier = repl_ctx->get_next_refinement_barrier();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1109,6 +1132,11 @@ namespace Legion {
         region_node->perform_versioning_analysis(ctx, parent_ctx, &version_info,
            refinement_mask, unique_op_id, runtime->address_space, ready_events);
       }
+      if (refinement_barrier.exists())
+      {
+        Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
+        ready_events.insert(refinement_barrier);
+      }
       if (!ready_events.empty())
         enqueue_ready_operation(Runtime::merge_events(ready_events));
       else
@@ -1138,6 +1166,9 @@ namespace Legion {
         RegionNode *region_node = runtime->forest->get_node(requirement.region); 
         if (!region_node->row_source->is_empty())
         {
+#ifdef DEBUG_LEGION
+          assert(refinement_barrier.exists());
+#endif
           // Make a new equivalence set and record it at this node
           const DistributedID did = did_collective->get_value(false/*block*/);
           EquivalenceSet *set = 
@@ -1151,7 +1182,8 @@ namespace Legion {
             for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                   previous_sets.begin(); it != previous_sets.end(); it++)
               set->clone_from(runtime->address_space, it->first, it->second,
-                        map_applied_conditions, false/*invalidate overlap*/);
+                          false/*forward to owner*/, map_applied_conditions, 
+                          false/*invalidate overlap*/);
           }
           // Invalidate the old refinement
           region_node->invalidate_refinement(ctx, refinement_mask,
@@ -1217,6 +1249,7 @@ namespace Legion {
     {
       activate_refinement();
       mapped_barrier = RtBarrier::NO_RT_BARRIER;
+      refinement_barrier = RtBarrier::NO_RT_BARRIER;
     }
 
     //--------------------------------------------------------------------------
@@ -1238,13 +1271,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplRefinementOp::set_repl_refinement_info(RtBarrier mapped)
+    void ReplRefinementOp::set_repl_refinement_info(RtBarrier mapped_bar,
+                                                    RtBarrier refinement_bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!mapped_barrier.exists());
+      assert(!refinement_barrier.exists());
 #endif
-      mapped_barrier = mapped;
+      mapped_barrier = mapped_bar;
+      refinement_barrier = refinement_bar;
     }
 
     //--------------------------------------------------------------------------
@@ -1298,6 +1334,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> ready_events;
+#ifdef DEBUG_LEGION
+      assert(refinement_barrier.exists());
+#endif
+      Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
+      ready_events.insert(refinement_barrier);
       if (!collective_dids.empty())
       {
         for (std::vector<ValueBroadcast<DistributedID>*>::const_iterator it =

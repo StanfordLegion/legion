@@ -2169,6 +2169,7 @@ namespace Legion {
       RtBarrier get_next_mapping_fence_barrier(void);
       ApBarrier get_next_execution_fence_barrier(void);
       RtBarrier get_next_resource_return_barrier(void);
+      RtBarrier get_next_refinement_barrier(void);
       RtBarrier get_next_trace_recording_barrier(void);
       RtBarrier get_next_summary_fence_barrier(void);
       inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
@@ -2231,6 +2232,9 @@ namespace Legion {
       // These barriers are used to identify when close operations are mapped
       std::vector<RtBarrier>  close_mapped_barriers;
       unsigned                next_close_mapped_bar_index;
+      // These barriers are used to identify when refinement ops are ready
+      std::vector<RtBarrier>  refinement_ready_barriers;
+      unsigned                next_refinement_ready_bar_index;
       // These barriers are used to identify when refinement ops are mapped
       std::vector<RtBarrier>  refinement_mapped_barriers;
       unsigned                next_refinement_mapped_bar_index; 

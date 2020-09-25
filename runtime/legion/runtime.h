@@ -1765,6 +1765,8 @@ namespace Legion {
     public:
       ProjectionFunction& operator=(const ProjectionFunction &rhs);
     public:
+      void prepare_for_shutdown(void);
+    public:
       // The old path explicitly for tasks
       LogicalRegion project_point(Task *task, unsigned idx, Runtime *runtime,
                        const Domain &launch_domain, const DomainPoint &point);

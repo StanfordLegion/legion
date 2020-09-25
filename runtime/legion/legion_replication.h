@@ -1166,11 +1166,14 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       void set_repl_close_info(RtBarrier mapped_barrier);
+      virtual void record_refinements(const FieldMask &refinement_mask,
+                                      const bool overwrite);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
     protected:
       RtBarrier mapped_barrier;
+      RtBarrier refinement_barrier;
       ValueBroadcast<DistributedID> *did_collective;
     };
 
@@ -1190,12 +1193,14 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      void set_repl_refinement_info(RtBarrier mapped_barrier);
+      void set_repl_refinement_info(RtBarrier mapped_barrier, 
+                                    RtBarrier refinement_barrier);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
     protected:
       RtBarrier mapped_barrier;
+      RtBarrier refinement_barrier;
       std::vector<ValueBroadcast<DistributedID>*> collective_dids;
       // Note that this data structure ensures that we do things
       // for these partitions in a order that is consistent across

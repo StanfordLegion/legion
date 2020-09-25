@@ -17019,7 +17019,7 @@ namespace Legion {
       {
         AddressSpaceID source;
         derez.deserialize(source);
-        unpack_state_and_apply(derez, source, unpacked_events);
+        unpack_state_and_apply(derez, source, false/*forward*/,unpacked_events);
       }
       AutoLock eq(eq_lock);
       if (!unpacked_events.empty())
@@ -21465,8 +21465,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::clone_owner(EquivalenceSet *src, const FieldMask &mask,
+                                     std::set<RtEvent> &applied_events,
+                                     const bool invalidate_overlap)
+    //--------------------------------------------------------------------------
+    {
+      // Get a first guess at where the owner is
+      AddressSpaceID guess_target;
+      {
+        AutoLock eq(eq_lock,1,false/*exclusive*/);
+        guess_target = logical_owner_space;
+      }
+      clone_from(guess_target, src, mask, true/*forward to owner*/,
+                 applied_events, invalidate_overlap);
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::clone_from(const AddressSpaceID target_space,
                                     EquivalenceSet *src, const FieldMask &mask,
+                                    const bool forward_to_owner,
                                     std::set<RtEvent> &applied_events,
                                     const bool invalidate_overlap)
     //--------------------------------------------------------------------------
@@ -21483,13 +21500,14 @@ namespace Legion {
       {
         const RtUserEvent done_event = Runtime::create_rt_user_event();
         src->clone_to_remote(did, target_space, region_node->row_source,
-                             mask, done_event, invalidate_overlap);
+                 mask, done_event, invalidate_overlap, forward_to_owner);
         applied_events.insert(done_event);
       }
       else
       {
         AutoLock eq(eq_lock); 
-        src->clone_to_local(this, mask, applied_events, invalidate_overlap);  
+        src->clone_to_local(this, mask, applied_events, 
+                            invalidate_overlap, forward_to_owner);  
       }
     }
 
@@ -21608,7 +21626,7 @@ namespace Legion {
       std::set<RtEvent> ready_events;
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      set->unpack_state_and_apply(derez, source, ready_events);
+      set->unpack_state_and_apply(derez, source, false/*forward*/,ready_events);
       // Check to see if we're ready or we need to defer this
       RtEvent precondition;
       if (!ready_events.empty())
@@ -21641,6 +21659,28 @@ namespace Legion {
                            restricted_updates, released_updates,
                            precondition_updates, anticondition_updates,
                            postcondition_updates);
+      pack_updates(rez, target, valid_updates, initialized_updates,
+           reduction_updates, restricted_updates, released_updates,
+           precondition_updates, anticondition_updates, postcondition_updates);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::pack_updates(Serializer &rez,
+              const AddressSpaceID target,
+              const LegionMap<IndexSpaceExpression*,
+                  FieldMaskSet<LogicalView> >::aligned &valid_updates,
+              const FieldMaskSet<IndexSpaceExpression> &initialized_updates,
+              const std::map<unsigned,std::list<std::pair<ReductionView*,
+                  IndexSpaceExpression*> > > &reduction_updates,
+              const LegionMap<IndexSpaceExpression*,
+                  FieldMaskSet<InstanceView> >::aligned &restricted_updates,
+              const LegionMap<IndexSpaceExpression*,
+                  FieldMaskSet<InstanceView> >::aligned &released_updates,
+              const TraceViewSet *precondition_updates,
+              const TraceViewSet *anticondition_updates,
+              const TraceViewSet *postcondition_updates)
+    //--------------------------------------------------------------------------
+    {
       rez.serialize<size_t>(valid_updates.size());
       for (LegionMap<IndexSpaceExpression*,
             FieldMaskSet<LogicalView> >::aligned::const_iterator vit =
@@ -21722,7 +21762,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::unpack_state_and_apply(Deserializer &derez,
-                 const AddressSpaceID source, std::set<RtEvent> &applied_events)
+                       const AddressSpaceID source, const bool forward_to_owner,
+                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::aligned
@@ -21873,7 +21914,7 @@ namespace Legion {
         {
           // Defer this until it is ready to be performed
           const RtUserEvent applied_event = Runtime::create_rt_user_event();
-          DeferApplyStateArgs args(this, applied_event);
+          DeferApplyStateArgs args(this, applied_event, forward_to_owner);
           args.valid_updates->swap(valid_updates);
           args.initialized_updates->swap(initialized_updates);
           args.reduction_updates->swap(reduction_updates);
@@ -21892,12 +21933,12 @@ namespace Legion {
       apply_state(valid_updates, initialized_updates, reduction_updates, 
                   restricted_updates, released_updates, precondition_updates,
                   anticondition_updates, postcondition_updates, 
-                  applied_events, true/*need lock*/);
+                  applied_events, true/*need lock*/, forward_to_owner);
     }
 
     //--------------------------------------------------------------------------
     EquivalenceSet::DeferApplyStateArgs::DeferApplyStateArgs(EquivalenceSet *s,
-                                                             RtUserEvent done)
+                                                 RtUserEvent done, bool forward)
       : LgTaskArgs<DeferApplyStateArgs>(implicit_provenance), set(s),
         valid_updates(new LegionMap<IndexSpaceExpression*,
             FieldMaskSet<LogicalView> >::aligned()),
@@ -21907,7 +21948,8 @@ namespace Legion {
         restricted_updates(new LegionMap<IndexSpaceExpression*,
             FieldMaskSet<InstanceView> >::aligned()),
         released_updates(new LegionMap<IndexSpaceExpression*,
-            FieldMaskSet<InstanceView> >::aligned()), done_event(done)
+            FieldMaskSet<InstanceView> >::aligned()), done_event(done),
+        forward_to_owner(forward)
     //--------------------------------------------------------------------------
     {
     }
@@ -21922,7 +21964,8 @@ namespace Legion {
           *(dargs->initialized_updates), *(dargs->reduction_updates),
           *(dargs->restricted_updates), *(dargs->released_updates),
           dargs->precondition_updates, dargs->anticondition_updates,
-          dargs->postcondition_updates, applied_events, true/*needs lock*/);
+          dargs->postcondition_updates, applied_events, true/*needs lock*/,
+          dargs->forward_to_owner);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->done_event, 
             Runtime::merge_events(applied_events));
@@ -22077,7 +22120,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::clone_to_local(EquivalenceSet *dst, FieldMask mask,
-                     std::set<RtEvent> &applied_events, bool invalidate_overlap)
+                     std::set<RtEvent> &applied_events, 
+                     const bool invalidate_overlap, const bool forward_to_owner)
     //--------------------------------------------------------------------------
     {
       // Lock in exclusive mode if we're doing an invalidate
@@ -22113,6 +22157,7 @@ namespace Legion {
             rez.serialize(remote_mask);
             rez.serialize(done_event);
             rez.serialize<bool>(invalidate_overlap);
+            rez.serialize<bool>(forward_to_owner);
           }
           runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
           applied_events.insert(done_event);
@@ -22163,7 +22208,7 @@ namespace Legion {
       dst->apply_state(valid_updates, initialized_updates, reduction_updates,
                    restricted_updates, released_updates, precondition_updates,
                    anticondition_updates, postcondition_updates, 
-                   applied_events, false/*no lock*/);
+                   applied_events, false/*no lock*/, forward_to_owner);
       if (invalidate_overlap)
       {
         if (!set_expr->is_empty())
@@ -22179,8 +22224,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::clone_to_remote(DistributedID target, 
-         AddressSpaceID target_space, IndexSpaceNode *target_node, 
-         const FieldMask &mask, RtUserEvent done_event, bool invalidate_overlap)
+                     AddressSpaceID target_space, IndexSpaceNode *target_node, 
+                     const FieldMask &mask, RtUserEvent done_event, 
+                     const bool invalidate_overlap, const bool forward_to_owner)
     //--------------------------------------------------------------------------
     {
       // Lock in exclusive mode if we're doing an invalidate
@@ -22219,6 +22265,7 @@ namespace Legion {
             rez.serialize(mask);
             rez.serialize(done_event);
             rez.serialize<bool>(invalidate_overlap);
+            rez.serialize<bool>(forward_to_owner);
           }
           runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
           return;
@@ -22243,9 +22290,17 @@ namespace Legion {
         rez.serialize(target);
         rez.serialize(local_space);
         rez.serialize(done_event);
+        rez.serialize<bool>(forward_to_owner);
         pack_state(rez, target_space, overlap, overlap_covers, mask);
       }
       runtime->send_equivalence_set_clone_response(target_space, rez);
+      if (invalidate_overlap)
+      {
+        if (!set_expr->is_empty())
+          invalidate_state(overlap, overlap_covers, mask, RtEvent::NO_RT_EVENT);
+        else
+          invalidate_state(set_expr, true/*cover*/, mask, RtEvent::NO_RT_EVENT);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -22582,7 +22637,8 @@ namespace Legion {
                   TraceViewSet *precondition_updates, 
                   TraceViewSet *anticondition_updates,
                   TraceViewSet *postcondition_updates,
-                  std::set<RtEvent> &applied_events, const bool needs_lock)
+                  std::set<RtEvent> &applied_events, 
+                  const bool needs_lock, const bool forward_to_owner)
     //--------------------------------------------------------------------------
     {
       if (needs_lock)
@@ -22591,7 +22647,27 @@ namespace Legion {
         apply_state(valid_updates, initialized_updates, reduction_updates,
                     restricted_updates, released_updates, precondition_updates,
                     anticondition_updates, postcondition_updates,
-                    applied_events, false/*needs lock*/);
+                    applied_events, false/*needs lock*/, forward_to_owner);
+        return;
+      }
+      if (forward_to_owner && !is_logical_owner())
+      {
+        const RtUserEvent done_event = Runtime::create_rt_user_event();
+        // Forward this on to the logical owner
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(local_space);
+          rez.serialize(done_event);
+          rez.serialize<bool>(true); // forward to owner
+          pack_updates(rez, logical_owner_space, valid_updates, 
+                     initialized_updates, reduction_updates,
+                     restricted_updates, released_updates, precondition_updates,
+                     anticondition_updates, postcondition_updates);
+        }
+        runtime->send_equivalence_set_clone_response(logical_owner_space, rez);
+        applied_events.insert(done_event);
         return;
       }
       WrapperReferenceMutator mutator(applied_events);
@@ -22683,8 +22759,9 @@ namespace Legion {
       derez.deserialize(mask);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      bool invalidate_overlap;
+      bool invalidate_overlap, forward_to_owner;
       derez.deserialize<bool>(invalidate_overlap);
+      derez.deserialize<bool>(forward_to_owner);
       
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
@@ -22696,7 +22773,7 @@ namespace Legion {
         std::set<RtEvent> applied_events;   
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
-        dst->clone_from(target_space, set, mask, 
+        dst->clone_from(target_space, set, mask, forward_to_owner,
                         applied_events, invalidate_overlap);
         if (!applied_events.empty())
           Runtime::trigger_event(done_event, 
@@ -22707,8 +22784,8 @@ namespace Legion {
       else
       {
         IndexSpaceNode *node = runtime->forest->get_node(handle);
-        set->clone_to_remote(target, target_space, node, mask, 
-                             done_event, invalidate_overlap);
+        set->clone_to_remote(target, target_space, node, mask, done_event, 
+                             invalidate_overlap, forward_to_owner);
       }
     }
 
@@ -22726,11 +22803,13 @@ namespace Legion {
       derez.deserialize(source);
       RtUserEvent done_event;
       derez.deserialize(done_event);
+      bool forward_to_owner;
+      derez.deserialize(forward_to_owner);
 
       std::set<RtEvent> applied_events;
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      set->unpack_state_and_apply(derez, source, applied_events);
+      set->unpack_state_and_apply(derez,source,forward_to_owner,applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
@@ -22922,8 +23001,8 @@ namespace Legion {
         std::set<RtEvent> preconditions;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               previous_sets.begin(); it != previous_sets.end(); it++)
-          new_set->clone_from(suggested_owner, it->first, 
-                              it->second, preconditions);
+          new_set->clone_from(suggested_owner, it->first, it->second, 
+                              false/*forward to owner*/, preconditions);
         if (!preconditions.empty())
           clone_event = new_set->make_owner(suggested_owner, 
               Runtime::merge_events(preconditions));
@@ -23393,8 +23472,11 @@ namespace Legion {
             to_remove.begin(); it != to_remove.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert((it->first->region_node != node) ||
-                it->first->region_node->row_source->is_empty());
+        // This would be a valid assertion except for cases with control
+        // replication where there is another node that owns the equivalence
+        // set and we just happen to have a copy of it here
+        //assert((it->first->region_node != node) ||
+        //        it->first->region_node->row_source->is_empty());
 #endif
         it->first->remove_tracker(this, it->second);
         if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
@@ -23987,7 +24069,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!!disjoint_complete);
+      assert(!!disjoint_complete || 
+          (node->is_region() && (node->as_region_node()->parent == NULL)));
 #endif
       // No need for the lock here, should not be racing with anyone
       if (!equivalence_sets.empty())
