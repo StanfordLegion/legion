@@ -628,7 +628,7 @@ namespace Realm {
       GPUStream *host_to_device_stream;
       GPUStream *device_to_host_stream;
       GPUStream *device_to_device_stream;
-      GPUStream *peer_to_peer_stream;
+      std::vector<GPUStream *> peer_to_peer_streams; // indexed by target
       std::vector<GPUStream *> task_streams;
       atomic<unsigned> next_stream;
 
