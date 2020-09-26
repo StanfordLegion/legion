@@ -1199,6 +1199,9 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
     protected:
+      void initialize_replicated_set(EquivalenceSet *set,
+          const FieldMask &mask, std::set<RtEvent> &applied_events) const;
+    protected:
       RtBarrier mapped_barrier;
       RtBarrier refinement_barrier;
       std::vector<ValueBroadcast<DistributedID>*> collective_dids;
@@ -2193,7 +2196,7 @@ namespace Legion {
                         RtEvent precondition = RtEvent::NO_RT_EVENT) const;
       EquivalenceSet* get_initial_equivalence_set(unsigned idx) const;
       EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
-                                  const FieldMask &mask, DistributedID did);
+                      const FieldMask &mask, DistributedID did, bool &first);
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
     public:

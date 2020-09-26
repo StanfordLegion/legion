@@ -1118,24 +1118,38 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> ready_events;
-      if ((did_collective != NULL) && !did_collective->is_origin())
-      {
-        const RtEvent ready = 
-          did_collective->perform_collective_wait(false/*block*/);
-        if (ready.exists() && !ready.has_triggered())
-          ready_events.insert(ready);
-      }
       if (!!refinement_mask && !refinement_overwrite)
       {
         const ContextID ctx = parent_ctx->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region);
         region_node->perform_versioning_analysis(ctx, parent_ctx, &version_info,
            refinement_mask, unique_op_id, runtime->address_space, ready_events);
+#ifdef DEBUG_LEGION
+        assert(refinement_barrier.exists());
+#endif
+        if (!ready_events.empty())
+        {
+          // Make sure that everyone is done computing their previous
+          // equivalence sets before we allow anyone to do any invalidations
+          Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/,
+              Runtime::merge_events(ready_events));
+          ready_events.clear();
+        }
+        else
+          Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
+        ready_events.insert(refinement_barrier);
       }
-      if (refinement_barrier.exists())
+      else if (refinement_barrier.exists())
       {
         Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
         ready_events.insert(refinement_barrier);
+      }
+      if ((did_collective != NULL) && !did_collective->is_origin())
+      {
+        const RtEvent ready = 
+          did_collective->perform_collective_wait(false/*block*/);
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
       }
       if (!ready_events.empty())
         enqueue_ready_operation(Runtime::merge_events(ready_events));
@@ -1170,12 +1184,13 @@ namespace Legion {
           assert(refinement_barrier.exists());
 #endif
           // Make a new equivalence set and record it at this node
+          bool first = false;
           const DistributedID did = did_collective->get_value(false/*block*/);
           EquivalenceSet *set = 
             repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                        region_node, refinement_mask, did);
+                                      region_node, refinement_mask, did, first);
           // Merge the state from the old equivalence sets if not overwriting
-          if (!refinement_overwrite)
+          if (first && !refinement_overwrite)
           {
             const FieldMaskSet<EquivalenceSet> &previous_sets = 
               version_info.get_equivalence_sets();
@@ -1333,24 +1348,7 @@ namespace Legion {
     void ReplRefinementOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> ready_events;
-#ifdef DEBUG_LEGION
-      assert(refinement_barrier.exists());
-#endif
-      Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
-      ready_events.insert(refinement_barrier);
-      if (!collective_dids.empty())
-      {
-        for (std::vector<ValueBroadcast<DistributedID>*>::const_iterator it =
-              collective_dids.begin(); it != collective_dids.end(); it++)
-        {
-          if ((*it)->is_origin())
-            continue;
-          RtEvent ready_event = (*it)->perform_collective_wait(false/*block*/);
-          if (ready_event.exists() && !ready_event.has_triggered())
-            ready_events.insert(ready_event);
-        }
-      }
+      std::set<RtEvent> ready_events;      
       const ContextID ctx = parent_ctx->get_context().get_id();
       FieldMask replicated_mask;
 #ifdef DEBUG_LEGION
@@ -1432,6 +1430,32 @@ namespace Legion {
       if (!!replicated_mask)
         to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
                     replicated_mask, unique_op_id, local_space, ready_events);
+#ifdef DEBUG_LEGION
+      assert(refinement_barrier.exists());
+#endif
+      // Make sure that everyone is done computing their equivalence sets
+      // from the previous set before we allow anyone to do any invalidations
+      if (!ready_events.empty())
+      {
+        Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/,
+            Runtime::merge_events(ready_events));
+        ready_events.clear();
+      }
+      else
+        Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
+      ready_events.insert(refinement_barrier);
+      if (!collective_dids.empty())
+      {
+        for (std::vector<ValueBroadcast<DistributedID>*>::const_iterator it =
+              collective_dids.begin(); it != collective_dids.end(); it++)
+        {
+          if ((*it)->is_origin())
+            continue;
+          RtEvent ready_event = (*it)->perform_collective_wait(false/*block*/);
+          if (ready_event.exists() && !ready_event.has_triggered())
+            ready_events.insert(ready_event);
+        }
+      }
       if (!ready_events.empty())
         enqueue_ready_operation(Runtime::merge_events(ready_events));
       else
@@ -1525,11 +1549,14 @@ namespace Legion {
               RegionNode *child = it->second->get_child(color);
               if (child->row_source->is_empty())
                 continue;
+              bool first = false;
               const DistributedID did = 
                 collective_dids[did_index++]->get_value(false/*block*/);
               EquivalenceSet *set = 
                 repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                                              child, mask, did);
+                                                      child, mask, did, first);
+              if (first)
+                initialize_replicated_set(set, mask, map_applied_conditions);
               child->record_refinement(ctx, set, mask, map_applied_conditions);
               // Remove the CONTEXT_REF on the set now that it is registered
               if (set->remove_base_valid_ref(CONTEXT_REF))
@@ -1546,11 +1573,14 @@ namespace Legion {
               RegionNode *child = it->second->get_child(color);
               if (child->row_source->is_empty())
                 continue;
+              bool first = false;
               const DistributedID did = 
                 collective_dids[did_index++]->get_value(false/*block*/);
               EquivalenceSet *set = 
                 repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                                              child, mask, did);
+                                                      child, mask, did, first);
+              if (first)
+                initialize_replicated_set(set, mask, map_applied_conditions);
               child->record_refinement(ctx, set, mask, map_applied_conditions);
               // Remove the CONTEXT_REF on the set now that it is registered
               if (set->remove_base_valid_ref(CONTEXT_REF))
@@ -1574,6 +1604,31 @@ namespace Legion {
         Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
       complete_mapping(mapped_barrier);
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::initialize_replicated_set(EquivalenceSet *set,
+                 const FieldMask &mask, std::set<RtEvent> &applied_events) const
+    //--------------------------------------------------------------------------
+    {
+      const FieldMaskSet<EquivalenceSet> &previous_sets = 
+        version_info.get_equivalence_sets();
+      // Import state into this equivalence set
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            previous_sets.begin(); it != previous_sets.end(); it++)
+      {
+        // See if the fields overlap first
+        const FieldMask overlap = it->second & mask;
+        if (!overlap)
+          continue;
+        IndexSpaceExpression *overlap_expr = 
+          runtime->forest->intersect_index_spaces(set->set_expr,
+                            it->first->region_node->row_source);
+        if (overlap_expr->is_empty())
+          continue;
+        set->clone_from(runtime->address_space, it->first, mask,
+                      false/*forward to owner*/, applied_events);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -7894,7 +7949,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet* ShardManager::deduplicate_equivalence_set_creation(
-              RegionNode *region_node, const FieldMask &mask, DistributedID did)
+                                 RegionNode *region_node, const FieldMask &mask,
+                                 DistributedID did, bool &first)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7916,6 +7972,7 @@ namespace Legion {
 #endif
           if (--finder->second.second == 0)
             created_equivalence_sets.erase(finder);
+          first = false;
           return result;
         }
         // Didn't find it so make it
@@ -7936,6 +7993,7 @@ namespace Legion {
         // This adds as many context refs as there are shards
         result->initialize_collective_references(1/*local shard count*/);
       }
+      first = true;
       return result;
     }
 

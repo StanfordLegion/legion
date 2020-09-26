@@ -15116,7 +15116,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_logical_owner() || 
-              (!(user_mask - replicated_states.get_valid_mask())));
+              (!(user_mask - replicated_states.get_valid_mask())) ||
+              region_node->row_source->is_empty());
       assert(sources.size() == corresponding.size());
 #endif
       WrapperReferenceMutator mutator(applied_events);
@@ -22848,10 +22849,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      LogicalRegion handle;
-      derez.deserialize(handle);
       TraceConditionSet *target;
       derez.deserialize(target);
+      LogicalRegion handle;
+      derez.deserialize(handle);
       TraceViewSet *previews = NULL;
       TraceViewSet *antiviews = NULL;
       TraceViewSet *postviews = NULL;
