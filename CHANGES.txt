@@ -1,6 +1,26 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 20.09.0 (September ??, 2020)
+  * Realm
+    - Switched from function-specific internal threads to generic "background
+        workers" that are shared by all subsystems.  The number of workers is
+        controlled by `-ll:bgwork` (default=2).  For further details, see:
+        https://github.com/StanfordLegion/legion/issues/662
+    - Numerous bug/performance/memory leak fixes
+    - Support for OpenMP-enabled code running on a Python processor.  The
+        total number of threads available to the processor is set with
+        `-ll:pyomp` (default=1 - i.e. just the initial thread)
+    - Support for C++ tasks on Python processors.  A C++ task does NOT take
+        the Python GIL by default - the task body should call
+        `PyGILState_{Ensure,Release}` as needed
+    - Increased the maximum number of instances in a single memory from 64K
+        to 4 million.
+    - Improved performance of concurrent CUDA GPU->GPU copies with 3+ GPUs
+  * Tools
+    - An installed version of Legion now includes legion_spy, legion_prof
+        scripts
+
 Version 20.06.0 (June 29, 2020)
   * Regent
     - Support for `std/format` module for type-safe formatted printing

@@ -138,10 +138,14 @@ namespace Realm {
   {
     // first, figure out how many levels the tree must have to find our index
     int level_needed = 0;
-    int elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
+    IT elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
     while(index >= elems_addressable) {
       level_needed++;
-      elems_addressable <<= ALLOCATOR::INNER_BITS;
+      // detect overflow
+      IT new_elems = (elems_addressable << ALLOCATOR::INNER_BITS);
+      if(new_elems < elems_addressable)
+	break;
+      elems_addressable = new_elems;
     }
 
     intptr_t rlval = root_and_level.load();
@@ -197,10 +201,14 @@ namespace Realm {
   {
     // first, figure out how many levels the tree must have to find our index
     int level_needed = 0;
-    int elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
+    IT elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
     while(index >= elems_addressable) {
       level_needed++;
-      elems_addressable <<= ALLOCATOR::INNER_BITS;
+      // detect overflow
+      IT new_elems = (elems_addressable << ALLOCATOR::INNER_BITS);
+      if(new_elems < elems_addressable)
+	break;
+      elems_addressable = new_elems;
     }
 
     // in the common case, we won't need to add levels to the tree - grab the root (no lock)
@@ -302,7 +310,7 @@ namespace Realm {
 
     // leaf node - just return pointer to the target element
     typename ALLOCATOR::LEAF_TYPE *leaf = static_cast<typename ALLOCATOR::LEAF_TYPE *>(n);
-    int ofs = (index & ((((IT)1) << ALLOCATOR::LEAF_BITS) - 1));
+    IT ofs = (index & ((((IT)1) << ALLOCATOR::LEAF_BITS) - 1));
     return &(leaf->elems[ofs]);
   }
 

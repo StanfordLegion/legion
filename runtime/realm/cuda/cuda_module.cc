@@ -1908,7 +1908,7 @@ namespace Realm {
 					(void *)(dst->fbmem->base + dst_offset),
 					(const void *)(fbmem->base + src_offset),
 					bytes, GPU_MEMCPY_PEER_TO_PEER, notification);
-      peer_to_peer_stream->add_copy(copy);
+      peer_to_peer_streams[dst->info->index]->add_copy(copy);
     }
 
     void GPU::copy_to_peer_2d(GPU *dst,
@@ -1922,7 +1922,7 @@ namespace Realm {
 					(const void *)(fbmem->base + src_offset),
 					dst_stride, src_stride, bytes, lines,
 					GPU_MEMCPY_PEER_TO_PEER, notification);
-      peer_to_peer_stream->add_copy(copy);
+      peer_to_peer_streams[dst->info->index]->add_copy(copy);
     }
 
     void GPU::copy_to_peer_3d(GPU *dst, off_t dst_offset, off_t src_offset,
@@ -1938,7 +1938,7 @@ namespace Realm {
                                         dst_height, src_height,
                                         bytes, height, depth,
 					GPU_MEMCPY_PEER_TO_PEER, notification);
-      peer_to_peer_stream->add_copy(copy);
+      peer_to_peer_streams[dst->info->index]->add_copy(copy);
     }
 
     static size_t reduce_fill_size(const void *fill_data, size_t fill_data_size)
@@ -2049,9 +2049,10 @@ namespace Realm {
       // this must be done before we enqueue the callback with CUDA
       op->add_async_work_item(f);
 
-      peer_to_peer_stream->add_copy(new GPUMemcpyFence(this,
-						       GPU_MEMCPY_PEER_TO_PEER,
-						       f));
+      GPUMemcpyFence *fence = new GPUMemcpyFence(this,
+						 GPU_MEMCPY_PEER_TO_PEER,
+						 f);
+      peer_to_peer_streams[dst->info->index]->add_copy(fence);
     }
 
     GPUStream* GPU::find_stream(CUstream stream) const
@@ -2060,11 +2061,6 @@ namespace Realm {
             task_streams.begin(); it != task_streams.end(); it++)
         if ((*it)->get_stream() == stream)
           return *it;
-      // These should have never escpaed 
-      assert(host_to_device_stream->get_stream() != stream);
-      assert(device_to_host_stream->get_stream() != stream);
-      assert(device_to_device_stream->get_stream() != stream);
-      assert(peer_to_peer_stream->get_stream() != stream);
       return NULL;
     }
 
@@ -2849,7 +2845,14 @@ namespace Realm {
       host_to_device_stream = new GPUStream(this, worker);
       device_to_host_stream = new GPUStream(this, worker);
       device_to_device_stream = new GPUStream(this, worker);
-      peer_to_peer_stream = new GPUStream(this, worker);
+
+      // only create p2p streams for devices we can talk to
+      peer_to_peer_streams.resize(module->gpu_info.size(), 0);
+      for(std::vector<GPUInfo *>::const_iterator it = module->gpu_info.begin();
+	  it != module->gpu_info.end();
+	  ++it)
+	if(info->peers.count((*it)->device) != 0)
+	  peer_to_peer_streams[(*it)->index] = new GPUStream(this, worker);
 
       task_streams.resize(num_streams);
       for(int idx = 0; idx < num_streams; idx++)
@@ -2873,7 +2876,13 @@ namespace Realm {
       delete host_to_device_stream;
       delete device_to_host_stream;
       delete device_to_device_stream;
-      delete peer_to_peer_stream;
+
+      for(std::vector<GPUStream *>::iterator it = peer_to_peer_streams.begin();
+	  it != peer_to_peer_streams.end();
+	  ++it)
+	if(*it)
+	  delete *it;
+
       while(!task_streams.empty()) {
 	delete task_streams.back();
 	task_streams.pop_back();
