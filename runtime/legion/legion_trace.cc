@@ -3944,14 +3944,14 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(lhs.exists());
-      assert(rhs.exists());
 #endif
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
       // Do this first in case it gets pre-empted
-      const unsigned rhs_ = find_event(rhs, tpl_lock);
+      const unsigned rhs_ = 
+        rhs.exists() ? find_event(rhs, tpl_lock) : fence_completion_id;
       unsigned lhs_ = find_or_convert_event(lhs);
       events.push_back(ApEvent());
       insert_instruction(new TriggerEvent(*this, lhs_, rhs_,
