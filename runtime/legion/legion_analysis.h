@@ -395,7 +395,9 @@ namespace Legion {
       inline void record_trigger_event(ApUserEvent result, ApEvent rhs) const
         {
           base_sanity_check();
-          rec->record_trigger_event(result, rhs, memo);
+          // No need to record the trigger if it has no precondition
+          if (rhs.exists())
+            rec->record_trigger_event(result, rhs, memo);
         }
       inline void record_merge_events(ApEvent &result, 
                                       ApEvent e1, ApEvent e2) const
