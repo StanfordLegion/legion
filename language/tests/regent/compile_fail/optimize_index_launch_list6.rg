@@ -58,7 +58,7 @@ end
 task main()
   var n = 5
   var cs = ispace(int1d, n)
-  var r = region(ispace(int1d, n), t)
+  var r = region(cs, t)
   for i in cs do
     r[i].f = i
   end
