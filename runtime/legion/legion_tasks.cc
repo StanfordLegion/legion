@@ -4065,8 +4065,16 @@ namespace Legion {
           }
         }
         // Initialize any region tree contexts
+        std::set<RtEvent> execution_events;
         execution_context->initialize_region_tree_contexts(clone_requirements,
-         version_infos, equivalence_sets, unmap_events, map_applied_conditions);
+                                version_infos, equivalence_sets, unmap_events,
+                                map_applied_conditions, execution_events);
+        // Execution events come from copying over virtual mapping state
+        // which needs to be done before the child task starts
+        if (!execution_events.empty())
+          for (std::set<RtEvent>::const_iterator it = 
+                execution_events.begin(); it != execution_events.end(); it++)
+            wait_on_events.insert(ApEvent(*it));
       }
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);

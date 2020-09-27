@@ -17158,8 +17158,8 @@ namespace Legion {
           if (!subinit)
             return;
         }
-        std::vector<IndexSpaceExpression*> to_delete;
         FieldMaskSet<IndexSpaceExpression> to_add;
+        std::vector<IndexSpaceExpression*> to_delete;
         for (FieldMaskSet<IndexSpaceExpression>::iterator it = 
               initialized_data.begin(); it != initialized_data.end(); it++)
         {
@@ -22115,7 +22115,7 @@ namespace Legion {
       for (std::map<IndexSpaceExpression*,unsigned>::const_iterator it =
             dargs->expr_refs_to_remove->begin(); it !=
             dargs->expr_refs_to_remove->end(); it++)
-        if (it->first->remove_expression_reference(it->second))
+        if (it->first->remove_expression_reference(false/*tree*/, it->second))
           delete it->first;
       delete dargs->view_refs_to_remove;
       delete dargs->expr_refs_to_remove;

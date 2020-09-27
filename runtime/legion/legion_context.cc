@@ -8441,7 +8441,8 @@ namespace Legion {
                       const LegionVector<VersionInfo>::aligned &version_infos,
                       const std::vector<EquivalenceSet*> &equivalence_sets,
                       const std::vector<ApUserEvent> &unmap_events,
-                      std::set<RtEvent> &applied_events)
+                      std::set<RtEvent> &applied_events,
+                      std::set<RtEvent> &execution_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INITIALIZE_REGION_TREE_CONTEXTS_CALL);
@@ -8593,7 +8594,7 @@ namespace Legion {
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
             eq_set->clone_from(space, it->first, it->second, 
-                         false/*fowrard to owner*/, applied_events, 
+                         false/*fowrard to owner*/, execution_events, 
                          IS_WRITE(regions[idx1])/*invalidate source overlap*/);
         }
         // Now initialize our logical and physical contexts
@@ -20913,7 +20914,8 @@ namespace Legion {
                        const LegionVector<VersionInfo>::aligned &version_infos,
                        const std::vector<EquivalenceSet*> &equivalence_sets,
                        const std::vector<ApUserEvent> &unmap_events,
-                       std::set<RtEvent> &applied_events)
+                       std::set<RtEvent> &applied_events,
+                       std::set<RtEvent> &execution_events)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
@@ -22394,7 +22396,8 @@ namespace Legion {
                        const LegionVector<VersionInfo>::aligned &version_infos,
                        const std::vector<EquivalenceSet*> &equivalence_sets,
                        const std::vector<ApUserEvent> &unmap_events,
-                       std::set<RtEvent> &applied_events)
+                       std::set<RtEvent> &applied_events,
+                       std::set<RtEvent> &execution_events)
     //--------------------------------------------------------------------------
     {
       assert(false);

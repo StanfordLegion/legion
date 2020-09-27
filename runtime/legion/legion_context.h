@@ -482,7 +482,8 @@ namespace Legion {
           const LegionVector<VersionInfo>::aligned &version_infos,
           const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events) = 0;
+          std::set<RtEvent> &applied_events,
+          std::set<RtEvent> &execution_events) = 0;
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                       std::set<RtEvent> &applied) = 0;
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
@@ -1282,7 +1283,8 @@ namespace Legion {
           const LegionVector<VersionInfo>::aligned &version_infos,
           const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events);
+          std::set<RtEvent> &applied_events,
+          std::set<RtEvent> &execution_events);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       void invalidate_created_requirement_contexts(const bool is_top_level_task,
@@ -2851,7 +2853,8 @@ namespace Legion {
           const LegionVector<VersionInfo>::aligned &version_infos,
           const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events);
+          std::set<RtEvent> &applied_events, 
+          std::set<RtEvent> &execution_events);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
@@ -3272,7 +3275,8 @@ namespace Legion {
           const LegionVector<VersionInfo>::aligned &version_infos,
           const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events);
+          std::set<RtEvent> &applied_events,
+          std::set<RtEvent> &execution_events);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,

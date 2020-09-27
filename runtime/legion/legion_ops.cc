@@ -13959,101 +13959,189 @@ namespace Legion {
       if ((src_op == dst_op) && (src_gen == dst_gen))
         return true;
       // Check to see if the source is one of our operations
-      int src_index = find_operation_index(src_op, src_gen);
+      int src_index = -1;
       int dst_index = find_operation_index(dst_op, dst_gen);
-      if ((src_index >= 0) && (dst_index >= 0))
+      if (dst_index < 0)
       {
-        // If it is, see what kind of dependence we have
-        if ((dtype == LEGION_TRUE_DEPENDENCE) || 
-            (dtype == LEGION_ANTI_DEPENDENCE) ||
-            (dtype == LEGION_ATOMIC_DEPENDENCE))
+        if (!internal_dependences.empty())
         {
-          TaskOp *src_task = find_task_by_index(src_index);
-          TaskOp *dst_task = find_task_by_index(dst_index);
-          REPORT_LEGION_ERROR(ERROR_MUST_EPOCH_DEPENDENCE,
-                        "MUST EPOCH ERROR: dependence between region %d "
-              "of task %s (ID %lld) and region %d of task %s (ID %lld) of "
-              " type %s", src_idx, src_task->get_task_name(),
-              src_task->get_unique_id(), dst_idx, 
-              dst_task->get_task_name(), dst_task->get_unique_id(),
-              (dtype == LEGION_TRUE_DEPENDENCE) ? "TRUE DEPENDENCE" :
-              (dtype == LEGION_ANTI_DEPENDENCE) ? "ANTI DEPENDENCE" :
-                "ATOMIC DEPENDENCE")
-        }
-        else if (dtype == LEGION_SIMULTANEOUS_DEPENDENCE)
-        {
-          // Record the dependence kind
-          int dst_index = find_operation_index(dst_op, dst_gen);
-#ifdef DEBUG_LEGION
-          assert(dst_index >= 0);
-#endif
-          // See if the dependence record already exists
-          const std::pair<unsigned,unsigned> src_key(src_index,src_idx);
-          const std::pair<unsigned,unsigned> dst_key(dst_index,dst_idx);
-          std::map<std::pair<unsigned,unsigned>,unsigned>::iterator
-            src_record_finder = dependence_map.find(src_key);
-          if (src_record_finder != dependence_map.end())
+          // Check to see if the destination is one of our internal ops
+          std::pair<Operation*,GenerationID> internal_key(dst_op, dst_gen);
+          std::map<std::pair<Operation*,GenerationID>,std::vector<std::pair<
+            unsigned,unsigned> > >::const_iterator finder = 
+            internal_dependences.find(internal_key);
+          if (finder != internal_dependences.end())
           {
-            // Already have a source record, see if we have 
-            // a destination record too
-            std::map<std::pair<unsigned,unsigned>,unsigned>::iterator
-              dst_record_finder = dependence_map.find(dst_key); 
-            if (dst_record_finder == dependence_map.end())
-            {
-              // Update the destination record entry
-              dependence_map[dst_key] = src_record_finder->second;
-              dependences[src_record_finder->second]->add_entry(dst_index, 
-                                                                dst_idx);
-            }
 #ifdef DEBUG_LEGION
-            else // both already there so just assert they are the same
-              assert(src_record_finder->second == dst_record_finder->second);
+            // should never have back-to-back internal ops
+            assert(!src_op->is_internal_op());
 #endif
-          }
-          else
-          {
-            // No source record
-            // See if we have a destination record entry
-            std::map<std::pair<unsigned,unsigned>,unsigned>::iterator
-              dst_record_finder = dependence_map.find(dst_key);
-            if (dst_record_finder == dependence_map.end())
+            src_index = find_operation_index(src_op, src_gen);
+#ifdef DEBUG_LEGION
+            assert(src_index >= 0);
+#endif
+            TaskOp *src_task = find_task_by_index(src_index);
+            const RegionRequirement &src_req = src_task->regions[src_idx];
+            IndexSpaceNode *src_node = 
+              runtime->forest->get_node(src_req.region.get_index_space());
+            // Scan through all the dependences this internal operation
+            // had on other tasks inside the must epoch launch and see
+            // which ones we actually interfere with so we can record
+            // the appropriate constraints
+            for (std::vector<std::pair<unsigned,unsigned> >::const_iterator it =
+                  finder->second.begin(); it != finder->second.end(); it++)
             {
-              // Neither source nor destination have an entry so
-              // make a new record
-              DependenceRecord *new_record = new DependenceRecord();
-              new_record->add_entry(src_index, src_idx);
-              new_record->add_entry(dst_index, dst_idx);
-              unsigned record_index = dependences.size();
-              dependence_map[src_key] = record_index;
-              dependence_map[dst_key] = record_index;
-              dependences.push_back(new_record);
-            }
-            else
-            {
-              // Have a destination but no source, so update the source
-              dependence_map[src_key] = dst_record_finder->second;
-              dependences[dst_record_finder->second]->add_entry(src_index,
-                                                                src_idx);
+              TaskOp *dst_task = find_task_by_index(it->first);
+              const RegionRequirement &dst_req = dst_task->regions[it->second];
+              IndexSpaceNode *dst_node =
+                runtime->forest->get_node(dst_req.region.get_index_space());
+              IndexTreeNode *dummy = NULL;
+              if (runtime->forest->are_disjoint_tree_only(src_node, 
+                                                  dst_node, dummy))
+                continue;
+              // Update the dependence type
+              DependenceType internal_dtype = 
+                check_dependence_type<true/*reductions interfere*/>(
+                                RegionUsage(src_req), RegionUsage(dst_req));
+              record_intra_must_epoch_dependence(src_index, src_idx, it->first,
+                                                 it->second, internal_dtype);
             }
           }
-          return false;
         }
-        // NO_DEPENDENCE and PROMOTED_DEPENDENCE are not errors
-        // and do not need to be recorded
+        return true;
       }
-      if ((dst_index >= 0) && src_op->is_internal_op())
+      if (src_op->is_internal_op())
       {
         // Refinement operations should not record dependences on previous
         // operations in the same must epoch operation
 #ifdef DEBUG_LEGION
         assert(src_op->get_operation_kind() == REFINEMENT_OP_KIND);
+        InternalOp *internal_op = dynamic_cast<InternalOp*>(src_op);
+        assert(internal_op != NULL);
+#else
+        InternalOp *internal_op = static_cast<InternalOp*>(src_op);
 #endif
-        // No need to do anything here, at least one point task (the creator)
-        // will record a mapping dependence on the refinement operation
-        // and that will guaranteed that none of the points will attempt to
-        // map until after the refinement is done
+        // Record the destination as a potential target for anything
+        // that comes later and depends on the internal operation
+        std::pair<Operation*,GenerationID> internal_key(src_op, src_gen);
+        internal_dependences[internal_key].push_back(
+            std::pair<unsigned,unsigned>(dst_index,dst_idx));
+        // Use the source of the internal operation here since we still
+        // need to record constraints properly between these operations
+        src_index = find_operation_index(internal_op->get_creator_op(),
+                                         internal_op->get_creator_gen());
+#ifdef DEBUG_LEGION
+        assert(src_index >= 0); // better be able to find it
+#endif
+        src_idx = internal_op->get_internal_index();
+        TaskOp *src_task = find_task_by_index(src_index);
+        TaskOp *dst_task = find_task_by_index(dst_index);
+        const RegionRequirement &src_req = src_task->regions[src_idx];
+        const RegionRequirement &dst_req = dst_task->regions[dst_idx];
+#ifdef DEBUG_LEGION
+        assert(src_req.handle_type == LEGION_SINGULAR_PROJECTION);
+        assert(dst_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        // Check to see if the regions actually do interfere
+        IndexSpaceNode *src_node = 
+          runtime->forest->get_node(src_req.region.get_index_space());
+        IndexSpaceNode *dst_node = 
+          runtime->forest->get_node(dst_req.region.get_index_space());
+        IndexTreeNode *dummy = NULL;
+        if (runtime->forest->are_disjoint_tree_only(src_node, dst_node, dummy))
+          return false;
+        // Update the dependence type
+        dtype = check_dependence_type<true/*reductions interfere*/>(
+                          RegionUsage(src_req), RegionUsage(dst_req));
+      }
+      else
+        src_index = find_operation_index(src_op, src_gen);
+#ifdef DEBUG_LEGION
+      assert(src_index >= 0);
+#endif
+      return record_intra_must_epoch_dependence(src_index, src_idx, 
+                                                dst_index, dst_idx, dtype); 
+    }
+
+    //--------------------------------------------------------------------------
+    bool MustEpochOp::record_intra_must_epoch_dependence(
+                                           unsigned src_index, unsigned src_idx,
+                                           unsigned dst_index, unsigned dst_idx,
+                                           DependenceType dtype)
+    //--------------------------------------------------------------------------
+    {
+      // If it is, see what kind of dependence we have
+      if ((dtype == LEGION_TRUE_DEPENDENCE) || 
+          (dtype == LEGION_ANTI_DEPENDENCE) ||
+          (dtype == LEGION_ATOMIC_DEPENDENCE))
+      {
+        TaskOp *src_task = find_task_by_index(src_index);
+        TaskOp *dst_task = find_task_by_index(dst_index);
+        REPORT_LEGION_ERROR(ERROR_MUST_EPOCH_DEPENDENCE,
+                      "MUST EPOCH ERROR: dependence between region %d "
+            "of task %s (ID %lld) and region %d of task %s (ID %lld) of "
+            " type %s", src_idx, src_task->get_task_name(),
+            src_task->get_unique_id(), dst_idx, 
+            dst_task->get_task_name(), dst_task->get_unique_id(),
+            (dtype == LEGION_TRUE_DEPENDENCE) ? "TRUE DEPENDENCE" :
+            (dtype == LEGION_ANTI_DEPENDENCE) ? "ANTI DEPENDENCE" :
+              "ATOMIC DEPENDENCE")
+      }
+      else if (dtype == LEGION_SIMULTANEOUS_DEPENDENCE)
+      {
+        // See if the dependence record already exists
+        const std::pair<unsigned,unsigned> src_key(src_index,src_idx);
+        const std::pair<unsigned,unsigned> dst_key(dst_index,dst_idx);
+        std::map<std::pair<unsigned,unsigned>,unsigned>::iterator
+          src_record_finder = dependence_map.find(src_key);
+        if (src_record_finder != dependence_map.end())
+        {
+          // Already have a source record, see if we have 
+          // a destination record too
+          std::map<std::pair<unsigned,unsigned>,unsigned>::iterator
+            dst_record_finder = dependence_map.find(dst_key); 
+          if (dst_record_finder == dependence_map.end())
+          {
+            // Update the destination record entry
+            dependence_map[dst_key] = src_record_finder->second;
+            dependences[src_record_finder->second]->add_entry(dst_index, 
+                                                              dst_idx);
+          }
+#ifdef DEBUG_LEGION
+          else // both already there so just assert they are the same
+            assert(src_record_finder->second == dst_record_finder->second);
+#endif
+        }
+        else
+        {
+          // No source record
+          // See if we have a destination record entry
+          std::map<std::pair<unsigned,unsigned>,unsigned>::iterator
+            dst_record_finder = dependence_map.find(dst_key);
+          if (dst_record_finder == dependence_map.end())
+          {
+            // Neither source nor destination have an entry so
+            // make a new record
+            DependenceRecord *new_record = new DependenceRecord();
+            new_record->add_entry(src_index, src_idx);
+            new_record->add_entry(dst_index, dst_idx);
+            unsigned record_index = dependences.size();
+            dependence_map[src_key] = record_index;
+            dependence_map[dst_key] = record_index;
+            dependences.push_back(new_record);
+          }
+          else
+          {
+            // Have a destination but no source, so update the source
+            dependence_map[src_key] = dst_record_finder->second;
+            dependences[dst_record_finder->second]->add_entry(src_index,
+                                                              src_idx);
+          }
+        }
         return false;
       }
+      // NO_DEPENDENCE and PROMOTED_DEPENDENCE are not errors
+      // and do not need to be recorded
       return true;
     }
 
@@ -14219,6 +14307,8 @@ namespace Legion {
     int MustEpochOp::find_operation_index(Operation *op, GenerationID op_gen)
     //--------------------------------------------------------------------------
     {
+      if (op->get_operation_kind() != Operation::TASK_OP_KIND)
+        return -1;
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
       {
         if ((indiv_tasks[idx] == op) && 

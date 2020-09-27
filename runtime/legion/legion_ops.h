@@ -1789,9 +1789,11 @@ namespace Legion {
       virtual bool is_internal_op(void) const { return true; }
       virtual const FieldMask& get_internal_mask(void) const = 0;
     public:
+      inline Operation* get_creator_op(void) const { return create_op; }
+      inline GenerationID get_creator_gen(void) const { return create_gen; }
       inline int get_internal_index(void) const { return creator_req_idx; }
       void record_trace_dependence(Operation *target, GenerationID target_gen,
-                                   int target_idx, int source_idx, 
+                                   int target_idx, int source_idx,
                                    DependenceType dtype,
                                    const FieldMask &dependent_mask);
       virtual unsigned find_parent_index(unsigned idx);
@@ -2610,6 +2612,10 @@ namespace Legion {
                              Operation *target_op, GenerationID target_gen,
                              unsigned source_idx, unsigned target_idx,
                              DependenceType dtype);
+      bool record_intra_must_epoch_dependence(
+                             unsigned src_index, unsigned src_idx,
+                             unsigned dst_index, unsigned dst_idx,
+                             DependenceType dtype);
       void must_epoch_map_task_callback(SingleTask *task, 
                                         Mapper::MapTaskInput &input,
                                         Mapper::MapTaskOutput &output);
@@ -2709,6 +2715,8 @@ namespace Legion {
       std::map<std::pair<unsigned/*task index*/,unsigned/*req index*/>,
                unsigned/*dependence index*/> dependence_map;
       std::vector<DependenceRecord*> dependences;
+      std::map<std::pair<Operation*,GenerationID>,std::vector<std::pair<
+        unsigned/*op idx*/,unsigned/*req idx*/> > > internal_dependences;
       std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     protected:

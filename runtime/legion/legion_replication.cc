@@ -1518,7 +1518,14 @@ namespace Legion {
             continue;
           std::vector<RegionNode*> &children = refinement_regions[it->first];
           if (children.empty())
+          {
+            // Still propagate the refinement so we can do lookups
+            // correctly for control replication
+            if (!it->first->parent->row_source->is_empty())
+              it->first->propagate_refinement(ctx, NULL/*no child*/, it->second,
+                                              map_applied_conditions);
             continue;
+          }
           // We're not actually going to make the equivalence sets here
           // Instead we're going to just fill in the right data structure
           // on the partition so that any traversals of the children

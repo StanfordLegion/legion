@@ -1063,8 +1063,10 @@ namespace Legion {
       virtual void pack_expression_structure(Serializer &rez,
                                              AddressSpaceID target,
                                              const bool top) = 0;
-      virtual void add_expression_reference(bool expr_tree = false) = 0;
-      virtual bool remove_expression_reference(bool expr_tree = false) = 0;
+      virtual void add_expression_reference(bool expr_tree = false,
+                                            unsigned cnt = 1) = 0;
+      virtual bool remove_expression_reference(bool expr_tree = false,
+                                               unsigned cnt = 1) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool test_intersection_nonblocking(IndexSpaceExpression *expr,
          RegionTreeForest *context, ApEvent &precondition, bool second = false);
@@ -1268,8 +1270,10 @@ namespace Legion {
       virtual void pack_expression_structure(Serializer &rez,
                                              AddressSpaceID target,
                                              const bool top) = 0;
-      virtual void add_expression_reference(bool expr_tree = false);
-      virtual bool remove_expression_reference(bool expr_tree = false);
+      virtual void add_expression_reference(bool expr_tree = false,
+                                            unsigned cnt = 1);
+      virtual bool remove_expression_reference(bool expr_tree = false,
+                                               unsigned cnt = 1);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, std::set<RtEvent> *applied,
@@ -1312,7 +1316,8 @@ namespace Legion {
                                              AddressSpaceID target,
                                              const bool top) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
-      virtual bool remove_expression_reference(bool expr_tree = false);
+      virtual bool remove_expression_reference(bool expr_tree = false,
+                                               unsigned cnt = 1);
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did, 
           RtEvent initialized, std::set<RtEvent> *applied,
           const bool notify_remote = true, IndexSpaceExprID expr_id = 0) = 0;
@@ -1929,8 +1934,10 @@ namespace Legion {
       virtual void pack_expression_structure(Serializer &rez,
                                              AddressSpaceID target,
                                              const bool top) = 0;
-      virtual void add_expression_reference(bool expr_tree = false);
-      virtual bool remove_expression_reference(bool expr_tree = false);
+      virtual void add_expression_reference(bool expr_tree = false,
+                                            unsigned cnt = 1);
+      virtual bool remove_expression_reference(bool expr_tree = false,
+                                               unsigned cnt = 1);
       virtual bool remove_operation(RegionTreeForest *forest);
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, std::set<RtEvent> *applied,

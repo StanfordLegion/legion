@@ -6814,17 +6814,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IntermediateExpression::add_expression_reference(bool expr_tree)
+    void IntermediateExpression::add_expression_reference(bool expr_tree,
+                                                          unsigned count)
     //--------------------------------------------------------------------------
     {
-      add_reference();
+      add_reference(count);
     }
 
     //--------------------------------------------------------------------------
-    bool IntermediateExpression::remove_expression_reference(bool expr_tree)
+    bool IntermediateExpression::remove_expression_reference(bool expr_tree,
+                                                             unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_reference();
+      return remove_reference(count);
     } 
 
     //--------------------------------------------------------------------------
@@ -6875,10 +6877,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceOperation::remove_expression_reference(bool expr_tree)
+    bool IndexSpaceOperation::remove_expression_reference(bool expr_tree,
+                                                          unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_reference();
+      return remove_reference(count);
     }
 
     //--------------------------------------------------------------------------
@@ -8606,26 +8609,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::add_expression_reference(bool expr_tree)
+    void IndexSpaceNode::add_expression_reference(bool expr_tree,
+                                                  unsigned count)
     //--------------------------------------------------------------------------
     {
       if (!expr_tree)
       {
         LocalReferenceMutator mutator;
-        add_base_valid_ref(IS_EXPR_REF, &mutator);
+        add_base_valid_ref(IS_EXPR_REF, &mutator, count);
       }
       else
-        add_base_resource_ref(IS_EXPR_REF);
+        add_base_resource_ref(IS_EXPR_REF, count);
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::remove_expression_reference(bool expr_tree)
+    bool IndexSpaceNode::remove_expression_reference(bool expr_tree,
+                                                     unsigned count)
     //--------------------------------------------------------------------------
     {
       if (expr_tree)
-        return remove_base_resource_ref(IS_EXPR_REF);
+        return remove_base_resource_ref(IS_EXPR_REF, count);
       else
-        return remove_base_valid_ref(IS_EXPR_REF);
+        return remove_base_valid_ref(IS_EXPR_REF, NULL, count);
     }
 
     //--------------------------------------------------------------------------
