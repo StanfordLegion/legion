@@ -3778,7 +3778,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(lhs.exists());
-      assert(rhs.exists());
 #endif
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
@@ -3787,7 +3786,8 @@ namespace Legion {
 
       unsigned lhs_ = find_or_convert_event(lhs);
       events.push_back(ApEvent());
-      insert_instruction(new TriggerEvent(*this, lhs_, find_event(rhs),
+      insert_instruction(new TriggerEvent(*this, lhs_, 
+            rhs.exists() ? find_event(rhs) : fence_completion_id,
             find_trace_local_id(memo)));
     }
 
