@@ -87,7 +87,6 @@ def parseInput(sourceFile, tokens, lineNumber, enums):
     declaration = None
     name = None
     code = None
-    remedy = None
     type = None
     message = None
     
@@ -124,7 +123,7 @@ def sanitizedMessage(message):
     serialNumber = 1
     index = sanitized.find("%")
     while index != -1:
-        for i in range(10):
+        for i in range(50):
             if (index + i >= len(sanitized)) or (sanitized[index + i] in splitters) or (sanitized[index + i] in whitespace):
                 replacement = "#" + str(serialNumber)
                 sanitized = sanitized[:index] + replacement + sanitized[index + i:]
@@ -151,6 +150,7 @@ def addToDatabase(type, name, code, message, connection, sourceFile, lineNumber)
 
     insertInstanceCommand = "insert into instances (code, sourceFile, lineNumber) values (" + code + ", \"" + filename + "\", " + str(lineNumber) + ");"
     connection.execute(insertInstanceCommand)
+
 
 
 def parseSourceFile(fileName, connection, enums):
@@ -205,36 +205,13 @@ def prefixedPath(fileName, prefix, lineNumber, strip):
     return result
 
 
-def writeGlossaryTerms(file, message, remedy, glossary, glossaryURL):
-    wroteTerm = False
-    for term in glossary:
-        t = term.replace(' ', '').lower().strip()
-        if message.replace(' ', '').lower().find(t) >= 0 or (remedy != None and remedy.replace(' ', '').lower().find(t) >= 0):
-            if not wroteTerm:
-                file.write("See also: ")
-                wroteTerm = True
-            href = "<a href=\"" + glossaryURL + "/glossary/" + term.strip() + ".html\">" + term.strip() + "</a>"
-            href = href.replace('//', '/')
-            file.write(href + "\n");
 
-
-def writeHtmlEntry(type, field, outputFile, row, hrefPrefix, strip, glossary, glossaryURL, remediesDir, messageEnumNames):
+def writeHtmlEntry(type, field, outputFile, row, hrefPrefix, strip):
     (code, name, message) = row
     outputFile.write("<p id=\"" + htmlMarker(type, field, code) + "\">")
     outputFile.write("<b>" + type + " " + str(code) + "</b>\n")
     outputFile.write("<br>Message: " + message + "\n");
     
-    remedy = None
-    if name in messageEnumNames:
-        remediesFilePath = remediesDir + '/' + name + ".html"
-        remediesFile = open(remediesFilePath, 'r')
-        strings = remediesFile.readlines()
-        remedy = ''
-        for string in strings:
-            remedy = remedy + string.strip()
-    if remedy != None:
-        outputFile.write("<br>Remedy:" + remedy + "\n");
-
     selectInstancesCommand = "select sourceFile, lineNumber from instances where code = " + str(code) + " order by sourceFile, lineNumber;"
     cursor = connection.cursor()
     cursor.execute(selectInstancesCommand)
@@ -246,8 +223,6 @@ def writeHtmlEntry(type, field, outputFile, row, hrefPrefix, strip, glossary, gl
         instance = cursor.fetchone()
     outputFile.write("<p>\n")
 
-    if glossary != None and glossaryURL != None:
-        writeGlossaryTerms(outputFile, message, remedy, glossary, glossaryURL)
     outputFile.write("<br>")
     outputFile.write("<a href=\"index.html\">back to message index</a>\n")
 
@@ -259,7 +234,7 @@ def tables(connection):
     return tables
 
 
-def writeHtmlSortedByField(field, connection, hrefPrefix, strip, glossary, glossaryURL, outputDir, remediesDir, messageEnumNames):
+def writeHtmlSortedByField(field, connection, hrefPrefix, strip, outputDir):
     for table in tables(connection):
         tableName = table[0]
         if tableName != 'instances':
@@ -271,7 +246,7 @@ def writeHtmlSortedByField(field, connection, hrefPrefix, strip, glossary, gloss
             cursor.execute(selectCommand)
             row = cursor.fetchone()
             while row != None:
-                writeHtmlEntry(tableName, field, outputFile, row, hrefPrefix, strip, glossary, glossaryURL, remediesDir, messageEnumNames)
+                writeHtmlEntry(tableName, field, outputFile, row, hrefPrefix, strip)
                 row = cursor.fetchone()
             outputFile.close()
 
@@ -318,7 +293,8 @@ def writeHtmlIndexTable(connection, tableName, field, file):
 def writeHtmlLinks(indexFile, connection, field):
     indexFile.write("<center>")
     for table in tables(connection):
-        indexFile.write("<a href=\"" + htmlMarker(table[0], field, None) + ".html\">" + table[0] + " messages ordered by " + field + "</a>&nbsp;&nbsp;&nbsp;\n")
+        if table[0] != 'instances':
+            indexFile.write("<a href=\"" + htmlMarker(table[0], field, None) + ".html\">" + table[0] + " messages ordered by " + field + "</a>&nbsp;&nbsp;&nbsp;\n")
     indexFile.write("</center>\n<p>\n")
 
 
@@ -334,13 +310,10 @@ def writeHtmlIndexes(connection, outputDir):
     indexFile.close()
 
 
-def writeHtmlOutput(connection, hrefPrefix, strip, glossaryFile, glossaryURL, outputDir, remediesDir, messageEnumNames):
-    glossary = None
-    if glossaryFile != None:
-        glossary = open(glossaryFile, "r").readlines()
+def writeHtmlOutput(connection, hrefPrefix, strip, outputDir):
     writeHtmlIndexes(connection, outputDir);
-    writeHtmlSortedByField("code", connection, hrefPrefix, strip, glossary, glossaryURL, outputDir, remediesDir, messageEnumNames)
-    writeHtmlSortedByField("message", connection, hrefPrefix, strip, glossary, glossaryURL, outputDir, remediesDir, messageEnumNames)
+    writeHtmlSortedByField("code", connection, hrefPrefix, strip, outputDir)
+    writeHtmlSortedByField("message", connection, hrefPrefix, strip, outputDir)
 
 
 def loadEnums(file):
@@ -378,11 +351,8 @@ class MyParser(argparse.ArgumentParser):
 parser = MyParser(description = 'Legion Tools: collate messages')
 parser.add_argument('--prefix', dest='prefix', action='store', help='path prefix to source files', default='')
 parser.add_argument('--strip', dest='strip', action='store', type=int, help='num dirs to strip from sourcfile path', default=0)
-parser.add_argument('--glossaryFile', dest='glossaryFile', action='store', help='path to glossary file, requires --glossaryURL', required=True)
-parser.add_argument('--glossaryURL', dest='glossaryURL', action='store', help='URL of online glossary, requires --glossaryFile', required=True)
 parser.add_argument('--output_dir', dest='outputDir', action='store', help='dir to write the output files to', default='.')
 parser.add_argument('--legion_config_h', dest='legionConfigH', action='store', help='path to legion_config.h', required=True)
-parser.add_argument('--remediesDir', dest='remediesDir', action='store', help='path to dir containing html remedies', required=True)
 
 args = parser.parse_args()
 
@@ -395,14 +365,7 @@ if legionConfigFile == None:
     sys.exit(-1)
 
 enums = loadEnums(legionConfigFile)
-
-remediesListFilePath = args.remediesDir + '/remediesList.txt'
-remediesListFile = open(remediesListFilePath, 'r')
-if remediesListFile == None:
-    print 'invalid message list file path', remediesListFilePath
-      
-messageEnumNames = loadMessageNames(remediesListFile)
 connection = sqlite3.connect(":memory:")
 parseSourceFiles(connection, enums)
 
-writeHtmlOutput(connection, args.prefix, args.strip, args.glossaryFile, args.glossaryURL, args.outputDir, args.remediesDir, messageEnumNames)
+writeHtmlOutput(connection, args.prefix, args.strip, args.outputDir)

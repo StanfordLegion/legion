@@ -2295,13 +2295,17 @@ namespace Realm {
 
       create_xfer_descriptors();
 
-      // make sure logging precedes the call to mark_finished below
-      log_dma.info() << "dma request " << (void *)this << " finished - is="
-                     << *domain << " before=" << before_copy << " after=" << get_finish_event();
       mark_finished(true/*successful*/);
       return;
       // </NEWDMA>
     } 
+
+    void CopyRequest::mark_completed(void)
+    {
+      log_dma.info() << "dma request " << (void *)this << " finished - is="
+                     << *domain << " before=" << before_copy << " after=" << get_finish_event();
+      Operation::mark_completed();
+    }
 
     ReduceRequest::ReduceRequest(const void *data, size_t datalen,
 				 ReductionOpID _redop_id,
@@ -2678,11 +2682,6 @@ namespace Realm {
 
       //printf("kinds: " IDFMT "=%d " IDFMT "=%d\n", src_mem.id, src_mem.impl()->kind, dst_mem.id, dst_mem.impl()->kind);
 
-      log_dma.info() << "dma request " << (void *)this << " finished - is="
-		     << *domain
-		     << " " << (red_fold ? "fold" : "apply") << " " << redop_id
-		     << " before=" << before_copy << " after=" << get_finish_event();
-
       if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>()) {
         ProfilingMeasurements::OperationMemoryUsage usage;  
         // Not precise, but close enough for now
@@ -2691,6 +2690,15 @@ namespace Realm {
         usage.size = total_bytes;
         measurements.add_measurement(usage);
       }
+    }
+
+    void ReduceRequest::mark_completed(void)
+    {
+      log_dma.info() << "dma request " << (void *)this << " finished - is="
+		     << *domain
+		     << " " << (red_fold ? "fold" : "apply") << " " << redop_id
+		     << " before=" << before_copy << " after=" << get_finish_event();
+      Operation::mark_completed();
     }
 
     FillRequest::FillRequest(const void *data, size_t datalen,
@@ -3151,10 +3159,14 @@ namespace Realm {
         usage.target = dst.inst.get_location();
         measurements.add_measurement(usage);
       }
+    }
 
+    void FillRequest::mark_completed(void)
+    {
       log_dma.info() << "dma request " << (void *)this << " finished - is="
 		     << *domain << " fill dst=" << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size="
 		     << fill_size << " before=" << before_fill << " after=" << get_finish_event();
+      Operation::mark_completed();
     }
 
     size_t FillRequest::optimize_fill_buffer(RegionInstanceImpl *inst_impl, int &fill_elmts)

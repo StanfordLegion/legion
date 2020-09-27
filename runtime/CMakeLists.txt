@@ -425,13 +425,17 @@ install(TARGETS RealmRuntime EXPORT LegionTargets
 
 # Mapper objects
 list(APPEND MAPPER_SRC
-  mappers/debug_mapper.h       mappers/debug_mapper.cc
   mappers/default_mapper.h     mappers/default_mapper.cc
+  mappers/default_mapper.inl
   mappers/mapping_utilities.h  mappers/mapping_utilities.cc
-  mappers/replay_mapper.h      mappers/replay_mapper.cc
   mappers/shim_mapper.h        mappers/shim_mapper.cc
   mappers/test_mapper.h        mappers/test_mapper.cc
   mappers/null_mapper.h        mappers/null_mapper.cc
+  mappers/replay_mapper.h      mappers/replay_mapper.cc
+  mappers/debug_mapper.h       mappers/debug_mapper.cc
+  mappers/wrapper_mapper.h     mappers/wrapper_mapper.cc
+  mappers/forwarding_mapper.h  mappers/forwarding_mapper.cc
+  mappers/logging_wrapper.h    mappers/logging_wrapper.cc
 )
 
 # Legion runtime
