@@ -838,22 +838,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::force_finalize_output_regions(void)
-    //--------------------------------------------------------------------------
-    {
-      // We make all output regions empty by returning null pointers
-      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
-      {
-        OutputRegion &output_region = output_regions[idx];
-        const OutputRequirement &req = output_region.impl->get_requirement();
-        for (std::set<FieldID>::iterator it = req.privilege_fields.begin();
-             it != req.privilege_fields.end(); ++it)
-          output_region.impl->return_data(0, *it, 0, 0);
-        output_region.impl->finalize();
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void TaskContext::destroy_user_lock(Reservation r)
     //--------------------------------------------------------------------------
     {

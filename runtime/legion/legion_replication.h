@@ -1095,8 +1095,6 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void replay_analysis(void);
       virtual void resolve_false(bool speculated, bool launched);
-    protected:
-      virtual void force_finalize_output_regions(void);
     public:
       // Override these so we can broadcast the future result
       virtual void trigger_task_complete(bool deferred = false);
@@ -1160,7 +1158,6 @@ namespace Legion {
                                                  RtEvent point_mapped);
     protected:
       virtual void finalize_output_regions(void);
-      virtual void force_finalize_output_regions(void);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;

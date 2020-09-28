@@ -620,7 +620,6 @@ namespace Legion {
           bool virtual_mapped, const InstanceSet &physical_instances);
       void add_output_region(const OutputRequirement &req, InstanceSet instances);
       void finalize_output_regions(void);
-      void force_finalize_output_regions(void);
       void initialize_overhead_tracker(void);
       void unmap_all_regions(void); 
       inline void begin_runtime_call(void);

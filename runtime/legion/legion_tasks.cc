@@ -5582,6 +5582,14 @@ namespace Legion {
       is_index_space = false;
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id);
+      if (outputs != NULL && launcher.predicate != Predicate::TRUE_PRED)
+        REPORT_LEGION_ERROR(
+            ERROR_OUTPUT_REGIONS_IN_PREDICATED_TASK,
+            "Output requirements are disallowed for tasks launched with "
+            "predicates, but preidcated task launch for task %s in parent "
+            "task %s (UID %lld) is used with output requirements.",
+            get_task_name(), parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id());
       remote_owner_uid = ctx->get_unique_id();
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       if (launcher.predicate != Predicate::TRUE_PRED)
@@ -5716,19 +5724,6 @@ namespace Legion {
 
         // Store the output requirement in the task
         output_regions.push_back(req);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::force_finalize_output_regions(void)
-    //--------------------------------------------------------------------------
-    {
-      RegionTreeForest *forest = runtime->forest;
-      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
-      {
-        const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
-        IndexSpaceNode *node = forest->get_node(ispace)->as_index_space_node();
-        node->set_domain(Rect<1>(0, -1), runtime->address_space);
       }
     }
 
@@ -5930,7 +5925,6 @@ namespace Legion {
           result.impl->set_result(NULL, 0, false/*own*/);
       }
       // Then clean up this task instance
-      force_finalize_output_regions();
       complete_mapping();
       complete_execution(execution_condition);
       resolve_speculation();
@@ -6283,7 +6277,6 @@ namespace Legion {
 #endif
       // Pretend like we executed the task
       execution_context->begin_misspeculation();
-      execution_context->force_finalize_output_regions();
       if (predicate_false_future.impl != NULL)
       {
         // Wait for the future to be ready
@@ -7240,7 +7233,6 @@ namespace Legion {
 #endif
       // Pretend like we executed the task
       execution_context->begin_misspeculation();
-      execution_context->force_finalize_output_regions();
       size_t result_size;
       const void *result = slice_owner->get_predicate_false_result(result_size);
       execution_context->end_misspeculation(result, result_size);
@@ -8240,77 +8232,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::force_finalize_output_regions(void)
-    //--------------------------------------------------------------------------
-    {
-      RegionTreeForest *forest = runtime->forest;
-
-      // Here we will initialize pending subspaces and output sizes
-      // so that later finalize_output_regions can do the right job.
-      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
-      {
-        const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
-        const IndexPartition &pid =
-          output_regions[idx].partition.get_index_partition();
-        IndexSpaceNode *parent= forest->get_node(ispace)->as_index_space_node();
-
-        if (!output_regions[idx].global_indexing)
-        {
-          Domain empty;
-          switch (parent->get_num_dims())
-          {
-#define DIMFUNC(DIM)                                   \
-            case DIM:                                  \
-            {                                          \
-              empty.dim = DIM;                         \
-              for (unsigned idx = 0; idx < DIM; ++idx) \
-              {                                        \
-                empty.rect_data[idx] = 0;              \
-                empty.rect_data[idx + DIM] = -1;       \
-              }                                        \
-              break;                                   \
-            }
-            LEGION_FOREACH_N(DIMFUNC)
-            default:
-              assert(false);
-          }
-#undef DIMFUNC
-          for (Domain::DomainPointIterator itr(index_domain); itr; ++itr)
-          {
-            IndexSpace child;
-            switch (index_domain.get_dim())
-            {
-#define DIMFUNC(DIM)                                                       \
-              case DIM:                                                    \
-              {                                                            \
-                Point<DIM> p = *itr;                                       \
-                child = forest->get_index_subspace(                        \
-                    pid, &p,NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
-                break;                                                     \
-              }
-              LEGION_FOREACH_N(DIMFUNC)
-              default:
-                assert(false);
-            }
-#undef DIMFUNC
-            forest->set_pending_space_domain(
-                child, empty, runtime->address_space);
-          }
-        }
-        else
-        {
-          typedef std::map<Point<1>,size_t> SizeMap;
-          SizeMap &output_sizes = all_output_sizes[idx];
-          for (PointInRectIterator<1> itr(index_domain); itr.valid(); ++itr)
-          {
-            const Point<1> &p = *itr;
-            output_sizes[p] = 0;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
     FutureMap IndexTask::initialize_task(InnerContext *ctx,
                                          const IndexTaskLauncher &launcher,
                                          IndexSpace launch_sp,
@@ -8378,6 +8299,14 @@ namespace Legion {
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id);
+      if (outputs != NULL && launcher.predicate != Predicate::TRUE_PRED)
+        REPORT_LEGION_ERROR(
+            ERROR_OUTPUT_REGIONS_IN_PREDICATED_TASK,
+            "Output requirements are disallowed for tasks launched with "
+            "predicates, but preidcated task launch for task %s in parent "
+            "task %s (UID %lld) is used with output requirements.",
+            get_task_name(), parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id());
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
@@ -8482,6 +8411,14 @@ namespace Legion {
         initialize_reduction_state();
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id);
+      if (outputs != NULL && launcher.predicate != Predicate::TRUE_PRED)
+        REPORT_LEGION_ERROR(
+            ERROR_OUTPUT_REGIONS_IN_PREDICATED_TASK,
+            "Output requirements are disallowed for tasks launched with "
+            "predicates, but preidcated task launch for task %s in parent "
+            "task %s (UID %lld) is used with output requirements.",
+            get_task_name(), parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id());
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
@@ -8922,7 +8859,6 @@ namespace Legion {
         }
       }
       // Then clean up this task execution
-      force_finalize_output_regions();
       complete_mapping();
       complete_execution(execution_condition);
       resolve_speculation();
