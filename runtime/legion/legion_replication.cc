@@ -4672,6 +4672,9 @@ namespace Legion {
             wait_events.insert(wait);
         }
       }
+      // Trigger this if we're not expecting to see any returns
+      if (remaining_resource_returns == 0)
+        Runtime::phase_barrier_arrive(resource_return_barrier, 1/*count*/);
       if (!wait_events.empty())
       {
         RtEvent dist_event = Runtime::merge_events(wait_events);
@@ -7283,7 +7286,7 @@ namespace Legion {
       assert(origin_index < unique_sorted_spaces.size());
 #endif
       const unsigned offset = convert_to_offset(local_index, origin_index);
-      const unsigned index = convert_to_index(offset / radix, origin_index); 
+      const unsigned index = convert_to_index(offset / radix, origin_index);
       return unique_sorted_spaces[index];
     }
 
@@ -7300,10 +7303,10 @@ namespace Legion {
 #endif
       const unsigned offset = radix * 
         convert_to_offset(local_index, origin_index);
-      for (unsigned idx = 0; idx < radix; idx++)
+      for (unsigned idx = 1; idx <= radix; idx++)
       {
         const unsigned child_offset = offset + idx;
-        if (child_offset <= unique_sorted_spaces.size())
+        if (child_offset < unique_sorted_spaces.size())
         {
           const unsigned index = convert_to_index(child_offset, origin_index);
           children.push_back(unique_sorted_spaces[index]); 
@@ -7362,14 +7365,13 @@ namespace Legion {
       assert(index < unique_sorted_spaces.size());
       assert(origin_index < unique_sorted_spaces.size());
 #endif
-      // All the offsets are done in 1-based indexing, hence the +1
       if (index < origin_index)
       {
         // Modulus arithmetic here
-        return ((unique_sorted_spaces.size() - origin_index) + index + 1);
+        return ((index + unique_sorted_spaces.size()) - origin_index);
       }
       else
-        return ((index - origin_index) + 1);
+        return (index - origin_index);
     }
 
     //--------------------------------------------------------------------------
@@ -7378,12 +7380,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(0 < offset); // offset should be strictly greater than zero
-      assert(offset <= unique_sorted_spaces.size());
+      assert(offset < unique_sorted_spaces.size());
       assert(origin_index < unique_sorted_spaces.size());
 #endif
-      // convert back to zero-based indexing with -1
-      unsigned result = origin_index + offset - 1;
+      unsigned result = origin_index + offset;
       if (result >= unique_sorted_spaces.size())
         result -= unique_sorted_spaces.size();
       return result;
