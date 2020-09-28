@@ -2203,7 +2203,7 @@ namespace Legion {
       void handle_post_mapped(bool local, RtEvent precondition);
       void handle_post_execution(const void *res, size_t res_size, 
                                  bool owned, bool local);
-      void trigger_task_complete(bool local);
+      void trigger_task_complete(bool local, std::set<RtEvent> &preconditions);
       void trigger_task_commit(bool local);
     public:
       void send_collective_message(ShardID target, Serializer &rez);

@@ -8138,7 +8138,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::trigger_task_complete(bool local)
+    void ShardManager::trigger_task_complete(bool local, 
+                                             std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       bool notify = false;
@@ -8165,9 +8166,12 @@ namespace Legion {
       {
         if (original_task == NULL)
         {
+          const RtUserEvent pre = Runtime::create_rt_user_event();
           Serializer rez;
           rez.serialize(repl_id);
+          rez.serialize(pre);
           runtime->send_replicate_trigger_complete(owner_space, rez);
+          preconditions.insert(pre);
         }
         else
         {
@@ -8178,21 +8182,11 @@ namespace Legion {
           // the tree or report leaks and duplicates of resources.
           // All the shards have the same set so we only have to do this
           // for one of the shards.
-          std::set<RtEvent> applied;
           if (original_task->is_top_level_task())
-            local_shards[0]->report_leaks_and_duplicates(applied);
+            local_shards[0]->report_leaks_and_duplicates(preconditions);
           else
             local_shards[0]->return_resources(
-                original_task->get_context(), applied);
-          // We'll just wait for now since there's no good way to
-          // force this to be propagated back otherwise
-          if (!applied.empty())
-          {
-            const RtEvent wait_on = Runtime::merge_events(applied);
-            if (wait_on.exists() && !wait_on.has_triggered())
-              wait_on.wait();
-          }
-          original_task->trigger_children_complete();
+                original_task->get_context(), preconditions);
         }
       }
     }
@@ -8202,8 +8196,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool notify = false;
+      bool trigger_children = false;
       {
         AutoLock m_lock(manager_lock);
+        // The first call to trigger task commit here is enough to know
+        // that all the effects are done for completion
+        if ((original_task != NULL) && 
+            (trigger_local_commit == 0) && (trigger_remote_commit == 0))
+          trigger_children = true;
         if (local)
         {
           trigger_local_commit++;
@@ -8221,6 +8221,8 @@ namespace Legion {
         notify = (trigger_local_commit == local_shards.size()) &&
                  (trigger_remote_commit == remote_constituents);
       }
+      if (trigger_children)
+        original_task->trigger_children_complete();
       if (notify)
       {
         if (original_task == NULL)
@@ -8849,8 +8851,15 @@ namespace Legion {
     {
       ReplicationID repl_id;
       derez.deserialize(repl_id);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      std::set<RtEvent> preconditions;
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->trigger_task_complete(false/*local*/);
+      manager->trigger_task_complete(false/*local*/, preconditions);
+      if (!preconditions.empty())
+        Runtime::trigger_event(done_event,Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------

@@ -7107,6 +7107,11 @@ namespace Legion {
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
+      // Make sure all of the shards have made it here before we do this
+      Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
+      if (!shard_barrier.has_triggered())
+        shard_barrier.wait();
+      Runtime::advance_barrier(shard_barrier);
       // Invalidate any context that we had so that the child
       // operations can begin committing
       std::set<RtEvent> preconditions;
@@ -7114,10 +7119,17 @@ namespace Legion {
                                                          preconditions);
       if (runtime->legion_spy_enabled)
         execution_context->log_created_requirements();
+      // If this is the top-level task, wait for all the invalidations to
+      // be done before we attempt to do the leaks and duplicates check
+      if (is_top_level_task() && !preconditions.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(preconditions);
+        preconditions.clear();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       // Then invoke the method on the shard manager 
-      shard_manager->trigger_task_complete(true/*local*/);
-      // See if we need to trigger that our children are complete
-      const bool need_commit = execution_context->attempt_children_commit();
+      shard_manager->trigger_task_complete(true/*local*/, preconditions);
       // Mark that this operation is complete, we'll only complete this
       // operation once all the shards are complete to ensure that all
       // equivalence sets are remove from the tree contexts before they
@@ -7127,6 +7139,8 @@ namespace Legion {
             Runtime::merge_events(preconditions));
       else
         Runtime::phase_barrier_arrive(shard_barrier, 1/*count*/);
+      // See if we need to trigger that our children are complete
+      const bool need_commit = execution_context->attempt_children_commit();
       complete_operation(shard_barrier);
       if (need_commit)
         trigger_children_committed();
