@@ -13849,7 +13849,10 @@ namespace Legion {
       IndexPartNode *partition_node = 
        runtime->forest->get_node(output.chosen_partition.get_index_partition());
       // Make sure that it is complete, and then update our information
-      if (!runtime->unsafe_mapper && !partition_node->is_complete(false))
+      // We also allow the mapper to pick the same projection partition 
+      // if the partition operation is an image or image-range
+      if (!runtime->unsafe_mapper && !partition_node->is_complete(false) &&
+            !thunk->safe_projection(partition_node->handle))
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of "
                       "'select_partition_projection' on mapper %s."
