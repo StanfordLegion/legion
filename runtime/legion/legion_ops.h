@@ -3112,6 +3112,7 @@ namespace Legion {
             const std::vector<FieldDataDescriptor> &instances) = 0;
         virtual PartitionKind get_kind(void) const = 0;
         virtual IndexPartition get_partition(void) const = 0;
+        virtual bool safe_projection(IndexPartition p) const { return false; }
         // This method should only be used by control replication thunks
         virtual void elide_collectives(void) { assert(false); }
       };
@@ -3138,6 +3139,8 @@ namespace Legion {
             const std::vector<FieldDataDescriptor> &instances);
         virtual PartitionKind get_kind(void) const { return BY_IMAGE; }
         virtual IndexPartition get_partition(void) const { return pid; }
+        virtual bool safe_projection(IndexPartition p) const 
+          { return (p == projection); }
       protected:
         IndexPartition pid;
         IndexPartition projection;
@@ -3152,6 +3155,8 @@ namespace Legion {
             const std::vector<FieldDataDescriptor> &instances);
         virtual PartitionKind get_kind(void) const { return BY_IMAGE_RANGE; }
         virtual IndexPartition get_partition(void) const { return pid; }
+        virtual bool safe_projection(IndexPartition p) const
+          { return (p == projection); }
       protected:
         IndexPartition pid;
         IndexPartition projection;

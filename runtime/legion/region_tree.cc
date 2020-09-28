@@ -11233,7 +11233,6 @@ namespace Legion {
             {
 #ifdef DEBUG_LEGION
               assert(outstanding_allocators == 0);
-              assert(outstanding_invalidations == 0);
               assert(remote_field_infos.size() == 1);
 #endif
               const AddressSpaceID remote_owner = *(remote_field_infos.begin());
@@ -11245,7 +11244,7 @@ namespace Legion {
 #endif
               if (!ready_event.exists())
                 ready_event = Runtime::create_rt_user_event();
-              outstanding_invalidations = 1;
+              outstanding_invalidations++;
               // Send the invalidation and make ourselves the new 
               // pending exclusive allocator value
               Serializer rez;
@@ -14317,9 +14316,11 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       assert(outstanding_invalidations > 0);
-      assert(allocation_state == FIELD_ALLOC_PENDING); 
+      assert((allocation_state == FIELD_ALLOC_PENDING) ||
+             (allocation_state == FIELD_ALLOC_INVALID)); 
 #endif
-      if (--outstanding_invalidations == 0)
+      if ((--outstanding_invalidations == 0) &&
+          (allocation_state == FIELD_ALLOC_PENDING))
         allocation_state = FIELD_ALLOC_EXCLUSIVE;
     }
 
