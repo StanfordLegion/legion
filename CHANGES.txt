@@ -1,7 +1,12 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 20.09.0 (September ??, 2020)
+Version 20.09.0 (September 28, 2020)
+  * Legion
+    - Support for mapper-controlled reuse of reduction instances.  See:
+        https://github.com/StanfordLegion/legion/issues/545
+    - Support for creating compact instances of sparse index spaces.  See:
+        https://github.com/StanfordLegion/legion/issues/624
   * Realm
     - Switched from function-specific internal threads to generic "background
         workers" that are shared by all subsystems.  The number of workers is
