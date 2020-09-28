@@ -5929,6 +5929,7 @@ namespace Legion {
       complete_execution(execution_condition);
       resolve_speculation();
       trigger_children_complete();
+      trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
