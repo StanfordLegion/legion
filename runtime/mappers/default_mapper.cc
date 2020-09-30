@@ -2380,7 +2380,7 @@ namespace Legion {
     void DefaultMapper::default_policy_select_output_constraints(
                                                const Task &task,
                                                LayoutConstraintSet &constraints,
-                                               const OutputRequirement &req)
+                                               const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
       IndexSpace is = req.region.get_index_space();

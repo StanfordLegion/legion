@@ -748,8 +748,6 @@ namespace Legion {
           const IndexSpaceRequirement &req, Serializer &rez);
       static void pack_region_requirement(
           const RegionRequirement &req, Serializer &rez);
-      static void pack_output_requirement(
-          const OutputRequirement &req, Serializer &rez);
       static void pack_grant(
           const Grant &grant, Serializer &rez);
       static void pack_phase_barrier(
@@ -760,8 +758,6 @@ namespace Legion {
           IndexSpaceRequirement &req, Deserializer &derez);
       static void unpack_region_requirement(
           RegionRequirement &req, Deserializer &derez);
-      static void unpack_output_requirement(
-          OutputRequirement &req, Deserializer &derez);
       static void unpack_grant(
           Grant &grant, Deserializer &derez);
       static void unpack_phase_barrier(

@@ -3510,12 +3510,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OutputRegionImpl::OutputRegionImpl(unsigned i,
-                                       const OutputRequirement &r,
+                                       const RegionRequirement &r,
                                        InstanceSet is,
                                        TaskContext *ctx,
-                                       Runtime *rt)
+                                       Runtime *rt, const bool global)
       : Collectable(), runtime(rt), context(ctx),
-        index(i), req(r), instance_set(is), num_elements(-1LU)
+        req(r), instance_set(is), num_elements(-1LU), index(i), 
+        global_indexing(global)
     //--------------------------------------------------------------------------
     {
     }
@@ -3523,7 +3524,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRegionImpl::OutputRegionImpl(const OutputRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL),
-        index(-1U), req(), instance_set(), num_elements(-1LU)
+        req(), instance_set(), num_elements(-1LU), index(-1U), 
+        global_indexing(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3638,7 +3640,8 @@ namespace Legion {
                                        const size_t *pnum_elements)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode *fspace_node = runtime->forest->get_node(req.field_space);
+      FieldSpaceNode *fspace_node = 
+        runtime->forest->get_node(req.region.get_field_space());
       size_t alloc_size = fspace_node->get_field_size(field_id);
 
       if (alloc_size != field_size)
@@ -3677,7 +3680,7 @@ namespace Legion {
 
       // Subregions of a globally indexed output region cannot be finalized in
       // the first round because their sizes are yet to be determined.
-      if (defer && req.partition.exists() && req.global_indexing)
+      if (defer && req.partition.exists() && global_indexing)
       {
         add_reference();
         FinalizeOutputArgs args(this);
@@ -3691,7 +3694,7 @@ namespace Legion {
       Domain domain;
       if (req.partition.exists())
       {
-        if (!req.global_indexing)
+        if (!global_indexing)
         {
           DomainPoint index_point = context->owner_task->index_point;
           domain.dim = index_point.get_dim() + 1;
@@ -16146,25 +16149,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    OutputRegion Runtime::get_output_region(Context ctx, unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context get output region!");
-      return ctx->get_output_region(index);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::get_output_regions(
-                                Context ctx, std::vector<OutputRegion> &regions)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context get output regions!");
-      regions = ctx->get_output_regions();
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::fill_fields(Context ctx, const FillLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -28401,11 +28385,6 @@ namespace Legion {
             const TaskOp::DeferredEnqueueArgs *enqueue_args = 
               (const TaskOp::DeferredEnqueueArgs*)args;
             enqueue_args->manager->add_to_ready_queue(enqueue_args->task);
-            break;
-          }
-        case LG_DEFERRED_TASK_COMPLETE_TASK_ID:
-          {
-            TaskOp::handle_deferred_task_complete(args); 
             break;
           }
         case LG_DEFER_MAPPER_MESSAGE_TASK_ID:

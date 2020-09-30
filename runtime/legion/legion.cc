@@ -5638,7 +5638,7 @@ namespace Legion {
     OutputRegion Runtime::get_output_region(Context ctx, unsigned index)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_output_region(ctx, index);
+      return ctx->get_output_region(index);
     }
 
     //--------------------------------------------------------------------------
@@ -5646,7 +5646,7 @@ namespace Legion {
                                 Context ctx, std::vector<OutputRegion> &regions)
     //--------------------------------------------------------------------------
     {
-      runtime->get_output_regions(ctx, regions);
+      regions = ctx->get_output_regions();
     }
 
     //--------------------------------------------------------------------------

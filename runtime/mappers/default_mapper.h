@@ -384,7 +384,7 @@ namespace Legion {
                                     const RegionRequirement &req);
       virtual void default_policy_select_output_constraints(const Task &task,
                                     LayoutConstraintSet &constraints,
-                                    const OutputRequirement &req);
+                                    const RegionRequirement &req);
       virtual Memory default_policy_select_constrained_instance_constraints(
 				    MapperContext ctx,
 				    const std::vector<const Task *> &tasks,

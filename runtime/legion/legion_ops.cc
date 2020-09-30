@@ -1884,16 +1884,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ExternalMappable::pack_output_requirement(
-                                  const OutputRequirement &req, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      pack_region_requirement(req, rez);
-      rez.serialize(req.field_space);
-      rez.serialize<bool>(req.global_indexing);
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void ExternalMappable::unpack_mappable(Mappable &mappable,
                                                       Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -1959,16 +1949,6 @@ namespace Legion {
         derez.deserialize(projection_ptr, projection_size);
         req.set_projection_args(projection_ptr, projection_size, true/*own*/);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ExternalMappable::unpack_output_requirement(
-                                    OutputRequirement &req, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      unpack_region_requirement(req, derez);
-      derez.deserialize(req.field_space);
-      derez.deserialize(req.global_indexing);
     }
 
     //--------------------------------------------------------------------------

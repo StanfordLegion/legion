@@ -50,7 +50,7 @@ namespace Legion {
     public:
       TaskContext(Runtime *runtime, TaskOp *owner, int depth,
                   const std::vector<RegionRequirement> &reqs,
-                  const std::vector<OutputRequirement> &output_reqs);
+                  const std::vector<RegionRequirement> &output_reqs);
       TaskContext(const TaskContext &rhs);
       virtual ~TaskContext(void);
     public:
@@ -618,7 +618,8 @@ namespace Legion {
       void add_physical_region(const RegionRequirement &req, bool mapped,
           MapperID mid, MappingTagID tag, ApUserEvent unmap_event,
           bool virtual_mapped, const InstanceSet &physical_instances);
-      void add_output_region(const OutputRequirement &req, InstanceSet instances);
+      void add_output_region(const RegionRequirement &req, 
+                             InstanceSet instances, bool global_indexing);
       void finalize_output_regions(void);
       void initialize_overhead_tracker(void);
       void unmap_all_regions(void); 
@@ -648,7 +649,7 @@ namespace Legion {
       Runtime *const runtime;
       TaskOp *const owner_task;
       const std::vector<RegionRequirement> &regions;
-      const std::vector<OutputRequirement> &output_reqs;
+      const std::vector<RegionRequirement> &output_reqs;
     protected:
       // For profiling information
       friend class SingleTask;
@@ -844,7 +845,7 @@ namespace Legion {
     public:
       InnerContext(Runtime *runtime, TaskOp *owner, int depth, bool full_inner,
                    const std::vector<RegionRequirement> &reqs,
-                   const std::vector<OutputRequirement> &output_reqs,
+                   const std::vector<RegionRequirement> &output_reqs,
                    const std::vector<unsigned> &parent_indexes,
                    const std::vector<bool> &virt_mapped, UniqueID context_uid, 
                    ApEvent execution_fence, bool remote = false);
@@ -1490,7 +1491,7 @@ namespace Legion {
                         AddressSpaceID source, bool symbolic);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
-      std::vector<OutputRequirement>       dummy_output_requirements;
+      std::vector<RegionRequirement>       dummy_output_requirements;
       std::vector<unsigned>                dummy_indexes;
       std::vector<bool>                    dummy_mapped;
     };
@@ -1630,7 +1631,7 @@ namespace Legion {
     public:
       ReplicateContext(Runtime *runtime, ShardTask *owner,int d,bool full_inner,
                        const std::vector<RegionRequirement> &reqs,
-                       const std::vector<OutputRequirement> &output_reqs,
+                       const std::vector<RegionRequirement> &output_reqs,
                        const std::vector<unsigned> &parent_indexes,
                        const std::vector<bool> &virt_mapped,
                        UniqueID context_uid, ApEvent execution_fence_event,

@@ -342,7 +342,6 @@ namespace Legion {
       LG_SELECT_TUNABLE_TASK_ID,
       LG_DEFERRED_ENQUEUE_OP_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
-      LG_DEFERRED_TASK_COMPLETE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
       LG_REMOTE_VIEW_CREATION_TASK_ID,
       LG_DEFER_DISTRIBUTE_TASK_ID,
@@ -463,7 +462,6 @@ namespace Legion {
         "Select Tunable",                                         \
         "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \
-        "Deferred Task Complete",                                 \
         "Deferred Mapper Message",                                \
         "Remote View Creation",                                   \
         "Defer Task Distribution",                                \

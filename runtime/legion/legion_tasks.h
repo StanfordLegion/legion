@@ -99,6 +99,28 @@ namespace Legion {
     };
 
     /**
+     * \class TaskRegions
+     * This is a helper class for accessing the region requirements of a task
+     */
+    class TaskRequirements {
+    public:
+      TaskRequirements(Task &t) : task(t) { }
+    public:
+      inline size_t size(void) const 
+        { return task.regions.size() + task.output_regions.size(); }
+      inline bool is_output(unsigned idx) const
+        { return (task.regions.size() <= idx); }
+      inline RegionRequirement& operator[](unsigned idx)
+        { return (idx < task.regions.size()) ? task.regions[idx] :
+                        task.output_regions[idx - task.regions.size()]; }
+      inline const RegionRequirement& operator[](unsigned idx) const
+        { return (idx < task.regions.size()) ? task.regions[idx] : 
+                        task.output_regions[idx - task.regions.size()]; }
+    private:
+      Task &task;
+    };
+
+    /**
      * \class TaskOp
      * This is the base task operation class for all
      * kinds of tasks in the system.
@@ -200,17 +222,6 @@ namespace Legion {
         ProcessorManager *const manager;
         TaskOp *const task;
       };
-      struct DeferredTaskCompleteArgs : 
-        public LgTaskArgs<DeferredTaskCompleteArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_TASK_COMPLETE_TASK_ID;
-      public:
-        DeferredTaskCompleteArgs(TaskOp *t)
-          : LgTaskArgs<DeferredTaskCompleteArgs>(t->get_unique_op_id()),
-            task(t) { }
-      public:
-        TaskOp *const task;
-      };
     public:
       TaskOp(Runtime *rt);
       virtual ~TaskOp(void);
@@ -293,6 +304,7 @@ namespace Legion {
                                       const DeferMappingArgs *args = NULL) = 0;
       virtual void launch_task(void) = 0;
       virtual bool is_stealable(void) const = 0;
+      virtual bool is_output_global(unsigned idx) const { return false; }
     public:
       virtual ApEvent get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -338,7 +350,7 @@ namespace Legion {
     public:
       // From Memoizable
       virtual const RegionRequirement& get_requirement(unsigned idx) const
-        { return regions[idx]; }
+        { return logical_regions[idx]; }
     public:
       // These methods get called once the task has executed
       // and all the children have either mapped, completed,
@@ -349,14 +361,13 @@ namespace Legion {
       // Tasks have two requirements to complete:
       // - all speculation must be resolved
       // - all children must be complete
-      virtual void trigger_task_complete(bool deferred = false) = 0;
+      virtual void trigger_task_complete(void) = 0;
       // Tasks have two requirements to commit:
       // - all commit dependences must be satisfied (trigger_commit)
       // - all children must commit (children_committed)
       virtual void trigger_task_commit(void) = 0;
-    public:
-      static void handle_deferred_task_complete(const void *args);
     protected:
+      TaskRequirements                          logical_regions;
       // Early mapped regions
       std::map<unsigned/*idx*/,InstanceSet>     early_mapped_regions;
       // A map of any locks that we need to take for this task
@@ -492,7 +503,7 @@ namespace Legion {
                                     std::vector<InstanceSet> &valid_instances);
     protected:
       void prepare_output_instance(InstanceSet &instance_set,
-                                   const OutputRequirement &req,
+                                   const RegionRequirement &req,
                                    Memory target,
                                    const LayoutConstraintSet &constraints);
       void finalize_output_regions(void);
@@ -551,7 +562,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
     protected:
       friend class ShardManager;
-      virtual void trigger_task_complete(bool deferred = false) = 0;
+      virtual void trigger_task_complete(void) = 0;
       virtual void trigger_task_commit(void) = 0;
     public:
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
@@ -590,8 +601,6 @@ namespace Legion {
       std::vector<Processor>                target_processors;
       // Hold the result of the mapping
       std::deque<InstanceSet>               physical_instances;
-    protected:
-      std::vector<InstanceSet>              output_instances;
     protected: // Mapper choices
       std::set<unsigned>                    untracked_valid_regions;
       VariantID                             selected_variant;
@@ -675,7 +684,7 @@ namespace Legion {
     public:
       virtual void trigger_mapping(void);
     protected:
-      virtual void trigger_task_complete(bool deferred = false) = 0;
+      virtual void trigger_task_complete(void) = 0;
       virtual void trigger_task_commit(void) = 0;
     public:
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
@@ -715,6 +724,7 @@ namespace Legion {
       const ReductionOp *reduction_op;
       FutureMap point_arguments;
       std::vector<FutureMap> point_futures;
+      std::vector<bool> output_global_indexing;
       // For handling reductions of types with serdez methods
       const SerdezRedopFns *serdez_redop_fns;
       size_t reduction_state_size;
@@ -790,7 +800,7 @@ namespace Legion {
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
-      virtual void trigger_task_complete(bool deferred = false);
+      virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
       virtual void handle_future(const void *res, size_t res_size,
@@ -883,11 +893,12 @@ namespace Legion {
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
+      virtual bool is_output_global(unsigned idx) const; 
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
-      virtual void trigger_task_complete(bool deferred = false);
+      virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
@@ -993,7 +1004,7 @@ namespace Legion {
       // Override these methods from operation class
       virtual void trigger_mapping(void); 
     protected:
-      virtual void trigger_task_complete(bool deferred = false);
+      virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
       virtual VersionInfo& get_version_info(unsigned idx);
@@ -1111,7 +1122,7 @@ namespace Legion {
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     protected:
-      virtual void trigger_task_complete(bool deferred = false);
+      virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
@@ -1157,15 +1168,17 @@ namespace Legion {
       void early_map_regions(std::set<RtEvent> &applied_conditions,
                              const std::vector<unsigned> &must_premap);
       void record_origin_mapped_slice(SliceTask *local_slice);
+    protected:
+      // Callback for control replication to perform reduction for sizes
+      // and provide an event for when the result is ready
+      virtual RtEvent prepare_index_task_complete(void);
     public:
       void return_slice_mapped(unsigned points,
                                RtEvent applied_condition,
                                ApEvent restrict_postcondition);
-      void return_slice_complete(unsigned points, RtEvent applied_condition);
+      void return_slice_complete(unsigned points, RtEvent applied_condition,
+         const std::map<unsigned,std::map<Point<1>,size_t> > &output_sizes);
       void return_slice_commit(unsigned points, RtEvent applied_condition);
-    public:
-      void return_output_sizes(
-              const std::map<unsigned,std::map<Point<1>,size_t> > &to_merge);
     public:
       void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
       void unpack_slice_complete(Deserializer &derez);
@@ -1273,6 +1286,7 @@ namespace Legion {
       virtual void launch_task(void);
       virtual bool is_stealable(void) const;
       virtual void map_and_launch(void);
+      virtual bool is_output_global(unsigned idx) const;
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -1298,7 +1312,7 @@ namespace Legion {
       void expand_replay_slices(std::list<SliceTask*> &slices);
       void find_profiling_reported(std::set<RtEvent> &preconditions);
     protected:
-      virtual void trigger_task_complete(bool deferred = false);
+      virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);

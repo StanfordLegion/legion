@@ -40,7 +40,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(Runtime *rt, TaskOp *owner, int d,
                              const std::vector<RegionRequirement> &reqs,
-                             const std::vector<OutputRequirement> &out_reqs)
+                             const std::vector<RegionRequirement> &out_reqs)
       : runtime(rt), owner_task(owner), regions(reqs),
         output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
@@ -786,12 +786,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::add_output_region(
-                            const OutputRequirement &req, InstanceSet instances)
+               const RegionRequirement &req, InstanceSet instances, bool global)
     //--------------------------------------------------------------------------
     {
       size_t index = output_regions.size();
       OutputRegionImpl *impl =
-        new OutputRegionImpl(index, req, instances, this, runtime);
+        new OutputRegionImpl(index, req, instances, this, runtime, global);
       output_regions.push_back(OutputRegion(impl));
     }
 
@@ -2900,11 +2900,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(Runtime *rt, TaskOp *owner,int d,bool full_inner,
                                const std::vector<RegionRequirement> &reqs,
-                               const std::vector<OutputRequirement> &output_reqs,
+                               const std::vector<RegionRequirement> &out_reqs,
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
                                UniqueID uid, ApEvent exec_fence, bool remote)
-      : TaskContext(rt, owner, d, reqs, output_reqs),
+      : TaskContext(rt, owner, d, reqs, out_reqs),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(full_inner),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
@@ -8646,9 +8646,9 @@ namespace Legion {
       const std::vector<bool> &no_access_regions = 
         single_task->get_no_access_regions();
 #ifdef DEBUG_LEGION
-      assert(regions.size() == physical_instances.size());
-      assert(regions.size() == virtual_mapped.size());
-      assert(regions.size() == no_access_regions.size());
+      assert(regions.size() <= physical_instances.size());
+      assert(regions.size() <= virtual_mapped.size());
+      assert(regions.size() <= no_access_regions.size());
 #endif
       // Initialize all of the logical contexts no matter what
       //
@@ -9221,7 +9221,7 @@ namespace Legion {
         single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions
       // we deal with that case below
-      for (unsigned idx = 0; idx < physical_instances.size(); idx++)
+      for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // We also don't need to close up read-only instances
         // or reduction-only instances (because they are restricted)
@@ -10005,17 +10005,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplicateContext::ReplicateContext(Runtime *rt, 
-                                   ShardTask *owner, int d, bool full,
-                                   const std::vector<RegionRequirement> &reqs,
-                            const std::vector<OutputRequirement> &output_reqs,
-                                   const std::vector<unsigned> &parent_indexes,
-                                   const std::vector<bool> &virt_mapped,
-                                   UniqueID ctx_uid, ApEvent exec_fence,
-                                   ShardManager *manager)
-      : InnerContext(rt, owner, d, full, reqs, output_reqs, parent_indexes,
+                                 ShardTask *owner, int d, bool full,
+                                 const std::vector<RegionRequirement> &reqs,
+                                 const std::vector<RegionRequirement> &out_reqs,
+                                 const std::vector<unsigned> &parent_indexes,
+                                 const std::vector<bool> &virt_mapped,
+                                 UniqueID ctx_uid, ApEvent exec_fence,
+                                 ShardManager *manager)
+      : InnerContext(rt, owner, d, full, reqs, out_reqs, parent_indexes,
                      virt_mapped, ctx_uid, exec_fence),
-        owner_shard(owner),
-        shard_manager(manager),
+        owner_shard(owner), shard_manager(manager),
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_indirection_bar_index(0),
         next_future_map_bar_index(0), index_space_allocator_shard(0), 
@@ -20021,7 +20020,7 @@ namespace Legion {
           return predicate_task_false(launcher);
         IndividualTask *task = runtime->get_available_individual_task(); 
         InnerContext *parent = owner_task->get_context();
-        Future result = task->initialize_task(parent, launcher);
+        Future result = task->initialize_task(parent, launcher, outputs);
         inline_child_task(task);
         task->deactivate();
         return result;
@@ -20050,7 +20049,8 @@ namespace Legion {
         IndexSpace launch_space = launcher.launch_space;
         if (!launch_space.exists())
           launch_space = find_index_launch_space(launcher.launch_domain);
-        FutureMap result = task->initialize_task(parent, launcher,launch_space);
+        FutureMap result = 
+          task->initialize_task(parent, launcher, launch_space, outputs);
         inline_child_task(task);
         task->deactivate();
         return result;
@@ -20080,7 +20080,7 @@ namespace Legion {
         if (!launch_space.exists())
           launch_space = find_index_launch_space(launcher.launch_domain);
         Future result = task->initialize_task(parent, launcher, launch_space, 
-                                              redop, deterministic);
+                                              redop, deterministic, outputs);
         inline_child_task(task);
         task->deactivate();
         return result;

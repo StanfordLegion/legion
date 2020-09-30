@@ -2969,6 +2969,12 @@ namespace Legion {
 #endif
     };
 
+    /**
+     * \class OutputRegion
+     * An OutputRegion provides an interface for applications to specify
+     * the output instances or allocations of memory to associate with
+     * output region requirements. 
+     */
     class OutputRegion : public Unserializable<OutputRegion> {
     public:
       OutputRegion(void);
@@ -3350,7 +3356,7 @@ namespace Legion {
       TaskID                              task_id; 
       std::vector<IndexSpaceRequirement>  indexes;
       std::vector<RegionRequirement>      regions;
-      std::vector<OutputRequirement>      output_regions;
+      std::vector<RegionRequirement>      output_regions;
       std::vector<Future>                 futures;
       std::vector<Grant>                  grants;
       std::vector<PhaseBarrier>           wait_barriers;
@@ -6325,7 +6331,6 @@ namespace Legion {
        * @param regions a vector to which output regions are returned
        */
       void get_output_regions(Context ctx, std::vector<OutputRegion> &regions);
-
     public:
       //------------------------------------------------------------------------
       // Fill Field Operations

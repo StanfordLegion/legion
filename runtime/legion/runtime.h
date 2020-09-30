@@ -663,10 +663,11 @@ namespace Legion {
       static const AllocationType alloc_type = OUTPUT_REGION_ALLOC;
     public:
       OutputRegionImpl(unsigned index,
-                       const OutputRequirement &req,
+                       const RegionRequirement &req,
                        InstanceSet instance_set,
                        TaskContext *ctx,
-                       Runtime *rt);
+                       Runtime *rt, 
+                       const bool global_indexing);
       OutputRegionImpl(const OutputRegionImpl &rhs);
       ~OutputRegionImpl(void);
     public:
@@ -703,7 +704,7 @@ namespace Legion {
     public:
       bool is_complete(FieldID &unbound_field) const;
     public:
-      const OutputRequirement &get_requirement(void) const { return req; }
+      const RegionRequirement &get_requirement(void) const { return req; }
       size_t size(void) const { return num_elements; }
     public:
       Runtime *const runtime;
@@ -715,12 +716,13 @@ namespace Legion {
         size_t alignment;
       };
     private:
-      unsigned index;
-      OutputRequirement req;
+      RegionRequirement req;
       InstanceSet instance_set;
-      size_t num_elements;
       // Output data batched during task execution
       std::map<FieldID,ExternalInstanceInfo> returned_instances;
+      size_t num_elements;
+      const unsigned index;
+      const bool global_indexing;
     };
 
     /**
@@ -2471,9 +2473,6 @@ namespace Legion {
       void remap_region(Context ctx, PhysicalRegion region);
       void unmap_region(Context ctx, PhysicalRegion region);
       void unmap_all_regions(Context ctx);
-    public:
-      OutputRegion get_output_region(Context ctx, unsigned index);
-      void get_output_regions(Context ctx, std::vector<OutputRegion> &regions);
     public:
       void fill_fields(Context ctx, const FillLauncher &launcher);
       void fill_fields(Context ctx, const IndexFillLauncher &launcher);

@@ -1049,7 +1049,7 @@ namespace Legion {
       virtual void pack_collective_stage(Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      void exchange_output_sizes(void);
+      RtEvent exchange_output_sizes(void);
     public:
       std::map<unsigned,SizeMap> &all_output_sizes;
     };
@@ -1095,9 +1095,10 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void replay_analysis(void);
       virtual void resolve_false(bool speculated, bool launched);
+      virtual void shard_off(RtEvent mapped_precondition);
     public:
       // Override these so we can broadcast the future result
-      virtual void trigger_task_complete(bool deferred = false);
+      virtual void trigger_task_complete(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
@@ -1138,9 +1139,12 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void replay_analysis(void);
+    protected:
+      virtual RtEvent prepare_index_task_complete(void);
     public:
       // Override this so we can exchange reduction results
-      virtual void trigger_task_complete(bool deferred = false);
+      virtual void trigger_task_complete(void);
+    public:
       // Have to override this too for doing output in the
       // case that we misspeculate
       virtual void resolve_false(bool speculated, bool launched);
