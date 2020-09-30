@@ -12605,7 +12605,7 @@ class State(object):
             else:
                 print(str(inst))
             print('  Memory '+str(inst.memory))
-            print('  '+str(inst.region))
+            print('  '+str(inst.index_expr))
             print('  Fields:')
             for field in inst.fields:
                 print('    '+str(field))
