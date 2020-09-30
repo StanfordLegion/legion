@@ -24,44 +24,47 @@ import "regent"
 
 local c = regentlib.c
 
+struct t {
+  f: int1d,
+}
+
 terra e(x : int) : int
   return 3
 end
 
-task f(r : region(int)) : int
+task f(r : region(ispace(int1d), t)) : int
 where reads(r) do
   return 5
 end
 
-task f2(r : region(int), s : region(int)) : int
+task f2(r : region(ispace(int1d), t), s : region(ispace(int1d), t)) : int
 where reads(r, s) do
   return 5
 end
 
-task g(r : region(int)) : int
+task g(r : region(ispace(int1d), t)) : int
 where reads(r), writes(r) do
   return 5
 end
 
-task g2(r : region(int), s : region(int)) : int
+task g2(r : region(ispace(int1d), t), s : region(ispace(int1d), t)) : int
 where reads(r, s), writes(r, s) do
   return 5
 end
 
 task main()
   var n = 5
-  var r = region(ispace(ptr, n), int)
-  var rc = c.legion_coloring_create()
-  for i = 0, n do
-    c.legion_coloring_ensure_color(rc, i)
+  var cs = ispace(int1d, n)
+  var r = region(cs, t)
+  for i in cs do
+    r[i].f = i/2
   end
-  var p_disjoint = partition(disjoint, r, rc)
-  var p_aliased = partition(aliased, r, rc)
+  var p_disjoint = partition(equal, r, cs)
+  var p_aliased = image(r, p_disjoint, r.f)
   var r0 = p_disjoint[0]
   var r1 = p_disjoint[1]
-  var p0_disjoint = partition(disjoint, r0, rc)
-  var p1_disjoint = partition(disjoint, r1, rc)
-  c.legion_coloring_destroy(rc)
+  var p0_disjoint = partition(equal, r0, cs)
+  var p1_disjoint = partition(equal, r1, cs)
 
   -- not optimized: loop-variant argument is interfering
   __demand(__index_launch)

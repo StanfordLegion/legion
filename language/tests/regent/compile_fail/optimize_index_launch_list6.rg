@@ -60,7 +60,7 @@ task main()
   var cs = ispace(int1d, n)
   var r = region(cs, t)
   for i in cs do
-    r[i].f = i
+    r[i].f = i/2
   end
   var p_disjoint = partition(equal, r, cs)
   var p_aliased = image(r, p_disjoint, r.f)
