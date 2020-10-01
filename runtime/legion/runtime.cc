@@ -28,6 +28,7 @@
 #include "legion/legion_replication.h"
 #include "legion/mapper_manager.h"
 #include "legion/garbage_collection.h"
+#include "legion/range_allocator.h"
 #include "mappers/default_mapper.h"
 #include "mappers/test_mapper.h"
 #include "mappers/replay_mapper.h"
@@ -36,11 +37,9 @@
 
 #include <unistd.h> // sleep for warnings
 
-#ifdef LEGION_MALLOC_INSTANCES
 #include <sys/mman.h>
 #ifdef LEGION_USE_CUDA
 #include <cuda.h>
-#endif
 #endif
 
 #define REPORT_DUMMY_CONTEXT(message)                        \
@@ -64,6 +63,7 @@ namespace Legion {
     Realm::Logger log_garbage("legion_gc");
     Realm::Logger log_shutdown("shutdown");
     Realm::Logger log_tracing("tracing");
+    Realm::Logger log_eager("eager");
     namespace LegionSpy {
       Realm::Logger log_spy("legion_spy");
     };
@@ -3505,6 +3505,388 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Output Region Impl
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OutputRegionImpl::OutputRegionImpl(unsigned i,
+                                       const RegionRequirement &r,
+                                       InstanceSet is,
+                                       TaskContext *ctx,
+                                       Runtime *rt, const bool global)
+      : Collectable(), runtime(rt), context(ctx),
+        req(r), instance_set(is), num_elements(-1LU), index(i), 
+        created_region(req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG),
+        global_indexing(global)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegionImpl::OutputRegionImpl(const OutputRegionImpl &rhs)
+      : Collectable(), runtime(NULL), context(NULL),
+        req(), instance_set(), num_elements(-1LU), index(-1U), 
+        created_region(false), global_indexing(false)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegionImpl::~OutputRegionImpl(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegionImpl& OutputRegionImpl::operator=(
+                                                  const OutputRegionImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    Memory OutputRegionImpl::target_memory(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(instance_set.size() > 0);
+#endif
+      InstanceRef ref = instance_set[0];
+      return ref.get_manager()->as_individual_manager()->get_memory();
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::return_data(size_t new_num_elements,
+                                       FieldID field_id,
+                                       uintptr_t ptr,
+                                       size_t alignment,
+                                       bool eager_pool /*= false */)
+    //--------------------------------------------------------------------------
+    {
+      std::map<FieldID,ExternalInstanceInfo>::iterator finder =
+        returned_instances.find(field_id);
+      if (finder != returned_instances.end())
+      {
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
+          "Data has already been set to field %u of output region %u of "
+          "task %s (UID: %lld). You can return data for each field of an "
+          "output region only once.",
+          field_id, index, context->owner_task->get_task_name(),
+          context->owner_task->get_unique_op_id());
+      }
+
+      if (num_elements != -1LU && new_num_elements != num_elements)
+      {
+          REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
+            "Output region %u of task %s (UID: %lld) has already been "
+            "initialized to have %zd elements, but the new output data "
+            "holds %zd elements. You must return the same number of "
+            "elements to all the fields in the same output region.",
+            index, context->owner_task->get_task_name(),
+            context->owner_task->get_unique_op_id(),
+            num_elements, new_num_elements);
+      }
+      else
+        num_elements = new_num_elements;
+
+      if (req.privilege_fields.find(field_id) == req.privilege_fields.end())
+      {
+          REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_FIELD,
+            "Output region %u of task %s (UID: %lld) does not have privilege "
+            "on field %u.", index, context->owner_task->get_task_name(),
+            context->owner_task->get_unique_op_id(), field_id);
+      }
+
+      // Here we simply queue up the output data, rather than eagerly
+      // creating and setting an instance to the output region.
+      ExternalInstanceInfo &info = returned_instances[field_id];
+      info.eager_pool = eager_pool;
+      // Sanitize the pointer when the size is 0
+      info.ptr = num_elements != 0 ? ptr : 0;
+      info.alignment = alignment;
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::return_data(size_t num_elements,
+                                       std::map<FieldID,void*> ptrs,
+                                       std::map<FieldID,size_t> *_alignments)
+    //--------------------------------------------------------------------------
+    {
+      std::map<FieldID,size_t> dummy_alignments;
+      std::map<FieldID,size_t> &alignments =
+        _alignments != NULL ?  *_alignments : dummy_alignments;
+
+      for (std::map<FieldID,void*>::iterator it = ptrs.begin();
+           it != ptrs.end(); ++it)
+      {
+        std::map<FieldID,size_t>::iterator finder = alignments.find(it->first);
+        size_t alignment = finder != alignments.end() ? finder->second : 0;
+        return_data(num_elements,
+                    it->first,
+                    reinterpret_cast<uintptr_t>(it->second),
+                    alignment,
+                    false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::return_data(FieldID field_id,
+                                       PhysicalInstance instance,
+                                       size_t field_size,
+                                       const size_t *pnum_elements)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *fspace_node = 
+        runtime->forest->get_node(req.region.get_field_space());
+      size_t alloc_size = fspace_node->get_field_size(field_id);
+
+      if (alloc_size != field_size)
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
+          "Field %u of output region %u of task %s (UID: %lld) has a type of "
+          "size %zd, but the returned deferred buffer is allocaited with a "
+          "type of size %zd.",
+          field_id, index, context->owner_task->get_task_name(),
+          context->owner_task->get_unique_op_id(), alloc_size, field_size);
+
+
+      // The realm instance backing a deferred buffer is currently tagged as
+      // a task local instance, so we need to tell the runtime that the instance
+      // now escapes the context.
+      uintptr_t ptr = context->escape_task_local_instance(instance);
+
+      // This is safe to do as we require the deferred buffer to be 1-D.
+      const Realm::InstanceLayout<1,coord_t> *layout =
+        reinterpret_cast<const Realm::InstanceLayout<1,coord_t>*>(
+            instance.get_layout());
+
+      size_t num_elements = pnum_elements != NULL
+                          ? *pnum_elements
+                          : layout->space.bounds.volume();
+
+      return_data(num_elements, field_id, ptr, layout->alignment_reqd, true);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::finalize(bool defer /*= true*/)
+    //--------------------------------------------------------------------------
+    {
+      Domain domain;
+      RegionNode *node = runtime->forest->get_node(req.region);
+      if (created_region)
+      {
+        IndexSpaceNode *index_node =
+          node->get_row_source()->as_index_space_node();
+        // Subregions of a globally indexed output region cannot be finalized 
+        // in the first round because their sizes are yet to be determined.
+        if (defer && req.partition.exists() && global_indexing)
+        {
+          add_reference();
+          FinalizeOutputArgs args(this);
+          runtime->issue_runtime_meta_task(
+              args, LG_THROUGHPUT_DEFERRED_PRIORITY,
+              Runtime::protect_event(index_node->index_space_ready));
+          return;
+        }
+
+        // Initialize the index space domain
+        if (req.partition.exists())
+        {
+          if (!global_indexing)
+          {
+            DomainPoint index_point = context->owner_task->index_point;
+            domain.dim = index_point.get_dim() + 1;
+#ifdef DEBUG_LEGION
+            assert(domain.dim <= LEGION_MAX_DIM);
+#endif
+            for (int idx = 0; idx < index_point.dim; ++idx)
+            {
+              domain.rect_data[idx + 1] = index_point[idx];
+              domain.rect_data[idx + 1 + domain.dim] = index_point[idx];
+            }
+            if (num_elements > 0)
+            {
+              domain.rect_data[0] = 0;
+              domain.rect_data[domain.dim] = num_elements - 1;
+            }
+            else
+            {
+              domain.rect_data[0] = 0;
+              domain.rect_data[domain.dim] = -1;
+            }
+
+            runtime->forest->set_pending_space_domain(
+                index_node->handle, domain, runtime->address_space);
+          }
+          else
+          {
+            // For a globally indexed output region, the domain has
+            // already been initialized once we reach here, so
+            // we just retrieve it.
+            ApEvent ready = ApEvent::NO_AP_EVENT;
+            domain = index_node->get_domain(ready, true);
+            if (ready.exists())
+              ready.wait();
+          }
+        }
+        else
+        {
+          domain =
+            num_elements > 0 ? Rect<1>(0, num_elements - 1) : Rect<1>(0, -1);
+          index_node->set_domain(domain, runtime->address_space);
+        }
+      }
+      else
+        node->row_source->get_launch_space_domain(domain);
+
+      FieldSpaceNode *fspace_node = node->get_column_source();
+
+      // Create a Realm instance and update the physical manager
+      // for each output field
+      for (std::map<FieldID,ExternalInstanceInfo>::iterator it =
+           returned_instances.begin(); it !=
+           returned_instances.end(); ++it)
+      {
+        FieldID field_id = it->first;
+        ExternalInstanceInfo &info = it->second;
+        size_t field_size = fspace_node->get_field_size(field_id);
+        std::set<FieldID> fields; fields.insert(field_id);
+        FieldMask mask = fspace_node->get_field_mask(fields);
+
+        // Find the right physical manager by checking against
+        // the field mask of the instance ref
+        IndividualManager *manager = NULL;
+        for (unsigned idx = 0; idx < instance_set.size(); ++idx)
+        {
+          const InstanceRef &instance = instance_set[idx];
+          if (!!(instance.get_valid_fields() & mask))
+          {
+            manager =
+              instance.get_instance_manager()->as_individual_manager();
+            break;
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(manager != NULL);
+#endif
+        // Create a Realm layout
+        std::map<Realm::FieldID,size_t> field_sizes;
+        field_sizes[field_id] = field_size;
+        Realm::InstanceLayoutConstraints constraints(field_sizes,
+                                                     0 /*block_size*/);
+        Realm::InstanceLayoutGeneric *layout = NULL;
+        switch (domain.get_dim())
+        {
+#define DIMFUNC(DIM)                                                         \
+          case DIM:                                                          \
+            {                                                                \
+              int dim_order[DIM];                                            \
+              for (unsigned idx = 0; idx < DIM; ++idx)                       \
+                dim_order[idx] = idx;                                        \
+              const DomainT<DIM,coord_t> bounds = Rect<DIM,coord_t>(domain); \
+              layout =                                                       \
+                Realm::InstanceLayoutGeneric::choose_instance_layout(        \
+                    bounds, constraints, dim_order);                         \
+              break;                                                         \
+            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+          default:
+            assert(false);
+        }
+#ifdef DEBUG_LEGION
+        assert(layout != NULL);
+#endif
+
+        LayoutConstraints *manager_cons = manager->layout->constraints;
+
+        size_t alignment = 0;
+        if (!manager_cons->alignment_constraints.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(manager_cons->alignment_constraints.size() == 1);
+          assert(manager_cons->alignment_constraints[0].fid == field_id);
+#endif
+          alignment = manager_cons->alignment_constraints[0].alignment;
+        }
+        // If no alignment is given, set it to the field size
+        if (alignment == 0)
+          alignment = field_size;
+        size_t bytes_used =
+          (num_elements * field_size + alignment - 1) / alignment * alignment;
+        layout->bytes_used = bytes_used;
+
+        if (!manager_cons->offset_constraints.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(manager_cons->offset_constraints.size() == 1);
+          assert(manager_cons->offset_constraints[0].fid == field_id);
+#endif
+          Realm::InstanceLayoutGeneric::FieldLayout &fl =
+            layout->fields[field_id];
+          fl.rel_offset = manager_cons->offset_constraints[0].offset;
+        }
+
+        // Create an external Realm instance
+        Realm::RegionInstance instance;
+        Realm::ProfilingRequestSet no_requests;
+        RtEvent wait_on(Realm::RegionInstance::create_external(
+          instance, manager->get_memory(), info.ptr, layout, no_requests));
+        if (wait_on.exists())
+          wait_on.wait();
+#ifdef DEBUG_LEGION
+        assert(instance.exists());
+#endif
+        // Finally we set the instance to the physical manager
+        manager->update_physical_instance(instance,
+                                          info.eager_pool
+                                          ? IndividualManager::EAGER
+                                          : IndividualManager::EXTERNAL_OWNED,
+                                          bytes_used,
+                                          info.ptr);
+
+        // If this is an allocation drawn from the eager pool,
+        // we need to link the pointer back to the memory manager with a
+        // new instance name so that the manager can keep track of this
+        // instance.
+        if (info.eager_pool)
+          manager->memory_manager->link_eager_instance(instance, info.ptr);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void OutputRegionImpl::handle_finalize_output(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const FinalizeOutputArgs *finalize_args = (const FinalizeOutputArgs*)args;
+      OutputRegionImpl *region = finalize_args->region;
+      region->finalize(false);
+      if (region->remove_reference())
+        delete region;
+    }
+
+    //--------------------------------------------------------------------------
+    bool OutputRegionImpl::is_complete(FieldID &unbound_field) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<FieldID>::const_iterator it =
+           req.instance_fields.begin(); it !=
+           req.instance_fields.end(); ++it)
+      {
+        if (returned_instances.find(*it) == returned_instances.end())
+        {
+          unbound_field = *it;
+          return false;
+        }
+      }
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Grant Impl 
     /////////////////////////////////////////////////////////////
 
@@ -5201,7 +5583,9 @@ namespace Legion {
     MemoryManager::MemoryManager(Memory m, Runtime *rt)
       : memory(m), owner_space(m.address_space()), 
         is_owner(m.address_space() == rt->address_space),
-        capacity(m.capacity()), remaining_capacity(capacity), runtime(rt)
+        capacity(m.capacity()), remaining_capacity(capacity), runtime(rt),
+        eager_pool_instance(PhysicalInstance::NO_INST), eager_pool(0),
+        eager_allocator(NULL), next_allocation_id(0)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_USE_CUDA
@@ -5222,6 +5606,38 @@ namespace Legion {
         local_gpu = finder.first();
       }
 #endif
+      if (!is_owner) return;
+
+      // Allocate eager pool
+      coord_t eager_pool_size = capacity * runtime->eager_alloc_percentage / 100;
+      log_eager.info("create an eager pool of size %lld on memory " IDFMT,
+                     eager_pool_size, memory.id);
+      const DomainT<1,coord_t> bounds(Rect<1>(0, Point<1>(eager_pool_size - 1)));
+      const std::vector<size_t> field_sizes(1,sizeof(char));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[] = {0};
+      Realm::InstanceLayoutGeneric *layout =
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds,
+                                                             constraints,
+                                                             dim_order);
+      Realm::ProfilingRequestSet no_requests;
+      Realm::RegionInstance::create_instance(eager_pool_instance,
+                                             memory,
+                                             layout,
+                                             no_requests);
+
+      if (eager_pool_size > 0)
+      {
+        typedef BasicRangeAllocator<size_t, size_t> Allocator;
+
+        Realm::AffineAccessor<char,1,coord_t> accessor(eager_pool_instance,
+                                                       0/*field id*/);
+        eager_pool = reinterpret_cast<uintptr_t>(accessor.ptr(0));
+
+        eager_allocator = new Allocator();
+        Allocator *alloc = reinterpret_cast<Allocator*>(eager_allocator);
+        alloc->add_range(0, eager_pool_size - 1);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5238,6 +5654,10 @@ namespace Legion {
     MemoryManager::~MemoryManager(void)
     //--------------------------------------------------------------------------
     {
+      if (eager_pool_instance.exists())
+        eager_pool_instance.destroy();
+      delete reinterpret_cast<BasicRangeAllocator<size_t, size_t>*>(
+          eager_allocator);
     }
 
     //--------------------------------------------------------------------------
@@ -7819,6 +8239,74 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalManager* MemoryManager::create_unbound_instance(
+                                               LogicalRegion region,
+                                               LayoutConstraintSet &constraints,
+                                               ApEvent ready_event,
+                                               MapperID mapper_id,
+                                               Processor target_proc,
+                                               GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      // We don't need to acquire allocation privilege as this function
+      // doesn't eagerly perform any instance collections.
+
+      RegionNode *node = runtime->forest->get_node(region);
+      FieldSpaceNode *fspace_node = node->get_column_source();
+
+      const std::vector<FieldID> &fields =
+        constraints.field_constraint.field_set;
+      FieldMask instance_mask;
+      std::vector<size_t> field_sizes(fields.size());
+      std::vector<unsigned> mask_index_map(fields.size());
+      std::vector<CustomSerdezID> serdez(fields.size());
+      fspace_node->compute_field_layout(
+          fields, field_sizes, mask_index_map, serdez, instance_mask);
+
+      LayoutDescription *layout =
+        fspace_node->find_layout_description(instance_mask, 1, constraints);
+      if (layout == NULL)
+      {
+        LayoutConstraints *internal_constraints =
+          runtime->register_layout(
+              fspace_node->handle, constraints, true/*internal*/);
+        layout = fspace_node->create_layout_description(
+            instance_mask, 1, internal_constraints,
+            mask_index_map, fields, field_sizes, serdez);
+      }
+
+      // Create an individual manager with a null instance
+      DistributedID did = runtime->get_available_distributed_id();
+      IndividualManager *manager =
+        new IndividualManager(runtime->forest, did,
+                              runtime->address_space,
+                              this,
+                              PhysicalInstance::NO_INST,
+                              node->get_row_source()->as_index_space_node(),
+                              NULL/*piece_list*/,
+                              0/*piece_list_size*/,
+                              fspace_node,
+                              region.get_tree_id(),
+                              layout,
+                              0/*redop id*/, true/*register now*/,
+                              -1U/*instance_footprint*/,
+                              ready_event,
+                              IndividualManager::UNBOUND,
+                              NULL/*op*/,
+                              false/*shadow_instance*/);
+
+      // Register the instance to make it visible to downstream tasks
+      record_created_instance(manager,
+                              true/*acquire*/,
+                              mapper_id,
+                              target_proc,
+                              priority,
+                              false/*remote*/);
+
+      return manager;
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent MemoryManager::acquire_allocation_privilege(void)
     //--------------------------------------------------------------------------
     {
@@ -7936,6 +8424,7 @@ namespace Legion {
       // to avoid races with deletions
       bool early_valid = acquire || (priority == LEGION_GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
+      bool external = !manager->is_external_instance();
       // Since we're going to put this in the table add a reference
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       {
@@ -7949,6 +8438,7 @@ namespace Legion {
           info.current_state = VALID_STATE;
         info.min_priority = priority;
         info.instance_size = instance_size;
+        info.external = external;
         info.mapper_priorities[
           std::pair<MapperID,Processor>(mapper_id,p)] = priority;
       }
@@ -8008,7 +8498,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MemoryManager::delete_by_size_and_state(const size_t needed_size,
-                                          InstanceState state, bool larger_only)
+                                                 const InstanceState state,
+                                                 const bool larger_only,
+                                                 const bool external)
     //--------------------------------------------------------------------------
     {
       bool pass_complete = true;
@@ -8024,7 +8516,8 @@ namespace Legion {
             for (TreeInstances::const_iterator it = 
                   cit->second.begin(); it != cit->second.end(); it++)
             {
-              if (it->second.current_state != COLLECTABLE_STATE)
+              if ((it->second.current_state != COLLECTABLE_STATE) ||
+                  (it->second.external == external))
                 continue;
               const size_t inst_size = it->first->get_instance_size();
               if ((inst_size >= needed_size) || !larger_only)
@@ -8070,7 +8563,8 @@ namespace Legion {
             for (TreeInstances::iterator it = 
                   cit->second.begin(); it != cit->second.end(); it++)
             {
-              if (it->second.current_state != ACTIVE_STATE)
+              if ((it->second.current_state != ACTIVE_STATE) ||
+                  (it->second.external == external))
                 continue;
               const size_t inst_size = it->first->get_instance_size();
               if ((inst_size >= needed_size) || !larger_only)
@@ -8201,6 +8695,172 @@ namespace Legion {
               it != vis_mems.end(); it++)
           visible_memories.insert(*it);
       return (visible_memories.find(other) != visible_memories.end());
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MemoryManager::create_eager_instance(
+               PhysicalInstance &instance, Realm::InstanceLayoutGeneric *layout)
+    //--------------------------------------------------------------------------
+    {
+      typedef BasicRangeAllocator<size_t, size_t> Allocator;
+      RtEvent wait_on(RtEvent::NO_EVENT);
+      instance = PhysicalInstance::NO_INST;
+      if (eager_allocator == NULL) return wait_on;
+
+      {
+        AutoLock lock(manager_lock);
+        size_t allocation_id = next_allocation_id++;
+
+        size_t offset = 0;
+        size_t size = layout->bytes_used;
+        Allocator *alloc = reinterpret_cast<Allocator*>(eager_allocator);
+        bool allocated = alloc->allocate(
+            allocation_id, size, layout->alignment_reqd, offset);
+
+        if (allocated)
+        {
+          uintptr_t ptr = eager_pool + offset;
+          Realm::ProfilingRequestSet no_requests;
+          wait_on = RtEvent(Realm::RegionInstance::create_external(
+                instance, memory, ptr, layout, no_requests));
+#ifdef DEBUG_LEGION
+          assert(eager_instances.find(instance) == eager_instances.end());
+#endif
+          eager_instances[instance] = std::make_pair(ptr, allocation_id);
+          log_eager.debug("allocate instance " IDFMT
+                          " (%p+%zd, %zd) on memory " IDFMT,
+                          instance.id,
+                          reinterpret_cast<void*>(eager_pool),
+                          offset,
+                          size,
+                          memory.id);
+        }
+      }
+
+      return wait_on;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::free_eager_instance(
+                                       PhysicalInstance instance, RtEvent defer)
+    //--------------------------------------------------------------------------
+    {
+      typedef BasicRangeAllocator<size_t, size_t> Allocator;
+
+      if (defer.exists() && !defer.has_triggered())
+      {
+        log_eager.debug("defer deallocation of instance " IDFMT
+                        " on memory " IDFMT ": wait for " IDFMT,
+                        instance.id, memory.id, defer.id);
+        FreeEagerInstanceArgs args(this, instance);
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, defer);
+      }
+      else
+      {
+        {
+          AutoLock lock(manager_lock);
+          std::map<PhysicalInstance,std::pair<uintptr_t,size_t> >::iterator
+            finder = eager_instances.find(instance);
+#ifdef DEBUG_LEGION
+          assert(finder != eager_instances.end());
+#endif
+          Allocator *alloc = reinterpret_cast<Allocator*>(eager_allocator);
+          alloc->deallocate(finder->second.second);
+          eager_instances.erase(finder);
+          log_eager.debug("deallocate instance " IDFMT " on memory " IDFMT,
+                          instance.id, memory.id);
+        }
+        instance.destroy();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::link_eager_instance(
+                                       PhysicalInstance instance, uintptr_t ptr)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock lock(manager_lock);
+      std::map<uintptr_t,size_t>::iterator finder =
+        unlinked_allocations.find(ptr);
+#ifdef DEBUG_LEGION
+      assert(finder != unlinked_allocations.end());
+#endif
+      log_eager.debug("link instance " IDFMT " (%p, %zd) on memory " IDFMT,
+                      instance.id, reinterpret_cast<void*>(ptr),
+                      finder->second, memory.id);
+      eager_instances[instance] = std::make_pair(finder->first, finder->second);
+      unlinked_allocations.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    uintptr_t MemoryManager::unlink_eager_instance(PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      // Note that this function removes the instance from the manager without
+      // deallocating it. It's the caller's responsibility to link
+      // the allocation back in the memory manager
+      AutoLock lock(manager_lock);
+      std::map<PhysicalInstance,std::pair<uintptr_t,size_t> >::iterator
+        finder = eager_instances.find(instance);
+#ifdef DEBUG_LEGION
+      assert(finder != eager_instances.end());
+#endif
+      eager_instances.erase(finder);
+      uintptr_t ptr = finder->second.first;
+      size_t allocation_id = finder->second.second;
+      log_eager.debug("unlink instance " IDFMT " (%p, %zd) on memory " IDFMT,
+                      instance.id, reinterpret_cast<void*>(ptr),
+                      allocation_id, memory.id);
+
+#ifdef DEBUG_LEGION
+      assert(unlinked_allocations.find(ptr) == unlinked_allocations.end());
+#endif
+      unlinked_allocations[ptr] = allocation_id;
+      return ptr;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MemoryManager::handle_free_eager_instance(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const FreeEagerInstanceArgs *fargs = (const FreeEagerInstanceArgs*)args;
+      fargs->manager->free_eager_instance(fargs->inst, RtEvent::NO_RT_EVENT);
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::free_external_allocation(uintptr_t ptr, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      switch (memory.kind())
+      {
+        case Memory::SYSTEM_MEM:
+        case Memory::SOCKET_MEM:
+          {
+            free((void*)ptr);
+            break;
+          }
+        case Memory::REGDMA_MEM:
+          {
+            munlock((void*)ptr, size);
+            free((void*)ptr);
+            break;
+          }
+#ifdef LEGION_USE_CUDA
+        case Memory::GPU_FB_MEM:
+          {
+            cuMemFree((CUdeviceptr)ptr);
+            break;
+          }
+        case Memory::Z_COPY_MEM:
+          {
+            cuMemFreeHost((void*)ptr);
+            break;
+          }
+#endif
+        default:
+          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+              "Unsupported memory kind %d", memory.kind())
+      }
     }
 
 #ifdef LEGION_MALLOC_INSTANCES
@@ -8377,54 +9037,26 @@ namespace Legion {
         size = finder->second;
         allocations.erase(finder);
       }
-      switch (memory.kind())
-      {
-        case SYSTEM_MEM:
-        case SOCKET_MEM:
-          {
-            free((void*)ptr);
-            break;
-          }
-        case REGDMA_MEM:
-          {
-            munlock((void*)ptr, size);
-            free((void*)ptr);
-            break;
-          }
 #ifdef LEGION_USE_CUDA
-        case Z_COPY_MEM:
-        case GPU_FB_MEM:
-          {
-            if (needs_defer)
-            {
-              // Put the allocation back in for when we go to look
-              // for it on the second pass
-              {
-                AutoLock m_lock(manager_lock);
+      if (needs_defer &&
+          ((memory.kind() == Z_COPY_MEM) || (memory.kind() == GPU_FB_MEM)))
+      {
+        // Put the allocation back in for when we go to look
+        // for it on the second pass
+        {
+          AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
-                assert(allocations.find(ptr) == allocations.end());
+          assert(allocations.find(ptr) == allocations.end());
 #endif
-                allocations[ptr] = size;
-              }
-              FreeInstanceArgs args(this, ptr);
-              runtime->issue_application_processor_task(args, LG_LOW_PRIORITY, 
-                                                        local_gpu, defer);
-            }
-            else
-            {
-              if (memory.kind() == Memory::GPU_FB_MEM)
-                cuMemFree((CUdeviceptr)ptr);
-              else
-                cuMemFreeHost((void*)ptr);
-            }
-            break;
-          }
-#endif
-        default:
-          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
-              "Unsupported memory kind for LEGION_MALLOC_INSTANCES %d",
-              memory.kind())
+          allocations[ptr] = size;
+        }
+        FreeInstanceArgs args(this, ptr);
+        runtime->issue_application_processor_task(args, LG_LOW_PRIORITY, 
+                                                  local_gpu, defer);
+        return;
       }
+#endif
+      free_external_allocation(ptr, size);
     }
 
     //--------------------------------------------------------------------------
@@ -9409,6 +10041,12 @@ namespace Legion {
             {
               runtime->handle_send_instance_manager(derez, 
                                                     remote_address_space);
+              break;
+            }
+          case SEND_MANAGER_UPDATE:
+            {
+              runtime->handle_send_manager_update(derez,
+                                                  remote_address_space);
               break;
             }
           case SEND_COLLECTIVE_MANAGER:
@@ -13039,6 +13677,7 @@ namespace Legion {
         initial_task_window_hysteresis(config.initial_task_window_hysteresis),
         initial_tasks_to_schedule(config.initial_tasks_to_schedule),
         initial_meta_task_vector_width(config.initial_meta_task_vector_width),
+        eager_alloc_percentage(config.eager_alloc_percentage),
         max_message_size(config.max_message_size),
         gc_epoch_size(config.gc_epoch_size),
         max_control_replication_contexts(
@@ -13248,6 +13887,7 @@ namespace Legion {
         initial_task_window_hysteresis(rhs.initial_task_window_hysteresis),
         initial_tasks_to_schedule(rhs.initial_tasks_to_schedule),
         initial_meta_task_vector_width(rhs.initial_meta_task_vector_width),
+        eager_alloc_percentage(rhs.eager_alloc_percentage),
         max_message_size(rhs.max_message_size),
         gc_epoch_size(rhs.gc_epoch_size), 
         max_control_replication_contexts(rhs.max_control_replication_contexts),
@@ -15428,32 +16068,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_task(Context ctx, const TaskLauncher &launcher)
+    Future Runtime::execute_task(Context ctx, const TaskLauncher &launcher,
+                                 std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     { 
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context execute task!");
-      return ctx->execute_task(launcher); 
+      return ctx->execute_task(launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
-    FutureMap Runtime::execute_index_space(Context ctx, 
-                                           const IndexTaskLauncher &launcher)
+    FutureMap Runtime::execute_index_space(
+                                  Context ctx, const IndexTaskLauncher &launcher,
+                                  std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context execute index space!");
-      return ctx->execute_index_space(launcher); 
+      return ctx->execute_index_space(launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_index_space(Context ctx, 
-     const IndexTaskLauncher &launcher, ReductionOpID redop, bool deterministic)
+    Future Runtime::execute_index_space(
+                                 Context ctx, const IndexTaskLauncher &launcher,
+                                 ReductionOpID redop, bool deterministic,
+                                 std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context execute index space!");
-      return ctx->execute_index_space(launcher, redop, deterministic); 
+      return ctx->execute_index_space(launcher, redop, deterministic, outputs);
     }
 
     //--------------------------------------------------------------------------
@@ -18869,6 +19513,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_manager_update(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_MANAGER_UPDATE,
+                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_collective_instance_manager(AddressSpaceID target, 
                                                    Serializer &rez)
     //--------------------------------------------------------------------------
@@ -20769,6 +21421,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndividualManager::handle_send_manager(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_manager_update(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndividualManager::handle_send_manager_update(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -25753,6 +26413,8 @@ namespace Legion {
                         config.initial_tasks_to_schedule, !filter)
         .add_option_int("-lg:vector", 
                         config.initial_meta_task_vector_width, !filter)
+        .add_option_int("-lg:eager_alloc_percentage",
+                        config.eager_alloc_percentage, !filter)
         .add_option_int("-lg:message",config.max_message_size, !filter)
         .add_option_int("-lg:epoch", config.gc_epoch_size, !filter)
         .add_option_int("-lg:local", config.max_local_fields, !filter)
@@ -27730,11 +28392,6 @@ namespace Legion {
             enqueue_args->manager->add_to_ready_queue(enqueue_args->task);
             break;
           }
-        case LG_DEFERRED_TASK_COMPLETE_TASK_ID:
-          {
-            TaskOp::handle_deferred_task_complete(args); 
-            break;
-          }
         case LG_DEFER_MAPPER_MESSAGE_TASK_ID:
           {
             MapperManager::handle_deferred_message(args);
@@ -27958,6 +28615,16 @@ namespace Legion {
         case LG_DEFER_RELEASE_ACQUIRED_TASK_ID:
           {
             Operation::handle_deferred_release(args);
+            break;
+          }
+        case LG_FREE_EAGER_INSTANCE_TASK_ID:
+          {
+            MemoryManager::handle_free_eager_instance(args);
+            break;
+          }
+        case LG_FIANLIZE_OUTPUT_ID:
+          {
+            OutputRegionImpl::handle_finalize_output(args);
             break;
           }
 #ifdef LEGION_MALLOC_INSTANCES

@@ -8686,9 +8686,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::DisjointPartitionRefinement::DisjointPartitionRefinement(
-     EquivalenceSet *owner, IndexPartNode *p, std::set<RtEvent> &applied_events)
+                                    EquivalenceSet *owner, IndexPartNode *p,
+                                    std::set<RtEvent> &applied_events, bool sym)
       : owner_did(owner->did), partition(p), total_child_volume(0),
-        partition_volume(partition->get_union_expression()->get_volume())
+        partition_volume(
+          sym ? partition->color_space->get_volume()
+              : partition->get_union_expression()->get_volume()),
+        symbolic(sym)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8703,7 +8707,7 @@ namespace Legion {
       const DisjointPartitionRefinement &rhs, std::set<RtEvent> &applied_events)
       : owner_did(rhs.owner_did), partition(rhs.partition), 
         children(rhs.get_children()), total_child_volume(children.size()), 
-        partition_volume(rhs.get_volume())
+        partition_volume(rhs.get_volume()), symbolic(rhs.symbolic)
     //--------------------------------------------------------------------------
     {
       WrapperReferenceMutator mutator(applied_events);
@@ -8728,7 +8732,10 @@ namespace Legion {
       assert(children.find(node) == children.end());
 #endif
       children[node] = child;
-      total_child_volume += node->get_volume();
+      if (symbolic)
+        total_child_volume += 1;
+      else
+        total_child_volume += node->get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -9149,6 +9156,7 @@ namespace Legion {
                                                     IndexSpace handle,
                                                     AddressSpaceID source,
                                                     RtUserEvent trace_done,
+                                                    bool symbolic,
                                                     RtUserEvent deferral_event)
     //--------------------------------------------------------------------------
     {
@@ -9178,7 +9186,8 @@ namespace Legion {
             const RtEvent continuation_pre = 
               chain_deferral_events(deferral_event);
             DeferRayTraceArgs args(this, target, expr, handle, source, 
-                                   trace_done, deferral_event, ray_mask);
+                                   trace_done, deferral_event, ray_mask,
+                                   symbolic);
             runtime->issue_runtime_meta_task(args, 
                             LG_THROUGHPUT_DEFERRED_PRIORITY, continuation_pre);
           }
@@ -9188,7 +9197,8 @@ namespace Legion {
             // triggered so just launch ourselves again whenever the lock
             // should be ready to try again
             DeferRayTraceArgs args(this, target, expr, handle, source, 
-                                   trace_done, deferral_event, ray_mask);
+                                   trace_done, deferral_event, ray_mask,
+                                   symbolic);
             runtime->issue_runtime_meta_task(args,
                               LG_THROUGHPUT_DEFERRED_PRIORITY, eq.try_next());
           }
@@ -9207,6 +9217,7 @@ namespace Legion {
             rez.serialize(handle);
             rez.serialize(source);
             rez.serialize(trace_done);
+            rez.serialize(symbolic);
           }
           runtime->send_equivalence_set_ray_trace_request(logical_owner_space,
                                                           rez);
@@ -9223,7 +9234,8 @@ namespace Legion {
           // If we're refining then we also need to defer this until 
           // the refinements that interfere with us are done
           DeferRayTraceArgs args(this, target, expr, handle, source, 
-                                 trace_done, deferral_event, ray_mask);
+                                 trace_done, deferral_event, ray_mask,
+                                 symbolic);
           runtime->issue_runtime_meta_task(args,
                             LG_THROUGHPUT_DEFERRED_PRIORITY, transition_event);
           return;
@@ -9600,6 +9612,50 @@ namespace Legion {
             ray_mask -= intersections.get_valid_mask();
           }
         }
+        // This is a special case for subspaces of an output region,
+        // where the size of the expression cannot be determined
+        // until the producer task finishes.
+        if (symbolic && !!ray_mask && (set_expr->expr_id != expr->expr_id))
+        {
+          if ((index_space_node != NULL) && handle.exists())
+          {
+            FieldMask disjoint_mask = ray_mask;
+            IndexSpaceNode *node = runtime->forest->get_node(handle);
+#ifdef DEBUG_LEGION
+            // For now we assume that there aren't any partially refined
+            // expressions.
+            assert(unrefined_remainders.empty());
+            // We also assume that we always hit this case
+            // with a complete disjoint partition.
+            // (Otherwise, a purely symbolic refinement
+            //  is impossible under the current setting.)
+            assert((node->parent != NULL) &&
+                   (node->parent->parent == index_space_node) &&
+                   node->parent->is_disjoint() && node->parent->is_complete());
+#endif
+            DisjointPartitionRefinement *dis =
+              new DisjointPartitionRefinement(this, node->parent, done_events,
+                                              true/*symbolic*/);
+            EquivalenceSet *child =
+              add_pending_refinement(expr, disjoint_mask, node, source);
+            pending_to_traverse.insert(child, disjoint_mask);
+            to_traverse_exprs[child] = expr;
+            // If this is a pending refinement then we'll need to
+            // wait for it before traversing farther
+            if (!refinement_done.exists())
+            {
+#ifdef DEBUG_LEGION
+              assert(waiting_event.exists());
+#endif
+              refinement_done = waiting_event;
+            }
+            // Save this for the future
+            dis->add_child(node, child);
+            disjoint_partition_refinements.insert(dis, disjoint_mask);
+            ray_mask -= disjoint_mask;
+          }
+        }
+
         // If we still have fields left, see if we need a refinement
         if (!!ray_mask && (set_expr->expr_id != expr->expr_id) &&
             (expr->get_volume() < set_expr->get_volume()))
@@ -9755,7 +9811,7 @@ namespace Legion {
               (finder->second->get_volume() == expr->get_volume())) ? handle :
                 IndexSpace::NO_SPACE;
           it->first->ray_trace_equivalence_sets(target, finder->second, 
-              it->second, subset_handle, source, done);
+              it->second, subset_handle, source, done, symbolic);
           done_events.insert(done);
         }
         // Clear these since we are done doing them
@@ -9778,7 +9834,8 @@ namespace Legion {
           copy_exprs->swap(to_traverse_exprs);
           const RtUserEvent done = Runtime::create_rt_user_event();
           DeferRayTraceFinishArgs args(target, source, copy_traverse,
-              copy_exprs, expr->get_volume(), handle, done);
+              copy_exprs, symbolic ? 0 : expr->get_volume(),
+              expr->expr_id, handle, done, symbolic);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_DEFERRED_PRIORITY, refinement_done);
           done_events.insert(done);
@@ -9800,7 +9857,7 @@ namespace Legion {
                 (finder->second->get_volume() == expr->get_volume())) ? handle :
                   IndexSpace::NO_SPACE;
             it->first->ray_trace_equivalence_sets(target, finder->second, 
-                it->second, subset_handle, source, done);
+                it->second, subset_handle, source, done, symbolic);
             done_events.insert(done);
           }
         }
@@ -13953,12 +14010,12 @@ namespace Legion {
     EquivalenceSet::DeferRayTraceArgs::DeferRayTraceArgs(EquivalenceSet *s, 
                           RayTracer *t, IndexSpaceExpression *e, 
                           IndexSpace h, AddressSpaceID o, RtUserEvent d,
-                          RtUserEvent def, const FieldMask &m,
+                          RtUserEvent def, const FieldMask &m, bool sym,
                           bool local, bool is_expr_s, IndexSpace expr_h,
                           IndexSpaceExprID expr_i)
       : LgTaskArgs<DeferRayTraceArgs>(implicit_provenance),
           set(s), target(t), expr(local ? e : NULL), handle(h), origin(o), 
-          done(d), deferral(def), ray_mask(new FieldMask(m)),
+          done(d), deferral(def), ray_mask(new FieldMask(m)), symbolic(sym),
           expr_handle(expr_h), expr_id(expr_i), is_local(local),
           is_expr_space(is_expr_s)
     //--------------------------------------------------------------------------
@@ -13980,7 +14037,7 @@ namespace Legion {
         : runtime->forest->find_remote_expression(dargs->expr_id);
       dargs->set->ray_trace_equivalence_sets(dargs->target, expr,
                           *(dargs->ray_mask), dargs->handle, dargs->origin,
-                          dargs->done, dargs->deferral);
+                          dargs->done, dargs->symbolic, dargs->deferral);
       // Clean up our ray mask
       delete dargs->ray_mask;
       // Remove our expression reference too
@@ -14004,12 +14061,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != dargs->exprs->end());
 #endif
-        const IndexSpace subset_handle = 
-          (dargs->handle.exists() && 
-            (finder->second->get_volume() == dargs->volume)) ? dargs->handle :
-              IndexSpace::NO_SPACE;
+        IndexSpace subset_handle;
+        if (dargs->symbolic)
+          subset_handle =
+            (dargs->handle.exists() &&
+             (finder->second->expr_id == dargs->expr_id))
+            ? dargs->handle : IndexSpace::NO_SPACE;
+        else
+          subset_handle =
+            (dargs->handle.exists() &&
+             (finder->second->get_volume() == dargs->volume))
+            ? dargs->handle : IndexSpace::NO_SPACE;
+
         it->first->ray_trace_equivalence_sets(dargs->target, finder->second, 
-            it->second, subset_handle, dargs->source, done);
+            it->second, subset_handle, dargs->source, done, dargs->symbolic);
         done_events.insert(done);
       }
       if (!done_events.empty())
@@ -14271,6 +14336,8 @@ namespace Legion {
       derez.deserialize(origin);
       RtUserEvent done_event;
       derez.deserialize(done_event);
+      bool symbolic;
+      derez.deserialize(symbolic);
       if (ready.exists() || expr_ready.exists())
       {
         const RtEvent defer = Runtime::merge_events(ready, expr_ready);
@@ -14280,7 +14347,7 @@ namespace Legion {
           DeferRayTraceArgs args(set, target, expr, 
                                  handle, origin, done_event,
                                  RtUserEvent::NO_RT_USER_EVENT,
-                                 ray_mask, is_local, is_expr_space, 
+                                 ray_mask, symbolic, is_local, is_expr_space, 
                                  expr_handle, expr_id);
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY, defer); 
@@ -14292,7 +14359,7 @@ namespace Legion {
         // Fall through and actually do the operation now
       }
       set->ray_trace_equivalence_sets(target, expr, ray_mask, handle, 
-                                      origin, done_event);
+                                      origin, done_event, symbolic);
     }
 
     //--------------------------------------------------------------------------
@@ -14436,7 +14503,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent VersionManager::perform_versioning_analysis(InnerContext *context,
                              VersionInfo *version_info, RegionNode *region_node,
-                             const FieldMask &version_mask, Operation *op)
+                             const FieldMask &version_mask, Operation *op,
+                             bool symbolic)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14554,7 +14622,8 @@ namespace Legion {
         IndexSpace handle = region_node->row_source->handle;
         RtEvent ready = context->compute_equivalence_sets(this, 
                       region_node->get_tree_id(), handle, expr, 
-                      remaining_mask, runtime->address_space);
+                      remaining_mask, runtime->address_space,
+                      symbolic);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready

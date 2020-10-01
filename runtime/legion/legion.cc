@@ -1270,6 +1270,122 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Output Requirement
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::OutputRequirement(bool valid)
+      : RegionRequirement(), field_space(FieldSpace::NO_SPACE),
+        global_indexing(false), valid_requirement(valid), convex_hull(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::OutputRequirement(const RegionRequirement &req)
+      : RegionRequirement(req), global_indexing(false), 
+        valid_requirement(true), convex_hull(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::OutputRequirement(FieldSpace _field_space,
+                                        const std::set<FieldID> &fields,
+                                        bool _global_indexing /*=false*/,
+                                        bool _convex_hull /*=false*/)
+      : RegionRequirement(), field_space(_field_space),
+        global_indexing(_global_indexing), valid_requirement(false),
+        convex_hull(_convex_hull)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<FieldID>::const_iterator it = fields.begin();
+           it != fields.end(); ++it)
+        RegionRequirement::add_field(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::OutputRequirement(const OutputRequirement &other)
+      : RegionRequirement(static_cast<const RegionRequirement&>(other)),
+        field_space(other.field_space), global_indexing(other.global_indexing),
+        valid_requirement(other.valid_requirement), 
+        convex_hull(other.convex_hull)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement::~OutputRequirement(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement& OutputRequirement::operator=(
+                                                   const OutputRequirement &rhs)
+    //--------------------------------------------------------------------------
+    {
+      static_cast<RegionRequirement&>(*this) =
+        static_cast<const OutputRequirement&>(rhs);
+      field_space = rhs.field_space;
+      global_indexing = rhs.global_indexing;
+      valid_requirement = rhs.valid_requirement;
+      convex_hull = rhs.convex_hull;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRequirement& OutputRequirement::operator=(
+                                                   const RegionRequirement &rhs)
+    //--------------------------------------------------------------------------
+    {
+      static_cast<RegionRequirement&>(*this) =
+        static_cast<const OutputRequirement&>(rhs);
+      field_space = FieldSpace::NO_SPACE;
+      global_indexing = false;
+      valid_requirement = true;
+      convex_hull = false;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool OutputRequirement::operator==(const OutputRequirement &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if ((field_space != rhs.field_space) ||
+          (global_indexing != rhs.global_indexing) ||
+          (valid_requirement != rhs.valid_requirement) ||
+          (convex_hull != rhs.convex_hull))
+        return false;
+      return static_cast<const RegionRequirement&>(*this) ==
+             static_cast<const OutputRequirement&>(rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    bool OutputRequirement::operator<(const OutputRequirement &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (field_space < rhs.field_space)
+        return true;
+      if(field_space > rhs.field_space)
+        return false;
+      if (global_indexing < rhs.global_indexing)
+        return true;
+      if (global_indexing > rhs.global_indexing)
+        return false;
+      if (valid_requirement < rhs.valid_requirement)
+        return true;
+      if (valid_requirement > rhs.valid_requirement)
+        return false;
+      if (convex_hull < rhs.convex_hull)
+        return true;
+      if (convex_hull > rhs.convex_hull)
+        return false;
+      return static_cast<const RegionRequirement&>(*this) <
+             static_cast<const OutputRequirement&>(rhs);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Index Space Requirement 
     /////////////////////////////////////////////////////////////
 
@@ -2465,6 +2581,108 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Internal::PhysicalRegionImpl::fail_privilege_check(d, fid, mode);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Output Region
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OutputRegion::OutputRegion(void)
+      : impl(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion::OutputRegion(const OutputRegion &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion::OutputRegion(Internal::OutputRegionImpl *i)
+      : impl(i)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion::~OutputRegion(void)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+        impl = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion& OutputRegion::operator=(const OutputRegion &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+      }
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    Memory OutputRegion::target_memory(void) const
+    //--------------------------------------------------------------------------
+    {
+      return impl->target_memory();
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::return_data(size_t num_elements,
+                                   FieldID field_id,
+                                   void *ptr,
+                                   size_t alignment /*= 0*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->return_data(
+          num_elements, field_id, reinterpret_cast<uintptr_t>(ptr), alignment);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::return_data(size_t num_elements,
+                                   std::map<FieldID,void*> ptrs,
+                                std::map<FieldID,size_t> *alignments /*= NULL*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->return_data(num_elements, ptrs, alignments);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::return_data(FieldID field_id,
+                                   Realm::RegionInstance instance,
+                                   size_t field_size,
+                                   const size_t *num_elements)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->return_data(field_id, instance, field_size, num_elements);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5295,27 +5513,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_task(Context ctx, 
-                                          const TaskLauncher &launcher)
+    Future Runtime::execute_task(Context ctx, const TaskLauncher &launcher,
+                             std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_task(ctx, launcher);
+      return runtime->execute_task(ctx, launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
-    FutureMap Runtime::execute_index_space(Context ctx, 
-                                              const IndexTaskLauncher &launcher)
+    FutureMap Runtime::execute_index_space(
+                             Context ctx, const IndexTaskLauncher &launcher,
+                             std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_index_space(ctx, launcher);
+      return runtime->execute_index_space(ctx, launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::execute_index_space(Context ctx, 
-     const IndexTaskLauncher &launcher, ReductionOpID redop, bool deterministic)
+    Future Runtime::execute_index_space(
+                             Context ctx, const IndexTaskLauncher &launcher,
+                             ReductionOpID redop, bool deterministic,
+                             std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_index_space(ctx, launcher, redop, deterministic);
+      return runtime->execute_index_space(
+                                  ctx, launcher, redop, deterministic, outputs);
     }
 
     //--------------------------------------------------------------------------
@@ -5349,7 +5571,7 @@ namespace Legion {
       TaskLauncher launcher(task_id, arg, predicate, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
-      return runtime->execute_task(ctx, launcher);
+      return runtime->execute_task(ctx, launcher, NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -5371,7 +5593,7 @@ namespace Legion {
                                  predicate, must_parallelism, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
-      return runtime->execute_index_space(ctx, launcher);
+      return runtime->execute_index_space(ctx, launcher, NULL);
     }
 
 
@@ -5396,7 +5618,7 @@ namespace Legion {
                                  predicate, must_parallelism, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
-      return runtime->execute_index_space(ctx, launcher, reduction, false);
+      return runtime->execute_index_space(ctx, launcher, reduction, false,NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -5443,6 +5665,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->unmap_all_regions(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    OutputRegion Runtime::get_output_region(Context ctx, unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->get_output_region(index);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_output_regions(
+                                Context ctx, std::vector<OutputRegion> &regions)
+    //--------------------------------------------------------------------------
+    {
+      regions = ctx->get_output_regions();
     }
 
     //--------------------------------------------------------------------------
@@ -6472,6 +6709,19 @@ namespace Legion {
             "Value, or DeferredReduction objects outside of Legion tasks.")
       return 
          Internal::implicit_context->create_task_local_instance(memory, layout);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::destroy_task_local_instance(Realm::RegionInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      if (Internal::implicit_context == NULL)
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "It is illegal to request the destruction of DeferredBuffer, "
+            "Deferred Value, or DeferredReduction objects outside of "
+            "Legion tasks.")
+      return
+         Internal::implicit_context->destroy_task_local_instance(instance);
     }
 
     //--------------------------------------------------------------------------

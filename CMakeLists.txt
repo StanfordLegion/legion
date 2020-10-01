@@ -265,6 +265,9 @@ if(Legion_USE_CUDA)
   if(Legion_HIJACK_CUDART)
     set(REALM_USE_CUDART_HIJACK ON)
   endif()
+
+  # runtime.cc uses cuda.h
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I${CUDA_INCLUDE_DIRS}")
 endif()
 
 #------------------------------------------------------------------------------#

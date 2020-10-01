@@ -132,6 +132,7 @@ namespace Legion {
           get_field_accessor(FieldID fid) const = 0;
     public: 
       virtual ApEvent get_use_event(void) const = 0;
+      virtual ApEvent get_use_event(ApEvent user) const = 0;
       virtual ApEvent get_unique_event(void) const = 0;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const = 0;
       virtual PointerConstraint 
@@ -273,7 +274,9 @@ namespace Legion {
       virtual RtEvent detach_external_instance(void) = 0;
       virtual bool has_visible_from(const std::set<Memory> &memories) const = 0;
       virtual Memory get_memory(void) const = 0; 
-      inline size_t get_instance_size(void) const { return instance_footprint; }
+      size_t get_instance_size(void) const;
+      void update_instance_footprint(size_t footprint)
+        { instance_footprint = footprint; }
 #ifdef LEGION_GPU_REDUCTIONS
     public:
       virtual bool is_gpu_visible(PhysicalManager *other) const = 0;
@@ -303,7 +306,7 @@ namespace Legion {
     public: 
       static ApEvent fetch_metadata(PhysicalInstance inst, ApEvent use_event);
     public:
-      const size_t instance_footprint;
+      size_t instance_footprint;
       const ReductionOp *reduction_op;
       const ReductionOpID redop;
       // Unique identifier event that is common across nodes
@@ -362,6 +365,19 @@ namespace Legion {
     class IndividualManager : public PhysicalManager,
                               public LegionHeapify<IndividualManager> { 
     public:
+      enum InstanceKind {
+        // Normal Realm allocations
+        INTERNAL,
+        // External allocations imported by attach operations
+        EXTERNAL_ATTACHED,
+        // External allocations from output regions, owned by the runtime
+        EXTERNAL_OWNED,
+        // Allocations drawn from the eager pool
+        EAGER,
+        // Instance not yet bound
+        UNBOUND,
+      };
+    public:
       static const AllocationType alloc_type = INDIVIDUAL_INST_MANAGER_ALLOC;
     public:
       struct DeferIndividualManagerArgs : 
@@ -373,9 +389,9 @@ namespace Legion {
             Memory m, PhysicalInstance i, size_t f, bool local, 
             IndexSpaceExpression *lx, bool is, IndexSpace dh, 
             IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid, 
-            LayoutConstraintID l, ApEvent use, ReductionOpID redop, 
-            const void *piece_list, size_t piece_list_size, 
-            bool shadow_instance);
+            LayoutConstraintID l, ApEvent use, InstanceKind kind,
+            ReductionOpID redop, const void *piece_list,
+            size_t piece_list_size, bool shadow_instance);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
@@ -391,10 +407,19 @@ namespace Legion {
         const RegionTreeID tree_id;
         const LayoutConstraintID layout_id;
         const ApEvent use_event;
+        const InstanceKind kind;
         const ReductionOpID redop;
         const void *const piece_list;
         const size_t piece_list_size;
         const bool shadow_instance;
+      };
+    private:
+      struct BroadcastFunctor {
+        BroadcastFunctor(Runtime *rt, Serializer &r) : runtime(rt), rez(r) { }
+        inline void apply(AddressSpaceID target)
+          { runtime->send_manager_update(target, rez); }
+        Runtime *runtime;
+        Serializer &rez;
       };
     public:
       IndividualManager(RegionTreeForest *ctx, DistributedID did,
@@ -405,7 +430,7 @@ namespace Legion {
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop, 
                         bool register_now, size_t footprint,
-                        ApEvent use_event, bool external_instance,
+                        ApEvent use_event, InstanceKind kind,
                         const ReductionOp *op = NULL,
                         bool shadow_instance = false);
       IndividualManager(const IndividualManager &rhs);
@@ -425,7 +450,8 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
     public:
-      virtual ApEvent get_use_event(void) const { return use_event; }
+      virtual ApEvent get_use_event(void) const;
+      virtual ApEvent get_use_event(ApEvent user) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const 
                                                    { return instance; }
       virtual PointerConstraint
@@ -468,7 +494,7 @@ namespace Legion {
           const void *piece_list, size_t piece_list_size,
           FieldSpaceNode *space_node, RegionTreeID tree_id,
           LayoutConstraints *constraints, ApEvent use_event,
-          ReductionOpID redop, bool shadow_instance);
+          InstanceKind kind, ReductionOpID redop, bool shadow_instance);
     public:
       virtual bool acquire_instance(ReferenceSource source, 
                                     ReferenceMutator *mutator);
@@ -489,11 +515,28 @@ namespace Legion {
           ReductionOpID redop, ReductionView *view);
 #endif
     public:
+      inline bool is_unbound() const { return kind == UNBOUND; }
+      void update_physical_instance(PhysicalInstance new_instance,
+                                    InstanceKind new_kind,
+                                    size_t new_footprint,
+                                    uintptr_t new_pointer = 0);
+      void broadcast_manager_update(void);
+      static void handle_send_manager_update(Runtime *runtime,
+                                             AddressSpaceID source,
+                                             Deserializer &derez);
+    public:
       MemoryManager *const memory_manager;
-      const PhysicalInstance instance;
+      PhysicalInstance instance;
       // Event that needs to trigger before we can start using
       // this physical instance.
-      const ApEvent use_event; 
+      ApUserEvent use_event;
+      InstanceKind kind;
+      // Keep the pointer for owned external instances
+      uintptr_t external_pointer;
+      // Completion event of the task that sets a realm instance
+      // to this manager. Valid only when the kind is UNBOUND
+      // initially, otherwise NO_AP_EVENT.
+      const ApEvent producer_event;
     };
 
     /**
@@ -565,6 +608,7 @@ namespace Legion {
       void finalize_collective_instance(ApUserEvent instance_event);
     public:
       virtual ApEvent get_use_event(void) const;
+      virtual ApEvent get_use_event(ApEvent user) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const;
       virtual PointerConstraint
                      get_pointer_constraint(const DomainPoint &key) const;
@@ -695,6 +739,7 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public: 
       virtual ApEvent get_use_event(void) const;
+      virtual ApEvent get_use_event(ApEvent user) const;
       virtual ApEvent get_unique_event(void) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const;
       virtual PointerConstraint

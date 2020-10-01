@@ -89,6 +89,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_inline_t);
   NEW_OPAQUE_TYPE(legion_mappable_t);
   NEW_OPAQUE_TYPE(legion_region_requirement_t);
+  NEW_OPAQUE_TYPE(legion_output_requirement_t);
   NEW_OPAQUE_TYPE(legion_machine_t);
   NEW_OPAQUE_TYPE(legion_mapper_t);
   NEW_OPAQUE_TYPE(legion_default_mapper_t);
@@ -2160,6 +2161,51 @@ extern "C" {
   legion_region_requirement_get_projection(legion_region_requirement_t handle);
 
   // -----------------------------------------------------------------------
+  // Output Requirement Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see Legion::OutputRequirement::OutputRequirement()
+   */
+  legion_output_requirement_t
+  legion_output_requirement_create(legion_field_space_t field_space,
+                                   legion_field_id_t *fields,
+                                   size_t fields_size,
+                                   bool global_indexing);
+
+  /**
+   * @see Legion::OutputRequirement::~OutputRequirement()
+   */
+  void
+  legion_output_requirement_destroy(legion_output_requirement_t handle);
+
+  /**
+   * @see Legion::OutputRequirement::add_field()
+   */
+  void
+  legion_output_requirement_add_field(legion_output_requirement_t handle,
+                                      legion_field_id_t field,
+                                      bool instance);
+
+  /**
+   * @see Legion::OutputRequirement::region
+   */
+  legion_logical_region_t
+  legion_output_requirement_get_region(legion_output_requirement_t handle);
+
+  /**
+   * @see Legion::OutputRequirement::parent
+   */
+  legion_logical_region_t
+  legion_output_requirement_get_parent(legion_output_requirement_t handle);
+
+  /**
+   * @see Legion::OutputRequirement::partition
+   */
+  legion_logical_partition_t
+  legion_output_requirement_get_partition(legion_output_requirement_t handle);
+
+  // -----------------------------------------------------------------------
   // Allocator and Argument Map Operations
   // -----------------------------------------------------------------------
 
@@ -2894,6 +2940,18 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
+   * @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &, std::vector<OutputRequirement>*)
+   */
+  legion_future_map_t
+  legion_index_launcher_execute_outputs(legion_runtime_t runtime,
+                                        legion_context_t ctx,
+                                        legion_index_launcher_t launcher,
+                                        legion_output_requirement_t *reqs,
+                                        size_t reqs_size);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
    * @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &, ReductionOpID)
    */
   legion_future_t
@@ -2902,6 +2960,20 @@ extern "C" {
                                                         legion_index_launcher_t launcher,
                                                         legion_reduction_op_id_t redop,
                                                         bool deterministic);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &, ReductionOpID, std::vector<OutputRequirement>*)
+   */
+  legion_future_t
+  legion_index_launcher_execute_reduction_and_outputs(legion_runtime_t runtime,
+                                                      legion_context_t ctx,
+                                                      legion_index_launcher_t launcher,
+                                                      legion_reduction_op_id_t redop,
+                                                      bool deterministic,
+                                                      legion_output_requirement_t *reqs,
+                                                      size_t reqs_size);
 
   /**
    * @see Legion::IndexTaskLauncher::add_region_requirement()

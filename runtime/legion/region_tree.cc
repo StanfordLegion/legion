@@ -1080,6 +1080,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::set_pending_space_domain(IndexSpace target,
+                                                    Domain domain,
+                                                    AddressSpaceID source,
+                                                    ShardID shard,
+                                                    size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *child_node = get_node(target);
+
+      if ((total_shards > 1) && ((child_node->color % total_shards) != shard))
+        return;
+
+      if (child_node->set_domain(domain, source))
+        assert(false);
+      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+                         const_cast<ApEvent*>(&child_node->index_space_ready)));
+      if (space_ready.has_triggered())
+        REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
+                            "Invalid pending child!\n")
+      Runtime::trigger_event(NULL, space_ready);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition RegionTreeForest::get_index_partition(IndexSpace parent,
                                                          Color color)
     //--------------------------------------------------------------------------
@@ -1798,7 +1821,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
                      unsigned idx, const RegionRequirement &req,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
+                     VersionInfo &version_info, std::set<RtEvent> &ready_events,
+                     bool symbolic)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1815,8 +1839,13 @@ namespace Legion {
       FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
       const RtEvent ready = 
-        region_node->perform_versioning_analysis(ctx.get_id(), context, 
-                                     &version_info, req.parent, user_mask, op);
+        region_node->perform_versioning_analysis(ctx.get_id(),
+                                                 context,
+                                                 &version_info,
+                                                 req.parent,
+                                                 user_mask,
+                                                 op,
+                                                 symbolic);
       if (ready.exists())
         ready_events.insert(ready);
     }
@@ -1864,7 +1893,8 @@ namespace Legion {
                   const InstanceSet &sources, ApEvent term_event, 
                   InnerContext *context,unsigned init_index,
                   std::map<PhysicalManager*,InstanceView*> &top_views,
-                  std::set<RtEvent> &applied_events)
+                  std::set<RtEvent> &applied_events,
+                  bool symbolic)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_INITIALIZE_CONTEXT_CALL);
@@ -1881,7 +1911,8 @@ namespace Legion {
       // Perform the version analysis and make it ready
       const RtEvent eq_ready = 
         top_node->perform_versioning_analysis(ctx.get_id(), context,
-               &init_version_info, req.region, user_mask, context->owner_task);
+               &init_version_info, req.region, user_mask, context->owner_task,
+               symbolic);
       // Now get the top-views for all the physical instances
       std::vector<InstanceView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
@@ -2183,7 +2214,8 @@ namespace Legion {
                                          UpdateAnalysis *analysis,
                                          InstanceSet &targets,
                                          const PhysicalTraceInfo &trace_info,
-                                         std::set<RtEvent> &map_applied_events)
+                                         std::set<RtEvent> &map_applied_events,
+                                         bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
       // If we are a NO_ACCESS or there are no fields then analysis will be NULL
@@ -2207,7 +2239,7 @@ namespace Legion {
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index, 
                 analysis->term_event, collect_event,
-                user_applied, trace_info, local_space);
+                user_applied, trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -2231,7 +2263,7 @@ namespace Legion {
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index,
                 analysis->term_event, collect_event, map_applied_events, 
-                trace_info, local_space);
+                trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -2302,13 +2334,15 @@ namespace Legion {
     RtEvent RegionTreeForest::defer_physical_perform_registration(RtEvent pre,
                          UpdateAnalysis *analysis, InstanceSet &targets,
                          std::set<RtEvent> &map_applied_events,
-                         ApEvent &result, const PhysicalTraceInfo &info)
+                         ApEvent &result, const PhysicalTraceInfo &info,
+                         bool symbolic)
     //--------------------------------------------------------------------------
     {
       RtUserEvent map_applied_done = Runtime::create_rt_user_event();
       map_applied_events.insert(map_applied_done);
       DeferPhysicalRegistrationArgs args(analysis->op->get_unique_op_id(),
-                             analysis, targets, map_applied_done, result, info);
+                             analysis, targets, map_applied_done, result, info,
+                             symbolic);
       return runtime->issue_runtime_meta_task(args, 
                     LG_LATENCY_WORK_PRIORITY, pre);
     }
@@ -2321,7 +2355,7 @@ namespace Legion {
         (const DeferPhysicalRegistrationArgs*)args;
       std::set<RtEvent> applied_events;
       dargs->result = physical_perform_registration(dargs->analysis, 
-                        dargs->targets, *dargs, applied_events);
+                        dargs->targets, *dargs, applied_events, dargs->symbolic);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->map_applied_done,
             Runtime::merge_events(applied_events));
@@ -9837,31 +9871,36 @@ namespace Legion {
       {
         // If we're complete then we can use the parent index space expresion
         if (!check_complete || !is_complete())
-        {
-          std::set<IndexSpaceExpression*> child_spaces;
-          if (total_children == max_linearized_color)
-          {
-            for (LegionColor color = 0; color < total_children; color++)
-              child_spaces.insert(get_child(color));
-          }
-          else
-          {
-            for (LegionColor color = 0; color < max_linearized_color; color++)
-            {
-              if (!color_space->contains_color(color))
-                continue;
-              child_spaces.insert(get_child(color));
-            }
-          }
           // We can always write the result immediately since we know
           // that the common sub-expression code will give the same
           // result if there is a race
-          union_expr = context->union_index_spaces(child_spaces);
-        }
+          union_expr = compute_union_expression();
         else // if we're complete the parent is our expression
           union_expr = parent;
       }
       return const_cast<IndexSpaceExpression*>(union_expr);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* IndexPartNode::compute_union_expression(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<IndexSpaceExpression*> child_spaces;
+      if (total_children == max_linearized_color)
+      {
+        for (LegionColor color = 0; color < total_children; color++)
+          child_spaces.insert(get_child(color));
+      }
+      else
+      {
+        for (LegionColor color = 0; color < max_linearized_color; color++)
+        {
+          if (!color_space->contains_color(color))
+            continue;
+          child_spaces.insert(get_child(color));
+        }
+      }
+      return context->union_index_spaces(child_spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -13307,7 +13346,7 @@ namespace Legion {
                                          layout, 0/*redop*/, 
                                          true/*register now*/,
                                          instance_footprint, ready_event,
-                                         true/*external instance*/);
+                                         IndividualManager::EXTERNAL_ATTACHED);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -17650,7 +17689,8 @@ namespace Legion {
                                                     VersionInfo *version_info,
                                                     LogicalRegion upper_bound,
                                                     const FieldMask &mask,
-                                                    Operation *op)
+                                                    Operation *op,
+                                                    bool symbolic)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
@@ -17660,7 +17700,7 @@ namespace Legion {
       // in the shattering code for equivalence sets that tries to
       // recognize disjoint partitions. If we ever switch to using
       // explicit shattering operations then we can remove this code
-      if ((handle != upper_bound) && (!manager.has_versions(mask)))
+      if ((handle != upper_bound) && (!manager.has_versions(mask)) && !symbolic)
       {
 #ifdef DEBUG_LEGION
         assert(parent != NULL);
@@ -17670,13 +17710,18 @@ namespace Legion {
         {
           const RtEvent ready = 
             parent->parent->perform_versioning_analysis(ctx, parent_ctx,
-                                NULL/*no version info*/, upper_bound, mask, op);
+                                                        NULL/*no version info*/,
+                                                        upper_bound,
+                                                        mask,
+                                                        op,
+                                                        symbolic);
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
         }
       }
       return manager.perform_versioning_analysis(parent_ctx, version_info, 
-                                                 this, mask, op);
+                                                 this, mask, op,
+                                                 symbolic);
     }
 
     //--------------------------------------------------------------------------

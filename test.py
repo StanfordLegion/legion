@@ -70,6 +70,14 @@ legion_cxx_tests = [
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
     ['test/legion_stl/test_stl', []],
+    ['test/output_requirements/output_requirements', []],
+    ['test/output_requirements/output_requirements', ['-replicate']],
+    ['test/output_requirements/output_requirements', ['-index']],
+    ['test/output_requirements/output_requirements', ['-index', '-replicate']],
+    ['test/output_requirements/output_requirements', ['-empty']],
+    ['test/output_requirements/output_requirements', ['-empty', '-replicate']],
+    ['test/output_requirements/output_requirements', ['-empty', '-index']],
+    ['test/output_requirements/output_requirements', ['-empty', '-index', '-replicate']],
 ]
 
 legion_fortran_tests = [

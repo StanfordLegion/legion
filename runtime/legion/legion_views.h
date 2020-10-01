@@ -173,7 +173,8 @@ namespace Legion {
                                     RtEvent collect_event,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
-                                    const AddressSpaceID source) = 0;
+                                    const AddressSpaceID source,
+                                    bool symbolic = false) = 0;
       virtual RtEvent find_copy_preconditions(bool reading,
                                     ReductionOpID redop,              
                                     const FieldMask &copy_mask,
@@ -337,7 +338,7 @@ namespace Legion {
                                    const bool trace_recording);
       // Check to see if there is any view with the same shape already
       // in the ExprView tree, if so return it
-      ExprView* find_congruent_view(IndexSpaceExpression *expr) const;
+      ExprView* find_congruent_view(IndexSpaceExpression *expr);
       // Add a new subview with fields into the tree
       void insert_subview(ExprView *subview, FieldMask &subview_mask);
       void find_tightest_subviews(IndexSpaceExpression *expr,
@@ -435,6 +436,8 @@ namespace Legion {
                                       const UniqueID op_id,
                                       const unsigned index,
                                       const bool user_covers);
+    public:
+      size_t get_view_volume(void);
     protected:
       void filter_local_users(ApEvent term_event);
       void filter_current_users(const EventFieldUsers &to_filter);
@@ -447,7 +450,7 @@ namespace Legion {
       PhysicalManager *const manager;
       InstanceView *const inst_view;
       IndexSpaceExpression *const view_expr;
-      const size_t view_volume;
+      size_t view_volume;
       // This is publicly mutable and protected by expr_lock from
       // the owner inst_view
       FieldMask invalid_fields;
@@ -604,7 +607,8 @@ namespace Legion {
                                     RtEvent collect_event,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
-                                    const AddressSpaceID source);
+                                    const AddressSpaceID source,
+                                    bool symbolic = false);
       virtual RtEvent find_copy_preconditions(bool reading,
                                     ReductionOpID redop,
                                     const FieldMask &copy_mask,
@@ -780,7 +784,8 @@ namespace Legion {
                                     RtEvent collect_event,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
-                                    const AddressSpaceID source);
+                                    const AddressSpaceID source,
+                                    bool symbolic = false);
       virtual RtEvent find_copy_preconditions(bool reading,
                                     ReductionOpID redop,
                                     const FieldMask &copy_mask,
