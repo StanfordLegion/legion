@@ -2346,7 +2346,7 @@ namespace Legion {
       }
       else
       {
-        std::vector<Rect<2,T> > output_rects;
+        std::vector<Realm::Rect<2,T> > output_rects;
         output_rects.reserve(output_sizes.size());
         for (std::map<Point<1>,size_t>::const_iterator it = 
               output_sizes.begin(); it != output_sizes.end(); it++)
@@ -2355,10 +2355,10 @@ namespace Legion {
             continue;
           const Point<2,T> lo(it->first[0], 0);
           const Point<2,T> hi(it->first[0], it->second - 1);
-          output_rects.push_back(Rect<2,T>(lo, hi));
+          output_rects.push_back(Realm::Rect<2,T>(lo, hi));
         }
         const Realm::IndexSpace<2,T> output_space(output_rects);
-        indirect = output_space;
+        indirect = DomainT<2,T>(output_space);
       }
       return set_domain(indirect, space, shard_mapping);
     }
