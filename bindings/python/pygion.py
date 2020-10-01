@@ -2221,8 +2221,8 @@ class SymbolicExpr(object):
         #     a = other
         #     b = self
         return SymbolicBinop(self, other, op='+')
-    def __radd__():
-        
+    def __radd__(self, other):
+        return SymbolicBinop(other, self, op='+')
     def is_region(self):
         return False
 
@@ -2275,6 +2275,9 @@ class SymbolicCall(SymbolicExpr):
     def _legion_postprocess_task_argument(self, point):
         return _postprocess(self.func.expr, point)(*list(_postprocess(arg, point) for arg in self.args))
 
+import petra as pt
+from llvmlite import ir
+
 class SymbolicBinop(SymbolicExpr):
     __slots__ = ['lhs', 'rhs', 'op']
     def __init__(self, lhs, rhs, op):
@@ -2288,6 +2291,10 @@ class SymbolicBinop(SymbolicExpr):
         return '%s %s %s' % (self.lhs, self.op, self.rhs)
     def _legion_postprocess_task_argument(self, point):
         return _postprocess(self.lhs, point) + _postprocess(self.rhs, point)
+    def codegen(self, builder: ir.IRBuilder, ctx: pt.CodegenContext):
+        right = self.rhs.codegen(builder, ctx)
+        left = self.lhs.codegen(builder, ctx)
+        return pt.Add(left, right)
 
 class SymbolicLoopIndex(SymbolicExpr):
     __slots__ = ['name']
@@ -2299,6 +2306,9 @@ class SymbolicLoopIndex(SymbolicExpr):
         return self.name
     def _legion_postprocess_task_argument(self, point):
         return point
+    def codegen(self, builder: ir.IRBuilder, ctx: pt.CodegenContext):
+        i = self.name.codegen(builder, ctx)
+        return pt.Var(i)
 
 ID = SymbolicLoopIndex('ID')
 
@@ -2324,9 +2334,6 @@ class ProjectionFunctor(object):
         if not isinstance(expr, SymbolicExpr):
             raise Exception('ProjectionFunctor requires a symbolic expression as an argument')
         self.expr = expr
-        # self.binop = expr.__str__()
-        # self.rhs = expr.rhs
-        # self.lhs = expr.lhs
         self.compile_and_register()
 
     def __call__(self, *args, **kwargs):
@@ -2349,7 +2356,7 @@ class ProjectionFunctor(object):
         elif isinstance(rhs, int):
             nbr = rhs
 
-        print("GOT THIS NUMBER:  ", nbr)
+        # print("GOT THIS NUMBER:  ", nbr)
 
         LEGION_MAX_DIM = _max_dim
         MAX_DOMAIN_DIM = 2 * LEGION_MAX_DIM
@@ -2511,7 +2518,10 @@ class ProjectionFunctor(object):
 
         engine = program.compile()
 
+        # proj_functor should be a pointer
+        # print("proj_name = ", proj_name)
         proj_functor = engine.get_function_address(proj_name)
+        # print("PROJ FUNCTOR: ",proj_functor)
 
         c.legion_runtime_register_projection_functor(
             _my.ctx.runtime,
@@ -2519,6 +2529,8 @@ class ProjectionFunctor(object):
             False,
             1,
             ffi.NULL,
+            ## check proj_functor in here 
+            ## 6474 in legion_c.cc
             ffi.cast("legion_projection_functor_logical_partition_t", proj_functor))
 
 def index_launch(domain, task, *args, **kwargs):
