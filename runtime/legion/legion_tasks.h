@@ -108,8 +108,10 @@ namespace Legion {
     public:
       inline size_t size(void) const 
         { return task.regions.size() + task.output_regions.size(); }
-      inline bool is_output(unsigned idx) const
-        { return (task.regions.size() <= idx); }
+      inline bool is_output_created(unsigned idx) const
+        { if (idx < task.regions.size()) return false;
+          return (task.output_regions[idx-task.regions.size()].flags &
+                        LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG); }
       inline RegionRequirement& operator[](unsigned idx)
         { return (idx < task.regions.size()) ? task.regions[idx] :
                         task.output_regions[idx - task.regions.size()]; }
@@ -652,6 +654,19 @@ namespace Legion {
      */
     class MultiTask : public TaskOp {
     public:
+      class OutputOptions {
+      public:
+        OutputOptions(void) : store(0) { }
+        OutputOptions(bool global, bool valid, bool convex)
+          : store((global ? 1 : 0) | (valid ? 2 : 0) | (convex ? 4 : 0)) { } 
+      public:
+        inline bool global_indexing(void) const { return (store & 1); }
+        inline bool valid_requirement(void) const { return (store & 2); }
+        inline bool convex_hull(void) const { return (store & 4); }
+      private:
+        unsigned char store;
+      };
+    public:
       MultiTask(Runtime *rt);
       virtual ~MultiTask(void);
     protected:
@@ -724,7 +739,7 @@ namespace Legion {
       const ReductionOp *reduction_op;
       FutureMap point_arguments;
       std::vector<FutureMap> point_futures;
-      std::vector<bool> output_global_indexing;
+      std::vector<OutputOptions> output_region_options;
       // For handling reductions of types with serdez methods
       const SerdezRedopFns *serdez_redop_fns;
       size_t reduction_state_size;

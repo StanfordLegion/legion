@@ -2316,6 +2316,55 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::set_output_union(
+                              const std::map<Point<1>,size_t> &output_sizes,
+                              const bool convex, AddressSpaceID space, 
+                              ShardMapping *shard_mapping)
+    //-------------------------------------------------------------------------- 
+    {
+#ifdef DEBUG_LEGION
+      assert(DIM == 2);
+#endif
+      // Need this indirection to help the type system
+      Domain indirect;
+      if (convex)
+      {
+        coord_t max_x = 0;
+        size_t max_y = 0;
+        for (std::map<Point<1>,size_t>::const_iterator it = 
+              output_sizes.begin(); it != output_sizes.end(); it++)
+        {
+          if (it->first[0] > max_x)
+            max_x = it->first[0];
+          if (it->second > max_y)
+            max_y = it->second;
+        }
+        const Point<2> lo(0,0);
+        const Point<2> hi(max_x, max_y-1);
+        const Rect<2> hull(lo,hi);
+        indirect = hull;
+      }
+      else
+      {
+        std::vector<Rect<2,T> > output_rects;
+        output_rects.reserve(output_sizes.size());
+        for (std::map<Point<1>,size_t>::const_iterator it = 
+              output_sizes.begin(); it != output_sizes.end(); it++)
+        {
+          if (it->second == 0)
+            continue;
+          const Point<2,T> lo(it->first[0], 0);
+          const Point<2,T> hi(it->first[0], it->second - 1);
+          output_rects.push_back(Rect<2,T>(lo, hi));
+        }
+        const Realm::IndexSpace<2,T> output_space(output_rects);
+        indirect = output_space;
+      }
+      return set_domain(indirect, space, shard_mapping);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::tighten_index_space(void)
     //--------------------------------------------------------------------------
     {
@@ -2877,21 +2926,6 @@ namespace Legion {
       // non-total-store-ordered memory consistency machines like PowerPC
       __sync_synchronize();
       linearization_ready = true;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::compute_domain_from_union(
-                                                IndexPartNode *child,
-                                                AddressSpaceID source,
-                                                ShardMapping *mapping /*=NULL*/)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceExpression *expr = child->compute_union_expression();
-      Realm::IndexSpace<DIM,T> realm_is;
-      ApEvent ready = expr->get_expr_index_space(&realm_is, type_tag, true);
-      set_realm_index_space(source, realm_is, mapping,
-                            Runtime::protect_event(ready));
     }
 
     //--------------------------------------------------------------------------

@@ -1070,9 +1070,16 @@ namespace Legion {
 
     /**
      * \struct OutputRequirement
-     * Output requirements are a special kind of region requirements to inform
-     * the runtime that the task produces variable size outputs. Unlike
-     * normal region requirements that name regions and partitions, the runtime
+     * Output requirements are a special kind of region requirement to inform
+     * the runtime that the task will be producing new instances as part of its
+     * execution that will be attached to the logical region at the end of the 
+     * task, and are therefore not mapped ahead of the task's execution.
+     *
+     * Output region requirements come in two flavors: those that are already
+     * valid region requirements and those which are going to produce variable
+     * sized outputs. Valid region requirements behave like normal region
+     * requirements except they will not be mapped by the task. Alternatively,
+     * for variable-sized output region requirements the runtime
      * will create fresh region and partition names for output requirements
      * right after the task is launched. Output requirements still pick
      * field IDs and the field space for the output regions.
@@ -1082,7 +1089,7 @@ namespace Legion {
      * the runtime gives back a fresh region and partition, whose construction
      * is controlled by the indexing mode specified the output requirement:
      *
-     * 0) For either indexing mode, the output partition is a complete, disjoint
+     * 0) For either indexing mode, the output partition is a disjoint
      *    partition whose color space is identical to the launch domain.
      *
      * 1) When the global indexing is requested, the output region has
@@ -1098,21 +1105,32 @@ namespace Legion {
      *    [<0, p>, <n-1, p>] where n is the output size of the point task p.
      *    The root index space is simply a union of all subspaces.
      *
+     * 3) In the case of local indexing, the output region can either have a
+     *    "loose" convex hull parent index space or a "tight" index space that
+     *    contains exactly the points in the child space. With the convex hull,
+     *    the runtime computes an upper bound 2-D rectangle with as many rows as
+     *    children and as many columns as the extent of the larges child space.
+     *    If convex_hull is set to false, the runtime will compute a more 
+     *    expensive sparse index space containing exactly the children points.
+     *
      * Note that the global indexing has performance consequences since
      * the runtime needs to perform a global prefix sum to compute the ranges
-     * of subspaces.
+     * of subspaces. Similarly the "tight" bounds can be expensive to compute
+     * due to the cost of building the sparsity data structure.
      *
      */
-
     struct OutputRequirement : public RegionRequirement {
     public:
-      OutputRequirement(void);
+      OutputRequirement(bool valid_requirement = false);
+      OutputRequirement(const RegionRequirement &req);
       OutputRequirement(FieldSpace field_space,
                         const std::set<FieldID> &fields,
-                        bool global_indexing = false);
+                        bool global_indexing = false,
+                        bool convex_hull = false);
     public:
       OutputRequirement(const OutputRequirement &rhs);
       ~OutputRequirement(void);
+      OutputRequirement& operator=(const RegionRequirement &req);
       OutputRequirement& operator=(const OutputRequirement &req);
     public:
       bool operator==(const OutputRequirement &req) const;
@@ -1120,6 +1138,8 @@ namespace Legion {
     public:
       FieldSpace field_space; /**< field space for the output region */
       bool global_indexing; /**< global indexing is used when true */
+      bool valid_requirement; /**< indicate requirement is valid */
+      bool convex_hull; /**< compute convex hull bounds for output region */
     };
 
     /**

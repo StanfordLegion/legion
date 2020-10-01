@@ -886,14 +886,14 @@ namespace Legion {
       if (redop > 0)
         reduction_collective = 
           new FutureExchange(ctx, reduction_state_size, COLLECTIVE_LOC_53);
-      bool has_globally_indexed_output = false;
+      bool has_output_region = false;
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
-        if (output_global_indexing[idx])
+        if (!output_region_options[idx].valid_requirement())
         {
-          has_globally_indexed_output = true;
+          has_output_region = true;
           break;
         }
-      if (has_globally_indexed_output)
+      if (has_output_region)
         output_size_collective =
           new OutputSizeExchange(ctx, COLLECTIVE_LOC_29, all_output_sizes);
     } 
@@ -1042,13 +1042,15 @@ namespace Legion {
 
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
       {
+        const OutputOptions &options = output_region_options[idx];
+        if (options.valid_requirement())
+          continue;
         const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
         const IndexPartition &pid =
           output_regions[idx].partition.get_index_partition();
         IndexSpaceNode *parent= forest->get_node(ispace);
-        IndexPartNode *part = forest->get_node(pid);
 
-        if (output_global_indexing[idx])
+        if (options.global_indexing())
         {
           // For globally indexed output regions, we need a prefix sum to get
           // the right size for each subregion.
@@ -1076,13 +1078,12 @@ namespace Legion {
                              runtime->address_space,
                              shard_mapping);
         }
-        else
-          // For locally indexed output regions, sizes of subregions are already
-          // set when they are fianlized by the point tasks. So we only need to
-          // initialize the root index space by taking a union of subspaces.
-          parent->compute_domain_from_union(part,
-                                            runtime->address_space,
-                                            shard_mapping);
+        // For locally indexed output regions, sizes of subregions are already
+        // set when they are fianlized by the point tasks. So we only need to
+        // initialize the root index space by taking a union of subspaces.
+        else if (parent->set_output_union(all_output_sizes[idx],
+              options.convex_hull(), runtime->address_space, shard_mapping))
+          delete parent;
       }
     }
 

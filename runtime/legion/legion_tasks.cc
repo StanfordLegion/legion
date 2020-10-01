@@ -2541,7 +2541,7 @@ namespace Legion {
           continue;
         runtime->forest->perform_versioning_analysis(this, idx, 
               logical_regions[idx], version_info, ready_events, 
-              logical_regions.is_output(idx));
+              logical_regions.is_output_created(idx));
       }
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
@@ -4080,20 +4080,20 @@ namespace Legion {
                 InstanceSet &targets = physical_instances[*it];
                 const RtEvent registration_post = 
                   runtime->forest->defer_physical_perform_registration(
-                                          reg_pre[*it], analyses[*it], targets,
-                                          map_applied_conditions, effects[*it],
-                                          PhysicalTraceInfo(trace_info, *it),
-                                          logical_regions.is_output(*it));
+                                        reg_pre[*it], analyses[*it], targets,
+                                        map_applied_conditions, effects[*it],
+                                        PhysicalTraceInfo(trace_info, *it),
+                                        logical_regions.is_output_created(*it));
                 registration_postconditions.insert(registration_post);
               }
               else
               {
                 InstanceSet &targets = physical_instances[*it];
                 effects[*it] = runtime->forest->physical_perform_registration(
-                                          analyses[*it], targets,
-                                          PhysicalTraceInfo(trace_info, *it),
-                                          map_applied_conditions,
-                                          logical_regions.is_output(*it));
+                                        analyses[*it], targets,
+                                        PhysicalTraceInfo(trace_info, *it),
+                                        map_applied_conditions,
+                                        logical_regions.is_output_created(*it));
               }
             }
             // Wait for all the registrations to be done
@@ -4980,7 +4980,7 @@ namespace Legion {
       // Remove our reference to the point arguments 
       point_arguments = FutureMap();
       point_futures.clear();
-      output_global_indexing.clear();
+      output_region_options.clear();
       slices.clear(); 
       if (predicate_false_result != NULL)
       {
@@ -5196,7 +5196,7 @@ namespace Legion {
       this->point_arguments = rhs->point_arguments;
       if (!rhs->point_futures.empty())
         this->point_futures = rhs->point_futures;
-      this->output_global_indexing = rhs->output_global_indexing;
+      this->output_region_options = rhs->output_region_options;
       this->predicate_false_future = rhs->predicate_false_future;
       this->predicate_false_size = rhs->predicate_false_size;
       if (this->predicate_false_size > 0)
@@ -5302,11 +5302,11 @@ namespace Legion {
       rez.serialize(redop);
       if (redop > 0)
         rez.serialize<bool>(deterministic_redop);
-      if (!output_global_indexing.empty())
+      if (!output_region_options.empty())
       {
-        rez.serialize<size_t>(output_global_indexing.size());
-        for (unsigned idx = 0; idx < output_global_indexing.size(); idx++)
-          rez.serialize<bool>(output_global_indexing[idx]);
+        rez.serialize<size_t>(output_region_options.size());
+        for (unsigned idx = 0; idx < output_region_options.size(); idx++)
+          rez.serialize(output_region_options[idx]);
       }
       else
         rez.serialize<size_t>(0);
@@ -5346,13 +5346,9 @@ namespace Legion {
       derez.deserialize(num_globals);
       if (num_globals > 0)
       {
-        output_global_indexing.resize(num_globals);
+        output_region_options.resize(num_globals);
         for (unsigned idx = 0; idx < num_globals; idx++)
-        {
-          bool result;
-          derez.deserialize<bool>(result);
-          output_global_indexing[idx] = result;
-        }
+          derez.deserialize(output_region_options[idx]);
       }
     }
 
@@ -5669,19 +5665,23 @@ namespace Legion {
       {
         OutputRequirement &req = *it;
 
-        // Create a deferred index space
-        // For an individual task, the index space is always 1D.
-        IndexSpace index_space = parent_ctx->create_unbound_index_space(
-            Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+        if (!req.valid_requirement)
+        {
+          // Create a deferred index space
+          // For an individual task, the index space is always 1D.
+          IndexSpace index_space = parent_ctx->create_unbound_index_space(
+              Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
 
-        // Create an output region
-        LogicalRegion region = parent_ctx->create_logical_region(
-            runtime->forest, index_space, req.field_space, false);
+          // Create an output region
+          LogicalRegion region = parent_ctx->create_logical_region(
+              runtime->forest, index_space, req.field_space, false);
 
-        // Set the region back to the output requirement so the caller
-        // can use it for downstream tasks
-        req.region = region;
-        req.parent = region;
+          // Set the region back to the output requirement so the caller
+          // can use it for downstream tasks
+          req.region = region;
+          req.parent = region;
+          req.flags |= LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG;
+        }
         req.privilege = WRITE_DISCARD;
 
         // Store the output requirement in the task
@@ -8155,13 +8155,15 @@ namespace Legion {
 
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
       {
+        const OutputOptions &options = output_region_options[idx];
+        if (options.valid_requirement())
+          continue;
         const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
         const IndexPartition &pid =
           output_regions[idx].partition.get_index_partition();
         IndexSpaceNode *parent= forest->get_node(ispace);
-        IndexPartNode *part = forest->get_node(pid);
 
-        if (output_global_indexing[idx])
+        if (options.global_indexing())
         {
           // For globally indexed output regions, we need a prefix sum to get
           // the right size for each subregion.
@@ -8180,11 +8182,12 @@ namespace Legion {
           }
           parent->set_domain(Rect<1>(0, sum - 1), runtime->address_space);
         }
-        else
-          // For locally indexed output regions, sizes of subregions are already
-          // set when they are fianlized by the point tasks. So we only need to
-          // initialize the root index space by taking a union of subspaces.
-          parent->compute_domain_from_union(part, runtime->address_space);
+        // For locally indexed output regions, sizes of subregions are already
+        // set when they are fianlized by the point tasks. So we only need to
+        // initialize the root index space by taking a union of subspaces.
+        else if (parent->set_output_union(all_output_sizes[idx],
+                  options.convex_hull(), runtime->address_space))
+          delete parent;
       }
     }
 
@@ -8558,82 +8561,86 @@ namespace Legion {
                std::vector<OutputRequirement> &outputs, IndexSpace launch_space)
     //--------------------------------------------------------------------------
     {
-      output_global_indexing.resize(outputs.size());
+      output_region_options.resize(outputs.size());
       for (unsigned idx = 0; idx < outputs.size(); idx++)
       {
         OutputRequirement &req = outputs[idx];
+        output_region_options[idx] = OutputOptions(req.global_indexing,
+                                req.valid_requirement, req.convex_hull);
 
-        TypeTag type_tag;
-
-        if (req.global_indexing)
+        if (!req.valid_requirement)
         {
-          output_global_indexing[idx] = true;
-          // When global indexing is used for the output region,
-          // we require the launch domain to be 1-D in order to avoid
-          // ambiguity in ordering of the subregions.
-          if (launch_space.get_dim() > 1)
-            REPORT_LEGION_ERROR(ERROR_INVALID_GLOBAL_INDEXING,
-              "Any index task requesting global indexing on an output region "
-              "must be launched with a 1-D launch domain, but task %s "
-              "(UID: %lld) has a %d-D launch domain.",
-              get_task_name(), get_unique_op_id(), launch_space.get_dim());
-
-          type_tag = NT_TemplateHelper::encode_tag<1,coord_t>();
-        }
-        else
-        {
-          output_global_indexing[idx] = false;
-          // When local indexing is used for the output region,
-          // we create an (N+1)-D index space when the launch domain is N-D.
-
-          // Before creating the index space, we make sure that
-          // the dimensionality (N+1) does not exceed LEGION_MAX_DIM.
-          if (launch_space.get_dim() + 1 > LEGION_MAX_DIM)
-            REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_DOMAIN,
-              "Dimensionality of output regions of task %s (UID: %lld) "
-              "exceeded LEGION_MAX_DIM. You may rebuild your code with a "
-              "bigger LEGION_MAX_DIM value or reduce dimensionality of "
-              "the launch domain.", get_task_name(), get_unique_op_id());
-
-          switch (launch_space.get_dim() + 1)
+          TypeTag type_tag;
+          if (req.global_indexing)
           {
-#define DIMFUNC(DIM) \
-            case DIM: \
-              { \
-                type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
-                break; \
-              }
-            LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-              default:
-                assert(false);
+            // When global indexing is used for the output region,
+            // we require the launch domain to be 1-D in order to avoid
+            // ambiguity in ordering of the subregions.
+            if (launch_space.get_dim() > 1)
+              REPORT_LEGION_ERROR(ERROR_INVALID_GLOBAL_INDEXING,
+                "Any index task requesting global indexing on an output region "
+                "must be launched with a 1-D launch domain, but task %s "
+                "(UID: %lld) has a %d-D launch domain.",
+                get_task_name(), get_unique_op_id(), launch_space.get_dim());
+
+            type_tag = NT_TemplateHelper::encode_tag<1,coord_t>();
           }
+          else
+          {
+            // When local indexing is used for the output region,
+            // we create an (N+1)-D index space when the launch domain is N-D.
+
+            // Before creating the index space, we make sure that
+            // the dimensionality (N+1) does not exceed LEGION_MAX_DIM.
+            if (launch_space.get_dim() + 1 > LEGION_MAX_DIM)
+              REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_DOMAIN,
+                "Dimensionality of output regions of task %s (UID: %lld) "
+                "exceeded LEGION_MAX_DIM. You may rebuild your code with a "
+                "bigger LEGION_MAX_DIM value or reduce dimensionality of "
+                "the launch domain.", get_task_name(), get_unique_op_id());
+
+            switch (launch_space.get_dim() + 1)
+            {
+#define DIMFUNC(DIM) \
+              case DIM: \
+                { \
+                  type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
+                  break; \
+                }
+              LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+                default:
+                  assert(false);
+            }
+          }
+
+          // Create a deferred index space
+          IndexSpace index_space =
+            parent_ctx->create_unbound_index_space(type_tag);
+
+          // Create a pending partition using the launch domain as the color space
+          IndexSpace color_space = launch_space;
+          IndexPartition pid = parent_ctx->create_pending_partition(
+              index_space, color_space,
+              LEGION_DISJOINT_COMPLETE_KIND,
+              LEGION_AUTO_GENERATE_ID);
+
+          // Create an output region and a partition
+          LogicalRegion region = parent_ctx->create_logical_region(
+              runtime->forest, index_space, req.field_space, false);
+
+          LogicalPartition partition =
+            runtime->forest->get_logical_partition(region, pid);
+
+          // Set the region and partition back to the output requirement
+          // so the caller can use it for downstream tasks
+          req.partition = partition;
+          req.parent = region;
+          req.handle_type = LEGION_PARTITION_PROJECTION;
+          req.flags |= LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG;
         }
 
-        // Create a deferred index space
-        IndexSpace index_space =
-          parent_ctx->create_unbound_index_space(type_tag);
-
-        // Create a pending partition using the launch domain as the color space
-        IndexSpace color_space = launch_space;
-        IndexPartition pid = parent_ctx->create_pending_partition(
-            index_space, color_space,
-            LEGION_DISJOINT_COMPLETE_KIND,
-            LEGION_AUTO_GENERATE_ID);
-
-        // Create an output region and a partition
-        LogicalRegion region = parent_ctx->create_logical_region(
-            runtime->forest, index_space, req.field_space, false);
-
-        LogicalPartition partition =
-          runtime->forest->get_logical_partition(region, pid);
-
-        // Set the region and partition back to the output requirement
-        // so the caller can use it for downstream tasks
-        req.partition = partition;
-        req.parent = region;
         req.privilege = WRITE_DISCARD;
-        req.handle_type = LEGION_PARTITION_PROJECTION;
 
         // Store the output requirement in the task
         output_regions.push_back(req);
@@ -10641,9 +10648,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(idx < output_global_indexing.size());
+      assert(idx < output_region_options.size());
 #endif
-      return output_global_indexing[idx];
+      return output_region_options[idx].global_indexing();
     }
 
     //--------------------------------------------------------------------------
@@ -11198,12 +11205,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(point.dim == 1);
       assert(output_regions.size() == outputs.size());
-      assert(output_regions.size() == output_global_indexing.size());
+      assert(output_regions.size() == output_region_options.size());
 #endif
       AutoLock o_lock(op_lock);
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
       {
-        if (!output_global_indexing[idx])
+        if (output_region_options[idx].valid_requirement())
           continue;
         std::map<Point<1>,size_t> &output_sizes= all_output_sizes[idx];
 #ifdef DEBUG_LEGION

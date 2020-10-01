@@ -3516,6 +3516,7 @@ namespace Legion {
                                        Runtime *rt, const bool global)
       : Collectable(), runtime(rt), context(ctx),
         req(r), instance_set(is), num_elements(-1LU), index(i), 
+        created_region(req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG),
         global_indexing(global)
     //--------------------------------------------------------------------------
     {
@@ -3525,7 +3526,7 @@ namespace Legion {
     OutputRegionImpl::OutputRegionImpl(const OutputRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL),
         req(), instance_set(), num_elements(-1LU), index(-1U), 
-        global_indexing(false)
+        created_region(false), global_indexing(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3674,69 +3675,73 @@ namespace Legion {
     void OutputRegionImpl::finalize(bool defer /*= true*/)
     //--------------------------------------------------------------------------
     {
-      RegionNode *node = runtime->forest->get_node(req.region);
-      IndexSpaceNode *index_node =
-        node->get_row_source()->as_index_space_node();
-
-      // Subregions of a globally indexed output region cannot be finalized in
-      // the first round because their sizes are yet to be determined.
-      if (defer && req.partition.exists() && global_indexing)
-      {
-        add_reference();
-        FinalizeOutputArgs args(this);
-        runtime->issue_runtime_meta_task(
-            args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-            Runtime::protect_event(index_node->index_space_ready));
-        return;
-      }
-
-      // Initialize the index space domain
       Domain domain;
-      if (req.partition.exists())
+      RegionNode *node = runtime->forest->get_node(req.region);
+      if (created_region)
       {
-        if (!global_indexing)
+        IndexSpaceNode *index_node =
+          node->get_row_source()->as_index_space_node();
+        // Subregions of a globally indexed output region cannot be finalized 
+        // in the first round because their sizes are yet to be determined.
+        if (defer && req.partition.exists() && global_indexing)
         {
-          DomainPoint index_point = context->owner_task->index_point;
-          domain.dim = index_point.get_dim() + 1;
+          add_reference();
+          FinalizeOutputArgs args(this);
+          runtime->issue_runtime_meta_task(
+              args, LG_THROUGHPUT_DEFERRED_PRIORITY,
+              Runtime::protect_event(index_node->index_space_ready));
+          return;
+        }
+
+        // Initialize the index space domain
+        if (req.partition.exists())
+        {
+          if (!global_indexing)
+          {
+            DomainPoint index_point = context->owner_task->index_point;
+            domain.dim = index_point.get_dim() + 1;
 #ifdef DEBUG_LEGION
-          assert(domain.dim <= LEGION_MAX_DIM);
+            assert(domain.dim <= LEGION_MAX_DIM);
 #endif
-          for (int idx = 0; idx < index_point.dim; ++idx)
-          {
-            domain.rect_data[idx + 1] = index_point[idx];
-            domain.rect_data[idx + 1 + domain.dim] = index_point[idx];
-          }
-          if (num_elements > 0)
-          {
-            domain.rect_data[0] = 0;
-            domain.rect_data[domain.dim] = num_elements - 1;
+            for (int idx = 0; idx < index_point.dim; ++idx)
+            {
+              domain.rect_data[idx + 1] = index_point[idx];
+              domain.rect_data[idx + 1 + domain.dim] = index_point[idx];
+            }
+            if (num_elements > 0)
+            {
+              domain.rect_data[0] = 0;
+              domain.rect_data[domain.dim] = num_elements - 1;
+            }
+            else
+            {
+              domain.rect_data[0] = 0;
+              domain.rect_data[domain.dim] = -1;
+            }
+
+            runtime->forest->set_pending_space_domain(
+                index_node->handle, domain, runtime->address_space);
           }
           else
           {
-            domain.rect_data[0] = 0;
-            domain.rect_data[domain.dim] = -1;
+            // For a globally indexed output region, the domain has
+            // already been initialized once we reach here, so
+            // we just retrieve it.
+            ApEvent ready = ApEvent::NO_AP_EVENT;
+            domain = index_node->get_domain(ready, true);
+            if (ready.exists())
+              ready.wait();
           }
-
-          runtime->forest->set_pending_space_domain(
-              index_node->handle, domain, runtime->address_space);
         }
         else
         {
-          // For a globally indexed output region, the domain has
-          // already been initialized once we reach here, so
-          // we just retrieve it.
-          ApEvent ready = ApEvent::NO_AP_EVENT;
-          domain = index_node->get_domain(ready, true);
-          if (ready.exists())
-            ready.wait();
+          domain =
+            num_elements > 0 ? Rect<1>(0, num_elements - 1) : Rect<1>(0, -1);
+          index_node->set_domain(domain, runtime->address_space);
         }
       }
       else
-      {
-        domain =
-          num_elements > 0 ? Rect<1>(0, num_elements - 1) : Rect<1>(0, -1);
-        index_node->set_domain(domain, runtime->address_space);
-      }
+        node->row_source->get_launch_space_domain(domain);
 
       FieldSpaceNode *fspace_node = node->get_column_source();
 
@@ -3854,7 +3859,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void OutputRegionImpl::handle_fianlize_output(const void *args)
+    /*static*/ void OutputRegionImpl::handle_finalize_output(const void *args)
     //--------------------------------------------------------------------------
     {
       const FinalizeOutputArgs *finalize_args = (const FinalizeOutputArgs*)args;
@@ -28619,7 +28624,7 @@ namespace Legion {
           }
         case LG_FIANLIZE_OUTPUT_ID:
           {
-            OutputRegionImpl::handle_fianlize_output(args);
+            OutputRegionImpl::handle_finalize_output(args);
             break;
           }
 #ifdef LEGION_MALLOC_INSTANCES

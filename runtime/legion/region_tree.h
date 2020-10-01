@@ -1950,6 +1950,9 @@ namespace Legion {
       virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
       virtual bool set_domain(const Domain &domain, AddressSpaceID space,
                               ShardMapping *shard_mapping = NULL) = 0;
+      virtual bool set_output_union(const std::map<Point<1>,size_t> &sizes,
+                                    const bool convex, AddressSpaceID space, 
+                                    ShardMapping *shard_mapping = NULL) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
@@ -2129,10 +2132,6 @@ namespace Legion {
                                             IndexSpace shard_space) = 0;
       virtual void destroy_shard_domain(const Domain &domain) = 0;
     public:
-      virtual void compute_domain_from_union(IndexPartNode *part_node,
-                                             AddressSpaceID source,
-                                             ShardMapping *mapping = NULL) = 0;
-    public:
       const IndexSpace handle;
       IndexPartNode *const parent;
       const ApEvent index_space_ready;
@@ -2184,6 +2183,9 @@ namespace Legion {
       virtual Domain get_domain(ApEvent &ready, bool need_tight);
       virtual bool set_domain(const Domain &domain, AddressSpaceID space,
                               ShardMapping *shard_mapping = NULL);
+      virtual bool set_output_union(const std::map<Point<1>,size_t> &sizes,
+                                    const bool convex, AddressSpaceID space, 
+                                    ShardMapping *shard_mapping = NULL);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
@@ -2474,10 +2476,6 @@ namespace Legion {
       bool contains_point(const Realm::Point<DIM,T> &point);
     protected:
       void compute_linearization_metadata(void);
-    public:
-      virtual void compute_domain_from_union(IndexPartNode *part_node,
-                                             AddressSpaceID source,
-                                             ShardMapping *mapping = NULL);
     protected:
       Realm::IndexSpace<DIM,T> realm_index_space;
     protected: // linearization meta-data, computed on demand

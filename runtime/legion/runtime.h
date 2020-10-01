@@ -700,7 +700,7 @@ namespace Legion {
     public:
       void finalize(bool defer = true);
     public:
-      static void handle_fianlize_output(const void *args);
+      static void handle_finalize_output(const void *args);
     public:
       bool is_complete(FieldID &unbound_field) const;
     public:
@@ -722,6 +722,7 @@ namespace Legion {
       std::map<FieldID,ExternalInstanceInfo> returned_instances;
       size_t num_elements;
       const unsigned index;
+      const bool created_region;
       const bool global_indexing;
     };
 
