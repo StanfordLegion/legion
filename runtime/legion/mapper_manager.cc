@@ -2583,7 +2583,10 @@ namespace Legion {
       bool local_acquired = true;
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
-        InstanceManager *man = instances[idx].impl;
+        const MappingInstance &inst = instances[idx];
+        if (!inst.exists())
+          continue;
+        InstanceManager *man = inst.impl;
         if (man->is_virtual_manager())
           continue;
         PhysicalManager *manager = man->as_instance_manager();
