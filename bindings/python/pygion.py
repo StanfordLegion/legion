@@ -2378,7 +2378,6 @@ class ProjectionFunctor(object):
         elif isinstance(rhs, int):
             nbr = rhs
 
-        print("GOT THIS NUMBER:  ", rhs, "and", lhs)
 
         LEGION_MAX_DIM = _max_dim
         MAX_DOMAIN_DIM = 2 * LEGION_MAX_DIM
