@@ -2214,15 +2214,30 @@ class _FuturePoint(object):
 
 class SymbolicExpr(object):
     def __add__(self, other):
-        # if isinstance(other, int):
-        #     a = self
-        #     b = other
-        # else:
-        #     a = other
-        #     b = self
         return SymbolicBinop(self, other, op='+')
     def __radd__(self, other):
         return SymbolicBinop(other, self, op='+')
+
+    def __mul__(self, other):
+        return SymbolicBinop(self, other, op='*')
+    def __rmul__(self, other):
+        return SymbolicBinop(other, self, op='*')
+
+    def __sub__(self, other):
+        return SymbolicBinop(self, other, op='-')
+    def __rsub__(self, other):
+        return SymbolicBinop(other, self, op='-')
+
+    def __div__(self, other):
+        return SymbolicBinop(self, other, op='/')
+    def __rdiv__(self, other):
+        return SymbolicBinop(other, self, op='/')
+
+    def __mod__(self, other):
+        return SymbolicBinop(self, other, op='%')
+    def __rmod__(self, other):
+        return SymbolicBinop(other, self, op='%')
+
     def is_region(self):
         return False
 
@@ -2275,13 +2290,11 @@ class SymbolicCall(SymbolicExpr):
     def _legion_postprocess_task_argument(self, point):
         return _postprocess(self.func.expr, point)(*list(_postprocess(arg, point) for arg in self.args))
 
-import petra as pt
-from llvmlite import ir
-
 class SymbolicBinop(SymbolicExpr):
+    import petra as pt
     __slots__ = ['lhs', 'rhs', 'op']
     def __init__(self, lhs, rhs, op):
-        assert op == '+' # FIXME
+        assert op in ['+', '-', '/', '*', '%'] # FIXME
         self.lhs = lhs
         self.rhs = rhs
         self.op = op
@@ -2291,12 +2304,22 @@ class SymbolicBinop(SymbolicExpr):
         return '%s %s %s' % (self.lhs, self.op, self.rhs)
     def _legion_postprocess_task_argument(self, point):
         return _postprocess(self.lhs, point) + _postprocess(self.rhs, point)
-    def codegen(self, builder: ir.IRBuilder, ctx: pt.CodegenContext):
-        right = self.rhs.codegen(builder, ctx)
-        left = self.lhs.codegen(builder, ctx)
-        return pt.Add(left, right)
+    def codegen(self):
+        right = self.rhs.codegen()
+        left = self.lhs.codegen()
+        if op == '+':
+            return pt.Add(left, right)
+        elif op == '*':
+            return pt.Mul(left, right)
+        elif op == '-':
+            return pt.Sub(left, right)
+        elif op == '/':
+            return pt.Div(left, right)
+        elif op == '%':
+            return pt.Mod(left, right)  
 
 class SymbolicLoopIndex(SymbolicExpr):
+    import petra as pt
     __slots__ = ['name']
     def __init__(self, name):
         self.name = name
@@ -2306,9 +2329,8 @@ class SymbolicLoopIndex(SymbolicExpr):
         return self.name
     def _legion_postprocess_task_argument(self, point):
         return point
-    def codegen(self, builder: ir.IRBuilder, ctx: pt.CodegenContext):
-        i = self.name.codegen(builder, ctx)
-        return pt.Var(i)
+    def codegen(self):
+        return pt.Var(self.name)
 
 ID = SymbolicLoopIndex('ID')
 
@@ -2356,7 +2378,7 @@ class ProjectionFunctor(object):
         elif isinstance(rhs, int):
             nbr = rhs
 
-        # print("GOT THIS NUMBER:  ", nbr)
+        print("GOT THIS NUMBER:  ", rhs, "and", lhs)
 
         LEGION_MAX_DIM = _max_dim
         MAX_DOMAIN_DIM = 2 * LEGION_MAX_DIM
@@ -2467,7 +2489,7 @@ class ProjectionFunctor(object):
         target_machine = program.get_target_machine()
 
         program.add_func(
-            "proj_functor",
+            "proj_name",
             (result_ptr, runtime, parent_ptr, point_ptr, domain_ptr,),
             (),
             pt.Block(
@@ -2521,7 +2543,7 @@ class ProjectionFunctor(object):
         # proj_functor should be a pointer
         # print("proj_name = ", proj_name)
         proj_functor = engine.get_function_address(proj_name)
-        # print("PROJ FUNCTOR: ",proj_functor)
+        print("PROJ FUNCTOR: ", proj_functor)
 
         c.legion_runtime_register_projection_functor(
             _my.ctx.runtime,

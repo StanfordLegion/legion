@@ -31,7 +31,7 @@ def hello(R, i):
     print("hello from point %s (region %s)" % (i, R.ispace.bounds))
     print(R.x)
 
-f = ProjectionFunctor(ID+5)
+f = ProjectionFunctor(3+ID%(2+1))
 
 @task
 def main():
