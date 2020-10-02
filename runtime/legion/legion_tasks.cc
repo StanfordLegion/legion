@@ -1770,8 +1770,8 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         UniqueID our_uid = get_unique_id();
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-          log_requirement(our_uid, idx, regions[idx]);
+        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+          log_requirement(our_uid, idx, logical_regions[idx]);
       }
 #ifdef DEBUG_LEGION
       {
@@ -8534,8 +8534,8 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
       { 
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+          TaskOp::log_requirement(unique_op_id, idx, logical_regions[idx]);
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
     }
