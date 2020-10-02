@@ -8385,11 +8385,15 @@ class Task(object):
         return success
 
     def print_task_mapping_decisions(self):
-        depth = self.get_depth()
-        for op in self.operations:
-            if not op.fully_logged:
-                continue
-            op.print_op_mapping_decisions(depth)
+        if self.replicants is not None:
+            for shard in itervalues(self.replicants.shards):
+                shard.print_task_mapping_decisions()
+        else:
+            depth = self.get_depth()
+            for op in self.operations:
+                if not op.fully_logged:
+                    continue
+                op.print_op_mapping_decisions(depth)
 
     def print_dataflow_graph(self, path, simplify_graphs, zoom_graphs):
         if len(self.operations) == 0:
@@ -12620,7 +12624,7 @@ class State(object):
             else:
                 print(str(inst))
             print('  Memory '+str(inst.memory))
-            print('  '+str(inst.region))
+            print('  '+str(inst.index_expr))
             print('  Fields:')
             for field in inst.fields:
                 print('    '+str(field))

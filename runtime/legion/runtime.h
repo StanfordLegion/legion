@@ -650,6 +650,83 @@ namespace Legion {
     };
 
     /**
+     * \class OutputRegionImpl
+     * The base implementation of an output region object.
+     *
+     * Just like physical region impls, we don't need to make
+     * output region impls thread safe, because they are accessed
+     * exclusively by a single task.
+     */
+    class OutputRegionImpl : public Collectable,
+                             public LegionHeapify<OutputRegionImpl> {
+    public:
+      static const AllocationType alloc_type = OUTPUT_REGION_ALLOC;
+    public:
+      OutputRegionImpl(unsigned index,
+                       const RegionRequirement &req,
+                       InstanceSet instance_set,
+                       TaskContext *ctx,
+                       Runtime *rt, 
+                       const bool global_indexing);
+      OutputRegionImpl(const OutputRegionImpl &rhs);
+      ~OutputRegionImpl(void);
+    public:
+      OutputRegionImpl& operator=(const OutputRegionImpl &rhs);
+    public:
+      Memory target_memory(void) const;
+    public:
+      void return_data(size_t num_elements,
+                       FieldID field_id,
+                       uintptr_t ptr,
+                       size_t alignment,
+                       bool eager_pool = false);
+      void return_data(size_t num_elements,
+                       std::map<FieldID,void*> ptrs,
+                       std::map<FieldID,size_t> *alignments);
+      void return_data(FieldID field_id,
+                       PhysicalInstance instance,
+                       size_t field_size,
+                       const size_t *num_elements);
+    private:
+      struct FinalizeOutputArgs : public LgTaskArgs<FinalizeOutputArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FINALIZE_OUTPUT_ID;
+      public:
+        FinalizeOutputArgs(OutputRegionImpl *r)
+          : LgTaskArgs<FinalizeOutputArgs>(implicit_provenance),
+            region(r) { }
+        OutputRegionImpl *region;
+      };
+    public:
+      void finalize(bool defer = true);
+    public:
+      static void handle_finalize_output(const void *args);
+    public:
+      bool is_complete(FieldID &unbound_field) const;
+    public:
+      const RegionRequirement &get_requirement(void) const { return req; }
+      size_t size(void) const { return num_elements; }
+    public:
+      Runtime *const runtime;
+      TaskContext *const context;
+    private:
+      struct ExternalInstanceInfo {
+        bool eager_pool;
+        uintptr_t ptr;
+        size_t alignment;
+      };
+    private:
+      RegionRequirement req;
+      InstanceSet instance_set;
+      // Output data batched during task execution
+      std::map<FieldID,ExternalInstanceInfo> returned_instances;
+      size_t num_elements;
+      const unsigned index;
+      const bool created_region;
+      const bool global_indexing;
+    };
+
+    /**
      * \class GrantImpl
      * This is the base implementation of a grant object.
      * The grant implementation remembers the locks that
@@ -995,15 +1072,29 @@ namespace Legion {
         InstanceInfo(void)
           : current_state(COLLECTABLE_STATE), 
             deferred_collect(RtUserEvent::NO_RT_USER_EVENT),
-            instance_size(0), pending_acquires(0), min_priority(0) { }
+            instance_size(0), pending_acquires(0), min_priority(0),
+            external(false) { }
       public:
         InstanceState current_state;
         RtUserEvent deferred_collect;
         size_t instance_size;
         unsigned pending_acquires;
         GCPriority min_priority;
+        bool external;
         std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
         // For tracking external instances and whether they can be used
+      };
+    public:
+      struct FreeEagerInstanceArgs : public LgTaskArgs<FreeEagerInstanceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FREE_EAGER_INSTANCE_TASK_ID;
+      public:
+        FreeEagerInstanceArgs(MemoryManager *m, PhysicalInstance i)
+          : LgTaskArgs<FreeEagerInstanceArgs>(implicit_provenance),
+            manager(m), inst(i) { }
+      public:
+        MemoryManager *const manager;
+        const PhysicalInstance inst;
       };
 #ifdef LEGION_MALLOC_INSTANCES
     public:
@@ -1159,6 +1250,12 @@ namespace Legion {
                                                         &candidates) const;
     public:
       PhysicalManager* create_shadow_instance(InstanceBuilder &builder);
+      PhysicalManager* create_unbound_instance(LogicalRegion region,
+                                               LayoutConstraintSet &constraints,
+                                               ApEvent ready_event,
+                                               MapperID mapper_id,
+                                               Processor target_proc,
+                                               GCPriority priority);
     protected:
       // We serialize all allocation attempts in a memory in order to 
       // ensure find_and_create calls will remain atomic
@@ -1171,12 +1268,23 @@ namespace Legion {
                                           CollectiveManager *collective = NULL,
                                           DomainPoint *collective_point = NULL);
     public:
-      bool delete_by_size_and_state(const size_t needed_size, 
-                                    InstanceState state, bool larger_only); 
+      bool delete_by_size_and_state(const size_t needed_size,
+                                    const InstanceState state,
+                                    const bool larger_only,
+                                    const bool external = false);
       RtEvent attach_external_instance(PhysicalManager *manager);
       RtEvent detach_external_instance(PhysicalManager *manager);
     public:
       bool is_visible_memory(Memory other);
+    public:
+      RtEvent create_eager_instance(PhysicalInstance &instance,
+                                    Realm::InstanceLayoutGeneric *layout);
+      void free_eager_instance(PhysicalInstance instance, RtEvent defer);
+      void link_eager_instance(PhysicalInstance instance, uintptr_t ptr);
+      uintptr_t unlink_eager_instance(PhysicalInstance instance);
+      static void handle_free_eager_instance(const void *args);
+    public:
+      void free_external_allocation(uintptr_t ptr, size_t size);
 #ifdef LEGION_MALLOC_INSTANCES
     public:
       uintptr_t allocate_legion_instance(size_t footprint, 
@@ -1201,6 +1309,19 @@ namespace Legion {
       size_t remaining_capacity;
       // The runtime we are associate with
       Runtime *const runtime;
+    public:
+      // Realm instance backin the eager pool
+      // Must be allocated at the start-up time
+      PhysicalInstance eager_pool_instance;
+      uintptr_t eager_pool;
+      // Allocator object for eager allocations
+      void *eager_allocator;
+      // Allocation counter
+      size_t next_allocation_id;
+      // Map each eager instance to its pointer and allocation id
+      std::map<PhysicalInstance,std::pair<uintptr_t,size_t> > eager_instances;
+      // Map unlinked eager allocation to its allocation id
+      std::map<uintptr_t,size_t> unlinked_allocations;
     protected:
       // Lock for controlling access to the data
       // structures in this memory manager
@@ -1939,6 +2060,7 @@ namespace Legion {
             initial_tasks_to_schedule(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE),
             initial_meta_task_vector_width(
                 LEGION_DEFAULT_META_TASK_VECTOR_WIDTH),
+            eager_alloc_percentage(LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE),
             max_message_size(LEGION_DEFAULT_MAX_MESSAGE_SIZE),
             gc_epoch_size(LEGION_DEFAULT_GC_EPOCH_SIZE),
             max_control_replication_contexts(
@@ -1988,6 +2110,7 @@ namespace Legion {
         unsigned initial_task_window_hysteresis;
         unsigned initial_tasks_to_schedule;
         unsigned initial_meta_task_vector_width;
+        unsigned eager_alloc_percentage;
         unsigned max_message_size;
         unsigned gc_epoch_size;
         unsigned max_control_replication_contexts;
@@ -2135,6 +2258,7 @@ namespace Legion {
       const unsigned initial_task_window_hysteresis;
       const unsigned initial_tasks_to_schedule;
       const unsigned initial_meta_task_vector_width;
+      const unsigned eager_alloc_percentage;
       const unsigned max_message_size;
       const unsigned gc_epoch_size;
       const unsigned max_control_replication_contexts;
@@ -2337,11 +2461,15 @@ namespace Legion {
     public:
       ArgumentMap create_argument_map(void);
     public:
-      Future execute_task(Context ctx, const TaskLauncher &launcher);
-      FutureMap execute_index_space(Context ctx, 
-                                    const IndexTaskLauncher &launcher);
+      Future execute_task(Context ctx,
+                          const TaskLauncher &launcher,
+                          std::vector<OutputRequirement> *outputs);
+      FutureMap execute_index_space(Context ctx,
+                                    const IndexTaskLauncher &launcher,
+                                    std::vector<OutputRequirement> *outputs);
       Future execute_index_space(Context ctx, const IndexTaskLauncher &launcher,
-                                 ReductionOpID redop, bool deterministic);
+                                 ReductionOpID redop, bool deterministic,
+                                 std::vector<OutputRequirement> *outputs);
     public:
       PhysicalRegion map_region(Context ctx, 
                                 const InlineLauncher &launcher);
@@ -2692,6 +2820,7 @@ namespace Legion {
       void send_sharded_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
+      void send_manager_update(AddressSpaceID target, Serializer &rez);
       void send_collective_instance_manager(AddressSpaceID target, 
                                             Serializer &rez);
       void send_collective_instance_message(AddressSpaceID target, 
@@ -2992,6 +3121,8 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,
                                         AddressSpaceID source);
+      void handle_send_manager_update(Deserializer &derez,
+                                      AddressSpaceID source);
       void handle_collective_instance_manager(Deserializer &derez,
                                               AddressSpaceID source);
       void handle_collective_instance_message(Deserializer &derez);

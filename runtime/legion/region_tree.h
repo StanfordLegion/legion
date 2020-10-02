@@ -124,10 +124,11 @@ namespace Legion {
       public:
         DeferPhysicalRegistrationArgs(UniqueID uid, UpdateAnalysis *ana,
                   InstanceSet &t, RtUserEvent map_applied, ApEvent &res,
-                  const PhysicalTraceInfo &info)
+                  const PhysicalTraceInfo &info, bool sym)
           : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid), 
             PhysicalTraceInfo(info), analysis(ana), 
-            map_applied_done(map_applied), targets(t), result(res) 
+            map_applied_done(map_applied), targets(t), result(res),
+            symbolic(sym)
           // This is kind of scary, Realm is about to make a copy of this
           // without our knowledge, but we need to preserve the correctness
           // of reference counting on PhysicalTraceRecorders, so just add
@@ -144,6 +145,7 @@ namespace Legion {
         RtUserEvent map_applied_done;
         InstanceSet &targets;
         ApEvent &result;
+        bool symbolic;
       };
     public:
       RegionTreeForest(Runtime *rt);
@@ -327,6 +329,12 @@ namespace Legion {
                                     const std::vector<IndexSpace> &handles,
                                     ShardID shard = 0, size_t total_shards = 1);
     public:
+      void set_pending_space_domain(IndexSpace target,
+                                    Domain domain,
+                                    AddressSpaceID source,
+                                    ShardID shard = 0,
+                                    size_t total_shards = 1);
+    public:
       IndexPartition get_index_partition(IndexSpace parent, Color color); 
       bool has_index_subspace(IndexPartition parent,
                               const void *realm_color, TypeTag type_tag);
@@ -469,8 +477,8 @@ namespace Legion {
       void perform_versioning_analysis(Operation *op, unsigned idx,
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
-                                       std::set<RtEvent> &ready_events);
-    public:
+                                       std::set<RtEvent> &ready_events,
+                                       const bool symbolic = false);
       void invalidate_current_context(RegionTreeContext ctx, bool users_only,
                                       RegionNode *top_node);
       bool match_instance_fields(const RegionRequirement &req1,
@@ -508,7 +516,8 @@ namespace Legion {
       ApEvent physical_perform_registration(UpdateAnalysis *analysis,
                                  InstanceSet &targets,
                                  const PhysicalTraceInfo &trace_info,
-                                 std::set<RtEvent> &map_applied_events);
+                                 std::set<RtEvent> &map_applied_events,
+                                 bool symbolic = false);
       // Same as the two above merged together
       ApEvent physical_perform_updates_and_registration(
                                    const RegionRequirement &req,
@@ -530,7 +539,8 @@ namespace Legion {
       RtEvent defer_physical_perform_registration(RtEvent register_pre,
                            UpdateAnalysis *analysis, InstanceSet &targets,
                            std::set<RtEvent> &map_applied_events,
-                           ApEvent &result, const PhysicalTraceInfo &info);
+                           ApEvent &result, const PhysicalTraceInfo &info,
+                           bool symbolic = false);
       void handle_defer_registration(const void *args);
       ApEvent acquire_restrictions(const RegionRequirement &req,
                                    VersionInfo &version_info,
@@ -1928,6 +1938,9 @@ namespace Legion {
       virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
       virtual bool set_domain(const Domain &domain, AddressSpaceID space,
                               ShardMapping *shard_mapping = NULL) = 0;
+      virtual bool set_output_union(const std::map<Point<1>,size_t> &sizes,
+                                    const bool convex, AddressSpaceID space, 
+                                    ShardMapping *shard_mapping = NULL) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
@@ -2152,8 +2165,9 @@ namespace Legion {
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &result,
 				    bool need_tight_result);
       bool set_realm_index_space(AddressSpaceID source,
-				 const Realm::IndexSpace<DIM,T> &value,
-                                 ShardMapping *shard_mapping = NULL);
+                                 const Realm::IndexSpace<DIM,T> &value,
+                                 ShardMapping *shard_mapping = NULL,
+                                 RtEvent ready_event = RtEvent::NO_RT_EVENT);
     public:
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
@@ -2161,6 +2175,9 @@ namespace Legion {
       virtual Domain get_domain(ApEvent &ready, bool need_tight);
       virtual bool set_domain(const Domain &domain, AddressSpaceID space,
                               ShardMapping *shard_mapping = NULL);
+      virtual bool set_output_union(const std::map<Point<1>,size_t> &sizes,
+                                    const bool convex, AddressSpaceID space, 
+                                    ShardMapping *shard_mapping = NULL);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
@@ -2904,6 +2921,7 @@ namespace Legion {
                                LegionColor c1, LegionColor c2);
       bool is_complete(bool from_app = false, bool false_if_not_ready = false);
       IndexSpaceExpression* get_union_expression(bool check_complete=true);
+      IndexSpaceExpression* compute_union_expression(void);
       void record_remote_disjoint_ready(RtUserEvent ready);
       void record_remote_disjoint_result(const bool disjoint_result);
     public:
@@ -3712,7 +3730,7 @@ namespace Legion {
         DeferComputeEquivalenceSetArgs(RegionNode *proxy, ContextID x,
             InnerContext *c, EqSetTracker *t, const AddressSpaceID ts,
             IndexSpaceExpression *e, const FieldMask &m, 
-            const UniqueID id, const AddressSpaceID s);
+            const UniqueID id, const AddressSpaceID s, const bool sym);
       public:
         RegionNode *const proxy_this;
         const ContextID ctx;
@@ -3724,6 +3742,7 @@ namespace Legion {
         const UniqueID opid;
         const AddressSpaceID source;
         const RtUserEvent ready;
+        const bool symbolic;
       };
       class InvalidFunctor {
       public:
@@ -3860,7 +3879,8 @@ namespace Legion {
                                        const FieldMask &version_mask,
                                        const UniqueID opid, 
                                        const AddressSpaceID original_source,
-                                       std::set<RtEvent> &ready_events);
+                                       std::set<RtEvent> &ready_events,
+                                       const bool symbolic = false);
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *parent_ctx,
                                     EqSetTracker *target,
@@ -3870,16 +3890,18 @@ namespace Legion {
                                     const UniqueID opid,
                                     const AddressSpaceID original_source,
                                     std::set<RtEvent> &ready_events,
-                                    bool downward_only);
+                                    const bool downward_only,
+                                    const bool symbolic);
       static void handle_deferred_compute_equivalence_sets(const void *args);
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,bool self,
                                  std::set<RtEvent> &applied_events, 
                                  std::vector<EquivalenceSet*> &to_release,
                                  InnerContext *source_context);
       void record_refinement(ContextID ctx, EquivalenceSet *set, 
-          const FieldMask &mask, std::set<RtEvent> &applied_events);
+                             const FieldMask &mask, bool symbolic, 
+                             std::set<RtEvent> &applied_eventssymbolic);
       void propagate_refinement(ContextID ctx, PartitionNode *child,
-                                const FieldMask &mask,
+                                const FieldMask &mask, bool symbolic,
                                 std::set<RtEvent> &applied_events);
     public:
       void find_open_complete_partitions(ContextID ctx,
@@ -3995,17 +4017,18 @@ namespace Legion {
                                     const UniqueID opid,
                                     const AddressSpaceID source,
                                     std::set<RtEvent> &ready_events,
-                                    bool downward_only);
+                                    const bool downward_only,
+                                    const bool symbolic);
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,
                                  std::set<RtEvent> &applied_events,
                                  std::vector<EquivalenceSet*> &to_release,
                                  InnerContext *source_context);
       void propagate_refinement(ContextID ctx, RegionNode *child,
-                                const FieldMask &mask,
+                                const FieldMask &mask, bool symbolic,
                                 std::set<RtEvent> &applied_events);
       void propagate_refinement(ContextID ctx, 
                                 const std::vector<RegionNode*> &children,
-                                const FieldMask &mask,
+                                const FieldMask &mask, bool symbolic,
                                 std::set<RtEvent> &applied_events);
     public:
       // Logging calls

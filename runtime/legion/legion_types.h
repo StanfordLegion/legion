@@ -122,6 +122,7 @@ namespace Legion {
   class Grant;
   class PhaseBarrier;
   struct RegionRequirement;
+  struct OutputRequirement;
   struct IndexSpaceRequirement;
   struct FieldSpaceRequirement;
   struct TaskLauncher;
@@ -138,6 +139,7 @@ namespace Legion {
   class FutureMap;
   class Predicate;
   class PhysicalRegion;
+  class OutputRegion;
   template<PrivilegeMode,typename,int,typename,typename,bool> 
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
@@ -341,7 +343,6 @@ namespace Legion {
       LG_SELECT_TUNABLE_TASK_ID,
       LG_DEFERRED_ENQUEUE_OP_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
-      LG_DEFERRED_TASK_COMPLETE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
       LG_REMOTE_VIEW_CREATION_TASK_ID,
       LG_DEFER_DISTRIBUTE_TASK_ID,
@@ -391,12 +392,14 @@ namespace Legion {
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
       LG_DEFER_FINALIZE_PENDING_SET_TASK_ID,
+      LG_FREE_EAGER_INSTANCE_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
       LG_DEFER_TRACE_PRECONDITION_TASK_ID,
       LG_DEFER_TRACE_POSTCONDITION_TASK_ID,
       LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
+      LG_FINALIZE_OUTPUT_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_YIELD_TASK_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
@@ -462,7 +465,6 @@ namespace Legion {
         "Select Tunable",                                         \
         "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \
-        "Deferred Task Complete",                                 \
         "Deferred Mapper Message",                                \
         "Remote View Creation",                                   \
         "Defer Task Distribution",                                \
@@ -512,12 +514,14 @@ namespace Legion {
         "Defer Release Acquired Instances",                       \
         "Defer Disjoint Complete Response",                       \
         "Defer Finalize Pending Equivalence Set",                 \
+        "Free Eager Instance",                                    \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Defer Trace Precondition Test",                          \
         "Defer Trace Postcondition Test",                         \
         "Defer Trace Finalize Condition Set Updates",             \
         "Defer Trace Update",                                     \
+        "Finalize Output Region Instance",                        \
         "Defer Consensus Match",                                  \
         "Yield",                                                  \
         "Retry Shutdown",                                         \
@@ -773,6 +777,7 @@ namespace Legion {
       SEND_SHARDED_VIEW,
       SEND_REDUCTION_VIEW,
       SEND_INSTANCE_MANAGER,
+      SEND_MANAGER_UPDATE,
       SEND_COLLECTIVE_MANAGER,
       SEND_COLLECTIVE_MESSAGE,
       SEND_CREATE_SHADOW_REQUEST,
@@ -981,6 +986,7 @@ namespace Legion {
         "Send Sharded View",                                          \
         "Send Reduction View",                                        \
         "Send Instance Manager",                                      \
+        "Send Manager Update",                                        \
         "Send Collective Instance Manager",                           \
         "Send Collective Instance Message",                           \
         "Send Create Shadow Reduction Instance Request",              \
@@ -1468,7 +1474,7 @@ namespace Legion {
       //COLLECTIVE_LOC_26 = 26,
       //COLLECTIVE_LOC_27 = 27, 
       //COLLECTIVE_LOC_28 = 28, 
-      //COLLECTIVE_LOC_29 = 29,
+      COLLECTIVE_LOC_29 = 29,
       COLLECTIVE_LOC_30 = 30,
       COLLECTIVE_LOC_31 = 31, 
       COLLECTIVE_LOC_32 = 32,
@@ -1565,6 +1571,7 @@ namespace Legion {
     class FutureMapImpl;
     class ReplFutureMapImpl;
     class PhysicalRegionImpl;
+    class OutputRegionImpl;
     class PieceIteratorImpl;
     class GrantImpl;
     class PredicateImpl;

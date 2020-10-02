@@ -3288,7 +3288,8 @@ namespace Legion {
         IndexSpaceExpression *overlap = 
           forest->intersect_index_spaces(condition_expr, (*it)->row_source);
         (*it)->compute_equivalence_sets(ctxid, context, this, space, overlap,
-            invalid_mask, opid, space, ready_events, false/*downward only*/);
+                                    invalid_mask, opid, space, ready_events, 
+                                    false/*downward only*/, false/*symbolic*/);
       }
       invalid_mask.clear();
       if (!ready_events.empty())

@@ -2220,8 +2220,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::set_realm_index_space(AddressSpaceID source, 
-                   const Realm::IndexSpace<DIM,T> &value, ShardMapping *mapping)
+    bool IndexSpaceNodeT<DIM,T>::set_realm_index_space(AddressSpaceID source,
+                                          const Realm::IndexSpace<DIM,T> &value,
+                                                       ShardMapping *mapping,
+                                                       RtEvent ready_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2238,7 +2240,7 @@ namespace Legion {
       if (owner_space != context->runtime->address_space)
       {
         // We're not the owner so we can trigger the event without the lock
-        Runtime::trigger_event(realm_index_space_set);
+        Runtime::trigger_event(realm_index_space_set, ready_event);
         // We're not the owner, if this is not from the owner then
         // send a message there telling the owner that it is set
         if ((source != owner_space) && (mapping == NULL))
@@ -2257,7 +2259,7 @@ namespace Legion {
         // Hold the lock while walking over the node set
         AutoLock n_lock(node_lock);
         // Now we can trigger the event while holding the lock
-        Runtime::trigger_event(realm_index_space_set);
+        Runtime::trigger_event(realm_index_space_set, ready_event);
         if (has_remote_instances())
         {
           // We're the owner, send messages to everyone else that we've 
@@ -2310,6 +2312,55 @@ namespace Legion {
     {
       const DomainT<DIM,T> realm_space = domain;
       return set_realm_index_space(source, realm_space, shard_mapping);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::set_output_union(
+                              const std::map<Point<1>,size_t> &output_sizes,
+                              const bool convex, AddressSpaceID space, 
+                              ShardMapping *shard_mapping)
+    //-------------------------------------------------------------------------- 
+    {
+#ifdef DEBUG_LEGION
+      assert(DIM == 2);
+#endif
+      // Need this indirection to help the type system
+      Domain indirect;
+      if (convex)
+      {
+        coord_t max_x = 0;
+        size_t max_y = 0;
+        for (std::map<Point<1>,size_t>::const_iterator it = 
+              output_sizes.begin(); it != output_sizes.end(); it++)
+        {
+          if (it->first[0] > max_x)
+            max_x = it->first[0];
+          if (it->second > max_y)
+            max_y = it->second;
+        }
+        const Point<2> lo(0,0);
+        const Point<2> hi(max_x, max_y-1);
+        const Rect<2> hull(lo,hi);
+        indirect = hull;
+      }
+      else
+      {
+        std::vector<Realm::Rect<2,T> > output_rects;
+        output_rects.reserve(output_sizes.size());
+        for (std::map<Point<1>,size_t>::const_iterator it = 
+              output_sizes.begin(); it != output_sizes.end(); it++)
+        {
+          if (it->second == 0)
+            continue;
+          const Point<2,T> lo(it->first[0], 0);
+          const Point<2,T> hi(it->first[0], it->second - 1);
+          output_rects.push_back(Realm::Rect<2,T>(lo, hi));
+        }
+        const Realm::IndexSpace<2,T> output_space(output_rects);
+        indirect = DomainT<2,T>(output_space);
+      }
+      return set_domain(indirect, space, shard_mapping);
     }
 
     //--------------------------------------------------------------------------

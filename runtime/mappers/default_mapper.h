@@ -111,6 +111,8 @@ namespace Legion {
         unsigned long long                          task_hash;
         VariantID                                   variant;
         std::vector<std::vector<PhysicalInstance> > mapping;
+        std::vector<Memory>                         output_targets;
+        std::vector<LayoutConstraintSet>            output_constraints;
       };
       struct MapperMsgHdr {
       public:
@@ -368,6 +370,8 @@ namespace Legion {
       virtual Memory default_policy_select_target_memory(MapperContext ctx, 
                                     Processor target_proc,
                                     const RegionRequirement &req);
+      virtual Memory default_policy_select_output_target(MapperContext ctx,
+                                    Processor target_proc);
       virtual LayoutConstraintID default_policy_select_layout_constraints(
                                     MapperContext ctx, Memory target_memory,
                                     const RegionRequirement &req,
@@ -377,6 +381,9 @@ namespace Legion {
       virtual void default_policy_select_constraints(MapperContext ctx,
                                     LayoutConstraintSet &constraints,
                                     Memory target_memory,
+                                    const RegionRequirement &req);
+      virtual void default_policy_select_output_constraints(const Task &task,
+                                    LayoutConstraintSet &constraints,
                                     const RegionRequirement &req);
       virtual Memory default_policy_select_constrained_instance_constraints(
 				    MapperContext ctx,

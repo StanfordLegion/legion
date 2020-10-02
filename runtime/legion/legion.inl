@@ -15446,7 +15446,10 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T> &r, size_t strides[N]) const;
       __CUDA_HD__
       inline FT& operator[](const Point<N,T> &p) const;
+    public:
+      void destroy();
     protected:
+      friend class OutputRegion;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<FT,N,T> accessor;
     };
@@ -15511,7 +15514,10 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T> &r, size_t strides[N]) const;
       __CUDA_HD__
       inline FT& operator[](const Point<N,T> &p) const;
+    public:
+      void destroy();
     protected:
+      friend class OutputRegion;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<FT,N,T> accessor;
       DomainT<N,T> bounds;
@@ -16205,6 +16211,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return accessor[p];
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    void DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              false
+#else
+              CB
+#endif
+              >::destroy()
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = Runtime::get_runtime();
+      runtime->destroy_task_local_instance(instance);
+      instance = Realm::RegionInstance::NO_INST;
     }
 
     //--------------------------------------------------------------------------
@@ -16924,6 +16950,36 @@ namespace Legion {
       assert(bounds.contains(p));
 #endif
       return accessor[p];
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    void DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              CB
+#else
+              true
+#endif
+              >::destroy()
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = Runtime::get_runtime();
+      runtime->destroy_task_local_instance(instance);
+      instance = Realm::RegionInstance::NO_INST;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void OutputRegion::return_data(FieldID field_id,
+                                   DeferredBuffer<T,1> &buffer,
+                                   const size_t *num_elements /*= NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      return_data(field_id, buffer.instance, sizeof(T), num_elements);
     }
 
     //--------------------------------------------------------------------------

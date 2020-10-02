@@ -2217,6 +2217,11 @@ namespace Legion {
                           IndexSpaceExpression *e, IndexSpace h,
                           AddressSpaceID o, RtUserEvent d,
                           RtUserEvent def, const FieldMask &m,
+                          // This is to tell whether the ray tracing
+                          // must be done purely symbolically.
+                          // Must be true only for index spaces of
+                          // output regions.
+                          bool symbolic=false,
                           // These are just for the case where the
                           // request comes from a remote node and
                           // we're waiting for the expression to load
@@ -2232,6 +2237,7 @@ namespace Legion {
         const RtUserEvent done;
         const RtUserEvent deferral;
         FieldMask *const ray_mask;
+        bool symbolic;
         const IndexSpace expr_handle;
         const IndexSpaceExprID expr_id;
         const bool is_local;
@@ -2245,18 +2251,21 @@ namespace Legion {
         DeferRayTraceFinishArgs(RayTracer *t, AddressSpaceID src,
             FieldMaskSet<EquivalenceSet> *to_tv,
             std::map<EquivalenceSet*,IndexSpaceExpression*> *exs,
-            const size_t v, const IndexSpace h, RtUserEvent d)
+            const size_t v, const IndexSpaceExprID e,
+            const IndexSpace h, RtUserEvent d, bool sym)
           : LgTaskArgs<DeferRayTraceFinishArgs>(implicit_provenance),
             target(t), source(src), to_traverse(to_tv), exprs(exs), 
-            volume(v), handle(h), done(d) { }
+            volume(v), expr_id(e), handle(h), done(d), symbolic(sym) { }
       public:
         RayTracer *const target;
         const AddressSpaceID source;
         FieldMaskSet<EquivalenceSet> *const to_traverse;
         std::map<EquivalenceSet*,IndexSpaceExpression*> *const exprs;
         const size_t volume;
+        const IndexSpaceExprID expr_id;
         const IndexSpace handle;
         const RtUserEvent done;
+        const bool symbolic;
       };
       struct DeferSubsetRequestArgs : 
         public LgTaskArgs<DeferSubsetRequestArgs> {
@@ -2356,7 +2365,8 @@ namespace Legion {
       struct DisjointPartitionRefinement {
       public:
         DisjointPartitionRefinement(EquivalenceSet *owner, IndexPartNode *p,
-                                    std::set<RtEvent> &applied_events);
+                                    std::set<RtEvent> &applied_events,
+                                    bool symbolic=false);
         DisjointPartitionRefinement(const DisjointPartitionRefinement &rhs,
                                     std::set<RtEvent> &applied_events);
         ~DisjointPartitionRefinement(void);
@@ -2376,6 +2386,7 @@ namespace Legion {
         std::map<IndexSpaceNode*,EquivalenceSet*> children;
         size_t total_child_volume;
         const size_t partition_volume;
+        const bool symbolic;
       };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
@@ -2438,6 +2449,7 @@ namespace Legion {
                                       IndexSpace handle,
                                       AddressSpaceID source,
                                       RtUserEvent ready,
+                                      bool symbolic=false,
                                       RtUserEvent deferral_event = 
                                         RtUserEvent::NO_RT_USER_EVENT); 
       void record_subset(EquivalenceSet *set, const FieldMask &mask);
@@ -3259,7 +3271,8 @@ namespace Legion {
         PendingEquivalenceSet *const pending;
       };
     public:
-      PendingEquivalenceSet(RegionNode *region_node, const FieldMask &mask);
+      PendingEquivalenceSet(RegionNode *region_node, const FieldMask &mask,
+                            const bool symbolic);
       PendingEquivalenceSet(const PendingEquivalenceSet &rhs);
       ~PendingEquivalenceSet(void);
     public:
@@ -3341,7 +3354,8 @@ namespace Legion {
                                        const FieldMask &version_mask,
                                        const UniqueID opid,
                                        const AddressSpaceID source,
-                                       std::set<RtEvent> &ready);
+                                       std::set<RtEvent> &ready,
+                                       const bool symbolic);
       virtual void add_tracker_reference(unsigned cnt = 1);
       virtual bool remove_tracker_reference(unsigned cnt = 1);
       virtual void record_equivalence_set(EquivalenceSet *set, 
@@ -3366,7 +3380,8 @@ namespace Legion {
                                     FieldMaskSet<PartitionNode> &children,
                                     FieldMask &parent_traversal,
                                     std::set<RtEvent> &deferral_events,
-                                    const bool downward_only);
+                                    const bool downward_only,
+                                    const bool symbolic);
       void find_or_create_empty_equivalence_sets(EqSetTracker *target,
                                     const AddressSpaceID target_space,
                                     const FieldMask &mask,
@@ -3375,7 +3390,8 @@ namespace Legion {
       static void handle_compute_equivalence_sets_response(
                       Deserializer &derez, Runtime *runtime);
       void record_refinement(EquivalenceSet *set, const FieldMask &mask,
-              FieldMask &parent_mask, std::set<RtEvent> &applied_events);
+                             FieldMask &parent_mask, const bool symbolic,
+                             std::set<RtEvent> &applied_events);
     public:
       // Call these from partition nodes
       void compute_equivalence_sets(const FieldMask &mask,

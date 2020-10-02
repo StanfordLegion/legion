@@ -1080,6 +1080,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::set_pending_space_domain(IndexSpace target,
+                                                    Domain domain,
+                                                    AddressSpaceID source,
+                                                    ShardID shard,
+                                                    size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *child_node = get_node(target);
+
+      if ((total_shards > 1) && ((child_node->color % total_shards) != shard))
+        return;
+
+      if (child_node->set_domain(domain, source))
+        assert(false);
+      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+                         const_cast<ApEvent*>(&child_node->index_space_ready)));
+      if (space_ready.has_triggered())
+        REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
+                            "Invalid pending child!\n")
+      Runtime::trigger_event(NULL, space_ready);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition RegionTreeForest::get_index_partition(IndexSpace parent,
                                                          Color color)
     //--------------------------------------------------------------------------
@@ -1812,8 +1835,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
-                     unsigned index, const RegionRequirement &req,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
+        unsigned index, const RegionRequirement &req, VersionInfo &version_info, 
+        std::set<RtEvent> &ready_events, const bool symbolic)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1831,7 +1854,7 @@ namespace Legion {
         region_node->column_source->get_field_mask(req.privilege_fields);
       region_node->perform_versioning_analysis(ctx.get_id(), context, 
                   &version_info, user_mask, op->get_unique_op_id(), 
-                  runtime->address_space, ready_events);
+                  runtime->address_space, ready_events, symbolic);
     }
 
     //--------------------------------------------------------------------------
@@ -2058,7 +2081,8 @@ namespace Legion {
                                          UpdateAnalysis *analysis,
                                          InstanceSet &targets,
                                          const PhysicalTraceInfo &trace_info,
-                                         std::set<RtEvent> &map_applied_events)
+                                         std::set<RtEvent> &map_applied_events,
+                                         bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
       // If we are a NO_ACCESS or there are no fields then analysis will be NULL
@@ -2082,7 +2106,7 @@ namespace Legion {
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index, 
                 analysis->term_event, collect_event,
-                user_applied, trace_info, local_space);
+                user_applied, trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -2106,7 +2130,7 @@ namespace Legion {
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index,
                 analysis->term_event, collect_event, map_applied_events, 
-                trace_info, local_space);
+                trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -2178,13 +2202,15 @@ namespace Legion {
     RtEvent RegionTreeForest::defer_physical_perform_registration(RtEvent pre,
                          UpdateAnalysis *analysis, InstanceSet &targets,
                          std::set<RtEvent> &map_applied_events,
-                         ApEvent &result, const PhysicalTraceInfo &info)
+                         ApEvent &result, const PhysicalTraceInfo &info,
+                         bool symbolic)
     //--------------------------------------------------------------------------
     {
       RtUserEvent map_applied_done = Runtime::create_rt_user_event();
       map_applied_events.insert(map_applied_done);
       DeferPhysicalRegistrationArgs args(analysis->op->get_unique_op_id(),
-                             analysis, targets, map_applied_done, result, info);
+                             analysis, targets, map_applied_done, result, info,
+                             symbolic);
       return runtime->issue_runtime_meta_task(args, 
                     LG_LATENCY_WORK_PRIORITY, pre);
     }
@@ -2197,7 +2223,7 @@ namespace Legion {
         (const DeferPhysicalRegistrationArgs*)args;
       std::set<RtEvent> applied_events;
       dargs->result = physical_perform_registration(dargs->analysis, 
-                        dargs->targets, *dargs, applied_events);
+                        dargs->targets, *dargs, applied_events, dargs->symbolic);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->map_applied_done,
             Runtime::merge_events(applied_events));
@@ -9697,31 +9723,36 @@ namespace Legion {
       {
         // If we're complete then we can use the parent index space expresion
         if (!check_complete || !is_complete())
-        {
-          std::set<IndexSpaceExpression*> child_spaces;
-          if (total_children == max_linearized_color)
-          {
-            for (LegionColor color = 0; color < total_children; color++)
-              child_spaces.insert(get_child(color));
-          }
-          else
-          {
-            for (LegionColor color = 0; color < max_linearized_color; color++)
-            {
-              if (!color_space->contains_color(color))
-                continue;
-              child_spaces.insert(get_child(color));
-            }
-          }
           // We can always write the result immediately since we know
           // that the common sub-expression code will give the same
           // result if there is a race
-          union_expr = context->union_index_spaces(child_spaces);
-        }
+          union_expr = compute_union_expression();
         else // if we're complete the parent is our expression
           union_expr = parent;
       }
       return const_cast<IndexSpaceExpression*>(union_expr);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* IndexPartNode::compute_union_expression(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<IndexSpaceExpression*> child_spaces;
+      if (total_children == max_linearized_color)
+      {
+        for (LegionColor color = 0; color < total_children; color++)
+          child_spaces.insert(get_child(color));
+      }
+      else
+      {
+        for (LegionColor color = 0; color < max_linearized_color; color++)
+        {
+          if (!color_space->contains_color(color))
+            continue;
+          child_spaces.insert(get_child(color));
+        }
+      }
+      return context->union_index_spaces(child_spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -13267,7 +13298,7 @@ namespace Legion {
                                          layout, 0/*redop*/, 
                                          true/*register now*/,
                                          instance_footprint, ready_event,
-                                         true/*external instance*/);
+                                         IndividualManager::EXTERNAL_ATTACHED);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -15076,7 +15107,8 @@ namespace Legion {
               trace_info.req.privilege_fields, req.privilege_fields);
           initializer->initialize(context, req, trace_info, trace_info.req_idx,
                                   unversioned, user.op);
-          initializer->record_refinements(unversioned, true/*overwrite*/);
+          initializer->record_refinements(unversioned, true/*overwrite*/,
+              (trace_info.req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG));
           // These fields are unversioned so there is nothing for 
           // this close operation to depend on
           const GenerationID initializer_gen = initializer->get_generation();
@@ -18213,12 +18245,13 @@ namespace Legion {
                                                  const FieldMask &mask,
                                                  const UniqueID opid,
                                                  const AddressSpaceID source,
-                                                 std::set<RtEvent> &applied)
+                                                 std::set<RtEvent> &applied,
+                                                 const bool symbolic)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.perform_versioning_analysis(parent_ctx, version_info, this, 
-              row_source, true/*expr covers*/, mask, opid, source, applied);
+        row_source, true/*expr covers*/, mask, opid, source, applied, symbolic);
     }
     
     //--------------------------------------------------------------------------
@@ -18231,7 +18264,8 @@ namespace Legion {
                                               const UniqueID opid,
                                               const AddressSpaceID source,
                                               std::set<RtEvent> &ready_events,
-                                              bool downward_only)
+                                              const bool downward_only,
+                                              const bool symbolic)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
@@ -18240,7 +18274,7 @@ namespace Legion {
       std::set<RtEvent> deferral_events;
       manager.compute_equivalence_sets(ctx, target, target_space, mask, context,
                opid, source, ready_events, children_traversal, parent_traversal,
-               deferral_events, downward_only);
+               deferral_events, downward_only, symbolic);
       if (!deferral_events.empty())
       {
 #ifdef DEBUG_LEGION
@@ -18251,14 +18285,14 @@ namespace Legion {
         {
           // Defer this computation until the version manager data is ready
           DeferComputeEquivalenceSetArgs args(this, ctx, context, target, 
-                                  target_space, expr, mask, opid, source);
+                        target_space, expr, mask, opid, source, symbolic);
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY, deferral_event);
           ready_events.insert(args.ready);
         }
         else
           compute_equivalence_sets(ctx, context, target, target_space, expr,
-              mask, opid, source, ready_events, true/*downward only*/);
+            mask, opid, source, ready_events, true/*downward only*/, symbolic);
       }
       if (!!parent_traversal)
       {
@@ -18268,7 +18302,8 @@ namespace Legion {
 #endif
         parent->compute_equivalence_sets(ctx, context, target, target_space,
                                          expr, parent_traversal, opid, source, 
-                                         ready_events, false/*downward only*/);
+                                         ready_events, false/*downward only*/,
+                                         symbolic);
       }
       if (!children_traversal.empty())
       {
@@ -18277,19 +18312,19 @@ namespace Legion {
           it->first->compute_equivalence_sets(ctx, context, target, 
                                               target_space, expr, it->second, 
                                               opid, source, ready_events, 
-                                              true/*downward only*/);
+                                              true/*downward only*/, symbolic);
       }
     }
 
     //--------------------------------------------------------------------------
     RegionNode::DeferComputeEquivalenceSetArgs::DeferComputeEquivalenceSetArgs(
-            RegionNode *proxy, ContextID x, InnerContext *c, EqSetTracker *t, 
-            const AddressSpaceID ts, IndexSpaceExpression *e, 
-            const FieldMask &m, const UniqueID id, const AddressSpaceID s)
+          RegionNode *proxy, ContextID x, InnerContext *c, EqSetTracker *t, 
+          const AddressSpaceID ts, IndexSpaceExpression *e, const FieldMask &m, 
+          const UniqueID id, const AddressSpaceID s, const bool sym)
       : LgTaskArgs<DeferComputeEquivalenceSetArgs>(implicit_provenance),
         proxy_this(proxy), ctx(x), context(c), target(t), target_space(ts),
         expr(e), mask(new FieldMask(m)), opid(id), source(s),
-        ready(Runtime::create_rt_user_event())
+        ready(Runtime::create_rt_user_event()), symbolic(sym)
     //--------------------------------------------------------------------------
     {
       expr->add_expression_reference();
@@ -18305,7 +18340,8 @@ namespace Legion {
       std::set<RtEvent> ready_events;
       dargs->proxy_this->compute_equivalence_sets(dargs->ctx, dargs->context,
           dargs->target, dargs->target_space, dargs->expr, *(dargs->mask), 
-          dargs->opid, dargs->source, ready_events, true/*downward only*/);
+          dargs->opid, dargs->source, ready_events, true/*downward only*/,
+          dargs->symbolic);
       if (!ready_events.empty())
         Runtime::trigger_event(dargs->ready, 
             Runtime::merge_events(ready_events));
@@ -18367,29 +18403,31 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::record_refinement(ContextID ctx, EquivalenceSet *set,
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+        const FieldMask &mask, bool symbolic, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
-      manager.record_refinement(set, mask, parent_mask, applied_events);
+      manager.record_refinement(set, mask, parent_mask,symbolic,applied_events);
       if (!!parent_mask && (parent != NULL))
-        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+        parent->propagate_refinement(ctx, this, parent_mask, 
+                                     symbolic, applied_events);
     }
 
     //--------------------------------------------------------------------------
     void RegionNode::propagate_refinement(ContextID ctx, PartitionNode *child,
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+        const FieldMask &mask, bool symbolic, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!row_source->is_empty());
+      assert(symbolic || !row_source->is_empty());
 #endif
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
       manager.propagate_refinement(child, mask, parent_mask, applied_events);
       if (!!parent_mask && (parent != NULL))
-        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+        parent->propagate_refinement(ctx, this, parent_mask, 
+                                     symbolic, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -19846,7 +19884,8 @@ namespace Legion {
                                               const UniqueID opid,
                                               const AddressSpaceID source,
                                               std::set<RtEvent> &ready_events,
-                                              bool downward_only)
+                                              const bool downward_only,
+                                              const bool symbolic)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
@@ -19862,8 +19901,8 @@ namespace Legion {
               interfering_children.end(); it++)
         {
           RegionNode *child = get_child(*it);
-          child->compute_equivalence_sets(ctx, context, target, target_space,
-              expr, mask, opid, source, ready_events, true/*downward only*/);
+          child->compute_equivalence_sets(ctx,context,target,target_space,expr,
+             mask, opid, source, ready_events, true/*downward only*/, symbolic);
         }
       }
       else
@@ -19877,7 +19916,7 @@ namespace Legion {
         if (!!parent_traversal)
           parent->compute_equivalence_sets(ctx, context, target, target_space,
               expr, parent_traversal, opid, source, ready_events, 
-              false/*downward only*/);
+              false/*downward only*/, symbolic);
         if (!!children_traversal)
         {
           std::vector<LegionColor> interfering_children;
@@ -19892,7 +19931,7 @@ namespace Legion {
             RegionNode *child = get_child(*it);
             child->compute_equivalence_sets(ctx, context, target, target_space,
                 expr, children_traversal, opid, source, ready_events, 
-                true/*downward only*/);
+                true/*downward only*/, symbolic);
           }
         }
       }
@@ -19929,27 +19968,30 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PartitionNode::propagate_refinement(ContextID ctx, RegionNode *child, 
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+        const FieldMask &mask, bool symbolic, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
       manager.propagate_refinement(child, mask, parent_mask, applied_events);
       if (!!parent_mask)
-        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+        parent->propagate_refinement(ctx, this, parent_mask, 
+                                     symbolic, applied_events);
     }
 
     //--------------------------------------------------------------------------
     void PartitionNode::propagate_refinement(ContextID ctx,
                        const std::vector<RegionNode*> &children,
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+                       const FieldMask &mask, bool symbolic,
+                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
       manager.propagate_refinement(children, mask, parent_mask, applied_events);
       if (!!parent_mask)
-        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+        parent->propagate_refinement(ctx, this, parent_mask, 
+                                     symbolic, applied_events);
     }
 
     //--------------------------------------------------------------------------

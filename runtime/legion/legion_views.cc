@@ -725,7 +725,7 @@ namespace Legion {
     ExprView::ExprView(RegionTreeForest *ctx, PhysicalManager *man, 
                        InstanceView *view, IndexSpaceExpression *exp) 
       : context(ctx), manager(man), inst_view(view),
-        view_expr(exp), view_volume(view_expr->get_volume()),
+        view_expr(exp), view_volume(-1U),
         invalid_fields(FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES))
     //--------------------------------------------------------------------------
     {
@@ -789,6 +789,15 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ExprView::get_view_volume(void)
+    //--------------------------------------------------------------------------
+    {
+      if (view_volume == -1U)
+        view_volume = view_expr->get_volume();
+      return view_volume;
     }
 
     //--------------------------------------------------------------------------
@@ -983,7 +992,7 @@ namespace Legion {
               IndexSpaceExpression *intersect = traverse_exprs[it->first];
               const bool user_dominates = 
                 (intersect->expr_id == it->first->view_expr->expr_id) ||
-                (intersect->get_volume() == it->first->view_volume);
+                (intersect->get_volume() == it->first->get_view_volume());
               it->first->find_user_preconditions(usage, intersect, 
                             user_dominates, it->second, term_event, 
                             op_id, index, preconditions, trace_recording);
@@ -1113,7 +1122,7 @@ namespace Legion {
           {
             const bool copy_dominates = 
               (expr_overlap->expr_id == it->first->view_expr->expr_id) ||
-              (expr_overlap->get_volume() == it->first->view_volume);
+              (expr_overlap->get_volume() == it->first->get_view_volume());
             it->first->find_copy_preconditions(usage, expr_overlap, 
                               copy_dominates, overlap, op_id, 
                               index, preconditions, trace_recording);
@@ -1123,11 +1132,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExprView* ExprView::find_congruent_view(IndexSpaceExpression *expr) const
+    ExprView* ExprView::find_congruent_view(IndexSpaceExpression *expr)
     //--------------------------------------------------------------------------
     {
       // Handle the base case first
-      if ((expr == view_expr) || (expr->get_volume() == view_volume))
+      if ((expr == view_expr) || (expr->get_volume() == get_view_volume()))
         return const_cast<ExprView*>(this);
       for (FieldMaskSet<ExprView>::const_iterator it = 
             subviews.begin(); it != subviews.end(); it++)
@@ -1143,7 +1152,7 @@ namespace Legion {
         if (overlap_volume == expr->get_volume())
         {
           // See if we strictly dominate or whether they are equal
-          if (overlap_volume < it->first->view_volume)
+          if (overlap_volume < it->first->get_view_volume())
           {
             ExprView *result = it->first->find_congruent_view(expr);
             if (result != NULL)
@@ -1184,17 +1193,17 @@ namespace Legion {
           if (overlap_volume == 0)
             continue;
           // See if we dominate or just intersect
-          if (overlap_volume == subview->view_volume)
+          if (overlap_volume == subview->get_view_volume())
           {
 #ifdef DEBUG_LEGION
             // Should only strictly dominate if they were congruent
             // then we wouldn't be inserting in the first place
-            assert(overlap_volume < it->first->view_volume);
+            assert(overlap_volume < it->first->get_view_volume());
 #endif
             // Dominator so we can just continue traversing
             dominating_subviews.insert(it->first, overlap_mask);
           }
-          else if (overlap_volume == it->first->view_volume)
+          else if (overlap_volume == it->first->get_view_volume())
           {
 #ifdef DEBUG_LEGION
             assert(overlap_mask * dominating_subviews.get_valid_mask());
@@ -1301,7 +1310,7 @@ namespace Legion {
           {
 #ifdef DEBUG_LEGION
             // Should strictly dominate otherwise we'd be congruent
-            assert(overlap_volume < it->first->view_volume);
+            assert(overlap_volume < it->first->get_view_volume());
 #endif
             dominated_mask |= overlap_mask;
             // Continute the traversal
@@ -1315,7 +1324,7 @@ namespace Legion {
       // If we still have fields then record ourself
       if (!!expr_mask)
       {
-        std::pair<size_t,ExprView*> key(view_volume, this);
+        std::pair<size_t,ExprView*> key(get_view_volume(), this);
         bounding_views[key] |= expr_mask;
       }
     }
@@ -2602,12 +2611,13 @@ namespace Legion {
                                             RtEvent collect_event,
                                             std::set<RtEvent> &applied_events,
                                             const PhysicalTraceInfo &trace_info,
-                                            const AddressSpaceID source)
+                                            const AddressSpaceID source,
+                                            bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
       // Quick test for empty index space expressions
-      if (user_expr->is_empty())
-        return manager->get_use_event();
+      if (!symbolic && user_expr->is_empty())
+        return manager->get_use_event(term_event);
       if (!is_logical_owner())
       {
         ApUserEvent ready_event;
@@ -2765,13 +2775,13 @@ namespace Legion {
 #endif // ENABLE_VIEW_REPLICATION
         // Now we can do our local analysis
         std::set<ApEvent> wait_on_events;
-        ApEvent start_use_event = manager->get_use_event();
+        ApEvent start_use_event = manager->get_use_event(term_event);
         if (start_use_event.exists())
           wait_on_events.insert(start_use_event);
         // Find the preconditions
         const bool user_dominates = 
           (user_expr->expr_id == current_users->view_expr->expr_id) ||
-          (user_expr->get_volume() == current_users->view_volume);
+          (user_expr->get_volume() == current_users->get_view_volume());
         {
           // Traversing the tree so need the expr_view lock
           AutoLock e_lock(expr_lock,1,false/*exclusive*/);
@@ -2840,7 +2850,7 @@ namespace Legion {
                   LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
               const bool copy_dominates = 
                 (copy_expr->expr_id == current_users->view_expr->expr_id) ||
-                (copy_expr->get_volume() == current_users->view_volume);
+                (copy_expr->get_volume() == current_users->get_view_volume());
               {
                 // Need a read-only copy of the expr_view lock to 
                 // traverse the tree
@@ -2951,7 +2961,7 @@ namespace Legion {
             LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
         const bool copy_dominates = 
           (copy_expr->expr_id == current_users->view_expr->expr_id) ||
-          (copy_expr->get_volume() == current_users->view_volume);
+          (copy_expr->get_volume() == current_users->get_view_volume());
         {
           // Need a read-only copy of the expr_lock to traverse the tree
           AutoLock e_lock(expr_lock,1,false/*exclusive*/);
@@ -2987,7 +2997,7 @@ namespace Legion {
           LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
       const bool copy_dominates = 
           (copy_expr->expr_id == current_users->view_expr->expr_id) ||
-          (copy_expr->get_volume() == current_users->view_volume);
+          (copy_expr->get_volume() == current_users->get_view_volume());
       // Need a read-only copy of the expr_lock to traverse the tree
       AutoLock e_lock(expr_lock,1,false/*exclusive*/);
       current_users->find_copy_preconditions(usage, copy_expr, copy_dominates,
@@ -4692,15 +4702,16 @@ namespace Legion {
                                          RtEvent collect_event,
                                          std::set<RtEvent> &applied_events,
                                          const PhysicalTraceInfo &trace_info,
-                                         const AddressSpaceID source)
+                                         const AddressSpaceID source,
+                                         bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(usage.redop == manager->redop);
 #endif
       // Quick test for empty index space expressions
-      if (user_expr->is_empty())
-        return manager->get_use_event();
+      if (!symbolic && user_expr->is_empty())
+        return manager->get_use_event(term_event);
       if (!is_logical_owner())
       {
         // If we're not the logical owner send a message there 
@@ -4735,7 +4746,7 @@ namespace Legion {
       else
       {
         std::set<ApEvent> wait_on_events;
-        ApEvent start_use_event = manager->get_use_event();
+        ApEvent start_use_event = manager->get_use_event(term_event);
         if (start_use_event.exists())
           wait_on_events.insert(start_use_event);
         {

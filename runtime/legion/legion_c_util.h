@@ -124,6 +124,7 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_inline_t, InlineMapping *);
       NEW_OPAQUE_WRAPPER(legion_mappable_t, Mappable *);
       NEW_OPAQUE_WRAPPER(legion_region_requirement_t , RegionRequirement *);
+      NEW_OPAQUE_WRAPPER(legion_output_requirement_t , OutputRequirement *);
       NEW_OPAQUE_WRAPPER(legion_machine_t, Machine *);
       NEW_OPAQUE_WRAPPER(legion_mapper_t, Mapping::Mapper *);
       NEW_OPAQUE_WRAPPER(legion_processor_query_t, Machine::ProcessorQuery *);

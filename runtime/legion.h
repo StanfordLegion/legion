@@ -1069,6 +1069,80 @@ namespace Legion {
     };
 
     /**
+     * \struct OutputRequirement
+     * Output requirements are a special kind of region requirement to inform
+     * the runtime that the task will be producing new instances as part of its
+     * execution that will be attached to the logical region at the end of the 
+     * task, and are therefore not mapped ahead of the task's execution.
+     *
+     * Output region requirements come in two flavors: those that are already
+     * valid region requirements and those which are going to produce variable
+     * sized outputs. Valid region requirements behave like normal region
+     * requirements except they will not be mapped by the task. Alternatively,
+     * for variable-sized output region requirements the runtime
+     * will create fresh region and partition names for output requirements
+     * right after the task is launched. Output requirements still pick
+     * field IDs and the field space for the output regions.
+     *
+     * Output regions are always 1D in case of individual task launch and no
+     * partitions will be created by the runtime. For index space launches,
+     * the runtime gives back a fresh region and partition, whose construction
+     * is controlled by the indexing mode specified the output requirement:
+     *
+     * 0) For either indexing mode, the output partition is a disjoint
+     *    partition whose color space is identical to the launch domain.
+     *
+     * 1) When the global indexing is requested, the output region has
+     *    a contiguous 1D index space whose volume is the sum of the sizes of
+     *    the outputs produced by point tasks. The range of the i-th subregion
+     *    is [S, S+n), where S is the sum of the previous i-1 subregions' sizes
+     *    and n is the output size of the i-th point task. The launch domain
+     *    must be 1D for the global indexing to be used.
+     *
+     * 2) With the local indexing, the output region has an (N+1)-D index
+     *    space for an N-D launch domain. The range of the subregion produced
+     *    by the point task p (where p is a point in an N-D space) is
+     *    [<0, p>, <n-1, p>] where n is the output size of the point task p.
+     *    The root index space is simply a union of all subspaces.
+     *
+     * 3) In the case of local indexing, the output region can either have a
+     *    "loose" convex hull parent index space or a "tight" index space that
+     *    contains exactly the points in the child space. With the convex hull,
+     *    the runtime computes an upper bound 2-D rectangle with as many rows as
+     *    children and as many columns as the extent of the larges child space.
+     *    If convex_hull is set to false, the runtime will compute a more 
+     *    expensive sparse index space containing exactly the children points.
+     *
+     * Note that the global indexing has performance consequences since
+     * the runtime needs to perform a global prefix sum to compute the ranges
+     * of subspaces. Similarly the "tight" bounds can be expensive to compute
+     * due to the cost of building the sparsity data structure.
+     *
+     */
+    struct OutputRequirement : public RegionRequirement {
+    public:
+      OutputRequirement(bool valid_requirement = false);
+      OutputRequirement(const RegionRequirement &req);
+      OutputRequirement(FieldSpace field_space,
+                        const std::set<FieldID> &fields,
+                        bool global_indexing = false,
+                        bool convex_hull = false);
+    public:
+      OutputRequirement(const OutputRequirement &rhs);
+      ~OutputRequirement(void);
+      OutputRequirement& operator=(const RegionRequirement &req);
+      OutputRequirement& operator=(const OutputRequirement &req);
+    public:
+      bool operator==(const OutputRequirement &req) const;
+      bool operator<(const OutputRequirement &req) const;
+    public:
+      FieldSpace field_space; /**< field space for the output region */
+      bool global_indexing; /**< global indexing is used when true */
+      bool valid_requirement; /**< indicate requirement is valid */
+      bool convex_hull; /**< compute convex hull bounds for output region */
+    };
+
+    /**
      * \struct IndexSpaceRequirement
      * Index space requirements are used to specify allocation and
      * deallocation privileges on logical regions.  Just like region
@@ -2904,14 +2978,56 @@ namespace Legion {
       inline T* ptr(const Rect<DIM,COORD_T> &r, size_t strides[DIM]) const;
       __CUDA_HD__
       inline T& operator[](const Point<DIM,COORD_T> &p) const;
+    public:
+      void destroy();
     protected:
+      friend class OutputRegion;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
 #ifdef BOUNDS_CHECKS
       DomainT<DIM,COORD_T> bounds;
 #endif
     };
- 
+
+    /**
+     * \class OutputRegion
+     * An OutputRegion provides an interface for applications to specify
+     * the output instances or allocations of memory to associate with
+     * output region requirements. 
+     */
+    class OutputRegion : public Unserializable<OutputRegion> {
+    public:
+      OutputRegion(void);
+      OutputRegion(const OutputRegion &rhs);
+      ~OutputRegion(void);
+    private:
+      Internal::OutputRegionImpl *impl;
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      explicit OutputRegion(Internal::OutputRegionImpl *impl);
+    public:
+      OutputRegion& operator=(const OutputRegion &rhs);
+    public:
+      Memory target_memory(void) const;
+    public:
+      void return_data(size_t num_elements,
+                       FieldID field_id,
+                       void *ptr,
+                       size_t alignment = 0);
+      void return_data(size_t num_elements,
+                       std::map<FieldID,void*> ptrs,
+                       std::map<FieldID,size_t> *alignments = NULL);
+      template<typename T>
+      void return_data(FieldID field_id,
+                       DeferredBuffer<T,1> &buffer,
+                       const size_t *num_elements = NULL);
+    private:
+      void return_data(FieldID field_id,
+                       Realm::RegionInstance instance,
+                       size_t field_size,
+                       const size_t *num_elements);
+    };
+
     //==========================================================================
     //                      Software Coherence Classes
     //==========================================================================
@@ -3260,6 +3376,7 @@ namespace Legion {
       TaskID                              task_id; 
       std::vector<IndexSpaceRequirement>  indexes;
       std::vector<RegionRequirement>      regions;
+      std::vector<RegionRequirement>      output_regions;
       std::vector<Future>                 futures;
       std::vector<Grant>                  grants;
       std::vector<PhaseBarrier>           wait_barriers;
@@ -5986,9 +6103,12 @@ namespace Legion {
        * @see TaskLauncher
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
+       * @param outputs optional output requirements
        * @return a future for the return value of the task
        */
-      Future execute_task(Context ctx, const TaskLauncher &launcher);
+      Future execute_task(Context ctx,
+                          const TaskLauncher &launcher,
+                          std::vector<OutputRequirement> *outputs = NULL);
 
       /**
        * Launch an index space of tasks with arguments specified
@@ -5996,11 +6116,13 @@ namespace Legion {
        * @see IndexTaskLauncher
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
+       * @param outputs optional output requirements
        * @return a future map for return values of the points
        *    in the index space of tasks
        */
-      FutureMap execute_index_space(Context ctx, 
-                                    const IndexTaskLauncher &launcher);
+      FutureMap execute_index_space(
+                                Context ctx, const IndexTaskLauncher &launcher,
+                                std::vector<OutputRequirement> *outputs = NULL);
 
       /**
        * Launch an index space of tasks with arguments specified
@@ -6014,11 +6136,14 @@ namespace Legion {
        * @param redop ID for the reduction op to use for reducing return values
        * @param deterministic request that the reduced future value be computed 
        *        in a deterministic way (more expensive than non-deterministic)
+       * @param outputs optional output requirements
        * @return a future result representing the reduction of
        *    all the return values from the index space of tasks
        */
-      Future execute_index_space(Context ctx, const IndexTaskLauncher &launcher,
-                               ReductionOpID redop, bool deterministic = false);
+      Future execute_index_space(
+                               Context ctx, const IndexTaskLauncher &launcher,
+                               ReductionOpID redop, bool deterministic = false,
+                               std::vector<OutputRequirement> *outputs = NULL);
 
       /**
        * Reduce a future map down to a single future value using 
@@ -6209,6 +6334,23 @@ namespace Legion {
        * @param ctx enclosing task context
        */
       void unmap_all_regions(Context ctx);
+    public:
+      //------------------------------------------------------------------------
+      // Output Region Operations
+      //------------------------------------------------------------------------
+      /**
+       * Return a single output region of a task.
+       * @param ctx enclosing task context
+       * @param index the output region index to query
+       */
+      OutputRegion get_output_region(Context ctx, unsigned index);
+
+      /**
+       * Return all output regions of a task.
+       * @param ctx enclosing task context
+       * @param regions a vector to which output regions are returned
+       */
+      void get_output_regions(Context ctx, std::vector<OutputRegion> &regions);
     public:
       //------------------------------------------------------------------------
       // Fill Field Operations
@@ -8675,6 +8817,7 @@ namespace Legion {
       friend class DeferredBuffer;
       Realm::RegionInstance create_task_local_instance(Memory memory,
                                 Realm::InstanceLayoutGeneric *layout);
+      void destroy_task_local_instance(Realm::RegionInstance instance);
     public:
       // This method is hidden down here and not publicly documented because
       // users shouldn't really need it for anything, however there are some

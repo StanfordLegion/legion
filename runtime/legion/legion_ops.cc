@@ -830,7 +830,8 @@ namespace Legion {
         for (std::map<PhysicalManager*,unsigned>::iterator it = 
               acquired_instances.begin(); it != acquired_instances.end(); )
         {
-          if (it->first->instance_footprint > 0)
+          size_t instance_size = it->first->get_instance_size();
+          if (instance_size > 0)
           {
             if (to_release == NULL)
               to_release = 
@@ -854,7 +855,8 @@ namespace Legion {
       for (std::map<PhysicalManager*,unsigned>::iterator it = 
             acquired_instances.begin(); it != acquired_instances.end(); )
       {
-        if (it->first->instance_footprint > 0)
+        size_t instance_size = it->first->get_instance_size();
+        if (instance_size > 0)
         {
           if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
                                 NULL/*mutator*/, it->second))
@@ -9389,7 +9391,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MergeCloseOp::record_refinements(const FieldMask &refinements, 
-                                          const bool overwrite)
+                                      const bool overwrite, const bool symbolic)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9400,6 +9402,7 @@ namespace Legion {
 #endif
       refinement_mask = refinements;
       refinement_overwrite = overwrite;
+      refinement_symbolic = symbolic;
     }
 
     //--------------------------------------------------------------------------
@@ -9415,6 +9418,7 @@ namespace Legion {
     {
       activate_close();
       refinement_overwrite = false;
+      refinement_symbolic = false;
     }
 
     //--------------------------------------------------------------------------
@@ -9503,7 +9507,7 @@ namespace Legion {
         std::set<RtEvent> map_applied_conditions;
         const ContextID ctx = parent_ctx->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region);
-        if (!region_node->row_source->is_empty())
+        if (refinement_symbolic || !region_node->row_source->is_empty())
         {
           // Make a new equivalence set and record it at this node
           const AddressSpaceID local_space = runtime->address_space;
@@ -9528,7 +9532,7 @@ namespace Legion {
           region_node->invalidate_refinement(ctx, refinement_mask, 
               false/*self*/, map_applied_conditions, to_release, parent_ctx);
           region_node->record_refinement(ctx, set, refinement_mask,
-                                         map_applied_conditions);
+                                refinement_symbolic, map_applied_conditions);
         }
         if (!map_applied_conditions.empty())
           complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -10188,6 +10192,7 @@ namespace Legion {
     {
       activate_internal();
       to_refine = NULL;
+      symbolic_refinement = false;
     }
 
     //--------------------------------------------------------------------------
@@ -10241,6 +10246,8 @@ namespace Legion {
 #endif
       initialize_internal(creator, index, trace_info);
       to_refine = root;
+      symbolic_refinement = 
+        (trace_info.req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG);
       MustEpochOp *must = creator->get_must_epoch_op();
       if (must != NULL)
         set_must_epoch(must, false/*do registration*/);
@@ -10337,7 +10344,7 @@ namespace Legion {
         // register them with the context so it can find them later
         IndexPartNode *index_part = it->first->row_source;
         std::vector<RegionNode*> &children = refinement_regions[it->first];
-        if (it->first->parent->row_source->is_empty())
+        if (!symbolic_refinement && it->first->parent->row_source->is_empty())
           continue;
         children.reserve(index_part->total_children);
         // Iterate over each child and make an equivalence set  
@@ -10349,10 +10356,10 @@ namespace Legion {
             RegionNode *child = it->first->get_child(color);
             // Skip empty regions since those are handled separately with 
             // their own explicit empty equivalence sets
-            if (child->row_source->is_empty())
+            if (!symbolic_refinement && child->row_source->is_empty())
               continue;
             PendingEquivalenceSet *pending = 
-              new PendingEquivalenceSet(child, it->second);
+              new PendingEquivalenceSet(child, it->second, symbolic_refinement);
             initialize_pending(pending, it->second, map_applied_conditions);
             // Parent context takes ownership here
             parent_ctx->record_pending_disjoint_complete_set(pending);
@@ -10369,10 +10376,10 @@ namespace Legion {
             RegionNode *child = it->first->get_child(color);
             // Skip empty regions since those are handled separately with 
             // their own explicit empty equivalence sets
-            if (child->row_source->is_empty())
+            if (!symbolic_refinement && child->row_source->is_empty())
               continue;
             PendingEquivalenceSet *pending = 
-              new PendingEquivalenceSet(child, it->second);
+              new PendingEquivalenceSet(child, it->second, symbolic_refinement);
             initialize_pending(pending, it->second, map_applied_conditions);
             // Parent context takes ownership here
             parent_ctx->record_pending_disjoint_complete_set(pending);
@@ -10403,7 +10410,7 @@ namespace Legion {
           continue;
         // Propagate this refinement up from the partition
         it->first->propagate_refinement(ctx, children, it->second, 
-                                        map_applied_conditions);
+                      symbolic_refinement, map_applied_conditions);
       }
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));

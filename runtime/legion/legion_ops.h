@@ -1891,7 +1891,7 @@ namespace Legion {
                       const FieldMask &close_mask, Operation *create_op);
       // Make this virtual so we can override for ReplMergeCloseOp
       virtual void record_refinements(const FieldMask &refinement_mask, 
-                                      const bool overwrite);
+                            const bool overwrite, const bool symbolic);
       void activate_merge(void);
       void deactivate_merge(void);
     public:
@@ -1913,6 +1913,7 @@ namespace Legion {
       std::vector<EquivalenceSet*> to_release;
       FieldMask refinement_mask;
       bool refinement_overwrite;
+      bool refinement_symbolic;
     };
 
     /**
@@ -2071,6 +2072,8 @@ namespace Legion {
       std::vector<EquivalenceSet*> to_release;
       // Fields which do not have initialized equivalence sets
       FieldMask uninitialized_fields;
+      // Whether we are performing a symbolic refinement
+      bool symbolic_refinement;
     };
 
     /**

@@ -1033,6 +1033,31 @@ namespace Legion {
     };
 
     /**
+     * \class OutputSizeExchange
+     * This class exchanges sizes of output subregions that are globally
+     * indexed.
+     */
+    class OutputSizeExchange : public AllGatherCollective<false> {
+    public:
+      typedef std::map<Point<1>,size_t> SizeMap;
+    public:
+      OutputSizeExchange(ReplicateContext *ctx,
+                         CollectiveIndexLocation loc,
+                         std::map<unsigned,SizeMap> &all_output_sizes);
+      OutputSizeExchange(const OutputSizeExchange &rhs);
+      virtual ~OutputSizeExchange(void);
+    public:
+      OutputSizeExchange& operator=(const OutputSizeExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      RtEvent exchange_output_sizes(void);
+    public:
+      std::map<unsigned,SizeMap> &all_output_sizes;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases
@@ -1073,9 +1098,10 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void replay_analysis(void);
       virtual void resolve_false(bool speculated, bool launched);
+      virtual void shard_off(RtEvent mapped_precondition);
     public:
       // Override these so we can broadcast the future result
-      virtual void trigger_task_complete(bool deferred = false);
+      virtual void trigger_task_complete(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
@@ -1116,9 +1142,12 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void replay_analysis(void);
+    protected:
+      virtual RtEvent prepare_index_task_complete(void);
     public:
       // Override this so we can exchange reduction results
-      virtual void trigger_task_complete(bool deferred = false);
+      virtual void trigger_task_complete(void);
+    public:
       // Have to override this too for doing output in the
       // case that we misspeculate
       virtual void resolve_false(bool speculated, bool launched);
@@ -1135,9 +1164,15 @@ namespace Legion {
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
     protected:
+      virtual void finalize_output_regions(void);
+    protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
       FutureExchange *reduction_collective;
+      OutputSizeExchange *output_size_collective;
+    protected:
+      // Map of output sizes collected by this shard
+      std::map<unsigned,std::map<Point<1>,size_t> > local_output_sizes;
     protected:
       std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
 #ifdef DEBUG_LEGION
@@ -1167,7 +1202,7 @@ namespace Legion {
     public:
       void set_repl_close_info(RtBarrier mapped_barrier);
       virtual void record_refinements(const FieldMask &refinement_mask,
-                                      const bool overwrite);
+                            const bool overwrite, const bool symbolic);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 

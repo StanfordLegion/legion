@@ -39,8 +39,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(Runtime *rt, TaskOp *owner, int d,
-                             const std::vector<RegionRequirement> &reqs)
-      : runtime(rt), owner_task(owner), regions(reqs), depth(d),
+                             const std::vector<RegionRequirement> &reqs,
+                             const std::vector<RegionRequirement> &out_reqs)
+      : runtime(rt), owner_task(owner), regions(reqs),
+        output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
         total_tunable_count(0), overhead_tracker(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
@@ -51,7 +53,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(const TaskContext &rhs)
-      : runtime(NULL), owner_task(NULL), regions(rhs.regions), depth(-1)
+      : runtime(NULL), owner_task(NULL), regions(rhs.regions),
+        output_reqs(rhs.output_reqs), depth(-1)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -267,7 +270,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      return create_index_space_internal(bounds, type_tag); 
+      return create_index_space_internal(&bounds, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -288,7 +291,7 @@ namespace Legion {
             const DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
             const Domain bounds(realm_is); \
-            return create_index_space_internal(bounds, \
+            return create_index_space_internal(&bounds, \
                 NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -315,7 +318,7 @@ namespace Legion {
             const DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
             const Domain bounds(realm_is); \
-            return create_index_space_internal(bounds, \
+            return create_index_space_internal(&bounds, \
                 NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -327,7 +330,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace TaskContext::create_index_space_internal(const Domain &bounds,
+    IndexSpace TaskContext::create_index_space_internal(const Domain *bounds,
                                                         TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
@@ -340,9 +343,17 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
-      runtime->forest->create_index_space(handle, &bounds, did); 
+      runtime->forest->create_index_space(handle, bounds, did); 
       register_index_space_creation(handle);
       return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace TaskContext::create_unbound_index_space(TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      return create_index_space_internal(NULL, type_tag); 
     }
 
     //--------------------------------------------------------------------------
@@ -748,6 +759,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::add_output_region(
+               const RegionRequirement &req, InstanceSet instances, bool global)
+    //--------------------------------------------------------------------------
+    {
+      size_t index = output_regions.size();
+      OutputRegionImpl *impl =
+        new OutputRegionImpl(index, req, instances, this, runtime, global);
+      output_regions.push_back(OutputRegion(impl));
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion TaskContext::get_physical_region(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -756,6 +778,38 @@ namespace Legion {
 #endif
       return physical_regions[idx];
     } 
+
+    //--------------------------------------------------------------------------
+    OutputRegion TaskContext::get_output_region(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < output_regions.size()); //should be one of our output regions
+#endif
+      return output_regions[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::finalize_output_regions(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+      {
+        // Check if the task returned data for all the output fields
+        // before we fianlize this output region.
+        OutputRegion &output_region = output_regions[idx];
+        FieldID unbound_field = 0;
+        if (!output_region.impl->is_complete(unbound_field))
+        {
+          REPORT_LEGION_ERROR(ERROR_UNBOUND_OUTPUT_REGION,
+            "Task %s (UID %lld) did not return any instance for field %d "
+            "of output requirement %u",
+            owner_task->get_task_name(), owner_task->get_unique_id(),
+            unbound_field, idx);
+        }
+        output_region.impl->finalize();
+      }
+    }
 
     //--------------------------------------------------------------------------
     void TaskContext::destroy_user_lock(Reservation r)
@@ -2351,8 +2405,8 @@ namespace Legion {
                                           memory, ptr, layout, no_requests));
       task_local_instances.push_back(std::make_pair(instance, ptr));
 #else
-      const RtEvent wait_on(Realm::RegionInstance::create_instance(instance, 
-                                              memory, layout, no_requests));
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      const RtEvent wait_on(manager->create_eager_instance(instance, layout));
       if (!instance.exists())
       {
         const char *mem_names[] = {
@@ -2361,15 +2415,72 @@ namespace Legion {
 #undef MEM_NAMES
         };
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-            "Failed to allocate DeferredBuffer/Value/Reductionin task %s "
+            "Failed to allocate DeferredBuffer/Value/Reduction in task %s "
             "(UID %lld) because %s memory " IDFMT " is full.", get_task_name(),
             get_unique_id(), mem_names[memory.kind()], memory.id) 
       }
-      task_local_instances.push_back(instance);
+      task_local_instances.insert(instance);
 #endif
       if (wait_on.exists() && !wait_on.has_triggered())
         wait_on.wait();
       return instance;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::destroy_task_local_instance(PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_MALLOC_INSTANCES
+      // TODO: We don't eagerly destroy local instances when they are malloc'ed
+#else
+      std::set<PhysicalInstance>::iterator finder =
+        task_local_instances.find(instance);
+#ifdef DEBUG_LEGION
+      assert(finder != task_local_instances.end());
+#endif
+      task_local_instances.erase(finder);
+      MemoryManager *manager = runtime->find_memory_manager(
+          instance.get_location());
+      manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    uintptr_t TaskContext::escape_task_local_instance(PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_MALLOC_INSTANCES
+      uintptr_t ptr = 0;
+      std::vector<std::pair<PhysicalInstance,uintptr_t> > new_instances;
+      for (std::vector<std::pair<PhysicalInstance,uintptr_t> >::iterator it =
+           task_local_instances.begin(); it !=
+           task_local_instances.end(); ++it)
+        if (it->first == instance)
+          ptr = it->second;
+        else
+          new_instances.push_back(*it);
+
+#ifdef DEBUG_LEGION
+      assert(ptr != 0);
+#endif
+      task_local_instances.swap(new_instances);
+      return ptr;
+#else
+      std::set<PhysicalInstance>::iterator finder =
+        task_local_instances.find(instance);
+#ifdef DEBUG_LEGION
+      assert(finder != task_local_instances.end());
+#endif
+      // Remove the instance from the set of task local instances
+      task_local_instances.erase(finder);
+
+      MemoryManager *manager = runtime->find_memory_manager(
+          instance.get_location());
+      // We also need to unlink the instance from the manager
+      // as we need to register the allocation with a different
+      // instance name later.
+      return manager->unlink_eager_instance(instance);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2517,22 +2628,15 @@ namespace Legion {
     void TaskContext::release_task_local_instances(PhysicalInstance return_inst)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_MALLOC_INSTANCES
       for (unsigned idx = 0; idx < task_local_instances.size(); idx++)
       {
-#ifdef LEGION_MALLOC_INSTANCES
         std::pair<PhysicalInstance,uintptr_t> inst = task_local_instances[idx];
         if (inst.first == return_inst)
           task_local_instances.front() = inst; // save this for clean up
         else
           inst.first.destroy(Processor::get_current_finish_event());
-#else
-        PhysicalInstance inst = task_local_instances[idx];
-        // Don't delete the return inst for now, the cleanup code will do that
-        if (inst != return_inst)
-          inst.destroy(Processor::get_current_finish_event());
-#endif
       }
-#ifdef LEGION_MALLOC_INSTANCES
       if (return_inst.exists())
       {
         task_local_instances.resize(1);
@@ -2541,11 +2645,26 @@ namespace Legion {
 #endif
       }
       else
-#endif
+        task_local_instances.clear();
+#else
+      for (std::set<PhysicalInstance>::iterator it =
+           task_local_instances.begin(); it !=
+           task_local_instances.end(); ++it)
+      {
+        PhysicalInstance inst = *it;
+        // Don't delete the return inst for now, the cleanup code will do that
+        if (inst != return_inst)
+        {
+          MemoryManager *manager =
+            runtime->find_memory_manager(inst.get_location());
+          manager->free_eager_instance(
+              inst, RtEvent(Processor::get_current_finish_event()));
+        }
+      }
       task_local_instances.clear();
+#endif
     }
 
-#ifdef LEGION_MALLOC_INSTANCES
     //--------------------------------------------------------------------------
     void TaskContext::release_future_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
@@ -2553,6 +2672,7 @@ namespace Legion {
       // Get the pointer and free it
       MemoryManager *manager = 
         runtime->find_memory_manager(instance.get_location());
+#ifdef LEGION_MALLOC_INSTANCES
 #ifdef DEBUG_LEGION
       assert(task_local_instances.size() == 1);
 #endif
@@ -2562,8 +2682,10 @@ namespace Legion {
       assert(inst.first == instance);
 #endif
       manager->free_legion_instance(RtEvent::NO_RT_EVENT, inst.second);
-    }
+#else
+      manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
 #endif
+    }
 
     //--------------------------------------------------------------------------
     Future TaskContext::predicate_task_false(const TaskLauncher &launcher)
@@ -2752,10 +2874,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(Runtime *rt, TaskOp *owner,int d,bool full_inner,
                                const std::vector<RegionRequirement> &reqs,
+                               const std::vector<RegionRequirement> &out_reqs,
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
                                UniqueID uid, ApEvent exec_fence, bool remote)
-      : TaskContext(rt, owner, d, reqs),
+      : TaskContext(rt, owner, d, reqs, out_reqs),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(full_inner),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
@@ -2812,7 +2935,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(const InnerContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions), tree_context(rhs.tree_context),
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs),
+        tree_context(rhs.tree_context),
         context_uid(0), remote_context(false), full_inner_context(false),
         parent_req_indexes(rhs.parent_req_indexes), 
         virtual_mapped(rhs.virtual_mapped)
@@ -3663,9 +3787,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent InnerContext::compute_equivalence_sets(EqSetTracker *target,
-                                AddressSpaceID target_space, RegionNode *region,
-                                const FieldMask &mask, const UniqueID opid,
-                                const AddressSpaceID source)
+                               AddressSpaceID target_space, RegionNode *region,
+                               const FieldMask &mask, const UniqueID opid,
+                               const AddressSpaceID source, const bool symbolic)
     //--------------------------------------------------------------------------
     {
       // We know we are on a node now where the version information
@@ -3674,7 +3798,8 @@ namespace Legion {
       std::set<RtEvent> ready;
       const ContextID ctx = get_context_id();
       region->compute_equivalence_sets(ctx, this, target, target_space,
-          region->row_source, mask, opid, source, ready, false/*down only*/);
+                                       region->row_source, mask, opid, source, 
+                                       ready, false/*down only*/, symbolic);
       if (!ready.empty())
         return Runtime::merge_events(ready);
       else
@@ -3700,7 +3825,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool InnerContext::finalize_disjoint_complete_sets(RegionNode *region, 
             VersionManager *target, FieldMask request_mask, const UniqueID opid,
-            const AddressSpaceID source, RtUserEvent ready_event)
+            const AddressSpaceID source, RtUserEvent ready_event, bool symbolic)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> applied_events;
@@ -3722,8 +3847,8 @@ namespace Legion {
         EquivalenceSet *new_set = 
           (*it)->compute_refinement(source, runtime, applied_events);
         FieldMask dummy_parent;
-        target->record_refinement(new_set, overlap,
-                                  dummy_parent, applied_events);
+        target->record_refinement(new_set, overlap, dummy_parent,
+                                  symbolic, applied_events);
         bool delete_now = false;
         if ((*it)->finalize(overlap, delete_now))
         {
@@ -5991,7 +6116,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::execute_task(const TaskLauncher &launcher)
+    Future InnerContext::execute_task(const TaskLauncher &launcher,
+                                      std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5999,7 +6125,11 @@ namespace Legion {
       if (launcher.predicate == Predicate::FALSE_PRED)
         return predicate_task_false(launcher);
       IndividualTask *task = runtime->get_available_individual_task();
-      Future result = task->initialize_task(this, launcher);
+      Future result = task->initialize_task(this, launcher,
+                                            true/*track parent*/,
+                                            false/*top level*/,
+                                            false/*implicit top level*/,
+                                            outputs);
 #ifdef DEBUG_LEGION
       log_task.debug("Registering new single task with unique id %lld "
                       "and task %s (ID %lld) with high level runtime in "
@@ -6014,7 +6144,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap InnerContext::execute_index_space(
-                                              const IndexTaskLauncher &launcher)
+                                        const IndexTaskLauncher &launcher,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
@@ -6042,7 +6173,11 @@ namespace Legion {
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
       IndexTask *task = runtime->get_available_index_task();
-      FutureMap result = task->initialize_task(this, launcher, launch_space);
+      FutureMap result = task->initialize_task(this,
+                                               launcher,
+                                               launch_space,
+                                               true /*track*/,
+                                               outputs);
 #ifdef DEBUG_LEGION
       log_task.debug("Registering new index space task with unique id "
                      "%lld and task %s (ID %lld) with high level runtime in "
@@ -6057,7 +6192,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InnerContext::execute_index_space(const IndexTaskLauncher &launcher,
-                                        ReductionOpID redop, bool deterministic)
+                                        ReductionOpID redop, bool deterministic,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
@@ -6085,7 +6221,8 @@ namespace Legion {
         launch_space = find_index_launch_space(launcher.launch_domain);
       IndexTask *task = runtime->get_available_index_task();
       Future result = task->initialize_task(this, launcher, launch_space, 
-                                            redop, deterministic);
+                                            redop, deterministic,
+                                            true /*track*/, outputs);
 #ifdef DEBUG_LEGION
       log_task.debug("Registering new index space task with unique id "
                      "%lld and task %s (ID %lld) with high level runtime in "
@@ -7368,18 +7505,12 @@ namespace Legion {
         {
           if (it->instance.exists())
           {
-#ifdef LEGION_MALLOC_INSTANCES
             // Need to keep the context alive until we release the instance
             it->context->add_reference();
-#endif
             it->context->post_end_task(it->result,it->size,false/*owned*/,NULL);
-#ifdef LEGION_MALLOC_INSTANCES
-            it->context->release_future_local_instance(it->instance); 
+            it->context->release_future_local_instance(it->instance);
             if (it->context->remove_reference())
               delete it->context;
-#endif
-            // Once we've copied the data then we can destroy the instance
-            it->instance.destroy();
           }
           else if (it->functor != NULL)
             it->context->post_end_task(NULL, 0, it->owned, it->functor);
@@ -8460,9 +8591,9 @@ namespace Legion {
       const std::vector<bool> &no_access_regions = 
         single_task->get_no_access_regions();
 #ifdef DEBUG_LEGION
-      assert(regions.size() == physical_instances.size());
-      assert(regions.size() == virtual_mapped.size());
-      assert(regions.size() == no_access_regions.size());
+      assert(regions.size() <= physical_instances.size());
+      assert(regions.size() <= virtual_mapped.size());
+      assert(regions.size() <= no_access_regions.size());
 #endif
       // Initialize all of the logical contexts no matter what
       //
@@ -9267,7 +9398,7 @@ namespace Legion {
         single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions
       // we deal with that case below
-      for (unsigned idx = 0; idx < physical_instances.size(); idx++)
+      for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (!virtual_mapped[idx])
         {
@@ -9294,6 +9425,9 @@ namespace Legion {
           add_to_dependence_queue(close_op);
         }
       }
+      // Finalize output regions by setting realm instances created during
+      // task execution to the output regions' physical managers
+      finalize_output_regions();
       // Check to see if we have any unordered operations that we need to inject
       {
         AutoLock d_lock(dependence_lock);
@@ -9521,9 +9655,11 @@ namespace Legion {
       derez.deserialize(original_source);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
+      bool symbolic;
+      derez.deserialize(symbolic);
 
       const RtEvent done = local_ctx->compute_equivalence_sets(target, source,
-                                          region, mask, opid, original_source);
+                                region, mask, opid, original_source, symbolic);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -9940,7 +10076,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(Runtime *rt, UniqueID ctx_id)
-      : InnerContext(rt, NULL, -1, false/*full inner*/, dummy_requirements, 
+      : InnerContext(rt, NULL, -1, false/*full inner*/,
+                     dummy_requirements, dummy_output_requirements,
                      dummy_indexes, dummy_mapped, ctx_id, ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -9948,8 +10085,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(const TopLevelContext &rhs)
-      : InnerContext(NULL, NULL, -1, false, dummy_requirements, dummy_indexes, 
-                     dummy_mapped, 0, ApEvent::NO_AP_EVENT)
+      : InnerContext(NULL, NULL, -1, false/*full inner*/,
+                     dummy_requirements, dummy_output_requirements,
+                     dummy_indexes, dummy_mapped, 0, ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9998,9 +10136,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent TopLevelContext::compute_equivalence_sets(EqSetTracker *target,
-                                AddressSpaceID target_space, RegionNode *region, 
-                                const FieldMask &mask, const UniqueID opid,
-                                const AddressSpaceID original_source)
+                      AddressSpaceID target_space, RegionNode *region, 
+                      const FieldMask &mask, const UniqueID opid,
+                      const AddressSpaceID original_source, const bool symbolic)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -10034,14 +10172,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplicateContext::ReplicateContext(Runtime *rt, 
-                                   ShardTask *owner, int d, bool full,
-                                   const std::vector<RegionRequirement> &reqs,
-                                   const std::vector<unsigned> &parent_indexes,
-                                   const std::vector<bool> &virt_mapped,
-                                   UniqueID ctx_uid, ApEvent exec_fence,
-                                   ShardManager *manager)
-      : InnerContext(rt, owner, d, full, reqs, parent_indexes, virt_mapped, 
-          ctx_uid, exec_fence), owner_shard(owner), shard_manager(manager),
+                                 ShardTask *owner, int d, bool full,
+                                 const std::vector<RegionRequirement> &reqs,
+                                 const std::vector<RegionRequirement> &out_reqs,
+                                 const std::vector<unsigned> &parent_indexes,
+                                 const std::vector<bool> &virt_mapped,
+                                 UniqueID ctx_uid, ApEvent exec_fence,
+                                 ShardManager *manager)
+      : InnerContext(rt, owner, d, full, reqs, out_reqs, parent_indexes,
+                     virt_mapped, ctx_uid, exec_fence),
+        owner_shard(owner), shard_manager(manager),
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_refinement_ready_bar_index(0),
         next_refinement_mapped_bar_index(0), next_indirection_bar_index(0), 
@@ -10133,6 +10273,103 @@ namespace Legion {
       {
         Realm::Barrier bar = future_map_barriers[idx];
         bar.destroy_barrier();
+      }
+      while (!pending_index_spaces.empty())
+      {
+        std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
+          pending_index_spaces.front();
+        if (collective.second)
+        {
+          const ISBroadcast value = collective.first->get_value(false);
+          runtime->forest->revoke_pending_index_space(value.space_id);
+          runtime->revoke_pending_distributed_collectable(value.did);
+          runtime->free_distributed_id(value.did);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_index_spaces.pop_front();
+      }
+      while (!pending_index_partitions.empty())
+      {
+        std::pair<ValueBroadcast<IPBroadcast>*,ShardID> &collective = 
+          pending_index_partitions.front();
+        if (collective.second)
+        {
+          const IPBroadcast value = collective.first->get_value(false);
+          runtime->forest->revoke_pending_partition(value.pid);
+          runtime->revoke_pending_distributed_collectable(value.did);
+          runtime->free_distributed_id(value.did);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_index_partitions.pop_front();
+      }
+      while (!pending_field_spaces.empty())
+      {
+        std::pair<ValueBroadcast<FSBroadcast>*,bool> &collective = 
+          pending_field_spaces.front();
+        if (collective.second)
+        {
+          const FSBroadcast value = collective.first->get_value(false);
+          runtime->forest->revoke_pending_field_space(value.space_id);
+          runtime->revoke_pending_distributed_collectable(value.did);
+          runtime->free_distributed_id(value.did);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_field_spaces.pop_front();
+      }
+      while (!pending_fields.empty())
+      {
+        std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
+          pending_fields.front();
+        if (!collective.second)
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_fields.pop_front();
+      }
+      while (!pending_region_trees.empty())
+      {
+        std::pair<ValueBroadcast<LRBroadcast>*,bool> &collective = 
+          pending_region_trees.front();
+        if (collective.second)
+        {
+          const LRBroadcast value = collective.first->get_value(false);
+          runtime->forest->revoke_pending_region_tree(value.tid);
+          runtime->free_distributed_id(value.did);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_region_trees.pop_front();
       }
       if (returned_resource_ready_barrier.exists())
         returned_resource_ready_barrier.destroy_barrier();
@@ -10997,12 +11234,12 @@ namespace Legion {
         hasher.hash(type_tag);
         verify_replicable(hasher, "create_index_space");
       }
-      return create_index_space_replicated(domain, type_tag); 
+      return create_index_space_replicated(&domain, type_tag); 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace ReplicateContext::create_index_space_replicated(
-                                         const Domain &domain, TypeTag type_tag)
+                                         const Domain *domain, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       // Seed this with the first index space broadcast
@@ -11020,7 +11257,7 @@ namespace Legion {
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
         IndexSpaceNode *node = 
-          runtime->forest->create_index_space(handle, &domain, value.did, 
+          runtime->forest->create_index_space(handle, domain, value.did, 
               false/*notify remote*/, value.expr_id, ApEvent::NO_AP_EVENT,
               creation_barrier, &applied);
         // Now we can update the creation set
@@ -11055,7 +11292,7 @@ namespace Legion {
         assert(handle.exists());
 #endif
         std::set<RtEvent> applied;
-        runtime->forest->create_index_space(handle, &domain, value.did,
+        runtime->forest->create_index_space(handle, domain, value.did,
                false/*notify remote*/, value.expr_id, ApEvent::NO_AP_EVENT,
                creation_barrier, &applied);
         // Arrive on the creation barrier
@@ -11077,6 +11314,22 @@ namespace Legion {
       increase_pending_index_spaces(double_buffer ? 
           pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
       return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::create_unbound_index_space(TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_UNBOUND_INDEX_SPACE);
+        Serializer rez;
+        hasher.hash(type_tag);
+        verify_replicable(hasher, "create_unbounded_index_space");
+      }
+      return create_index_space_replicated(NULL, type_tag); 
     }
 
     //--------------------------------------------------------------------------
@@ -11239,7 +11492,7 @@ namespace Legion {
             const DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
             const Domain bounds(realm_is); \
-            return create_index_space_replicated(bounds, \
+            return create_index_space_replicated(&bounds, \
                 NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -11275,7 +11528,7 @@ namespace Legion {
             const DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
             const Domain bounds(realm_is); \
-            return create_index_space_replicated(bounds, \
+            return create_index_space_replicated(&bounds, \
                 NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -15217,7 +15470,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplicateContext::execute_task(const TaskLauncher &launcher)
+    Future ReplicateContext::execute_task(const TaskLauncher &launcher,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -15263,10 +15517,15 @@ namespace Legion {
       // If we're doing a local-function task then we can run that with just
       // a normal individual task in each shard since it is safe to duplicate
       if (launcher.local_function_task)
-        return InnerContext::execute_task(launcher);
+        return InnerContext::execute_task(launcher, outputs);
       ReplIndividualTask *task = 
         runtime->get_available_repl_individual_task();
-      Future result = task->initialize_task(this, launcher);
+      Future result = task->initialize_task(this,
+                                            launcher,
+                                            true /*track*/,
+                                            false /*top_level*/,
+                                            false /*implicit_top_level*/,
+                                            outputs);
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_task.debug("Registering new single task with unique id %lld "
@@ -15290,7 +15549,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap ReplicateContext::execute_index_space(
-                                              const IndexTaskLauncher &launcher)
+                                        const IndexTaskLauncher &launcher,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
@@ -15398,7 +15658,11 @@ namespace Legion {
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
       ReplIndexTask *task = runtime->get_available_repl_index_task();
-      FutureMap result = task->initialize_task(this, launcher, launch_space);
+      FutureMap result = task->initialize_task(this,
+                                               launcher,
+                                               launch_space,
+                                               true /*track*/,
+                                               outputs);
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_task.debug("Registering new index space task with unique id "
@@ -15421,7 +15685,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future ReplicateContext::execute_index_space(
-     const IndexTaskLauncher &launcher, ReductionOpID redop, bool deterministic)
+                                        const IndexTaskLauncher &launcher,
+                                        ReductionOpID redop, bool deterministic,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
@@ -15485,7 +15751,8 @@ namespace Legion {
         launch_space = find_index_launch_space(launcher.launch_domain);
       ReplIndexTask *task = runtime->get_available_repl_index_task();
       Future result = task->initialize_task(this, launcher, launch_space, 
-                                            redop, deterministic);
+                                            redop, deterministic, true/*track*/,
+                                            outputs);
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_task.debug("Registering new index space task with unique id "
@@ -16916,12 +17183,14 @@ namespace Legion {
       derez.deserialize(original_source);
       RtUserEvent done_event;
       derez.deserialize(done_event);
+      bool symbolic;
+      derez.deserialize(symbolic);
 
       RegionNode *node = runtime->forest->get_node(handle);
       VersionInfo result_info;
       std::set<RtEvent> ready_events;
-      node->perform_versioning_analysis(tree_context.get_id(), this, 
-          &result_info, request_mask, opid, original_source, ready_events);
+      node->perform_versioning_analysis(tree_context.get_id(),this,&result_info,
+                   request_mask, opid, original_source, ready_events, symbolic);
       // In general these ready events should be empty because we 
       // are on the shard that owns these eqivalence sets so it should
       // just be able to compute them right away. We wait though just
@@ -16949,12 +17218,14 @@ namespace Legion {
           }
           rez.serialize(opid);
           rez.serialize(done_event);
+          rez.serialize<bool>(symbolic);
         }
         runtime->send_control_replicate_disjoint_complete_response(target_space,
                                                                    rez);
       }
       else // Local node so can just record them directly
-        finalize_disjoint_complete_response(target, done_event, result_sets);
+        finalize_disjoint_complete_response(target, done_event, 
+                                            symbolic, result_sets);
     }
 
     //--------------------------------------------------------------------------
@@ -16986,26 +17257,29 @@ namespace Legion {
       derez.deserialize(opid);
       RtUserEvent done_event;
       derez.deserialize(done_event);
+      bool symbolic;
+      derez.deserialize(symbolic);
       if (!ready_events.empty())
       {
         const RtEvent precondition = Runtime::merge_events(ready_events);
         if (precondition.exists() && !precondition.has_triggered())
         {
-          DeferDisjointCompleteResponseArgs args(opid, target, sets,done_event);
+          DeferDisjointCompleteResponseArgs args(opid, target, sets,
+                                                 done_event, symbolic);
           runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_DEFERRED_PRIORITY, precondition);
           return;
         }
       }
-      finalize_disjoint_complete_response(target, done_event, sets);
+      finalize_disjoint_complete_response(target, done_event, symbolic, sets);
     }
 
     //--------------------------------------------------------------------------
     ReplicateContext::DeferDisjointCompleteResponseArgs::
       DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *t,
-                                 FieldMaskSet<EquivalenceSet> &s, RtUserEvent d)
+                       FieldMaskSet<EquivalenceSet> &s, RtUserEvent d, bool sym)
       : LgTaskArgs<DeferDisjointCompleteResponseArgs>(opid), target(t),
-        sets(new FieldMaskSet<EquivalenceSet>()), done_event(d)
+        sets(new FieldMaskSet<EquivalenceSet>()), done_event(d), symbolic(sym)
     //--------------------------------------------------------------------------
     {
       sets->swap(s);
@@ -17019,22 +17293,22 @@ namespace Legion {
       const DeferDisjointCompleteResponseArgs *dargs =
         (const DeferDisjointCompleteResponseArgs*)args;
       finalize_disjoint_complete_response(dargs->target, 
-          dargs->done_event, *(dargs->sets));
+          dargs->done_event, dargs->symbolic, *(dargs->sets));
       delete dargs->sets;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void ReplicateContext::finalize_disjoint_complete_response(
-                                VersionManager *target, RtUserEvent done_event,
-                                const FieldMaskSet<EquivalenceSet> &result_sets)
+           VersionManager *target, RtUserEvent done_event, 
+           const bool symbolic, const FieldMaskSet<EquivalenceSet> &result_sets)
     //--------------------------------------------------------------------------
     {
       FieldMask dummy_parent;
       std::set<RtEvent> applied_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             result_sets.begin(); it != result_sets.end(); it++)
-        target->record_refinement(it->first, it->second, 
-                                  dummy_parent, applied_events);
+        target->record_refinement(it->first, it->second, dummy_parent, 
+                                  symbolic, applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
@@ -18290,7 +18564,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool ReplicateContext::finalize_disjoint_complete_sets(RegionNode *region, 
             VersionManager *target, FieldMask request_mask, const UniqueID opid,
-            const AddressSpaceID source, RtUserEvent ready_event)
+            const AddressSpaceID source, RtUserEvent ready_event, bool symbolic)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18325,12 +18599,13 @@ namespace Legion {
         rez.serialize(opid);
         rez.serialize(source);
         rez.serialize(ready_event);
+        rez.serialize<bool>(symbolic);
         shard_manager->send_disjoint_complete_request(target_shard, rez);
         return false;
       }
       else // we're the owner so just handle this here
         return InnerContext::finalize_disjoint_complete_sets(region, target,
-                                    request_mask, opid, source, ready_event);
+                          request_mask, opid, source, ready_event, symbolic);
     }
 
     //--------------------------------------------------------------------------
@@ -18609,9 +18884,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(Runtime *rt, UniqueID context_uid)
-      : InnerContext(rt, NULL, -1, false/*full inner*/, remote_task.regions, 
-          local_parent_req_indexes, local_virtual_mapped, 
-          context_uid, ApEvent::NO_AP_EVENT, true/*remote*/),
+      : InnerContext(rt, NULL, -1, false/*full inner*/, remote_task.regions,
+                     remote_task.output_regions, local_parent_req_indexes,
+                     local_virtual_mapped, context_uid, ApEvent::NO_AP_EVENT,
+                     true/*remote*/),
         parent_ctx(NULL), shard_manager(NULL),
         top_level_context(false), remote_task(RemoteTask(this)), repl_id(0)
     //--------------------------------------------------------------------------
@@ -18620,8 +18896,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(const RemoteContext &rhs)
-      : InnerContext(NULL, NULL, 0, false, rhs.regions,local_parent_req_indexes,
-          local_virtual_mapped, 0, ApEvent::NO_AP_EVENT, true), 
+      : InnerContext(NULL, NULL, 0, false, rhs.regions, rhs.output_reqs,
+                     local_parent_req_indexes, local_virtual_mapped, 0,
+                     ApEvent::NO_AP_EVENT, true),
         remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
     {
@@ -18710,9 +18987,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent RemoteContext::compute_equivalence_sets(EqSetTracker *target,
-                                AddressSpaceID target_space, RegionNode *region,
-                                const FieldMask &mask, const UniqueID opid,
-                                const AddressSpaceID original_source)
+                      AddressSpaceID target_space, RegionNode *region,
+                      const FieldMask &mask, const UniqueID opid,
+                      const AddressSpaceID original_source, const bool symbolic)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18734,6 +19011,7 @@ namespace Legion {
         rez.serialize(opid);
         rez.serialize(original_source);
         rez.serialize(ready_event);
+        rez.serialize<bool>(symbolic);
       }
       // Send it to the owner space 
       runtime->send_compute_equivalence_sets_request(dest, rez);
@@ -19187,7 +19465,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LeafContext::LeafContext(Runtime *rt, TaskOp *owner)
-      : TaskContext(rt, owner, owner->get_depth(), owner->regions), 
+      : TaskContext(rt, owner, owner->get_depth(), owner->regions,
+                    owner->output_regions),
         inlined_tasks(0)
     //--------------------------------------------------------------------------
     {
@@ -19195,7 +19474,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LeafContext::LeafContext(const LeafContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions)
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -20166,7 +20445,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future LeafContext::execute_task(const TaskLauncher &launcher)
+    Future LeafContext::execute_task(const TaskLauncher &launcher,
+                                     std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (launcher.enable_inlining)
@@ -20175,7 +20455,7 @@ namespace Legion {
           return predicate_task_false(launcher);
         IndividualTask *task = runtime->get_available_individual_task(); 
         InnerContext *parent = owner_task->get_context();
-        Future result = task->initialize_task(parent, launcher);
+        Future result = task->initialize_task(parent, launcher, outputs);
         inline_child_task(task);
         task->deactivate();
         return result;
@@ -20191,7 +20471,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap LeafContext::execute_index_space(
-                                              const IndexTaskLauncher &launcher)
+                                        const IndexTaskLauncher &launcher,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (!launcher.must_parallelism && launcher.enable_inlining)
@@ -20203,7 +20484,8 @@ namespace Legion {
         IndexSpace launch_space = launcher.launch_space;
         if (!launch_space.exists())
           launch_space = find_index_launch_space(launcher.launch_domain);
-        FutureMap result = task->initialize_task(parent, launcher,launch_space);
+        FutureMap result = 
+          task->initialize_task(parent, launcher, launch_space, outputs);
         inline_child_task(task);
         task->deactivate();
         return result;
@@ -20218,8 +20500,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future LeafContext::execute_index_space(const IndexTaskLauncher &launcher, 
-                                        ReductionOpID redop, bool deterministic)
+    Future LeafContext::execute_index_space(const IndexTaskLauncher &launcher,
+                                        ReductionOpID redop, bool deterministic,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
       if (!launcher.must_parallelism && launcher.enable_inlining)
@@ -20232,7 +20515,7 @@ namespace Legion {
         if (!launch_space.exists())
           launch_space = find_index_launch_space(launcher.launch_domain);
         Future result = task->initialize_task(parent, launcher, launch_space, 
-                                              redop, deterministic);
+                                              redop, deterministic, outputs);
         inline_child_task(task);
         task->deactivate();
         return result;
@@ -20976,6 +21259,9 @@ namespace Legion {
         if (it->is_mapped())
           it->impl->unmap_region();
       }
+      // Finalize output regions by setting realm instances created during
+      // task execution to the output regions' physical managers
+      finalize_output_regions();
       if (!execution_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(execution_events);
@@ -21120,7 +21406,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InlineContext::InlineContext(Runtime *rt, TaskContext *enc, TaskOp *child)
-      : TaskContext(rt, child, enc->get_depth(), child->regions), 
+      : TaskContext(rt, child, enc->get_depth(), child->regions,
+                    child->output_regions),
         enclosing(enc), inline_task(child)
     //--------------------------------------------------------------------------
     {
@@ -21162,7 +21449,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InlineContext::InlineContext(const InlineContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions), 
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs),
         enclosing(NULL), inline_task(NULL)
     //--------------------------------------------------------------------------
     {
@@ -21856,26 +22143,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InlineContext::execute_task(const TaskLauncher &launcher)
+    Future InlineContext::execute_task(const TaskLauncher &launcher,
+                                       std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
-      return enclosing->execute_task(launcher);
+      return enclosing->execute_task(launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
     FutureMap InlineContext::execute_index_space(
-                                              const IndexTaskLauncher &launcher)
+                                        const IndexTaskLauncher &launcher,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
-      return enclosing->execute_index_space(launcher);
+      return enclosing->execute_index_space(launcher, outputs);
     }
 
     //--------------------------------------------------------------------------
     Future InlineContext::execute_index_space(const IndexTaskLauncher &launcher,
-                                        ReductionOpID redop, bool deterministic)
+                                        ReductionOpID redop, bool deterministic,
+                                        std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
-      return enclosing->execute_index_space(launcher, redop, deterministic);
+      return enclosing->execute_index_space(
+                                       launcher, redop, deterministic, outputs);
     }
 
     //--------------------------------------------------------------------------
