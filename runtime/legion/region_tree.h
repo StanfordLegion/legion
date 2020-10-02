@@ -1950,7 +1950,7 @@ namespace Legion {
       virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
       virtual bool set_domain(const Domain &domain, AddressSpaceID space,
                               ShardMapping *shard_mapping = NULL) = 0;
-      virtual bool set_output_union(const std::map<Point<1>,size_t> &sizes,
+      virtual bool set_output_union(const std::map<DomainPoint,size_t> &sizes,
                                     const bool convex, AddressSpaceID space, 
                                     ShardMapping *shard_mapping = NULL) = 0;
       virtual void tighten_index_space(void) = 0;
@@ -1982,6 +1982,7 @@ namespace Legion {
       virtual bool contains_point(const DomainPoint &point) = 0;
     public:
       virtual LegionColor get_max_linearized_color(void) = 0;
+      virtual LegionColor linearize_color(const DomainPoint &point) = 0;
       virtual LegionColor linearize_color(const void *realm_color,
                                           TypeTag type_tag) = 0;
       virtual void delinearize_color(LegionColor color, 
@@ -2183,7 +2184,7 @@ namespace Legion {
       virtual Domain get_domain(ApEvent &ready, bool need_tight);
       virtual bool set_domain(const Domain &domain, AddressSpaceID space,
                               ShardMapping *shard_mapping = NULL);
-      virtual bool set_output_union(const std::map<Point<1>,size_t> &sizes,
+      virtual bool set_output_union(const std::map<DomainPoint,size_t> &sizes,
                                     const bool convex, AddressSpaceID space, 
                                     ShardMapping *shard_mapping = NULL);
       virtual void tighten_index_space(void);
@@ -2216,6 +2217,7 @@ namespace Legion {
       virtual bool contains_point(const DomainPoint &point);
     public:
       virtual LegionColor get_max_linearized_color(void);
+      virtual LegionColor linearize_color(const DomainPoint &point);
       virtual LegionColor linearize_color(const void *realm_color,
                                           TypeTag type_tag);
       LegionColor linearize_color(Point<DIM,T> color); 

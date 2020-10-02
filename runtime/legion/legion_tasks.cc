@@ -8158,29 +8158,30 @@ namespace Legion {
         const OutputOptions &options = output_region_options[idx];
         if (options.valid_requirement())
           continue;
-        const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
-        const IndexPartition &pid =
-          output_regions[idx].partition.get_index_partition();
-        IndexSpaceNode *parent= forest->get_node(ispace);
-
+        IndexSpaceNode *parent= forest->get_node(
+            output_regions[idx].parent.get_index_space());
         if (options.global_indexing())
         {
           // For globally indexed output regions, we need a prefix sum to get
           // the right size for each subregion.
-          typedef std::map<Point<1>,size_t> SizeMap;
-          const SizeMap &output_sizes = all_output_sizes[idx];
           coord_t sum = 0;
+          typedef std::map<DomainPoint,size_t> SizeMap;
+          const SizeMap &output_sizes = all_output_sizes[idx];
+          IndexPartNode *part = runtime->forest->get_node(
+            output_regions[idx].partition.get_index_partition());
           for (SizeMap::const_iterator it = output_sizes.begin();
                it != output_sizes.end(); ++it)
           {
-            size_t size = it->second;
-            IndexSpace child = forest->get_index_subspace(
-                pid, &it->first, NT_TemplateHelper::encode_tag<1,coord_t>());
-            forest->set_pending_space_domain(
-                child, Rect<1>(sum, sum + size - 1), runtime->address_space);
+            const size_t size = it->second;
+            const LegionColor color =
+              part->color_space->linearize_color(it->first);
+            IndexSpaceNode *child = part->get_child(color);
+            forest->set_pending_space_domain(child->handle,
+                Rect<1>(sum, sum + size - 1), runtime->address_space);
             sum += size;
           }
-          parent->set_domain(Rect<1>(0, sum - 1), runtime->address_space);
+          if (parent->set_domain(Rect<1>(0, sum - 1), runtime->address_space))
+            delete parent;
         }
         // For locally indexed output regions, sizes of subregions are already
         // set when they are fianlized by the point tasks. So we only need to
@@ -9838,7 +9839,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::return_slice_complete(unsigned points, RtEvent slice_done,
-                  const std::map<unsigned,std::map<Point<1>,size_t> > &to_merge)
+               const std::map<unsigned,std::map<DomainPoint,size_t> > &to_merge)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_RETURN_SLICE_COMPLETE_CALL);
@@ -9851,7 +9852,7 @@ namespace Legion {
         // Merge in any output sizes
         if (!to_merge.empty())
         {
-          typedef std::map<Point<1>,size_t> SizeMap;
+          typedef std::map<DomainPoint,size_t> SizeMap;
           for (std::map<unsigned,SizeMap>::const_iterator it = 
                 to_merge.begin(); it != to_merge.end(); ++it)
           {
@@ -9997,21 +9998,19 @@ namespace Legion {
           derez.advance_pointer(reduc_size);
         }
       }
-      std::map<unsigned,std::map<Point<1>,size_t> > to_merge;
+      std::map<unsigned,std::map<DomainPoint,size_t> > to_merge;
       size_t map_size;
       derez.deserialize(map_size);
       for (size_t i = 0; i < map_size; ++i)
       {
         unsigned idx;
         derez.deserialize(idx);
-        std::map<Point<1>,size_t> &output_sizes = to_merge[idx];
+        std::map<DomainPoint,size_t> &output_sizes = to_merge[idx];
         for (unsigned j = 0; j < points; ++j)
         {
-          Point<1> point;
+          DomainPoint point;
           derez.deserialize(point);
-          size_t size;
-          derez.deserialize(size);
-          output_sizes[point] = size;
+          derez.deserialize(output_sizes[point]);
         }
       }
 
@@ -11212,7 +11211,7 @@ namespace Legion {
       {
         if (output_region_options[idx].valid_requirement())
           continue;
-        std::map<Point<1>,size_t> &output_sizes= all_output_sizes[idx];
+        std::map<DomainPoint,size_t> &output_sizes= all_output_sizes[idx];
 #ifdef DEBUG_LEGION
         assert(output_sizes.find(point) == output_sizes.end());
 #endif
@@ -11422,13 +11421,12 @@ namespace Legion {
       rez.serialize(all_output_sizes.size());
       if (!all_output_sizes.empty())
       {
-        for (std::map<unsigned,std::map<Point<1>,size_t> >::iterator it =
-             all_output_sizes.begin(); it !=
-             all_output_sizes.end(); ++it)
+        for (std::map<unsigned,std::map<DomainPoint,size_t> >::iterator it =
+              all_output_sizes.begin(); it != all_output_sizes.end(); ++it)
         {
           rez.serialize(it->first);
-          for (std::map<Point<1>,size_t>::iterator sit = it->second.begin();
-               sit != it->second.end(); ++sit)
+          for (std::map<DomainPoint,size_t>::iterator sit = 
+                it->second.begin(); sit != it->second.end(); ++sit)
           {
             rez.serialize(sit->first);
             rez.serialize(sit->second);

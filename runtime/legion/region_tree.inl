@@ -2317,50 +2317,76 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::set_output_union(
-                              const std::map<Point<1>,size_t> &output_sizes,
+                              const std::map<DomainPoint,size_t> &output_sizes,
                               const bool convex, AddressSpaceID space, 
                               ShardMapping *shard_mapping)
     //-------------------------------------------------------------------------- 
     {
-#ifdef DEBUG_LEGION
-      assert(DIM == 2);
-#endif
-      // Need this indirection to help the type system
-      Domain indirect;
       if (convex)
       {
-        coord_t max_x = 0;
-        size_t max_y = 0;
-        for (std::map<Point<1>,size_t>::const_iterator it = 
+        bool first = true;
+        Point<DIM,T> lo, hi; 
+        for (std::map<DomainPoint,size_t>::const_iterator it = 
               output_sizes.begin(); it != output_sizes.end(); it++)
         {
-          if (it->first[0] > max_x)
-            max_x = it->first[0];
-          if (it->second > max_y)
-            max_y = it->second;
+#ifdef DEBUG_LEGION
+          assert((it->first.get_dim()+1) == DIM);
+#endif
+          if (it->second == 0)
+            continue;
+          if (first)
+          {
+            for (unsigned idx = 0; idx < (DIM-1); idx++)
+            {
+              lo[idx] = it->first[idx];
+              hi[idx] = it->first[idx];
+            }
+            lo[DIM-1] = 0;
+            hi[DIM-1] = it->second - 1;
+            first = false;
+          }
+          else
+          {
+            for (unsigned idx = 0; idx < (DIM-1); idx++)
+            {
+              if (it->first[idx] < lo[idx])
+                lo[idx] = it->first[idx];
+              if (hi[idx] < it->first[idx])
+                hi[idx] = it->first[idx];
+            }
+            if (hi[DIM-1] < it->second)
+              hi[DIM-1] = it->second - 1;
+          }
         }
-        const Point<2> lo(0,0);
-        const Point<2> hi(max_x, max_y-1);
-        const Rect<2> hull(lo,hi);
-        indirect = hull;
+        const Rect<DIM,T> hull(lo,hi);
+        const DomainT<DIM,T> output_space(hull);
+        return set_realm_index_space(space, output_space, shard_mapping);
       }
       else
       {
-        std::vector<Realm::Rect<2,T> > output_rects;
+        std::vector<Realm::Rect<DIM,T> > output_rects;
         output_rects.reserve(output_sizes.size());
-        for (std::map<Point<1>,size_t>::const_iterator it = 
+        for (std::map<DomainPoint,size_t>::const_iterator it = 
               output_sizes.begin(); it != output_sizes.end(); it++)
         {
+#ifdef DEBUG_LEGION
+          assert((it->first.get_dim()+1) == DIM);
+#endif
           if (it->second == 0)
             continue;
-          const Point<2,T> lo(it->first[0], 0);
-          const Point<2,T> hi(it->first[0], it->second - 1);
-          output_rects.push_back(Realm::Rect<2,T>(lo, hi));
+          Point<DIM,T> lo, hi;
+          for (unsigned idx = 0; idx < (DIM-1); idx++)
+          {
+            lo[idx] = it->first[idx];
+            hi[idx] = it->first[idx];
+          }
+          lo[DIM-1] = 0;
+          hi[DIM-1] = it->second - 1;
+          output_rects.push_back(Realm::Rect<DIM,T>(lo, hi));
         }
-        const Realm::IndexSpace<2,T> output_space(output_rects);
-        indirect = DomainT<2,T>(output_space);
+        const Realm::IndexSpace<DIM,T> output_space(output_rects);
+        return set_realm_index_space(space, output_space, shard_mapping);
       }
-      return set_domain(indirect, space, shard_mapping);
     }
 
     //--------------------------------------------------------------------------
@@ -2926,6 +2952,15 @@ namespace Legion {
       // non-total-store-ordered memory consistency machines like PowerPC
       __sync_synchronize();
       linearization_ready = true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LegionColor IndexSpaceNodeT<DIM,T>::linearize_color(const DomainPoint &p)
+    //--------------------------------------------------------------------------
+    {
+      const Point<DIM,T> point = p;
+      return linearize_color(&point, type_tag);
     }
 
     //--------------------------------------------------------------------------

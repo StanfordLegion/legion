@@ -1045,38 +1045,36 @@ namespace Legion {
         const OutputOptions &options = output_region_options[idx];
         if (options.valid_requirement())
           continue;
-        const IndexSpace &ispace = output_regions[idx].parent.get_index_space();
-        const IndexPartition &pid =
-          output_regions[idx].partition.get_index_partition();
-        IndexSpaceNode *parent= forest->get_node(ispace);
-
+        IndexSpaceNode *parent = forest->get_node(
+            output_regions[idx].parent.get_index_space());
         if (options.global_indexing())
         {
           // For globally indexed output regions, we need a prefix sum to get
           // the right size for each subregion.
-          typedef std::map<Point<1>,size_t> SizeMap;
+          coord_t sum = 0;
+          typedef std::map<DomainPoint,size_t> SizeMap;
           const SizeMap &output_sizes = all_output_sizes[idx];
           const SizeMap &local_sizes = local_output_sizes[idx];
-          coord_t sum = 0;
+          IndexPartNode *part = runtime->forest->get_node(
+            output_regions[idx].partition.get_index_partition());
           for (SizeMap::const_iterator it = output_sizes.begin();
                it != output_sizes.end(); ++it)
           {
-            size_t size = it->second;
+            const size_t size = it->second;
             // Make sure we initialize nodes owned by this shard.
             if (local_sizes.find(it->first) != local_sizes.end())
             {
-              IndexSpace child = forest->get_index_subspace(
-                  pid, &it->first, NT_TemplateHelper::encode_tag<1,coord_t>());
-              // We don't need to pass the shard id and the number of shards
-              // as we know that we call this only from the owner shard
-              forest->set_pending_space_domain(
-                  child, Rect<1>(sum, sum + size - 1), runtime->address_space);
+              const LegionColor color =
+                part->color_space->linearize_color(it->first);
+              IndexSpaceNode *child = part->get_child(color);
+              forest->set_pending_space_domain(child->handle,
+                  Rect<1>(sum, sum + size - 1), runtime->address_space);
             }
             sum += size;
           }
-          parent->set_domain(Rect<1>(0, sum - 1),
-                             runtime->address_space,
-                             shard_mapping);
+          if (parent->set_domain(Rect<1>(0, sum - 1), runtime->address_space,
+                                 shard_mapping))
+            delete parent;
         }
         // For locally indexed output regions, sizes of subregions are already
         // set when they are fianlized by the point tasks. So we only need to
@@ -12072,15 +12070,17 @@ namespace Legion {
         derez.deserialize(num_entries);
         for (unsigned idx = 0; idx < num_entries; idx++)
         {
-          Point<1> point;
-          size_t size;
+          DomainPoint point;
           derez.deserialize(point);
-          derez.deserialize(size);
 #ifdef DEBUG_LEGION
+          size_t size;
+          derez.deserialize(size);
           assert(it->second.find(point) == it->second.end() ||
                  it->second.find(point)->second == size);
-#endif
           it->second[point] = size;
+#else
+          derez.deserialize(it->second[point]);
+#endif
         }
       }
     }
