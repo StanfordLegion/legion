@@ -830,12 +830,15 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void TaskContext::add_created_region(LogicalRegion handle, bool task_local)
+    void TaskContext::add_created_region(LogicalRegion handle, 
+                                const bool task_local, const bool output_region)
     //--------------------------------------------------------------------------
     {
       // Already hold the lock from the caller
       RegionRequirement new_req(handle, LEGION_READ_WRITE, 
                                 LEGION_EXCLUSIVE, handle);
+      if (output_region)
+        new_req.flags |= LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG;
       if (runtime->legion_spy_enabled)
         TaskOp::log_requirement(get_unique_id(), next_created_index, new_req);
       // Put a region requirement with no fields in the list of
@@ -873,7 +876,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::register_region_creation(LogicalRegion handle,
-                                               bool task_local)
+                                               const bool task_local,
+                                               const bool output_region)
     //--------------------------------------------------------------------------
     {
       // Create a new logical region 
@@ -899,7 +903,7 @@ namespace Legion {
 #endif
         created_regions[handle] = 1;
       }
-      add_created_region(handle, task_local);
+      add_created_region(handle, task_local, output_region);
     }
 
     //--------------------------------------------------------------------------
@@ -5969,7 +5973,8 @@ namespace Legion {
     LogicalRegion InnerContext::create_logical_region(RegionTreeForest *forest,
                                                       IndexSpace index_space,
                                                       FieldSpace field_space,
-                                                      bool task_local)
+                                                      const bool task_local,
+                                                      const bool output_region)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5987,7 +5992,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       forest->create_logical_region(region, did);
       // Register the creation of a top-level region with the context
-      register_region_creation(region, task_local);
+      register_region_creation(region, task_local, output_region);
       return region;
     }
 
@@ -8831,7 +8836,8 @@ namespace Legion {
             RegionNode *node = runtime->forest->get_node(it->second.region);
             runtime->forest->invalidate_current_context(tree_context,
                                           false/*users only*/, node);
-            if (!node->row_source->is_empty())
+            if (!node->row_source->is_empty() || 
+                (it->second.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG))
               node->invalidate_refinement(tree_context.get_id(), all_ones_mask,
                   true/*self*/, applied_events, invalidated_refinements, this);
             invalidated_regions.insert(it->second.region);
@@ -14998,7 +15004,8 @@ namespace Legion {
                                                       RegionTreeForest *forest,
                                                       IndexSpace index_space,
                                                       FieldSpace field_space,
-                                                      bool task_local)
+                                                      const bool task_local,
+                                                      const bool output_region)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -15077,7 +15084,7 @@ namespace Legion {
       // Advance the creation barrier so that we know when it is ready
       advance_replicate_barrier(creation_barrier, total_shards);
       // Register the creation of a top-level region with the context
-      register_region_creation(handle, task_local);
+      register_region_creation(handle, task_local, output_region);
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
@@ -20341,7 +20348,8 @@ namespace Legion {
     LogicalRegion LeafContext::create_logical_region(RegionTreeForest *forest,
                                                       IndexSpace index_space,
                                                       FieldSpace field_space,
-                                                      bool task_local)
+                                                      const bool task_local,
+                                                      const bool output_region)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -20359,7 +20367,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       forest->create_logical_region(region, did);
       // Register the creation of a top-level region with the context
-      register_region_creation(region, task_local);
+      register_region_creation(region, task_local, output_region);
       // Don't bother making any equivalence sets yet, we'll do that
       // in the end_task call when we know about only the regions
       // that have survived the execution of the task
@@ -22087,11 +22095,12 @@ namespace Legion {
     LogicalRegion InlineContext::create_logical_region(RegionTreeForest *forest,
                                                        IndexSpace index_space,
                                                        FieldSpace field_space,
-                                                       bool task_local)
+                                                       const bool task_local,
+                                                       const bool output_region)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_logical_region(forest, index_space, field_space,
-                                              task_local);
+                                              task_local, output_region);
     }
 
     //--------------------------------------------------------------------------

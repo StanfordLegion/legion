@@ -5424,7 +5424,8 @@ namespace Legion {
 
           // Create an output region
           LogicalRegion region = parent_ctx->create_logical_region(
-              runtime->forest, index_space, req.field_space, false);
+              runtime->forest, index_space, req.field_space, 
+              false/*local region*/, true/*output region*/);
 
           // Set the region back to the output requirement so the caller
           // can use it for downstream tasks
@@ -8429,7 +8430,8 @@ namespace Legion {
 
           // Create an output region and a partition
           LogicalRegion region = parent_ctx->create_logical_region(
-              runtime->forest, index_space, req.field_space, false);
+              runtime->forest, index_space, req.field_space, 
+              false/*local region*/, true/*output region*/);
 
           LogicalPartition partition =
             runtime->forest->get_logical_partition(region, pid);

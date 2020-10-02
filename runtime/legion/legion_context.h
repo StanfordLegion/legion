@@ -337,9 +337,10 @@ namespace Legion {
                                const std::set<FieldID> &to_free,
                                const bool unordered) = 0; 
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
-                                            IndexSpace index_space,
-                                            FieldSpace field_space,
-                                            bool task_local) = 0;
+                                          IndexSpace index_space,
+                                          FieldSpace field_space,
+                                          const bool task_local,
+                                          const bool output_region = false) = 0;
       virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered) = 0;
@@ -531,11 +532,13 @@ namespace Legion {
       const std::vector<OutputRegion> get_output_regions(void) const
         { return output_regions; }
     public:
-      void add_created_region(LogicalRegion handle, bool task_local);
+      void add_created_region(LogicalRegion handle, const bool task_local,
+                              const bool output_region = false);
       // for logging created region requirements
       void log_created_requirements(void);
     public:
-      void register_region_creation(LogicalRegion handle, bool task_local);
+      void register_region_creation(LogicalRegion handle, const bool task_local,
+                                    const bool output_region);
     public:
       void register_field_creation(FieldSpace space, FieldID fid, bool local);
       void register_all_field_creations(FieldSpace space, bool local,
@@ -1155,7 +1158,8 @@ namespace Legion {
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
                                             FieldSpace field_space,
-                                            bool task_local);
+                                            const bool task_local,
+                                            const bool output_region = false);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
       virtual void get_local_field_set(const FieldSpace handle,
@@ -2043,7 +2047,8 @@ namespace Legion {
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
                                             FieldSpace field_space,
-                                            bool task_local);
+                                            const bool task_local,
+                                            const bool output_region = false);
       virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
@@ -2748,7 +2753,8 @@ namespace Legion {
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
                                             FieldSpace field_space,
-                                            bool task_local);
+                                            const bool task_local,
+                                            const bool output_region = false);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
       virtual void get_local_field_set(const FieldSpace handle,
@@ -3168,7 +3174,8 @@ namespace Legion {
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
                                             FieldSpace field_space,
-                                            bool task_local);
+                                            const bool task_local,
+                                            const bool output_region = false);
       virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
