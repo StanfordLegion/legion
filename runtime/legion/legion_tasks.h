@@ -607,12 +607,11 @@ namespace Legion {
       class OutputOptions {
       public:
         OutputOptions(void) : store(0) { }
-        OutputOptions(bool global, bool valid, bool convex)
-          : store((global ? 1 : 0) | (valid ? 2 : 0) | (convex ? 4 : 0)) { } 
+        OutputOptions(bool global, bool valid)
+          : store((global ? 1 : 0) | (valid ? 2 : 0)) { } 
       public:
         inline bool global_indexing(void) const { return (store & 1); }
         inline bool valid_requirement(void) const { return (store & 2); }
-        inline bool convex_hull(void) const { return (store & 4); }
       private:
         unsigned char store;
       };
@@ -1140,7 +1139,7 @@ namespace Legion {
                                RtEvent applied_condition,
                                ApEvent restrict_postcondition);
       void return_slice_complete(unsigned points, RtEvent applied_condition,
-         const std::map<unsigned,std::map<Point<1>,size_t> > &output_sizes);
+         const std::map<unsigned,std::map<DomainPoint,size_t> > &output_sizes);
       void return_slice_commit(unsigned points, RtEvent applied_condition);
     public:
       void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
@@ -1205,7 +1204,7 @@ namespace Legion {
 #endif
     protected:
       // Sizes of subspaces for globally indexed output regions
-      std::map<unsigned,std::map<Point<1>,size_t> > all_output_sizes;
+      std::map<unsigned,std::map<DomainPoint,size_t> > all_output_sizes;
     };
 
     /**
@@ -1369,7 +1368,7 @@ namespace Legion {
       std::set<std::pair<DomainPoint,DomainPoint> > unique_intra_space_deps;
     protected:
       // Sizes of subspaces for globally indexed output regions
-      std::map<unsigned,std::map<Point<1>,size_t> > all_output_sizes;
+      std::map<unsigned,std::map<DomainPoint,size_t> > all_output_sizes;
     };
 
   }; // namespace Internal

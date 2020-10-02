@@ -347,8 +347,8 @@ void consumer_task(const Task *task,
            Rect<1>(Point<1>(task->index_point[0] * SIZE),
                    Point<1>((task->index_point[0] + 1) * SIZE - 1)));
     assert(r2 ==
-           Rect<2>(Point<2>(0, task->index_point[0]),
-                   Point<2>(SIZE - 1, task->index_point[0])));
+           Rect<2>(Point<2>(task->index_point[0], 0),
+                   Point<2>(task->index_point[0], SIZE - 1)));
     fprintf(stderr,
         "[Consumer %lld] region 1: %lld -- %lld, "
         "region 2: (%lld, %lld) -- (%lld, %lld)\n",

@@ -3705,18 +3705,18 @@ namespace Legion {
 #endif
             for (int idx = 0; idx < index_point.dim; ++idx)
             {
-              domain.rect_data[idx + 1] = index_point[idx];
-              domain.rect_data[idx + 1 + domain.dim] = index_point[idx];
+              domain.rect_data[idx] = index_point[idx];
+              domain.rect_data[idx + domain.dim] = index_point[idx];
             }
             if (num_elements > 0)
             {
-              domain.rect_data[0] = 0;
-              domain.rect_data[domain.dim] = num_elements - 1;
+              domain.rect_data[domain.dim-1] = 0;
+              domain.rect_data[2*domain.dim-1] = num_elements - 1;
             }
             else
             {
-              domain.rect_data[0] = 0;
-              domain.rect_data[domain.dim] = -1;
+              domain.rect_data[domain.dim-1] = 1;
+              domain.rect_data[2*domain.dim-1] = 0;
             }
 
             runtime->forest->set_pending_space_domain(
