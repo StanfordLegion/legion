@@ -2318,75 +2318,31 @@ namespace Legion {
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::set_output_union(
                               const std::map<DomainPoint,size_t> &output_sizes,
-                              const bool convex, AddressSpaceID space, 
-                              ShardMapping *shard_mapping)
+                              AddressSpaceID space, ShardMapping *shard_mapping)
     //-------------------------------------------------------------------------- 
     {
-      if (convex)
+      std::vector<Realm::Rect<DIM,T> > output_rects;
+      output_rects.reserve(output_sizes.size());
+      for (std::map<DomainPoint,size_t>::const_iterator it = 
+            output_sizes.begin(); it != output_sizes.end(); it++)
       {
-        bool first = true;
-        Point<DIM,T> lo, hi; 
-        for (std::map<DomainPoint,size_t>::const_iterator it = 
-              output_sizes.begin(); it != output_sizes.end(); it++)
-        {
 #ifdef DEBUG_LEGION
-          assert((it->first.get_dim()+1) == DIM);
+        assert((it->first.get_dim()+1) == DIM);
 #endif
-          if (it->second == 0)
-            continue;
-          if (first)
-          {
-            for (unsigned idx = 0; idx < (DIM-1); idx++)
-            {
-              lo[idx] = it->first[idx];
-              hi[idx] = it->first[idx];
-            }
-            lo[DIM-1] = 0;
-            hi[DIM-1] = it->second - 1;
-            first = false;
-          }
-          else
-          {
-            for (unsigned idx = 0; idx < (DIM-1); idx++)
-            {
-              if (it->first[idx] < lo[idx])
-                lo[idx] = it->first[idx];
-              if (hi[idx] < it->first[idx])
-                hi[idx] = it->first[idx];
-            }
-            if (hi[DIM-1] < it->second)
-              hi[DIM-1] = it->second - 1;
-          }
-        }
-        const Rect<DIM,T> hull(lo,hi);
-        const DomainT<DIM,T> output_space(hull);
-        return set_realm_index_space(space, output_space, shard_mapping);
-      }
-      else
-      {
-        std::vector<Realm::Rect<DIM,T> > output_rects;
-        output_rects.reserve(output_sizes.size());
-        for (std::map<DomainPoint,size_t>::const_iterator it = 
-              output_sizes.begin(); it != output_sizes.end(); it++)
+        if (it->second == 0)
+          continue;
+        Point<DIM,T> lo, hi;
+        for (unsigned idx = 0; idx < (DIM-1); idx++)
         {
-#ifdef DEBUG_LEGION
-          assert((it->first.get_dim()+1) == DIM);
-#endif
-          if (it->second == 0)
-            continue;
-          Point<DIM,T> lo, hi;
-          for (unsigned idx = 0; idx < (DIM-1); idx++)
-          {
-            lo[idx] = it->first[idx];
-            hi[idx] = it->first[idx];
-          }
-          lo[DIM-1] = 0;
-          hi[DIM-1] = it->second - 1;
-          output_rects.push_back(Realm::Rect<DIM,T>(lo, hi));
+          lo[idx] = it->first[idx];
+          hi[idx] = it->first[idx];
         }
-        const Realm::IndexSpace<DIM,T> output_space(output_rects);
-        return set_realm_index_space(space, output_space, shard_mapping);
+        lo[DIM-1] = 0;
+        hi[DIM-1] = it->second - 1;
+        output_rects.push_back(Realm::Rect<DIM,T>(lo, hi));
       }
+      const Realm::IndexSpace<DIM,T> output_space(output_rects);
+      return set_realm_index_space(space, output_space, shard_mapping);
     }
 
     //--------------------------------------------------------------------------

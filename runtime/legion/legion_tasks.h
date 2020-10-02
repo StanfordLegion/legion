@@ -657,12 +657,11 @@ namespace Legion {
       class OutputOptions {
       public:
         OutputOptions(void) : store(0) { }
-        OutputOptions(bool global, bool valid, bool convex)
-          : store((global ? 1 : 0) | (valid ? 2 : 0) | (convex ? 4 : 0)) { } 
+        OutputOptions(bool global, bool valid)
+          : store((global ? 1 : 0) | (valid ? 2 : 0)) { } 
       public:
         inline bool global_indexing(void) const { return (store & 1); }
         inline bool valid_requirement(void) const { return (store & 2); }
-        inline bool convex_hull(void) const { return (store & 4); }
       private:
         unsigned char store;
       };

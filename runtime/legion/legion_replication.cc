@@ -1080,7 +1080,7 @@ namespace Legion {
         // set when they are fianlized by the point tasks. So we only need to
         // initialize the root index space by taking a union of subspaces.
         else if (parent->set_output_union(all_output_sizes[idx],
-              options.convex_hull(), runtime->address_space, shard_mapping))
+                          runtime->address_space, shard_mapping))
           delete parent;
       }
     }

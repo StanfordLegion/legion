@@ -1951,8 +1951,7 @@ namespace Legion {
       virtual bool set_domain(const Domain &domain, AddressSpaceID space,
                               ShardMapping *shard_mapping = NULL) = 0;
       virtual bool set_output_union(const std::map<DomainPoint,size_t> &sizes,
-                                    const bool convex, AddressSpaceID space, 
-                                    ShardMapping *shard_mapping = NULL) = 0;
+                AddressSpaceID space, ShardMapping *shard_mapping = NULL) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
@@ -2185,8 +2184,7 @@ namespace Legion {
       virtual bool set_domain(const Domain &domain, AddressSpaceID space,
                               ShardMapping *shard_mapping = NULL);
       virtual bool set_output_union(const std::map<DomainPoint,size_t> &sizes,
-                                    const bool convex, AddressSpaceID space, 
-                                    ShardMapping *shard_mapping = NULL);
+                    AddressSpaceID space, ShardMapping *shard_mapping = NULL);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);

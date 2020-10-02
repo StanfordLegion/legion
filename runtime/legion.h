@@ -1125,8 +1125,7 @@ namespace Legion {
       OutputRequirement(const RegionRequirement &req);
       OutputRequirement(FieldSpace field_space,
                         const std::set<FieldID> &fields,
-                        bool global_indexing = false,
-                        bool convex_hull = false);
+                        bool global_indexing = false);
     public:
       OutputRequirement(const OutputRequirement &rhs);
       ~OutputRequirement(void);
@@ -1139,7 +1138,6 @@ namespace Legion {
       FieldSpace field_space; /**< field space for the output region */
       bool global_indexing; /**< global indexing is used when true */
       bool valid_requirement; /**< indicate requirement is valid */
-      bool convex_hull; /**< compute convex hull bounds for output region */
     };
 
     /**

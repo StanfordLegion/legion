@@ -1276,15 +1276,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRequirement::OutputRequirement(bool valid)
       : RegionRequirement(), field_space(FieldSpace::NO_SPACE),
-        global_indexing(false), valid_requirement(valid), convex_hull(false)
+        global_indexing(false), valid_requirement(valid)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     OutputRequirement::OutputRequirement(const RegionRequirement &req)
-      : RegionRequirement(req), global_indexing(false), 
-        valid_requirement(true), convex_hull(false)
+      : RegionRequirement(req), global_indexing(false), valid_requirement(true)
     //--------------------------------------------------------------------------
     {
     }
@@ -1292,11 +1291,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRequirement::OutputRequirement(FieldSpace _field_space,
                                         const std::set<FieldID> &fields,
-                                        bool _global_indexing /*=false*/,
-                                        bool _convex_hull /*=false*/)
+                                        bool _global_indexing /*=false*/)
       : RegionRequirement(), field_space(_field_space),
-        global_indexing(_global_indexing), valid_requirement(false),
-        convex_hull(_convex_hull)
+        global_indexing(_global_indexing), valid_requirement(false)
     //--------------------------------------------------------------------------
     {
       for (std::set<FieldID>::const_iterator it = fields.begin();
@@ -1308,8 +1305,7 @@ namespace Legion {
     OutputRequirement::OutputRequirement(const OutputRequirement &other)
       : RegionRequirement(static_cast<const RegionRequirement&>(other)),
         field_space(other.field_space), global_indexing(other.global_indexing),
-        valid_requirement(other.valid_requirement), 
-        convex_hull(other.convex_hull)
+        valid_requirement(other.valid_requirement)
     //--------------------------------------------------------------------------
     {
     }
@@ -1330,7 +1326,6 @@ namespace Legion {
       field_space = rhs.field_space;
       global_indexing = rhs.global_indexing;
       valid_requirement = rhs.valid_requirement;
-      convex_hull = rhs.convex_hull;
       return *this;
     }
 
@@ -1344,7 +1339,6 @@ namespace Legion {
       field_space = FieldSpace::NO_SPACE;
       global_indexing = false;
       valid_requirement = true;
-      convex_hull = false;
       return *this;
     }
 
@@ -1354,8 +1348,7 @@ namespace Legion {
     {
       if ((field_space != rhs.field_space) ||
           (global_indexing != rhs.global_indexing) ||
-          (valid_requirement != rhs.valid_requirement) ||
-          (convex_hull != rhs.convex_hull))
+          (valid_requirement != rhs.valid_requirement))
         return false;
       return static_cast<const RegionRequirement&>(*this) ==
              static_cast<const OutputRequirement&>(rhs);
@@ -1376,10 +1369,6 @@ namespace Legion {
       if (valid_requirement < rhs.valid_requirement)
         return true;
       if (valid_requirement > rhs.valid_requirement)
-        return false;
-      if (convex_hull < rhs.convex_hull)
-        return true;
-      if (convex_hull > rhs.convex_hull)
         return false;
       return static_cast<const RegionRequirement&>(*this) <
              static_cast<const OutputRequirement&>(rhs);
