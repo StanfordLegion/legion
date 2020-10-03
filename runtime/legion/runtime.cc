@@ -3817,7 +3817,9 @@ namespace Legion {
         if (alignment == 0)
           alignment = field_size;
         size_t bytes_used =
-          (num_elements * field_size + alignment - 1) / alignment * alignment;
+          field_size > 0
+          ? (num_elements * field_size + alignment - 1) / alignment * alignment
+          : 0;
         layout->bytes_used = bytes_used;
 
         if (!manager_cons->offset_constraints.empty())
