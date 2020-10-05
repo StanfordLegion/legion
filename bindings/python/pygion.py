@@ -2316,7 +2316,9 @@ class SymbolicBinop(SymbolicExpr):
         elif op == '/':
             return pt.Div(left, right)
         elif op == '%':
-            return pt.Mod(left, right)  
+            return pt.Mod(left, right)
+        else:
+            assert False  
 
 class SymbolicLoopIndex(SymbolicExpr):
     import petra as pt
@@ -2488,7 +2490,7 @@ class ProjectionFunctor(object):
         target_machine = program.get_target_machine()
 
         program.add_func(
-            "proj_name",
+            proj_name,
             (result_ptr, runtime, parent_ptr, point_ptr, domain_ptr,),
             (),
             pt.Block(
