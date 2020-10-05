@@ -2229,9 +2229,9 @@ class SymbolicExpr(object):
         return SymbolicBinop(other, self, op='-')
 
     def __div__(self, other):
-        return SymbolicBinop(self, other, op='/')
+        return SymbolicBinop(self, other, op='//')
     def __rdiv__(self, other):
-        return SymbolicBinop(other, self, op='/')
+        return SymbolicBinop(other, self, op='//')
 
     def __mod__(self, other):
         return SymbolicBinop(self, other, op='%')
@@ -2294,7 +2294,7 @@ class SymbolicBinop(SymbolicExpr):
     import petra as pt
     __slots__ = ['lhs', 'rhs', 'op']
     def __init__(self, lhs, rhs, op):
-        assert op in ['+', '-', '/', '*', '%'] # FIXME
+        assert op in ['+', '-', '//', '*', '%'] # FIXME
         self.lhs = lhs
         self.rhs = rhs
         self.op = op
@@ -2313,7 +2313,7 @@ class SymbolicBinop(SymbolicExpr):
             return pt.Mul(left, right)
         elif op == '-':
             return pt.Sub(left, right)
-        elif op == '/':
+        elif op == '//':
             return pt.Div(left, right)
         elif op == '%':
             return pt.Mod(left, right)
