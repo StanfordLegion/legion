@@ -14,20 +14,18 @@
 
 import "regent"
 
-local format = require("std/format")
-
 fspace fsa {
   x : int,
+  y : int,
 }
 
 fspace fsb {
-  y : fsa,
+  z : fsa,
+  w : fsa,
 }
 
-local fp = regentlib.field_path("y", "x")
 task main()
-  var z : fsb
-  z.[fp] = 123
-  format.println("{}", z.[fp])
+  var r = region(ispace(int1d, 10), fsb)
+  fill(r.[regentlib.field_path("z", "x")], 0)
 end
 regentlib.start(main)
