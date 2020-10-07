@@ -2051,7 +2051,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_target_processors; idx++)
           derez.deserialize(target_processors[idx]);
         virtual_mapped.resize(logical_regions.size());
-        version_infos.resize(regions.size());
+        version_infos.resize(logical_regions.size());
         for (unsigned idx = 0; idx < logical_regions.size(); idx++)
         {
           bool result;
@@ -2097,7 +2097,7 @@ namespace Legion {
         remote_trace_info = 
           TraceInfo::unpack_remote_trace_info(derez, this, runtime); 
         derez.deserialize(deferred_complete_mapping);
-        version_infos.resize(regions.size());
+        version_infos.resize(logical_regions.size());
       }
       update_no_access_regions();
     } 
@@ -5524,7 +5524,7 @@ namespace Legion {
         predicate_false_future.impl->register_dependence(this);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
-      version_infos.resize(regions.size());
+      version_infos.resize(logical_regions.size());
     }
 
     //--------------------------------------------------------------------------
@@ -8484,7 +8484,7 @@ namespace Legion {
         it->impl->register_dependence(this);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
-      version_infos.resize(regions.size());
+      version_infos.resize(logical_regions.size());
     }
 
     //--------------------------------------------------------------------------
@@ -10812,7 +10812,7 @@ namespace Legion {
       result->index_domain = this->index_domain;
       result->tpl = tpl;
       result->memo_state = memo_state;
-      result->version_infos.resize(regions.size());
+      result->version_infos.resize(logical_regions.size());
       // Grab any remote trace info that we need from the slice
       if (remote_trace_info != NULL)
       {
