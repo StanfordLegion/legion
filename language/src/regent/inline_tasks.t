@@ -302,8 +302,9 @@ end
 local find_lvalues = {}
 
 local function find_lvalues_expr_address_of(cx, node)
-  assert(node.value:is(ast.specialized.expr.ID))
-  cx.lvalues[node.value.value] = true
+  if node.value:is(ast.specialized.expr.ID) then
+    cx.lvalues[node.value.value] = true
+  end
 end
 
 local find_lvalues_expr_table = {
