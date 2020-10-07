@@ -1861,6 +1861,8 @@ namespace Legion {
     public:
       IndexSpaceNode& operator=(const IndexSpaceNode &rhs);
     public:
+      inline bool is_set(void) const { return index_space_set; }
+    public:
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -2128,19 +2130,20 @@ namespace Legion {
       IndexPartNode *const parent;
       const ApEvent index_space_ready;
     protected:
-      unsigned                  send_references;
-      // On the owner node track when the index space is set
-      RtUserEvent               realm_index_space_set;
-      // Keep track of whether we've tightened these bounds
-      RtUserEvent               tight_index_space_set;
-      bool                      tight_index_space;
-      // Must hold the node lock when accessing the
-      // remaining data structures
+      // Must hold the node lock when accessing these data structures
       std::map<LegionColor,IndexPartNode*> color_map;
       std::map<LegionColor,IndexPartition> remote_colors;
       std::set<RegionNode*> logical_nodes;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
+    protected:
+      // On the owner node track when the index space is set
+      RtUserEvent               realm_index_space_set;
+      // Keep track of whether we've tightened these bounds
+      RtUserEvent               tight_index_space_set;
+      unsigned                  send_references;
+      bool                      index_space_set;
+      bool                      tight_index_space;
     };
 
     /**

@@ -2152,6 +2152,7 @@ namespace Legion {
           realm_index_space = 
             *static_cast<const Realm::IndexSpace<DIM,T>*>(bounds);
         Runtime::trigger_event(realm_index_space_set);
+        index_space_set = true;
       }
       else
         add_base_resource_ref(RUNTIME_REF);
@@ -2227,6 +2228,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!index_space_set);
       assert(!realm_index_space_set.has_triggered());
 #endif
       // We can set this now but triggering the realm_index_space_set
@@ -2234,6 +2236,7 @@ namespace Legion {
       // node so that it is serialized with respect to queries from 
       // remote nodes for copies about the remote instance
       realm_index_space = value;
+      index_space_set = true;
       // If we're not the owner, send a message back to the
       // owner specifying that it can set the index space value
       const AddressSpaceID owner_space = get_owner_space();

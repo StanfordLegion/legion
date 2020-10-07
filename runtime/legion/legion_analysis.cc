@@ -21457,8 +21457,17 @@ namespace Legion {
         // may go round and round a few times, but they have lower
         // priority and therefore shouldn't create a livelock.
         AutoLock eq(eq_lock,1,false/*exclusive*/);
-        if (target == logical_owner_space)
-          rez.serialize(local_space);
+        // is_ready tests whether this set expression has been set
+        // it might not be in the case of an output region and we
+        // don't want to block testing is_empty in that case if it 
+        // hasn't been set
+        if (set_expr->is_set() && !set_expr->is_empty())
+        {
+          if (target == logical_owner_space)
+            rez.serialize(local_space);
+          else
+            rez.serialize(logical_owner_space);
+        }
         else
           rez.serialize(logical_owner_space);
         // Also pack up any replicated states to send

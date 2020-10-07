@@ -7580,10 +7580,10 @@ namespace Legion {
         IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
         handle(h), parent(par), index_space_ready(ready), 
-        send_references((parent != NULL) ? 1 : 0),
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
-        tight_index_space(false)
+        send_references((parent != NULL) ? 1 : 0),
+        index_space_set(false), tight_index_space(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
