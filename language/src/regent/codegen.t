@@ -4587,7 +4587,6 @@ function codegen.expr_partition_equal(cx, node)
     end
   else
     local dim = region_type:ispace().dim
-    local colors_dim = colors_type.dim
     local transform = terralib.newsymbol(
       c["legion_transform_" .. tostring(dim) .. "x" .. tostring(dim) .. "_t"], "transform")
     local extent = terralib.newsymbol(
@@ -4595,7 +4594,7 @@ function codegen.expr_partition_equal(cx, node)
     local domain_get_rect =
       c["legion_domain_get_rect_" .. tostring(dim) .. "d"]
     local colors_domain_get_rect =
-      c["legion_domain_get_rect_" .. tostring(colors_dim) .. "d"]
+      c["legion_domain_get_rect_" .. tostring(colors_type.dim) .. "d"]
     local create_domain_transform =
       c["legion_domain_transform_from_" .. tostring(dim) .. "x" .. tostring(dim)]
     local create_domain =
