@@ -4103,6 +4103,22 @@ extern "C" {
   legion_runtime_get_runtime(void);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::get_context()
+   */
+  legion_context_t
+  legion_runtime_get_context(void);
+
+  /**
+   * IMPORTANT: This method is ONLY for use with contexts obtained via legion_runtime_get_context().
+   *
+   * @param handle Caller must have ownership of parameter `handle`.
+   */
+  void
+  legion_context_destroy(legion_context_t);
+
+  /**
    * @see Legion::Runtime::get_executing_processor()
    */
   legion_processor_t

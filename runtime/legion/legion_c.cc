@@ -5150,6 +5150,22 @@ legion_runtime_get_runtime()
   return CObjectWrapper::wrap(runtime);
 }
 
+legion_context_t
+legion_runtime_get_context()
+{
+  Context ctx = Runtime::get_context();
+  CContext *cctx = new CContext(ctx);
+  return CObjectWrapper::wrap(cctx);
+}
+
+void
+legion_context_destroy(legion_context_t cctx_)
+{
+  CContext *cctx = CObjectWrapper::unwrap(cctx_);
+  assert(cctx->num_regions() == 0 && "do not manually destroy automatically created contexts");
+  delete cctx;
+}
+
 legion_processor_t
 legion_runtime_get_executing_processor(legion_runtime_t runtime_,
                                        legion_context_t ctx_)
