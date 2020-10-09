@@ -59,7 +59,7 @@ local function check_valid_inline_task(node, task)
   end
   function check_field_paths_qualified(name, node, fields, type)
     if not fields then
-      if not (type:isprimitive() or type.__no_field_slicing or std.is_bounded_type(type)) then
+      if not (type:isprimitive() or type:ispointer() or type.__no_field_slicing or std.is_bounded_type(type)) then
         report.error(node, "ambiguous field access in " .. name ..
             ": every field path in an inline task must be fully specified.")
       end
