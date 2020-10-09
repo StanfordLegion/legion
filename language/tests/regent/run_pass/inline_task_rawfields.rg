@@ -20,7 +20,8 @@ fspace Fields
 {
   A : double,
   B : double,
-  C : double
+  C : double,
+  D : &double,
 }
 
 __demand(__inline)
@@ -32,11 +33,22 @@ do
   return a[0]
 end
 
+__demand(__inline)
+task test2(t : region(ispace(int1d), Fields))
+where
+  reads(t.D)
+do
+  var a = __fields(t.{D})
+  return a[0]
+end
+
 task main()
   var t = region(ispace(int1d, 2), Fields)
   fill(t.{A, B, C}, 0)
   var f = test(t)
+  var g = test2(t)
   regentlib.assert(f == __fields(t.A)[0], "test failed")
+  regentlib.assert(g == __fields(t.D)[0], "test failed")
 end
 
 regentlib.start(main)
