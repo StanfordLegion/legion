@@ -196,6 +196,7 @@ variables:
   SCHEDULER_PARAMETERS: "--nodes=1 --partition=power9"
   FLEGION_USER: "gitlab-runner-flegion"
   DARWIN_JOB_TYPE: "power9"
+  IS_DARWIN_JOB: "1"
 
 ###
 ### Setup
@@ -358,9 +359,6 @@ before_script:
   tags:
     - darwin-slurm
     - power9
-  only:
-    variables:
-      - $RUN_DARWIN_JOBS
 
 # For compute-heavy tests:
 .linux_compute: &linux_compute
@@ -372,10 +370,9 @@ before_script:
 .p100: &p100
   tags:
     - p100
-  only:
-    variables:
-      - $RUN_P100_JOBS
+
 .cuda_p100: &cuda_p100
+  IS_P100_JOB: "1"
   CUDA: "/usr/local/cuda"
   USE_CUDA: "1"
   GPU_ARCH: "60"
@@ -401,8 +398,27 @@ before_script:
 ### Tests
 ###
 
+# rules for which jobs will run
+.test_rules: &test_rules
+  rules:
+    # some jobs are tagged and can only run on certain hardware - a CI variable
+    #  is used to enable these jobs in case that hardware is offline
+    - if: '$IS_P100_JOB == "1" && $RUN_P100_JOBS != "1"'
+      when: never
+    - if: '$IS_DARWIN_JOB == "1" && $RUN_DARWIN_JOBS != "1"'
+      when: never
+    # commits only run a short suite of jobs
+    - if: '$CI_PIPELINE_SOURCE == "push" && $IS_SHORT_JOB != "1"'
+      when: never
+    # if none of the above exclusions apply, run the job
+    - when: always
+
+.short: &short
+  IS_SHORT_JOB: "1"
+
 # Each job will run this set of tests.
 .tests: &tests
+  <<: *test_rules
   script:
     - ./tools/add_github_host_key.sh
     - grep 'model name' /proc/cpuinfo | uniq -c || true
@@ -430,6 +446,7 @@ before_script:
 
 # Some additional tests are only run on certain configurations.
 .external_tests: &external_tests
+  <<: *test_rules
   script:
     - ./tools/add_github_host_key.sh
     - |
@@ -491,7 +508,7 @@ gcc49_cxx98_release_legion_fortran:
 gcc49_cxx98_release_llvm_cmake_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *release, *cxx98_normal, *llvm, *cmake, *regent, *incremental]
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *llvm, *cmake, *regent, *incremental, *short]
 #   * Debug (Privilege and Bounds Checks)
 gcc49_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
@@ -539,7 +556,7 @@ gcc49_cxx98_debug_openmp_regent:
 gcc49_cxx98_debug_python2_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *python2, *legion]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *python2, *legion, *short]
 gcc49_cxx98_debug_python3_legion:
   <<: [*linux, *image, *tests]
   variables:
@@ -570,11 +587,11 @@ gcc49_cxx98_release_gasnet_legion:
 gcc49_cxx98_debug_gasnet_cmake_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *cmake, *legion, *ctest]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *cmake, *legion, *ctest, *short]
 gcc49_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *regent, *incremental]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *regent, *incremental, *short]
 gcc49_cxx98_debug_gasnetdbg_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -604,7 +621,7 @@ gcc49_cxx98_release_mpi_legion:
 gcc49_cxx98_debug_mpi_cmake_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *mpi, *cmake, *legion, *ctest]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *mpi, *cmake, *legion, *ctest, *short]
 gcc49_cxx98_debug_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -658,7 +675,7 @@ gcc49_cxx98_debug_hdf5_mpi_regent:
 gcc49_cxx98_debug_spy_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *cxx98_normal, *spy, *gasnet, *regent]
+    <<: [*gcc49, *terra38, *cxx98_normal, *spy, *gasnet, *regent, *short]
 gcc49_cxx98_debug_spy_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -676,7 +693,7 @@ gcc49_cxx98_32bit_release_legion:
 gcc49_cxx11_debug_maxdim4_external:
   <<: [*linux_compute, *image, *external_tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5]
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5, *short]
 
 # Linux with Clang 3.8
 # * Basic configurations
@@ -702,12 +719,12 @@ clang38_cxx98_debug_spy_legion:
 clang38_cxx98_debug_spy_python3_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal, *spy, *python3, *regent, *parallel]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *spy, *python3, *regent, *parallel, *short]
 #   * Prof
 clang38_cxx98_release_prof_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *release, *cxx98_normal, *prof, *regent, *parallel]
+    <<: [*clang38, *terra38, *release, *cxx98_normal, *prof, *regent, *parallel, *short]
 #   * C++11
 clang38_cxx11_release_legion:
   <<: [*linux, *image_clang, *tests]
@@ -1004,11 +1021,11 @@ p100_gcc7_cxx11_release_cuda_legion:
 p100_gcc7_cxx11_debug_checks_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc7, *debug, *cxx11_normal, *checks, *cuda_p100, *legion]
+    <<: [*gcc7, *debug, *cxx11_normal, *checks, *cuda_p100, *legion, *short]
 p100_clang7_cxx11_release_cuda_regent:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *regent]
+    <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *regent, *short]
 p100_gcc7_cxx11_release_cmake_cuda_legion:
   <<: [*p100, *tests]
   variables:
@@ -1034,7 +1051,7 @@ p100_clang7_cxx14_debug_kokkos_cuda_legion:
 p100_clang7_cxx14_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *debug, *cxx14_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest]
+    <<: [*clang7, *debug, *cxx14_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
 p100_gcc7_cxx14_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
@@ -1042,7 +1059,7 @@ p100_gcc7_cxx14_debug_kokkos_cuda_openmp_legion:
 p100_gcc7_cxx14_debug_shared_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc7, *debug, *shared, *cxx14_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest]
+    <<: [*gcc7, *debug, *shared, *cxx14_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
 
 # Darwin Power9 tests:
 darwin_power9_gcc8_cxx17_release_legion:
