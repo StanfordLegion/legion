@@ -4207,6 +4207,14 @@ extern "C" {
   legion_physical_region_get_field_id(legion_physical_region_t handle, size_t index);
 
   /**
+   * @see Legion::PhysicalRegion::get_memories()
+   */
+  size_t
+  legion_physical_region_get_memory_count(legion_physical_region_t handle);
+  legion_memory_t
+  legion_physical_region_get_memory(legion_physical_region_t handle, size_t index);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::PhysicalRegion::get_field_accessor()

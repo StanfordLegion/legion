@@ -5293,6 +5293,28 @@ legion_physical_region_get_field_id(legion_physical_region_t handle_, size_t ind
   return fields[index];
 }
 
+size_t
+legion_physical_region_get_memory_count(legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  std::set<Memory> memories;
+  handle->get_memories(memories);
+  return memories.size();
+}
+
+legion_memory_t
+legion_physical_region_get_memory(legion_physical_region_t handle_, size_t index)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  std::set<Memory> memories;
+  handle->get_memories(memories);
+  std::set<Memory>::iterator it = memories.begin();
+  for (size_t i = 0; i < index; i++, it++) {
+    assert(it != memories.end());
+  }
+  return CObjectWrapper::wrap(*it);
+}
+
 #define GET_ACCESSOR(DIM) \
 legion_accessor_array_##DIM##d_t \
 legion_physical_region_get_field_accessor_array_##DIM##d( \
