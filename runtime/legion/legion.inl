@@ -15448,6 +15448,7 @@ namespace Legion {
       inline FT& operator[](const Point<N,T> &p) const;
     public:
       void destroy();
+      Realm::RegionInstance get_instance() const;
     protected:
       friend class OutputRegion;
       Realm::RegionInstance instance;
@@ -15516,6 +15517,7 @@ namespace Legion {
       inline FT& operator[](const Point<N,T> &p) const;
     public:
       void destroy();
+      Realm::RegionInstance get_instance() const;
     protected:
       friend class OutputRegion;
       Realm::RegionInstance instance;
@@ -16231,6 +16233,24 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime();
       runtime->destroy_task_local_instance(instance);
       instance = Realm::RegionInstance::NO_INST;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    Realm::RegionInstance DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              false
+#else
+              CB
+#endif
+              >::get_instance() const
+    //--------------------------------------------------------------------------
+    {
+      return instance;
     }
 
     //--------------------------------------------------------------------------
@@ -16970,6 +16990,24 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime();
       runtime->destroy_task_local_instance(instance);
       instance = Realm::RegionInstance::NO_INST;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    Realm::RegionInstance DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              CB
+#else
+              true
+#endif
+              >::get_instance() const
+    //--------------------------------------------------------------------------
+    {
+      return instance;
     }
 
     //--------------------------------------------------------------------------

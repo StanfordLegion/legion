@@ -2978,6 +2978,7 @@ namespace Legion {
       inline T& operator[](const Point<DIM,COORD_T> &p) const;
     public:
       void destroy();
+      Realm::RegionInstance get_instance() const;
     protected:
       friend class OutputRegion;
       Realm::RegionInstance instance;
@@ -3019,7 +3020,6 @@ namespace Legion {
       void return_data(FieldID field_id,
                        DeferredBuffer<T,1> &buffer,
                        const size_t *num_elements = NULL);
-    private:
       void return_data(FieldID field_id,
                        Realm::RegionInstance instance,
                        size_t field_size,
