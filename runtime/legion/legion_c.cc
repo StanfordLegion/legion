@@ -5280,6 +5280,22 @@ legion_runtime_get_runtime()
   return CObjectWrapper::wrap(runtime);
 }
 
+legion_context_t
+legion_runtime_get_context()
+{
+  Context ctx = Runtime::get_context();
+  CContext *cctx = new CContext(ctx);
+  return CObjectWrapper::wrap(cctx);
+}
+
+void
+legion_context_destroy(legion_context_t cctx_)
+{
+  CContext *cctx = CObjectWrapper::unwrap(cctx_);
+  assert(cctx->num_regions() == 0 && "do not manually destroy automatically created contexts");
+  delete cctx;
+}
+
 legion_processor_t
 legion_runtime_get_executing_processor(legion_runtime_t runtime_,
                                        legion_context_t ctx_)
@@ -5405,6 +5421,28 @@ legion_physical_region_get_field_id(legion_physical_region_t handle_, size_t ind
   handle->get_fields(fields);
   assert((index < fields.size()));
   return fields[index];
+}
+
+size_t
+legion_physical_region_get_memory_count(legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  std::set<Memory> memories;
+  handle->get_memories(memories);
+  return memories.size();
+}
+
+legion_memory_t
+legion_physical_region_get_memory(legion_physical_region_t handle_, size_t index)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  std::set<Memory> memories;
+  handle->get_memories(memories);
+  std::set<Memory>::iterator it = memories.begin();
+  for (size_t i = 0; i < index; i++, it++) {
+    assert(it != memories.end());
+  }
+  return CObjectWrapper::wrap(*it);
 }
 
 #define GET_ACCESSOR(DIM) \

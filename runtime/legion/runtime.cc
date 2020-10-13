@@ -28,7 +28,6 @@
 #include "legion/legion_replication.h"
 #include "legion/mapper_manager.h"
 #include "legion/garbage_collection.h"
-#include "legion/range_allocator.h"
 #include "mappers/default_mapper.h"
 #include "mappers/test_mapper.h"
 #include "mappers/replay_mapper.h"
@@ -3817,7 +3816,9 @@ namespace Legion {
         if (alignment == 0)
           alignment = field_size;
         size_t bytes_used =
-          (num_elements * field_size + alignment - 1) / alignment * alignment;
+          field_size > 0
+          ? (num_elements * field_size + alignment - 1) / alignment * alignment
+          : 0;
         layout->bytes_used = bytes_used;
 
         if (!manager_cons->offset_constraints.empty())
@@ -5609,10 +5610,11 @@ namespace Legion {
       if (!is_owner) return;
 
       // Allocate eager pool
-      coord_t eager_pool_size = capacity * runtime->eager_alloc_percentage / 100;
+      const coord_t eager_pool_size = 
+        capacity * runtime->eager_alloc_percentage / 100;
       log_eager.info("create an eager pool of size %lld on memory " IDFMT,
                      eager_pool_size, memory.id);
-      const DomainT<1,coord_t> bounds(Rect<1>(0, Point<1>(eager_pool_size - 1)));
+      const DomainT<1,coord_t> bounds(Rect<1>(0,Point<1>(eager_pool_size - 1)));
       const std::vector<size_t> field_sizes(1,sizeof(char));
       Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
       int dim_order[] = {0};
@@ -5628,15 +5630,12 @@ namespace Legion {
 
       if (eager_pool_size > 0)
       {
-        typedef BasicRangeAllocator<size_t, size_t> Allocator;
-
         Realm::AffineAccessor<char,1,coord_t> accessor(eager_pool_instance,
                                                        0/*field id*/);
         eager_pool = reinterpret_cast<uintptr_t>(accessor.ptr(0));
 
-        eager_allocator = new Allocator();
-        Allocator *alloc = reinterpret_cast<Allocator*>(eager_allocator);
-        alloc->add_range(0, eager_pool_size - 1);
+        eager_allocator = new EagerAllocator();
+        eager_allocator->add_range(0, eager_pool_size - 1);
       }
     }
 
@@ -5656,8 +5655,7 @@ namespace Legion {
     {
       if (eager_pool_instance.exists())
         eager_pool_instance.destroy();
-      delete reinterpret_cast<BasicRangeAllocator<size_t, size_t>*>(
-          eager_allocator);
+      delete eager_allocator;
     }
 
     //--------------------------------------------------------------------------
@@ -8702,41 +8700,36 @@ namespace Legion {
                PhysicalInstance &instance, Realm::InstanceLayoutGeneric *layout)
     //--------------------------------------------------------------------------
     {
-      typedef BasicRangeAllocator<size_t, size_t> Allocator;
       RtEvent wait_on(RtEvent::NO_EVENT);
       instance = PhysicalInstance::NO_INST;
-      if (eager_allocator == NULL) return wait_on;
+      if (eager_allocator == NULL) 
+        return wait_on;
+      AutoLock lock(manager_lock);
+      size_t allocation_id = next_allocation_id++;
 
+      size_t offset = 0;
+      size_t size = layout->bytes_used;
+      bool allocated = eager_allocator->allocate(
+          allocation_id, size, layout->alignment_reqd, offset);
+
+      if (allocated)
       {
-        AutoLock lock(manager_lock);
-        size_t allocation_id = next_allocation_id++;
-
-        size_t offset = 0;
-        size_t size = layout->bytes_used;
-        Allocator *alloc = reinterpret_cast<Allocator*>(eager_allocator);
-        bool allocated = alloc->allocate(
-            allocation_id, size, layout->alignment_reqd, offset);
-
-        if (allocated)
-        {
-          uintptr_t ptr = eager_pool + offset;
-          Realm::ProfilingRequestSet no_requests;
-          wait_on = RtEvent(Realm::RegionInstance::create_external(
-                instance, memory, ptr, layout, no_requests));
+        uintptr_t ptr = eager_pool + offset;
+        Realm::ProfilingRequestSet no_requests;
+        wait_on = RtEvent(Realm::RegionInstance::create_external(
+              instance, memory, ptr, layout, no_requests));
 #ifdef DEBUG_LEGION
-          assert(eager_instances.find(instance) == eager_instances.end());
+        assert(eager_instances.find(instance) == eager_instances.end());
 #endif
-          eager_instances[instance] = std::make_pair(ptr, allocation_id);
-          log_eager.debug("allocate instance " IDFMT
-                          " (%p+%zd, %zd) on memory " IDFMT,
-                          instance.id,
-                          reinterpret_cast<void*>(eager_pool),
-                          offset,
-                          size,
-                          memory.id);
-        }
+        eager_instances[instance] = std::make_pair(ptr, allocation_id);
+        log_eager.debug("allocate instance " IDFMT
+                        " (%p+%zd, %zd) on memory " IDFMT,
+                        instance.id,
+                        reinterpret_cast<void*>(eager_pool),
+                        offset,
+                        size,
+                        memory.id);
       }
-
       return wait_on;
     }
 
@@ -8745,8 +8738,6 @@ namespace Legion {
                                        PhysicalInstance instance, RtEvent defer)
     //--------------------------------------------------------------------------
     {
-      typedef BasicRangeAllocator<size_t, size_t> Allocator;
-
       if (defer.exists() && !defer.has_triggered())
       {
         log_eager.debug("defer deallocation of instance " IDFMT
@@ -8764,8 +8755,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(finder != eager_instances.end());
 #endif
-          Allocator *alloc = reinterpret_cast<Allocator*>(eager_allocator);
-          alloc->deallocate(finder->second.second);
+          eager_allocator->deallocate(finder->second.second);
           eager_instances.erase(finder);
           log_eager.debug("deallocate instance " IDFMT " on memory " IDFMT,
                           instance.id, memory.id);

@@ -33,6 +33,7 @@ enum FIDs
   FID_X = 100,
   FID_Y = 101,
   FID_Z = 102,
+  FID_W = 103,
 };
 
 enum TaskIDs
@@ -272,6 +273,7 @@ void producer_task(const Task *task,
     outputs[0].return_data(0, FID_X, NULL);
     outputs[0].return_data(0, FID_Y, NULL);
     outputs[1].return_data(0, FID_Z, NULL);
+    outputs[1].return_data(0, FID_W, NULL);
     return;
   }
 
@@ -292,6 +294,7 @@ void producer_task(const Task *task,
   outputs[0].return_data(SIZE, FID_X, ptr_x);
   outputs[0].return_data(FID_Y, buf_y);
   outputs[1].return_data(SIZE, FID_Z, ptr_z);
+  outputs[1].return_data(SIZE, FID_W, NULL);
 }
 
 typedef FieldAccessor<READ_ONLY, int64_t, 1, coord_t,
@@ -435,6 +438,7 @@ void main_task(const Task *task,
   allocator.allocate_field(sizeof(int64_t), FID_X);
   allocator.allocate_field(sizeof(int32_t), FID_Y);
   allocator.allocate_field(sizeof(int64_t), FID_Z);
+  allocator.allocate_field(0, FID_W);
 
   std::set<FieldID> field_set1;
   field_set1.insert(FID_X);
@@ -442,6 +446,7 @@ void main_task(const Task *task,
 
   std::set<FieldID> field_set2;
   field_set2.insert(FID_Z);
+  field_set2.insert(FID_W);
 
   std::vector<OutputRequirement> out_reqs;
   out_reqs.push_back(OutputRequirement(fs, field_set1, true));

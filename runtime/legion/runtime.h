@@ -1315,7 +1315,8 @@ namespace Legion {
       PhysicalInstance eager_pool_instance;
       uintptr_t eager_pool;
       // Allocator object for eager allocations
-      void *eager_allocator;
+      typedef BasicRangeAllocator<size_t, size_t> EagerAllocator;
+      EagerAllocator *eager_allocator;
       // Allocation counter
       size_t next_allocation_id;
       // Map each eager instance to its pointer and allocation id

@@ -2420,8 +2420,11 @@ namespace Legion {
         };
         REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
             "Failed to allocate DeferredBuffer/Value/Reduction in task %s "
-            "(UID %lld) because %s memory " IDFMT " is full.", get_task_name(),
-            get_unique_id(), mem_names[memory.kind()], memory.id) 
+            "(UID %lld) because %s memory " IDFMT " is full. This is an eager "
+            "allocation so you must adjust the percentage of this memory "
+            "dedicated for eager allocations with '-lg:eager_alloc_percentage' "
+            "flag on the command line.", get_task_name(), get_unique_id(), 
+            mem_names[memory.kind()], memory.id) 
       }
       task_local_instances.insert(instance);
 #endif

@@ -1117,7 +1117,9 @@ namespace Realm {
 			       size_t span_size,
 			       size_t pre_bytes_total) 
       {
-	ActiveMessage<XferDesRemoteWriteMessage> amsg(target, nbytes, dst_buf);
+	ActiveMessage<XferDesRemoteWriteMessage> amsg(target,
+						      src_buf, nbytes,
+						      dst_buf);
 	amsg->req = req;
 	amsg->next_xd_guid = next_xd_guid;
 	amsg->next_port_idx = next_port_idx;
@@ -1125,8 +1127,6 @@ namespace Realm {
 	assert(span_size <= UINT_MAX);
 	amsg->span_size = span_size;
 	amsg->pre_bytes_total = pre_bytes_total;
-        //TODO: need to ask Sean what payload mode we should use
-	amsg.add_payload(src_buf, nbytes, PAYLOAD_KEEP);
 	amsg.commit();
       }
 
@@ -1139,15 +1139,16 @@ namespace Realm {
 			       size_t span_size,
 			       size_t pre_bytes_total) 
       {
-	size_t payload_size = nbytes*nlines;
-	ActiveMessage<XferDesRemoteWriteMessage> amsg(target, payload_size, dst_buf);
+	ActiveMessage<XferDesRemoteWriteMessage> amsg(target,
+						      src_buf, nbytes,
+						      nlines, src_str,
+						      dst_buf);
 	amsg->req = req;
 	amsg->next_xd_guid = next_xd_guid;
 	amsg->next_port_idx = next_port_idx;
 	amsg->span_start = span_start;
 	amsg->span_size = span_size;
 	amsg->pre_bytes_total = pre_bytes_total;
-	amsg.add_payload(src_buf, nbytes, nlines, src_str, PAYLOAD_KEEP);
 	amsg.commit();
       }
     };
