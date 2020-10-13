@@ -4181,6 +4181,22 @@ extern "C" {
   legion_runtime_get_runtime(void);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::get_context()
+   */
+  legion_context_t
+  legion_runtime_get_context(void);
+
+  /**
+   * IMPORTANT: This method is ONLY for use with contexts obtained via legion_runtime_get_context().
+   *
+   * @param handle Caller must have ownership of parameter `handle`.
+   */
+  void
+  legion_context_destroy(legion_context_t);
+
+  /**
    * @see Legion::Runtime::get_executing_processor()
    */
   legion_processor_t
@@ -4267,6 +4283,14 @@ extern "C" {
   legion_physical_region_get_field_count(legion_physical_region_t handle);
   legion_field_id_t
   legion_physical_region_get_field_id(legion_physical_region_t handle, size_t index);
+
+  /**
+   * @see Legion::PhysicalRegion::get_memories()
+   */
+  size_t
+  legion_physical_region_get_memory_count(legion_physical_region_t handle);
+  legion_memory_t
+  legion_physical_region_get_memory(legion_physical_region_t handle, size_t index);
 
   /**
    * @return Caller takes ownership of return value.

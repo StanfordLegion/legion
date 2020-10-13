@@ -55,6 +55,9 @@ namespace Realm {
   template <typename T>
     class ActiveMessage {
   public:
+    // constructs an INACTIVE message object - call init(...) as needed
+    ActiveMessage();
+
     // construct a new active message for either a single recipient or a mask
     //  of recipients
     // in addition to the header struct (T), a message can include a variable
@@ -62,7 +65,34 @@ namespace Realm {
     ActiveMessage(NodeID _target,
 		  size_t _max_payload_size = 0, void *_dest_payload_addr = 0);
     ActiveMessage(const Realm::NodeSet &_targets, size_t _max_payload_size = 0);
+
+    // providing the payload (as a 1D or 2D reference, which must be PAYLOAD_KEEP)
+    //  up front can avoid a copy if the source location is directly accessible
+    //  by the networking hardware
+    ActiveMessage(NodeID _target, const void *_data, size_t _datalen,
+		  void *_dest_payload_addr = 0);
+    ActiveMessage(const Realm::NodeSet &_targets,
+		  const void *_data, size_t _datalen);
+    ActiveMessage(NodeID _target, const void *_data, size_t _bytes_per_line,
+		  size_t _lines, size_t _line_stride, void *_dest_payload_addr = 0);
+    ActiveMessage(const Realm::NodeSet &_targets,
+		  const void *_data, size_t _bytes_per_line,
+		  size_t _lines, size_t _line_stride);
+
     ~ActiveMessage(void);
+
+    // a version of `init` for each constructor above
+    void init(NodeID _target,
+	      size_t _max_payload_size = 0, void *_dest_payload_addr = 0);
+    void init(const Realm::NodeSet &_targets, size_t _max_payload_size = 0);
+    void init(NodeID _target, const void *_data, size_t _datalen,
+	      void *_dest_payload_addr = 0);
+    void init(const Realm::NodeSet &_targets, const void *_data, size_t _datalen);
+    void init(NodeID _target, const void *_data, size_t _bytes_per_line,
+	      size_t _lines, size_t _line_stride, void *_dest_payload_addr = 0);
+    void init(const Realm::NodeSet &_targets,
+	      const void *_data, size_t _bytes_per_line,
+	      size_t _lines, size_t _line_stride);
 
     // operator-> gives access to the header structure
     T *operator->(void);

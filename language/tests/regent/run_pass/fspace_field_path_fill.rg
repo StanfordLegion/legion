@@ -14,41 +14,18 @@
 
 import "regent"
 
-local c = regentlib.c
-
-fspace Fields
-{
-  A : double,
-  B : double,
-  C : double,
-  D : &double,
+fspace fsa {
+  x : int,
+  y : int,
 }
 
-__demand(__inline)
-task test(t : region(ispace(int1d), Fields))
-where
-  reads(t.B), writes(t.A)
-do
-  var a = __fields(t.{A, B})
-  return a[0]
-end
-
-__demand(__inline)
-task test2(t : region(ispace(int1d), Fields))
-where
-  reads(t.D)
-do
-  var a = __fields(t.{D})
-  return a[0]
-end
+fspace fsb {
+  z : fsa,
+  w : fsa,
+}
 
 task main()
-  var t = region(ispace(int1d, 2), Fields)
-  fill(t.{A, B, C}, 0)
-  var f = test(t)
-  var g = test2(t)
-  regentlib.assert(f == __fields(t.A)[0], "test failed")
-  regentlib.assert(g == __fields(t.D)[0], "test failed")
+  var r = region(ispace(int1d, 10), fsb)
+  fill(r.[regentlib.field_path("z", "x")], 0)
 end
-
 regentlib.start(main)

@@ -1429,7 +1429,9 @@ namespace Legion {
   {
     switch(d.get_dim()) {
 #define DIMFUNC(DIM) \
-    case DIM: return os << d.get_rect<DIM>();
+    case DIM: { os << d.bounds<DIM,coord_t>(); \
+                if(d.is_id != 0) os << ',' << std::hex << d.is_id << std::dec; \
+		return os; }
     LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
     default: assert(0);

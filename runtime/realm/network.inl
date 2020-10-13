@@ -97,6 +97,9 @@ namespace Realm {
 							 unsigned short msgid,
 							 size_t header_size,
 							 size_t max_payload_size,
+							 const void *src_payload_addr,
+							 size_t src_payload_lines,
+							 size_t src_payload_line_stride,
 							 void *dest_payload_addr,
 							 void *storage_base,
 							 size_t storage_size)
@@ -109,6 +112,9 @@ namespace Realm {
 							  msgid,
 							  header_size,
 							  max_payload_size,
+							  src_payload_addr,
+							  src_payload_lines,
+							  src_payload_line_stride,
 							  dest_payload_addr,
 							  storage_base,
 							  storage_size);
@@ -118,6 +124,9 @@ namespace Realm {
 							 unsigned short msgid,
 							 size_t header_size,
 							 size_t max_payload_size,
+							 const void *src_payload_addr,
+							 size_t src_payload_lines,
+							 size_t src_payload_line_stride,
 							 void *storage_base,
 							 size_t storage_size)
     {
@@ -129,6 +138,9 @@ namespace Realm {
 							  msgid,
 							  header_size,
 							  max_payload_size,
+							  src_payload_addr,
+							  src_payload_lines,
+							  src_payload_line_stride,
 							  storage_base,
 							  storage_size);
     }

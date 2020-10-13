@@ -107,10 +107,20 @@ end
 
 function type_check.region_field(cx, node, region, prefix_path, value_type)
   assert(std.is_symbol(region))
-  local field_path = prefix_path .. data.newtuple(node.field_name)
-  local field_type = std.get_field(value_type, node.field_name)
+  local field_name = node.field_name
+  if not data.is_tuple(field_name) then
+    field_name = data.newtuple(node.field_name)
+  end
+  local field_path = prefix_path .. field_name
+  local field_type = value_type
+  for _, f in ipairs(field_name) do
+    field_type = std.get_field(field_type, f)
+    if not field_type then
+      break
+    end
+  end
   if not field_type then
-    report.error(node, "no field '" .. node.field_name ..
+    report.error(node, "no field '" .. field_name:mkstring(".") ..
                 "' in region " .. (data.newtuple(region) .. prefix_path):mkstring("."))
   end
 

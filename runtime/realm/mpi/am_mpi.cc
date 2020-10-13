@@ -166,7 +166,7 @@ void AMPoll_cancel()
     }
 }
 
-void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int has_dest, MPI_Aint dest)
+void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int payload_lines, int payload_line_stride, int has_dest, MPI_Aint dest)
 {
     char buf_send[1024];
 
@@ -178,7 +178,13 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
 
     if (has_dest) {
         assert(g_am_win);
-        CHECK_MPI( MPI_Put(payload, payload_size, MPI_BYTE, tgt, dest, payload_size, MPI_BYTE, g_am_win) );
+	if (payload_lines > 1) {
+	  int line_size = payload_size / payload_lines;
+	  for (int i = 0; i < payload_lines; i++)
+	    CHECK_MPI( MPI_Put(payload + (i * payload_line_stride), line_size, MPI_BYTE,
+			       tgt, dest + (i * line_size), line_size, MPI_BYTE, g_am_win) );
+	} else
+	  CHECK_MPI( MPI_Put(payload, payload_size, MPI_BYTE, tgt, dest, payload_size, MPI_BYTE, g_am_win) );
         CHECK_MPI( MPI_Win_flush(tgt, g_am_win) );
 
         msg->type = 2;
@@ -193,7 +199,13 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
             memcpy(msg_header, header, header_size);
         }
         if (payload_size > 0) {
-            memcpy(msg_header + header_size, payload, payload_size);
+	    if (payload_lines > 1) {
+	      int line_size = payload_size / payload_lines;
+	      for (int i = 0; i < payload_lines; i++)
+		memcpy(msg_header + header_size + (i * line_size),
+		       payload + (i * payload_line_stride), line_size);
+	    } else
+	      memcpy(msg_header + header_size, payload, payload_size);
         }
         int n = AM_MSG_HEADER_SIZE + header_size + payload_size;
         assert(tgt != node_this);
@@ -212,6 +224,7 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         assert(tgt != node_this);
         CHECK_MPI( MPI_Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD) );
         assert(tgt != node_this);
+	assert(payload_lines <= 1); // not supporting 2d payloads here yet
         CHECK_MPI( MPI_Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, comm_medium) );
 
     }
