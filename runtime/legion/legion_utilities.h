@@ -2786,10 +2786,9 @@ namespace Legion {
       FieldMaskSet(void)
         : single(true) { entries.single_entry = NULL; }
       inline FieldMaskSet(T *init, const FieldMask &m, bool no_null = true);
-      template<typename T2>
-      inline FieldMaskSet(const FieldMaskSet<T2> &rhs);
+      inline FieldMaskSet(const FieldMaskSet<T> &rhs);
       // If copy is set to false then this is a move constructor
-      inline FieldMaskSet(FieldMaskSet &rhs, bool copy);
+      inline FieldMaskSet(FieldMaskSet<T> &rhs, bool copy);
       ~FieldMaskSet(void) { clear(); }
     public:
       inline FieldMaskSet& operator=(const FieldMaskSet &rhs);
@@ -2856,8 +2855,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T> template<typename T2>
-    inline FieldMaskSet<T>::FieldMaskSet(const FieldMaskSet<T2> &rhs)
+    template<typename T>
+    inline FieldMaskSet<T>::FieldMaskSet(const FieldMaskSet<T> &rhs)
       : valid_fields(rhs.valid_fields), single(rhs.single)
     //--------------------------------------------------------------------------
     {
