@@ -249,6 +249,7 @@ namespace Legion {
       virtual void enable_reentrant(MappingCallInfo *info) = 0;
       virtual void disable_reentrant(MappingCallInfo *info) = 0;
     protected:
+      friend class Runtime;
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
           Operation *op, RtEvent &precondition, bool prioritize = false) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
