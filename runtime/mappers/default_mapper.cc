@@ -2048,7 +2048,7 @@ namespace Legion {
           best_memory = *it;
           best_bandwidth = affinity[0].bandwidth;
         }
-        if ((it->kind() == Memory::REGDMA_MEM) &&
+        if ((it->kind() == Memory::REGDMA_MEM || it->kind() == Memory::Z_COPY_MEM) &&
 	    (!best_rdma_memory.exists() ||
 	     (affinity[0].bandwidth > best_rdma_bandwidth))) {
           best_rdma_memory = *it;
