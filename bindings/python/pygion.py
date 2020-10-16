@@ -2366,6 +2366,9 @@ class ProjectionFunctor(object):
 
     def compile_and_register(self):
         global _next_proj_functor_id
+        global engine 
+        global proj_functor
+        global program
         self.proj_id = _next_proj_functor_id
         _next_proj_functor_id += 1
 
@@ -2723,7 +2726,7 @@ class ProjectionFunctor(object):
             _my.ctx.runtime,
             self.proj_id,
             False,
-            1,
+            0,
             ffi.NULL,
             ffi.cast("legion_projection_functor_logical_partition_t", proj_functor)
         )

@@ -193,7 +193,7 @@ f = ProjectionFunctor(ID + 1)
 @task(privileges=[R])
 def hello(R, i):
     print("HELLO FUNCTION")
-    # print("hello from point %s (region %s)" % (i, R.ispace.bounds))
+    print("hello from point %s (region %s)" % (i, R.ispace.bounds))
     # print(R.x)
 
 @task
