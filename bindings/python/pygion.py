@@ -1987,8 +1987,18 @@ class _TaskLauncher(object):
                                 launcher, req, arg.fspace.field_ids[field], True)
                 elif isinstance(arg, SymbolicExpr):
                     # FIXME: Support non-trivial projection functors
-                    assert isinstance(arg, SymbolicIndexAccess) and (isinstance(arg.index, SymbolicLoopIndex) or isinstance(arg.index, ConcreteLoopIndex))
+                    # add function for check and add function call
+                    def arg_check():
+                        A = isinstance(arg, SymbolicIndexAccess)
+                        B = isinstance(arg.index, SymbolicLoopIndex)
+                        C = isinstance(arg.index, ConcreteLoopIndex)
+                        return A and (B or C)
+                    assert arg_check()
+                    # get the real proj id out of f if f else 0
+                    # if f == 0:
                     proj_id = 100
+                    # else:
+                    #     proj_id = 
 
                     parent = arg.parent if arg.parent is not None else arg
                     parent = parent.parent if parent.parent is not None else parent
@@ -2215,28 +2225,28 @@ class _FuturePoint(object):
 class SymbolicExpr(object):
     def __add__(self, other):
         return SymbolicBinop(self, other, op='+')
-    # def __radd__(self, other):
-    #     return SymbolicBinop(other, self, op='+')
+    def __radd__(self, other):
+        return SymbolicBinop(other, self, op='+')
 
-    # def __mul__(self, other):
-    #     return SymbolicBinop(self, other, op='*')
-    # def __rmul__(self, other):
-    #     return SymbolicBinop(other, self, op='*')
+    def __mul__(self, other):
+        return SymbolicBinop(self, other, op='*')
+    def __rmul__(self, other):
+        return SymbolicBinop(other, self, op='*')
 
-    # def __sub__(self, other):
-    #     return SymbolicBinop(self, other, op='-')
-    # def __rsub__(self, other):
-    #     return SymbolicBinop(other, self, op='-')
+    def __sub__(self, other):
+        return SymbolicBinop(self, other, op='-')
+    def __rsub__(self, other):
+        return SymbolicBinop(other, self, op='-')
 
-    # def __floordiv__(self, other):
-    #     return SymbolicBinop(self, other, op='//')
-    # def __rdiv__(self, other):
-    #     return SymbolicBinop(other, self, op='//')
+    def __floordiv__(self, other):
+        return SymbolicBinop(self, other, op='//')
+    def __rdiv__(self, other):
+        return SymbolicBinop(other, self, op='//')
 
-    # def __mod__(self, other):
-    #     return SymbolicBinop(self, other, op='%')
-    # def __rmod__(self, other):
-    #     return SymbolicBinop(other, self, op='%')
+    def __mod__(self, other):
+        return SymbolicBinop(self, other, op='%')
+    def __rmod__(self, other):
+        return SymbolicBinop(other, self, op='%')
 
     def is_region(self):
         return False
@@ -2294,8 +2304,7 @@ class SymbolicBinop(SymbolicExpr):
     import petra as pt
     __slots__ = ['lhs', 'rhs', 'op']
     def __init__(self, lhs, rhs, op):
-        # assert op in ['+', '-', '//', '*', '%'] # FIXME
-        assert op is '+'
+        assert op in ['+', '-', '//', '*', '%'] # FIXME
         self.lhs = lhs
         self.rhs = rhs
         self.op = op
@@ -2305,21 +2314,21 @@ class SymbolicBinop(SymbolicExpr):
         return '%s %s %s' % (self.lhs, self.op, self.rhs)
     def _legion_postprocess_task_argument(self, point):
         return _postprocess(self.lhs, point) + _postprocess(self.rhs, point)
-    # def codegen(self):
-    #     right = self.rhs.codegen()
-    #     left = self.lhs.codegen()
-    #     if op == '+':
-    #         return pt.Add(left, right)
-        # elif op == '*':
-        #     return pt.Mul(left, right)
-        # elif op == '-':
-        #     return pt.Sub(left, right)
-        # elif op == '//':
-        #     return pt.Div(left, right)
-        # elif op == '%':
-        #     return pt.Mod(left, right)
-        # else:
-        #     assert False  
+    def codegen(self):
+        right = self.rhs.codegen()
+        left = self.lhs.codegen()
+        if op == '+':
+            return pt.Add(left, right)
+        elif op == '*':
+            return pt.Mul(left, right)
+        elif op == '-':
+            return pt.Sub(left, right)
+        elif op == '//':
+            return pt.Div(left, right)
+        elif op == '%':
+            return pt.Mod(left, right)
+        else:
+            assert False  
 
 class SymbolicLoopIndex(SymbolicExpr):
     import petra as pt
@@ -2332,8 +2341,8 @@ class SymbolicLoopIndex(SymbolicExpr):
         return self.name
     def _legion_postprocess_task_argument(self, point):
         return point
-    # def codegen(self):
-    #     return pt.Var(self.name)
+    def codegen(self):
+        return pt.Var(self.name)
 
 ID = SymbolicLoopIndex('ID')
 
@@ -2374,194 +2383,22 @@ class ProjectionFunctor(object):
 
         proj_name = "proj_functor_%s" % self.proj_id
 
-        # import petra as pt
-
-        # rhs = self.expr.rhs
-        # lhs = self.expr.lhs
-
-        # if isinstance(lhs, int):
-        #     nbr = lhs
-        # elif isinstance(rhs, int):
-        #     nbr = rhs
-
-
-        # LEGION_MAX_DIM = _max_dim
-        # MAX_DOMAIN_DIM = 2 * LEGION_MAX_DIM
-        # DIM = 1
-
-        # program = pt.Program("module")
-
-        # # Define types:
-        # legion_region_tree_id_t = pt.Int32_t  # unsigned int
-        # legion_index_partition_id_t = pt.Int32_t  # unsigned int
-        # legion_index_tree_id_t = pt.Int32_t  # unsigned int
-        # legion_type_tag_t = pt.Int32_t  # unsigned int
-        # legion_field_space_id_t = pt.Int32_t  # unsigned int
-        # coord_t = pt.Int64_t  # long long
-        # legion_index_space_id_t = pt.Int32_t  # unsigned int
-        # realm_id_t = pt.Int64_t  # unsigned long long
-
-        # legion_runtime_t = pt.PointerType(pt.Int8_t)
-
-        # legion_index_partition_t = pt.StructType(
-        #     {
-        #         "id": legion_index_partition_id_t,
-        #         "tid": legion_index_tree_id_t,
-        #         "type_tag": legion_type_tag_t,
-        #     }
-        # )
-
-        # legion_field_space_t = pt.StructType({"id": legion_field_space_id_t})
-
-        # legion_logical_partition_t = pt.StructType(
-        #     {
-        #         "tree_id": legion_region_tree_id_t,
-        #         "index_partition": legion_index_partition_t,
-        #         "field_space": legion_field_space_t,
-        #     }
-        # )
-
-        # legion_domain_point_t = pt.StructType(
-        #     {"dim": pt.Int32_t, "point_data": pt.ArrayType(coord_t, LEGION_MAX_DIM)}
-        # )
-
-        # legion_domain_t = pt.StructType(
-        #     {
-        #         "is_id": realm_id_t,
-        #         "dim": pt.Int32_t,
-        #         "rect_data": pt.ArrayType(coord_t, MAX_DOMAIN_DIM),
-        #     }
-        # )
-
-        # legion_point_1d_t = pt.Int64_t
-
-        # legion_index_space_t = pt.StructType(
-        #     {
-        #         "id": legion_index_space_id_t,
-        #         "tid": legion_index_tree_id_t,
-        #         "type_tag": legion_type_tag_t,
-        #     }
-        # )
-
-        # legion_logical_region_t = pt.StructType(
-        #     {
-        #         "tree_id": legion_region_tree_id_t,
-        #         "index_space": legion_index_space_t,
-        #         "field_space": legion_field_space_t,
-        #     }
-        # )
-
-        # # Define functions:
-        # program.add_func_decl(
-        #     "legion_domain_point_get_point_1d",
-        #     (pt.PointerType(legion_domain_point_t),),
-        #     legion_point_1d_t,
-        #     attributes=(("byval",),),
-        # )
-
-        # program.add_func_decl(
-        #     "legion_domain_point_from_point_1d",
-        #     (pt.PointerType(legion_domain_point_t), legion_point_1d_t,),
-        #     (),
-        #     attributes=(("sret",), None),
-        # )
-        # program.add_func_decl(
-        #     "legion_logical_partition_get_logical_subregion_by_color_domain_point",
-        #     (
-        #         pt.PointerType(legion_logical_region_t),
-        #         legion_runtime_t,
-        #         pt.PointerType(legion_logical_partition_t),
-        #         pt.PointerType(legion_domain_point_t),
-        #     ),
-        #     (),
-        #     attributes=(("sret",), None, ("byval",), ("byval",),),
-        # )
-        # program.add_func_decl("malloc", (pt.Int32_t,), pt.PointerType(legion_domain_point_t))
-        # program.add_func_decl("free", (pt.PointerType(legion_domain_point_t),), ())
-
-        # # Define variables:
-        # runtime = pt.Symbol(legion_runtime_t, "runtime")
-        # parent_ptr = pt.Symbol(pt.PointerType(legion_logical_partition_t), "parent_ptr")
-        # point_ptr = pt.Symbol(pt.PointerType(legion_domain_point_t), "point_ptr")
-        # domain_ptr = pt.Symbol(pt.PointerType(legion_domain_t), "domain_ptr")
-        # point1d = pt.Symbol(legion_point_1d_t, "point1d")
-        # point1d_x_plus_1 = pt.Symbol(legion_point_1d_t, "point1d_x_plus_1")
-        # domain_point_x_plus_1_ptr = pt.Symbol(
-        #     pt.PointerType(legion_domain_point_t), "point1d_x_plus_1_ptr"
-        # )
-        # result_ptr = pt.Symbol(pt.PointerType(legion_logical_region_t), "result_ptr")
-
-        # target_machine = program.get_target_machine()
-
-        # program.add_func(
-        #     proj_name,
-        #     (result_ptr, runtime, parent_ptr, point_ptr, domain_ptr,),
-        #     (),
-        #     pt.Block(
-        #         [
-        #             pt.DefineVar(
-        #                 point1d,
-        #                 pt.Call(
-        #                     "legion_domain_point_get_point_1d",
-        #                     [pt.Var(point_ptr),],
-        #                     attributes=("byval",),
-        #                 ),
-        #             ),
-        #             pt.DefineVar(point1d_x_plus_1, pt.Add(pt.Var(point1d), pt.Int64(nbr))),
-        #             pt.DefineVar(
-        #                 domain_point_x_plus_1_ptr,
-        #                 pt.Call(
-        #                     "malloc",
-        #                     [
-        #                         pt.Int32(
-        #                             legion_domain_point_t.llvm_type().get_abi_size(
-        #                                 target_machine.target_data
-        #                             )
-        #                         ),
-        #                     ],
-        #                 ),
-        #             ),
-        #             pt.Call(
-        #                 "legion_domain_point_from_point_1d",
-        #                 [pt.Var(domain_point_x_plus_1_ptr), pt.Var(point1d_x_plus_1),],
-        #                 attributes=("sret",),
-        #             ),
-        #             pt.Call(
-        #                 "legion_logical_partition_get_logical_subregion_by_color_domain_point",
-        #                 [
-        #                     pt.Var(result_ptr),
-        #                     pt.Var(runtime),
-        #                     pt.Var(parent_ptr),
-        #                     pt.Var(domain_point_x_plus_1_ptr),
-        #                 ],
-        #                 attributes=("sret", None, "byval", "byval"),
-        #             ),
-        #             pt.Call("free", [pt.Var(domain_point_x_plus_1_ptr),]),
-        #             pt.Return(()),
-        #         ]
-        #     ),
-        #     attributes=(("noalias", "sret"), None, ("byval",), ("byval",), ("byval",)),
-        # )
-
-        # engine = program.compile()
-
-        # # proj_functor should be a pointer
-        # # print("proj_name = ", proj_name)
-        # proj_functor = engine.get_function_address(proj_name)
-        # print("PROJ FUNCTOR: ", proj_functor)
-
-
-        ########__________START HERE__________########
-
         import petra as pt
 
-        program = pt.Program("module")
+        rhs = self.expr.rhs
+        lhs = self.expr.lhs
 
-        # Global variables
+        if isinstance(lhs, int):
+            nbr = lhs
+        elif isinstance(rhs, int):
+            nbr = rhs
+
+
         LEGION_MAX_DIM = _max_dim
         MAX_DOMAIN_DIM = 2 * LEGION_MAX_DIM
         DIM = 1
 
+        program = pt.Program("module")
 
         # Define types:
         legion_region_tree_id_t = pt.Int32_t  # unsigned int
@@ -2666,7 +2503,7 @@ class ProjectionFunctor(object):
         target_machine = program.get_target_machine()
 
         program.add_func(
-            "proj_functor",
+            proj_name,
             (result_ptr, runtime, parent_ptr, point_ptr, domain_ptr,),
             (),
             pt.Block(
@@ -2679,7 +2516,7 @@ class ProjectionFunctor(object):
                             attributes=("byval",),
                         ),
                     ),
-                    pt.DefineVar(point1d_x_plus_1, pt.Add(pt.Var(point1d), pt.Int64(1))),
+                    pt.DefineVar(point1d_x_plus_1, pt.Add(pt.Var(point1d), pt.Int64(nbr))),
                     pt.DefineVar(
                         domain_point_x_plus_1_ptr,
                         pt.Call(
@@ -2715,13 +2552,11 @@ class ProjectionFunctor(object):
             attributes=(("noalias", "sret"), None, ("byval",), ("byval",), ("byval",)),
         )
 
-
         engine = program.compile()
 
-        proj_functor = engine.get_function_address("proj_functor")
-        print(proj_functor)
+        proj_functor = engine.get_function_address(proj_name)
+        print("PROJ FUNCTOR: ", proj_functor)
 
-        ########__________END HERE__________########
         c.legion_runtime_register_projection_functor(
             _my.ctx.runtime,
             self.proj_id,
