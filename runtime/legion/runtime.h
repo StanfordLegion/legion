@@ -706,6 +706,8 @@ namespace Legion {
     public:
       const RegionRequirement &get_requirement(void) const { return req; }
       size_t size(void) const { return num_elements; }
+    protected:
+      IndividualManager *get_manager(FieldID field_id);
     public:
       Runtime *const runtime;
       TaskContext *const context;

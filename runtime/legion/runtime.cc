@@ -3652,6 +3652,16 @@ namespace Legion {
           field_id, index, context->owner_task->get_task_name(),
           context->owner_task->get_unique_op_id(), alloc_size, field_size);
 
+      IndividualManager *manager = get_manager(field_id);
+      if (instance.get_location() != manager->get_memory())
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
+          "Field %u of output region %u of task %s (UID: %lld) is requested "
+          "to have an instance on memory " IDFMT ", but the returned instance "
+          "is allocated on memory " IDFMT ".",
+          field_id, index, context->owner_task->get_task_name(),
+          context->owner_task->get_unique_op_id(),
+          instance.get_location().id, manager->get_memory().id);
+
 
       // The realm instance backing a deferred buffer is currently tagged as
       // a task local instance, so we need to tell the runtime that the instance
@@ -3751,29 +3761,11 @@ namespace Legion {
            returned_instances.end(); ++it)
       {
         FieldID field_id = it->first;
-        ExternalInstanceInfo &info = it->second;
-        size_t field_size = fspace_node->get_field_size(field_id);
-        std::set<FieldID> fields; fields.insert(field_id);
-        FieldMask mask = fspace_node->get_field_mask(fields);
+        IndividualManager *manager = get_manager(field_id);
 
-        // Find the right physical manager by checking against
-        // the field mask of the instance ref
-        IndividualManager *manager = NULL;
-        for (unsigned idx = 0; idx < instance_set.size(); ++idx)
-        {
-          const InstanceRef &instance = instance_set[idx];
-          if (!!(instance.get_valid_fields() & mask))
-          {
-            manager =
-              instance.get_instance_manager()->as_individual_manager();
-            break;
-          }
-        }
-#ifdef DEBUG_LEGION
-        assert(manager != NULL);
-#endif
         // Create a Realm layout
         std::map<Realm::FieldID,size_t> field_sizes;
+        size_t field_size = fspace_node->get_field_size(field_id);
         field_sizes[field_id] = field_size;
         Realm::InstanceLayoutConstraints constraints(field_sizes,
                                                      0 /*block_size*/);
@@ -3835,6 +3827,7 @@ namespace Legion {
         // Create an external Realm instance
         Realm::RegionInstance instance;
         Realm::ProfilingRequestSet no_requests;
+        ExternalInstanceInfo &info = it->second;
         RtEvent wait_on(Realm::RegionInstance::create_external(
           instance, manager->get_memory(), info.ptr, layout, no_requests));
         if (wait_on.exists())
@@ -3885,6 +3878,35 @@ namespace Legion {
         }
       }
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    IndividualManager *OutputRegionImpl::get_manager(FieldID field_id)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = runtime->forest->get_node(req.region);
+      FieldSpaceNode *fspace_node = node->get_column_source();
+
+      std::set<FieldID> fields; fields.insert(field_id);
+      FieldMask mask = fspace_node->get_field_mask(fields);
+
+      // Find the right physical manager by checking against
+      // the field mask of the instance ref
+      IndividualManager *manager = NULL;
+      for (unsigned idx = 0; idx < instance_set.size(); ++idx)
+      {
+        const InstanceRef &instance = instance_set[idx];
+        if (!!(instance.get_valid_fields() & mask))
+        {
+          manager =
+            instance.get_instance_manager()->as_individual_manager();
+          break;
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+#endif
+      return manager;
     }
 
     /////////////////////////////////////////////////////////////
