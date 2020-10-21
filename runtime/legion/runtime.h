@@ -706,6 +706,8 @@ namespace Legion {
     public:
       const RegionRequirement &get_requirement(void) const { return req; }
       size_t size(void) const { return num_elements; }
+    protected:
+      IndividualManager *get_manager(FieldID field_id);
     public:
       Runtime *const runtime;
       TaskContext *const context;
@@ -2547,6 +2549,9 @@ namespace Legion {
                       const void *value, void (*destructor)(void*));
     public:
       Mapper* get_mapper(Context ctx, MapperID id, Processor target);
+      MappingCallInfo* begin_mapper_call(Context ctx, MapperID id, 
+                                         Processor target);
+      void end_mapper_call(MappingCallInfo *info);
       Processor get_executing_processor(Context ctx);
       void raise_region_exception(Context ctx, PhysicalRegion region, 
                                   bool nuclear);

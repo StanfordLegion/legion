@@ -6166,6 +6166,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Mapping::MapperContext Runtime::begin_mapper_call(Context ctx, MapperID id,
+                                                      Processor target)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->begin_mapper_call(ctx, id, target);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::end_mapper_call(Mapping::MapperContext ctx)
+    //--------------------------------------------------------------------------
+    {
+      runtime->end_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
     Processor Runtime::get_executing_processor(Context ctx)
     //--------------------------------------------------------------------------
     {

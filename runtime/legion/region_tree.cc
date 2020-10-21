@@ -11276,6 +11276,8 @@ namespace Legion {
               if (!ready_event.exists())
                 ready_event = Runtime::create_rt_user_event();
               outstanding_invalidations++;
+              // Add a reference that will be remove when the flush returns
+              add_base_resource_ref(FIELD_ALLOCATOR_REF);
               // Send the invalidation and make ourselves the new 
               // pending exclusive allocator value
               Serializer rez;
@@ -11354,6 +11356,8 @@ namespace Legion {
                   }
                   const RtUserEvent done = Runtime::create_rt_user_event();
                   outstanding_invalidations++;
+                  // Add a reference that will be remove when the flush returns
+                  add_base_resource_ref(FIELD_ALLOCATOR_REF);
                   Serializer rez;
                   {
                     RezCheck z(rez);
@@ -11527,17 +11531,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!is_owner());
 #endif
-        const RtUserEvent done_event = Runtime::create_rt_user_event();
-        // Send the message back to the owner
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(handle);
-          rez.serialize<bool>(false); // return allocation
-          rez.serialize(done_event);
-        }
-        runtime->send_field_space_allocator_free(owner_space, rez);
-        return done_event;
+        return RtEvent::NO_RT_EVENT;
       }
       else
       {
@@ -13623,10 +13617,13 @@ namespace Legion {
       derez.deserialize(handle);
 
       FieldSpaceNode *node = forest->get_node(handle);
-      node->process_allocator_flush(derez);
+      const bool remove_free_reference = node->process_allocator_flush(derez);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
+      if (node->remove_base_resource_ref(FIELD_ALLOCATOR_REF,
+            (remove_free_reference ? 2 : 1)))
+        delete node;
     }
 
     //--------------------------------------------------------------------------
@@ -14266,7 +14263,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::process_allocator_flush(Deserializer &derez)
+    bool FieldSpaceNode::process_allocator_flush(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14353,6 +14350,7 @@ namespace Legion {
       if ((--outstanding_invalidations == 0) &&
           (allocation_state == FIELD_ALLOC_PENDING))
         allocation_state = FIELD_ALLOC_EXCLUSIVE;
+      return allocator_meta_data;
     }
 
     //--------------------------------------------------------------------------

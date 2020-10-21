@@ -224,7 +224,7 @@ namespace Legion {
       Mapper(MapperRuntime *rt);
       virtual ~Mapper(void);
     public:
-      MapperRuntime *const runtime; 
+      MapperRuntime *const runtime;
     public:
       /**
        ** ----------------------------------------------------------------------
@@ -1895,8 +1895,7 @@ namespace Legion {
       // These calls are illegal in the serialized mapper model 
       //------------------------------------------------------------------------
       bool is_locked(MapperContext ctx) const;
-      void lock_mapper(MapperContext ctx, 
-                                 bool read_only = false) const;
+      void lock_mapper(MapperContext ctx, bool read_only = false) const;
       void unlock_mapper(MapperContext ctx) const;
     public:
       //------------------------------------------------------------------------
