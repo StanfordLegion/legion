@@ -3391,7 +3391,7 @@ namespace Legion {
       void process_allocator_response(Deserializer &derez);
       void process_allocator_invalidation(RtUserEvent done, 
                                           bool flush, bool merge);
-      void process_allocator_flush(Deserializer &derez);
+      bool process_allocator_flush(Deserializer &derez);
       void process_allocator_free(Deserializer &derez, AddressSpaceID source);
     protected:
       bool allocate_local_indexes(CustomSerdezID serdez,

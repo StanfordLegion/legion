@@ -1197,6 +1197,9 @@ class Variant(StatObject):
         self.task_kind = None
         self.color = None
 
+    def __hash__(self):
+        return hash(self.variant_id)
+
     def __eq__(self, other):
         return self.variant_id == other.variant_id
 
@@ -1956,6 +1959,9 @@ class MapperCallKind(StatObject):
         self.mapper_call_kind = mapper_call_kind
         self.name = name
         self.color = None
+
+    def __hash__(self):
+        return hash(self.mapper_call_kind)
 
     def __eq__(self, other):
         return self.mapper_call_kind == other.mapper_call_kind

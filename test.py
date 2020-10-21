@@ -407,6 +407,18 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, t
     cmd([make_exe, '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
     # FIXME: Actually run it
 
+    # HTR
+    # Contact: Mario Di Renzo <direnzo.mario1@gmail.com>
+    htr_dir = os.path.join(tmp_dir, 'htr')
+    cmd(['git', 'clone', 'https://github.com/stanfordhpccenter/HTR-solver.git', htr_dir])
+    htr_env = dict(list(env.items()) + [
+        ('LEGION_DIR', root_dir),
+        ('LD_LIBRARY_PATH', os.path.join(root_dir, 'bindings', 'regent')),
+        ('HTR_DIR', htr_dir),
+        ('CC', 'gcc'),
+    ])
+    cmd(['python3', os.path.join(htr_dir, 'unitTests', 'testAll.py')], env=htr_env)
+
     # TaskAMR
     # Contact: Jonathan Graham <jgraham@lanl.gov>
     task_amr_dir = os.path.join(tmp_dir, 'task_amr')
@@ -476,18 +488,6 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, ti
     cmd([pennant, str(app_cores), 'test/sedovsmall/sedovsmall.pnt', '-ll:cpu', str(app_cores)],
         cwd=pennant_dir,
         timelimit=timelimit)
-
-    # HTR
-    # Contact: Mario Di Renzo <direnzo.mario1@gmail.com>
-    htr_dir = os.path.join(tmp_dir, 'htr')
-    cmd(['git', 'clone', '-b', 'Develop', 'git@gitlab.com:mario.direnzo/Prometeo.git', htr_dir])
-    htr_env = dict(list(env.items()) + [
-        ('LEGION_DIR', root_dir),
-        ('LD_LIBRARY_PATH', os.path.join(root_dir, 'bindings', 'regent')),
-        ('HTR_DIR', htr_dir),
-        ('CC', 'gcc'),
-    ])
-    cmd(['python3', os.path.join(htr_dir, 'unitTests', 'testAll.py')], env=htr_env)
 
 
 def run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):

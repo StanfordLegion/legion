@@ -575,6 +575,7 @@ namespace Legion {
       PERMIT_STEAL_REQUEST_CALL,
       HANDLE_MESSAGE_CALL,
       HANDLE_TASK_RESULT_CALL,
+      APPLICATION_MAPPER_CALL,
       LAST_MAPPER_CALL,
     };
 
@@ -630,6 +631,7 @@ namespace Legion {
       "permit_steal_request",                       \
       "handle_message",                             \
       "handle_task_result",                         \
+      "application mapper call",                    \
     }
 
     // Methodology for assigning priorities to meta-tasks:

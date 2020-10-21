@@ -16775,6 +16775,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    MappingCallInfo* Runtime::begin_mapper_call(Context ctx, MapperID id, 
+                                                Processor target)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      MapperManager *manager;
+      if (!target.exists())
+      {
+        Processor proc = ctx->get_executing_processor();
+#ifdef DEBUG_LEGION
+        assert(proc_managers.find(proc) != proc_managers.end());
+#endif
+        manager = proc_managers[proc]->find_mapper(id);
+      }
+      else
+      {
+        std::map<Processor,ProcessorManager*>::const_iterator finder = 
+          proc_managers.find(target);
+        if (finder == proc_managers.end())
+          REPORT_LEGION_ERROR(ERROR_INVALID_PROCESSOR_NAME, "Invalid processor "
+                              IDFMT " passed to begin mapper call.", target.id)
+        manager = finder->second->find_mapper(id);
+      }
+      RtEvent ready;
+      MappingCallInfo *result = manager->begin_mapper_call(
+          APPLICATION_MAPPER_CALL, NULL, ready);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::end_mapper_call(MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      info->manager->finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     Processor Runtime::get_executing_processor(Context ctx)
     //--------------------------------------------------------------------------
     {

@@ -7134,6 +7134,29 @@ namespace Legion {
        */
       Mapping::Mapper* get_mapper(Context ctx, MapperID id, 
                                   Processor target = Processor::NO_PROC);
+
+      /**
+       * Start a mapper call from the application side. This will create
+       * a mapper context to use during the mapper call. The creation of
+       * this mapper context will ensure appropriate synchronization with
+       * other mapper calls consistent with the mapper synchronization model.
+       * @param ctx the enclosing task context
+       * @param id the mapper ID for which mapper to locate
+       * @param target processor if any, if none specified then
+       *               the executing processor for the current
+       *               context is used, if specified processor
+       *               must be local to the address space
+       * @return a fresh mapper context to use for the mapper call
+       */
+      Mapping::MapperContext begin_mapper_call(Context ctx, MapperID id,
+                                      Processor target = Processor::NO_PROC);
+
+      /**
+       * End a mapper call from the application side. This must be done for
+       * all mapper contexts created by calls into begin_mapper_call.
+       * @param ctx mapper context to end
+       */
+      void end_mapper_call(Mapping::MapperContext ctx);
       
       /**
        * Return the processor on which the current task is
