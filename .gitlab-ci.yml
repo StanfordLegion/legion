@@ -410,6 +410,9 @@ before_script:
     # some scheduled runs are only looking at specific subsets of functionality
     - if: '$ONLY_KOKKOS_JOBS == "1" && $USE_KOKKOS != "1"'
       when: never
+    # do not automatically run pipelines for pull requests
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
     # commits only run a short suite of jobs
     - if: '$CI_PIPELINE_SOURCE == "push" && $IS_SHORT_JOB != "1"'
       when: never
