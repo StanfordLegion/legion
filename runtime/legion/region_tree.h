@@ -3121,7 +3121,7 @@ namespace Legion {
       void record_read_only_infos(const std::map<FieldID,FieldInfo> &infos);
       void process_allocator_response(Deserializer &derez);
       void process_allocator_invalidation(RtUserEvent done);
-      void process_allocator_flush(Deserializer &derez);
+      bool process_allocator_flush(Deserializer &derez);
       void process_allocator_free(Deserializer &derez, AddressSpaceID source);
     protected:
       bool allocate_local_indexes(CustomSerdezID serdez,
