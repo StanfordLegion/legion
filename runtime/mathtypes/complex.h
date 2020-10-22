@@ -24,20 +24,134 @@
 #endif
 #endif
 
+#if __cplusplus >= 201103L
+#define __CEXPR__ constexpr
+#else
+#define __CEXPR__
+#endif
+
 #include <cmath>
+#ifdef __CUDACC__
+#include <thrust/complex.h>
+#define COMPLEX_NAMESPACE thrust
+#else
+#include <complex>
+#define COMPLEX_NAMESPACE std
+#endif 
 #ifdef COMPLEX_HALF
 #include "mathtypes/half.h"
 #endif
 
-// Empty base version
-// We support half and float versions for now
-// TODO: double support
 template<typename T>
-class complex { };
+
+using complex = COMPLEX_NAMESPACE::complex<T>;
+
+#ifdef __CUDACC__
+// We need fabs for situations where we process complex, floating point, and
+// integral types in the same generic call. This is only needed for the thrust
+// version of complex as the std one already has fabs.
+// Overload for __half defined after complex<__half>
+namespace thrust {
+template<class T>
+__CUDA_HD__ __CEXPR__ T fabs(const complex<T>& arg) {
+  return abs(arg);
+}
+}
+#endif
+
+template <typename T>
+struct convert_complex
+{
+};
+
+template <>
+struct convert_complex<double>
+{
+  __CUDA_HD__ static inline complex<double> from_int(unsigned long long val)
+  {
+    union
+    {
+      unsigned long long as_long;
+      double array[2];
+    } convert = {0};
+    convert.as_long = val;
+    complex<double> retval(convert.array[0], convert.array[1]);
+    return retval;
+  }
+  // cast back to integer
+  __CUDA_HD__ inline static unsigned long long as_int(complex<double> c)
+  {
+    union
+    {
+      unsigned long long as_long;
+      double array[2];
+    } convert = {0};
+    convert.array[0] = c.real();
+    convert.array[1] = c.imag();
+    return convert.as_long;
+  }
+};
+
+template <>
+struct convert_complex<float>
+{
+  __CUDA_HD__ static inline complex<float> from_int(unsigned long long val)
+  {
+    union
+    {
+      unsigned long long as_long;
+      float array[2];
+    } convert = {0};
+    convert.as_long = val;
+    complex<float> retval(convert.array[0], convert.array[1]);
+    return retval;
+  }
+  // cast back to integer
+  __CUDA_HD__ inline static unsigned long long as_int(complex<float> c)
+  {
+    union
+    {
+      unsigned long long as_long;
+      float array[2];
+    } convert = {0};
+    convert.array[0] = c.real();
+    convert.array[1] = c.imag();
+    return convert.as_long;
+  }
+};
+
+// Need to put this in COMPLEX_NAMESPACE namespace for ADL. The namespace has to
+// be changed/removed if another implementation of complex is used
+namespace COMPLEX_NAMESPACE {
+template<typename T> __CUDA_HD__ __CEXPR__
+inline bool operator<(const complex<T>& c1, const complex<T>& c2) {
+    return (c1.real() < c2.real()) || 
+      (!(c2.real() < c1.real()) && (c1.imag() < c2.imag()));
+}
+
+template<typename T> __CUDA_HD__ __CEXPR__
+inline bool operator>(const complex<T>& c1, const complex<T>& c2) {
+    return (c1.real() > c2.real()) || 
+      (!(c2.real() > c1.real()) && (c1.imag() > c2.imag()));
+}
+
+template<typename T> __CUDA_HD__ __CEXPR__
+inline bool operator<=(const complex<T>& c1, const complex<T>& c2) {
+    return (c1 == c2) || (c1.real() < c2.real()) || 
+      (!(c2.real() < c1.real()) && (c1.imag() < c2.imag()));
+}
+
+template<typename T> __CUDA_HD__ __CEXPR__
+inline bool operator>=(const complex<T>& c1, const complex<T>& c2) {
+    return (c1 == c2) || (c1.real() > c2.real()) || 
+      (!(c2.real() > c1.real()) && (c1.imag() > c2.imag()));
+}
+
+} // namespace COMPLEX_NAMESPACE
 
 #ifdef COMPLEX_HALF
 template<>
-class complex<__half> {
+class COMPLEX_NAMESPACE::complex<__half> {
 public:
   __CUDA_HD__
   complex(void) { } // empty default constructor for CUDA
@@ -50,36 +164,6 @@ public:
   complex(__half2 val) : _real(val.x), _imag(val.y) { }
 #endif
 public:
-  // reinterpret cast from integer
-  __CUDA_HD__ 
-  static inline complex<__half> from_int(int val) 
-    {
-      union { int as_int; unsigned short array[2]; } convert;
-      convert.as_int = val;
-      complex<__half> retval;
-#ifdef __CUDA_ARCH__
-      retval._real = __short_as_half(convert.array[0]);
-      retval._imag = __short_as_half(convert.array[1]);
-#else
-      retval._real = *(reinterpret_cast<const __half*>(&convert.array[0]));
-      retval._imag = *(reinterpret_cast<const __half*>(&convert.array[1]));
-#endif
-      return retval;
-    }
-  // cast back to integer
-  __CUDA_HD__
-  inline int as_int(void) const
-    {
-      union { int as_int; unsigned short array[2]; } convert;
-#ifdef __CUDA_ARCH__
-      convert.array[0] = __half_as_short(_real);
-      convert.array[1] = __half_as_short(_imag);
-#else
-      convert.array[0] = *(reinterpret_cast<const unsigned short*>(&_real));
-      convert.array[1] = *(reinterpret_cast<const unsigned short*>(&_imag));
-#endif
-      return convert.as_int;
-    }
 #ifdef __CUDACC__
   __device__
   operator __half2(void) const
@@ -143,313 +227,95 @@ protected:
   __half _real;
   __half _imag;
 };
-#endif
 
-template<>
-class complex<float> {
-public:
-  __CUDA_HD__
-  complex(void) { } // empty default constructor for CUDA
-  __CUDA_HD__
-  complex(float re, float im = 0.f) : _real(re), _imag(im) { }
-  __CUDA_HD__
-  complex(const complex<float> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
-#ifdef __CUDACC__
-  __device__ // Device only constructor
-  complex(float2 val) : _real(val.x), _imag(val.y) { }
+__CUDA_HD__
+inline __half abs(const complex<__half>& z) {
+#ifdef __CUDA_ARCH__
+  return hypotf(z.real(), z.imag());
+#elif __cplusplus >= 201103L
+  return (__half)(std::hypotf(z.real(), z.imag()));
+#else
+  return (__half)(std::sqrt(z.real() * z.real() + z.imag() * z.imag()));
 #endif
-public:
-  // reinterpret cast from integer
-  __CUDA_HD__ 
-  static inline complex<float> from_int(unsigned long long val)
+}
+
+template <>
+struct convert_complex<__half>
+{
+  __CUDA_HD__
+  static inline complex<__half> from_int(int val)
+  {
+    union
     {
-      union { unsigned long long as_long; float array[2]; } convert;
-      convert.as_long = val;
-      complex<float> retval;
-      retval._real = convert.array[0];
-      retval._imag = convert.array[1];
-      return retval;
-    }
+      int as_int;
+      unsigned short array[2];
+    } convert;
+    convert.as_int = val;
+    complex<__half> retval(
+#ifdef __CUDA_ARCH__
+    __short_as_half(convert.array[0]),
+    __short_as_half(convert.array[1])
+#else
+    *(reinterpret_cast<const __half *>(&convert.array[0])),
+    *(reinterpret_cast<const __half *>(&convert.array[1]))
+#endif
+    );
+    return retval;
+  }
   // cast back to integer
   __CUDA_HD__
-  inline unsigned long long as_int(void) const
-    {
-      union { unsigned long long as_long; float array[2]; } convert;
-      convert.array[0] = _real;
-      convert.array[1] = _imag;
-      return convert.as_long;
-    }
-#ifdef __CUDACC__
-  __device__
-  operator float2(void) const
+  inline static int as_int(complex<__half> c)
   {
-    float2 result;
-    result.x = _real;
-    result.y = _imag;
-    return result;
-  }
+    union
+    {
+      int as_int;
+      unsigned short array[2];
+    } convert;
+#ifdef __CUDA_ARCH__
+    convert.array[0] = __half_as_short(c.real());
+    convert.array[1] = __half_as_short(c.imag());
+#else
+    const __half real = c.real(), imag = c.imag();
+    convert.array[0] = *(reinterpret_cast<const unsigned short *>(&real));
+    convert.array[1] = *(reinterpret_cast<const unsigned short *>(&imag));
 #endif
-public:
-  __CUDA_HD__
-  inline complex<float>& operator=(const complex<float> &rhs)
-    {
-      _real = rhs.real();
-      _imag = rhs.imag();
-      return *this;
-    }
-public:
-  __CUDA_HD__
-  inline float real(void) const { return _real; }
-  __CUDA_HD__
-  inline float imag(void) const { return _imag; }
-public:
-  __CUDA_HD__
-  inline complex<float>& operator+=(const complex<float> &rhs)
-    {
-      _real += rhs.real();
-      _imag += rhs.imag();
-      return *this;
-    }
-  __CUDA_HD__
-  inline complex<float>& operator-=(const complex<float> &rhs)
-    {
-      _real -= rhs.real();
-      _imag -= rhs.imag();
-      return *this;
-    }
-  __CUDA_HD__
-  inline complex<float>& operator*=(const complex<float> &rhs)
-    {
-      const float new_real = _real * rhs.real() - _imag * rhs.imag();
-      const float new_imag = _imag * rhs.real() + _real * rhs.imag();
-      _real = new_real;
-      _imag = new_imag;
-      return *this;
-    }
-  __CUDA_HD__
-  inline complex<float>& operator/=(const complex<float> &rhs)
-    {
-      // Note the plus because of conjugation
-      const float num_real = _real * rhs.real() + _imag * rhs.imag();       
-      // Note the minus because of conjugation
-      const float num_imag = _imag * rhs.real() - _real * rhs.imag();
-      const float denom = rhs.real() * rhs.real() + rhs.imag() * rhs.imag();
-      _real = num_real / denom;
-      _imag = num_imag / denom;
-      return *this;
-    }
-protected:
-  float _real;
-  float _imag;
+    return convert.as_int;
+  }
 };
 
-template<>
-class complex<double> {
-public:
-  __CUDA_HD__
-  complex(void) { } // empty default constructor for CUDA
-  __CUDA_HD__
-  complex(double re, double im = 0.0) : _real(re), _imag(im) { }
-  __CUDA_HD__
-  complex(const complex<double> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
-#ifdef __CUDACC__
-  __device__ // Device only constructor
-  complex(double2 val) : _real(val.x), _imag(val.y) { }
-#endif
-public:
-  // reinterpret cast from integer
-  __CUDA_HD__ 
-  static inline complex<double> from_int(unsigned long long val)
-    {
-      union { unsigned long long as_long; double array[2]; } convert;
-      convert.as_long = val;
-      complex<double> retval;
-      retval._real = convert.array[0];
-      retval._imag = convert.array[1];
-      return retval;
-    }
-  // cast back to integer
-  __CUDA_HD__
-  inline unsigned long long as_int(void) const
-    {
-      union { unsigned long long as_long; double array[2]; } convert;
-      convert.array[0] = _real;
-      convert.array[1] = _imag;
-      return convert.as_long;
-    }
-#ifdef __CUDACC__
-  __device__
-  operator double2(void) const
-  {
-    double2 result;
-    result.x = _real;
-    result.y = _imag;
-    return result;
-  }
-#endif
-public:
-  __CUDA_HD__
-  inline complex<double>& operator=(const complex<double> &rhs)
-    {
-      _real = rhs.real();
-      _imag = rhs.imag();
-      return *this;
-    }
-public:
-  __CUDA_HD__
-  inline double real(void) const { return _real; }
-  __CUDA_HD__
-  inline double imag(void) const { return _imag; }
-public:
-  __CUDA_HD__
-  inline complex<double>& operator+=(const complex<double> &rhs)
-    {
-      _real += rhs.real();
-      _imag += rhs.imag();
-      return *this;
-    }
-  __CUDA_HD__
-  inline complex<double>& operator-=(const complex<double> &rhs)
-    {
-      _real -= rhs.real();
-      _imag -= rhs.imag();
-      return *this;
-    }
-  __CUDA_HD__
-  inline complex<double>& operator*=(const complex<double> &rhs)
-    {
-      const double new_real = _real * rhs.real() - _imag * rhs.imag();
-      const double new_imag = _imag * rhs.real() + _real * rhs.imag();
-      _real = new_real;
-      _imag = new_imag;
-      return *this;
-    }
-  __CUDA_HD__
-  inline complex<double>& operator/=(const complex<double> &rhs)
-    {
-      // Note the plus because of conjugation
-      const double num_real = _real * rhs.real() + _imag * rhs.imag();
-      // Note the minus because of conjugation
-      const double num_imag = _imag * rhs.real() - _real * rhs.imag();
-      const double denom = rhs.real() * rhs.real() + rhs.imag() * rhs.imag();
-      _real = num_real / denom;
-      _imag = num_imag / denom;
-      return *this;
-    }
-protected:
-  double _real;
-  double _imag;
-};
-
-// These methods work on all types regardless of instatiations
-template<typename T> __CUDA_HD__
-inline complex<T> operator+(const complex<T> &rhs)
+__CUDA_HD__
+inline complex<__half> operator+(const complex<__half> &one, const complex<__half> &two)
 {
-  return complex<T>(+rhs.real(), +rhs.imag());
+  return complex<__half>(one.real() + two.real(), one.imag() + two.imag());
 }
 
-template<typename T> __CUDA_HD__
-inline complex<T> operator-(const complex<T> &rhs)
+__CUDA_HD__
+inline complex<__half> operator-(const complex<__half> &one, const complex<__half> &two)
 {
-  return complex<T>(-rhs.real(), -rhs.imag());
+  return complex<__half>(one.real() - two.real(), one.imag() - two.imag());
 }
 
-template<typename T> __CUDA_HD__
-inline complex<T> operator+(const complex<T> &one, const complex<T> &two)
+__CUDA_HD__
+inline complex<__half> operator*(const complex<__half> &one, const complex<__half> &two)
 {
-  return complex<T>(one.real() + two.real(), one.imag() + two.imag());
-}
-
-template<typename T> __CUDA_HD__
-inline complex<T> operator-(const complex<T> &one, const complex<T> &two)
-{
-  return complex<T>(one.real() - two.real(), one.imag() - two.imag());
-}
-
-template<typename T> __CUDA_HD__
-inline complex<T> operator*(const complex<T> &one, const complex<T> &two)
-{
-  return complex<T>(one.real() * two.real() - one.imag() * two.imag(),
+  return complex<__half>(one.real() * two.real() - one.imag() * two.imag(),
                     one.imag() * two.real() + one.real() * two.imag());
 }
 
-template<typename T> __CUDA_HD__
-inline complex<T> operator/(const complex<T> &one, const complex<T> &two)
+__CUDA_HD__
+inline complex<__half> operator/(const complex<__half> &one, const complex<__half> &two)
 {
   // Note the plus because of conjugation
-  const T num_real = one.real() * two.real() + one.imag() * two.imag();       
+  const __half num_real = one.real() * two.real() + one.imag() * two.imag();       
   // Note the minus because of conjugation
-  const T num_imag = one.imag() * two.real() - one.real() * two.imag();
-  const T denom = two.real() * two.real() + two.imag() * two.imag();
-  return complex<T>(num_real / denom, num_imag / denom);
+  const __half num_imag = one.imag() * two.real() - one.real() * two.imag();
+  const __half denom = two.real() * two.real() + two.imag() * two.imag();
+  return complex<__half>(num_real / denom, num_imag / denom);
 }
 
-template<typename T> __CUDA_HD__
-inline bool operator==(const complex<T> &one, const complex<T> &two)
-{
-  return (one.real() == two.real()) && (one.imag() == two.imag());
-}
+#endif // COMPLEX_HALF
 
-template<typename T> __CUDA_HD__
-inline bool operator!=(const complex<T> &one, const complex<T> &two)
-{
-  return (one.real() != two.real()) || (one.imag() != two.imag());
-}
-
-template<typename T> __CUDA_HD__
-inline bool operator<(const complex<T>& c1, const complex<T>& c2) {
-    return (c1.real() < c2.real()) || 
-      (!(c2.real() < c1.real()) && (c1.imag() < c2.imag()));
-}
-
-template<typename T> __CUDA_HD__
-inline bool operator>(const complex<T>& c1, const complex<T>& c2) {
-    return (c1.real() > c2.real()) || 
-      (!(c2.real() > c1.real()) && (c1.imag() > c2.imag()));
-}
-
-template<typename T> __CUDA_HD__
-inline bool operator<=(const complex<T>& c1, const complex<T>& c2) {
-    return (c1 == c2) || (c1.real() < c2.real()) || 
-      (!(c2.real() < c1.real()) && (c1.imag() < c2.imag()));
-}
-
-template<typename T> __CUDA_HD__
-inline bool operator>=(const complex<T>& c1, const complex<T>& c2) {
-    return (c1 == c2) || (c1.real() > c2.real()) || 
-      (!(c2.real() > c1.real()) && (c1.imag() > c2.imag()));
-}
-
-// Both single and half precision go through this path
-template<typename T> __CUDA_HD__
-inline T abs(const complex<T>& z) {
-#ifdef __CUDA_ARCH__
-  return (T)(hypotf(z.real(), z.imag()));
-#elif __cplusplus >= 201103L
-  return T{std::hypotf(z.real(), z.imag())};
-#else
-  return (T)(std::sqrt(z.real() * z.real() + z.imag() * z.imag()));
-#endif
-}
-
-// Double precision uses this version of the specialization
-template<> __CUDA_HD__
-inline double abs(const complex<double>& z) {
-#ifdef __CUDA_ARCH__
-  return hypot(z.real(), z.imag());
-#elif __cplusplus >= 201103L
-  return std::hypot(z.real(), z.imag());
-#else
-  return std::sqrt(z.real() * z.real() + z.imag() * z.imag());
-#endif
-}
-
-template<typename T> __CUDA_HD__
-inline T fabs(const complex<T>& z) {
-  return abs(z);
-}
-
-// TODO: fill this out with full support for std::complex
+#undef __CEXPR__
 
 #endif // complex_H__ 
 

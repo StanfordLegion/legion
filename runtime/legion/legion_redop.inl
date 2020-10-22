@@ -762,7 +762,7 @@ namespace Legion {
     newval = *target;
     do {
       oldval = newval;
-      newval = (complex<__half>::from_int(newval) + rhs).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) + rhs);
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
@@ -770,7 +770,7 @@ namespace Legion {
     int oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<__half>::from_int(oldval) + rhs).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(oldval) + rhs);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -790,7 +790,7 @@ namespace Legion {
     newval = *target;
     do {
       oldval = newval;
-      newval = (complex<__half>::from_int(newval) + rhs2).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) + rhs2);
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
@@ -798,7 +798,7 @@ namespace Legion {
     int oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<__half>::from_int(oldval) + rhs2).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(oldval) + rhs2);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -815,19 +815,19 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&lhs;
-    union { unsigned long long as_int; float2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    unsigned long long oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>(newval.as_complex) + rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) + rhs);
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile unsigned long long *target = (unsigned long long*)&lhs;
     unsigned long long oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<float>::from_int(oldval) + rhs).as_int();
+      newval = convert_complex<float>::as_int(convert_complex<float>::from_int(oldval) + rhs);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -843,19 +843,19 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&rhs1;
-    union { unsigned long long as_int; float2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    unsigned long long oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>(newval.as_complex) + rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) + rhs2);
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile unsigned long long *target = (unsigned long long*)&rhs1;
     unsigned long long oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<float>::from_int(oldval) + rhs2).as_int();
+      newval = convert_complex<float>::as_int(convert_complex<float>::from_int(oldval) + rhs2);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -1615,7 +1615,7 @@ namespace Legion {
     newval = *target;
     do {
       oldval = newval;
-      newval = (complex<__half>::from_int(newval) - rhs).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) - rhs);
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
@@ -1623,7 +1623,7 @@ namespace Legion {
     int oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<__half>::from_int(oldval) - rhs).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(oldval) - rhs);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -1643,7 +1643,7 @@ namespace Legion {
     newval = *target;
     do {
       oldval = newval;
-      newval = (complex<__half>::from_int(newval) + rhs2).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) - rhs2);
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
@@ -1651,7 +1651,7 @@ namespace Legion {
     int oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<__half>::from_int(oldval) + rhs2).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(oldval) - rhs2);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -1668,19 +1668,19 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&lhs;
-    union { unsigned long long as_int; float2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    unsigned long long oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>(newval.as_complex) - rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) - rhs);
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile unsigned long long *target = (unsigned long long*)&lhs;
     unsigned long long oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<float>::from_int(oldval) - rhs).as_int();
+      newval = convert_complex<float>::as_int(convert_complex<float>::from_int(oldval) - rhs);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -1696,19 +1696,19 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&rhs1;
-    union { unsigned long long as_int; float2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    unsigned long long oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>(newval.as_complex) + rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) - rhs2);
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile unsigned long long *target = (unsigned long long*)&rhs1;
     unsigned long long oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<float>::from_int(oldval) + rhs2).as_int();
+      newval = convert_complex<float>::as_int(convert_complex<float>::from_int(oldval) - rhs2);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -2563,7 +2563,7 @@ namespace Legion {
     newval = *target;
     do {
       oldval = newval;
-      newval = (complex<__half>::from_int(newval) * rhs).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) * rhs);
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
@@ -2571,7 +2571,7 @@ namespace Legion {
     int oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<__half>::from_int(oldval) * rhs).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(oldval) * rhs);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -2591,7 +2591,7 @@ namespace Legion {
     newval = *target;
     do {
       oldval = newval;
-      newval = (complex<__half>::from_int(newval) * rhs2).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) * rhs2);
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
@@ -2599,7 +2599,7 @@ namespace Legion {
     int oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<__half>::from_int(oldval) * rhs2).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(oldval) * rhs2);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -2616,19 +2616,19 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&lhs;
-    union { unsigned long long as_int; float2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    unsigned long long oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>(newval.as_complex) * rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) * rhs);
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile unsigned long long *target = (unsigned long long*)&lhs;
     unsigned long long oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<float>::from_int(oldval) * rhs).as_int();
+      newval = convert_complex<float>::as_int(convert_complex<float>::from_int(oldval) * rhs);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -2644,19 +2644,19 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&rhs1;
-    union { unsigned long long as_int; float2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    unsigned long long oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>(newval.as_complex) * rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) * rhs2);
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile unsigned long long *target = (unsigned long long*)&rhs1;
     unsigned long long oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<float>::from_int(oldval) * rhs2).as_int();
+      newval = convert_complex<float>::as_int(convert_complex<float>::from_int(oldval) * rhs2);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -3447,7 +3447,7 @@ namespace Legion {
     newval = *target;
     do {
       oldval = newval;
-      newval = (complex<__half>::from_int(newval) / rhs).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) / rhs);
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
@@ -3455,7 +3455,7 @@ namespace Legion {
     int oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<__half>::from_int(oldval) / rhs).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(oldval) / rhs);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -3475,7 +3475,7 @@ namespace Legion {
     newval = *target;
     do {
       oldval = newval;
-      newval = (complex<__half>::from_int(newval) * rhs2).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) / rhs2);
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
@@ -3483,7 +3483,7 @@ namespace Legion {
     int oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<__half>::from_int(oldval) * rhs2).as_int();
+      newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(oldval) / rhs2);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -3500,19 +3500,19 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&lhs;
-    union { unsigned long long as_int; float2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    unsigned long long oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>(newval.as_complex) / rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) / rhs);
+      newval  = atomicCAS(target, oldval , newval );
+    } while (oldval  != newval );
 #else
     volatile unsigned long long *target = (unsigned long long*)&lhs;
     unsigned long long oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<float>::from_int(oldval) / rhs).as_int();
+      newval = convert_complex<float>::as_int(convert_complex<float>::from_int(oldval) / rhs);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -3528,19 +3528,19 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&rhs1;
-    union { unsigned long long as_int; float2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    unsigned long long oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<float>(newval.as_complex) * rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) / rhs2);
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile unsigned long long *target = (unsigned long long*)&rhs1;
     unsigned long long oldval, newval;
     do {
       oldval = *target;
-      newval = (complex<float>::from_int(oldval) * rhs2).as_int();
+      newval = convert_complex<float>::as_int(convert_complex<float>::from_int(oldval) / rhs2);
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -4502,7 +4502,7 @@ namespace Legion {
     newval = *target;
     do {
       oldval = newval;
-      newval = (__MAX__(complex<__half>::from_int(newval), rhs)).as_int();
+      newval = convert_complex<__half>::as_int(__MAX__(convert_complex<__half>::from_int(newval), rhs));
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
@@ -4510,7 +4510,7 @@ namespace Legion {
     int oldval, newval;
     do {
       oldval = *target;
-      newval = (__MAX__(complex<__half>::from_int(oldval), rhs)).as_int();
+      newval = convert_complex<__half>::as_int(__MAX__(convert_complex<__half>::from_int(oldval), rhs));
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -4531,7 +4531,7 @@ namespace Legion {
     newval = *target;
     do {
       oldval = newval;
-      newval = (__MAX__(complex<__half>::from_int(newval), rhs2)).as_int();
+      newval = convert_complex<__half>::as_int(__MAX__(convert_complex<__half>::from_int(newval), rhs2));
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
@@ -4539,7 +4539,7 @@ namespace Legion {
     int oldval, newval;
     do {
       oldval = *target;
-      newval = (__MAX__(complex<__half>::from_int(oldval), rhs2)).as_int();
+      newval = convert_complex<__half>::as_int(__MAX__(convert_complex<__half>::from_int(oldval), rhs2));
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -4557,19 +4557,19 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&lhs;
-    union { unsigned long long as_int; float2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    unsigned long long oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = __MAX__(complex<float>(newval.as_complex), rhs);
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval= convert_complex<float>::as_int(__MAX__(convert_complex<float>::from_int(newval), rhs));
+      newval  = atomicCAS(target, oldval , newval );
+    } while (oldval  != newval );
 #else
     volatile unsigned long long *target = (unsigned long long*)&lhs;
     unsigned long long oldval, newval;
     do {
       oldval = *target;
-      newval = (__MAX__(complex<float>::from_int(oldval), rhs)).as_int();
+      newval = convert_complex<float>::as_int(__MAX__(convert_complex<float>::from_int(oldval), rhs));
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -4586,19 +4586,19 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&rhs1;
-    union { unsigned long long as_int; float2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    unsigned long long  oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = __MAX__(complex<float>(newval.as_complex), rhs2);
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = convert_complex<float>::as_int(__MAX__(convert_complex<float>::from_int(newval), rhs2));
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile unsigned long long *target = (unsigned long long*)&rhs1;
     unsigned long long oldval, newval;
     do {
       oldval = *target;
-      newval = (__MAX__(complex<float>::from_int(oldval), rhs2)).as_int();
+      newval = convert_complex<float>::as_int(__MAX__(convert_complex<float>::from_int(oldval), rhs2));
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -5564,7 +5564,7 @@ namespace Legion {
     newval = *target;
     do {
       oldval = newval;
-      newval = (__MIN__(complex<__half>::from_int(newval), rhs)).as_int();
+      newval = convert_complex<__half>::as_int(__MIN__(convert_complex<__half>::from_int(newval), rhs));
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
@@ -5572,7 +5572,7 @@ namespace Legion {
     int oldval, newval;
     do {
       oldval = *target;
-      newval = (__MIN__(complex<__half>::from_int(oldval), rhs)).as_int();
+      newval = convert_complex<__half>::as_int(__MIN__(convert_complex<__half>::from_int(oldval), rhs));
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -5593,7 +5593,7 @@ namespace Legion {
     newval = *target;
     do {
       oldval = newval;
-      newval = (__MIN__(complex<__half>::from_int(newval), rhs2)).as_int();
+      newval = convert_complex<__half>::as_int(__MIN__(convert_complex<__half>::from_int(newval), rhs2));
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
@@ -5601,7 +5601,7 @@ namespace Legion {
     int oldval, newval;
     do {
       oldval = *target;
-      newval = (__MIN__(complex<__half>::from_int(oldval), rhs2)).as_int();
+      newval = convert_complex<__half>::as_int(__MIN__(convert_complex<__half>::from_int(oldval), rhs2));
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -5619,19 +5619,19 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&lhs;
-    union { unsigned long long as_int; float2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    unsigned long long oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = __MIN__(complex<float>(newval.as_complex), rhs);
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval= convert_complex<float>::as_int(__MIN__(convert_complex<float>::from_int(newval), rhs));
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile unsigned long long *target = (unsigned long long*)&lhs;
     unsigned long long oldval, newval;
     do {
       oldval = *target;
-      newval = (__MIN__(complex<float>::from_int(oldval), rhs)).as_int();
+      newval = convert_complex<float>::as_int(__MIN__(convert_complex<float>::from_int(oldval), rhs));
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -5648,19 +5648,19 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&rhs1;
-    union { unsigned long long as_int; float2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    unsigned long long oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = __MIN__(complex<float>(newval.as_complex), rhs2);
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = convert_complex<float>::as_int(__MIN__(convert_complex<float>::from_int(newval), rhs2));
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile unsigned long long *target = (unsigned long long*)&rhs1;
     unsigned long long oldval, newval;
     do {
       oldval = *target;
-      newval = (__MIN__(complex<float>::from_int(oldval), rhs2)).as_int();
+      newval = convert_complex<float>::as_int(__MIN__(convert_complex<float>::from_int(oldval), rhs2));
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
