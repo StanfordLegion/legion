@@ -1679,6 +1679,11 @@ def _postprocess(arg, point):
         return arg._legion_postprocess_task_argument(point)
     return arg
 
+def _preprocess(arg, point):
+    if hasattr(arg, '_legion_preprocess_task_argument'):
+        return arg._legion_preprocess_task_argument(point)
+    return arg
+
 class Task (object):
     __slots__ = ['body', 'privileges', 'return_type',
                  'leaf', 'inner', 'idempotent', 'replicable',
@@ -1992,13 +1997,18 @@ class _TaskLauncher(object):
                         A = isinstance(arg, SymbolicIndexAccess)
                         B = isinstance(arg.index, SymbolicLoopIndex)
                         C = isinstance(arg.index, ConcreteLoopIndex)
-                        return A and (B or C)
+                        D = isinstance(arg.index, SymbolicCall) and isinstance(arg.index, ProjectionFunctor)
+                        E = False
+                        if D:
+                            E = isinstance(arg.index.arg, SymbolicLoopIndex)
+                        return A and (B or C or (D and E))
                     assert arg_check()
+
                     # get the real proj id out of f if f else 0
-                    # if f == 0:
-                    proj_id = 100
-                    # else:
-                    #     proj_id = 
+                    if arg.index == 0:
+                        proj_id = 100
+                    else:
+                        proj_id = arg.index.proj_id
 
                     parent = arg.parent if arg.parent is not None else arg
                     parent = parent.parent if parent.parent is not None else parent
@@ -2261,7 +2271,7 @@ class SymbolicIndexAccess(SymbolicExpr):
     def __repr__(self):
         return '%s[%s]' % (self.value, self.index)
     def _legion_preprocess_task_argument(self):
-        if isinstance(self.index, ConcreteLoopIndex):
+        if isinstance(self.index, SymbolicLoopIndex):
             return self.value[self.index._legion_preprocess_task_argument()]
         return self
     def _legion_postprocess_task_argument(self, point):
@@ -2313,7 +2323,17 @@ class SymbolicBinop(SymbolicExpr):
     def __repr__(self):
         return '%s %s %s' % (self.lhs, self.op, self.rhs)
     def _legion_postprocess_task_argument(self, point):
-        return _postprocess(self.lhs, point) + _postprocess(self.rhs, point)
+        if op == '+':
+            return _postprocess(self.lhs, point) + _postprocess(self.rhs, point)
+        elif op == '*':
+            return _postprocess(self.lhs, point) * _postprocess(self.rhs, point)
+        elif op == '-':
+            return _postprocess(self.lhs, point) - _postprocess(self.rhs, point)
+        elif op == '//':
+            return _postprocess(self.lhs, point) // _postprocess(self.rhs, point)
+        elif op == '%':
+            return _postprocess(self.lhs, point) % _postprocess(self.rhs, point)
+        
     def codegen(self):
         right = self.rhs.codegen()
         left = self.lhs.codegen()

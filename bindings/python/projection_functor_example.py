@@ -24,9 +24,18 @@ def main():
 
     for i in IndexLaunch([3]):
         # hello(P[f(i)], i)
+        # add +1 here after preprocess
+        # if not only i contruct it then use it 
+        # its going to be inneficient 
+        # dictionary key is expression anf val is proj function
+        # have our own hash function
         hello(P[i], i)
+
+    # have one like line 65 in index_launch.py
+    index_launch([3], hello, P[ID], ID)
 
 
 if __name__ == "__main__":
     main()
 
+# symbolicexpr in line 2264 in link
