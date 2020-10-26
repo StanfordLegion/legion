@@ -1992,23 +1992,24 @@ class _TaskLauncher(object):
                                 launcher, req, arg.fspace.field_ids[field], True)
                 elif isinstance(arg, SymbolicExpr):
                     # FIXME: Support non-trivial projection functors
-                    # add function for check and add function call
                     def arg_check():
-                        A = isinstance(arg, SymbolicIndexAccess)
-                        B = isinstance(arg.index, SymbolicLoopIndex)
-                        C = isinstance(arg.index, ConcreteLoopIndex)
-                        D = isinstance(arg.index, SymbolicCall) and isinstance(arg.index, ProjectionFunctor)
-                        E = False
-                        if D:
-                            E = isinstance(arg.index.arg, SymbolicLoopIndex)
-                        return A and (B or C or (D and E))
-                    assert arg_check()
+                        # P[...]
+                        if not isinstance(arg, SymbolicIndexAccess):
+                            return False, None
+                        # P[i] or P[ID]
+                        if isinstance(arg.index, (SymbolicLoopIndex, ConcreteLoopIndex)):
+                            return True, 0
+                        # P[f(i)] or P[f(ID)]
+                        if isinstance(arg.index, SymbolicCall) and isinstance(arg.index.function, ProjectionFunctor):
+                            return True, arg.index.function.proj_id
+                        # P[i + ...] or P[ID + ...]
+                        if isinstance(arg.index, SymbolicExpr) and isinstance(arg.index.arg, (SymbolicLoopIndex, ConcreteLoopIndex)):
+                            f = ProjectionFunctor(arg.index)
+                            return True, f.proj_id
+                        return False, None
 
-                    # get the real proj id out of f if f else 0
-                    if arg.index == 0:
-                        proj_id = 100
-                    else:
-                        proj_id = arg.index.proj_id
+                    valid, proj_id = arg_check()
+                    assert valid
 
                     parent = arg.parent if arg.parent is not None else arg
                     parent = parent.parent if parent.parent is not None else parent
@@ -2270,9 +2271,10 @@ class SymbolicIndexAccess(SymbolicExpr):
         return '%s[%s]' % (self.value, self.index)
     def __repr__(self):
         return '%s[%s]' % (self.value, self.index)
-    def _legion_preprocess_task_argument(self):
+    def _legion_preprocess_task_argument(self, point):
         if isinstance(self.index, SymbolicLoopIndex):
-            return self.value[self.index._legion_preprocess_task_argument()]
+            # return self.value[self.index._legion_preprocess_task_argument()]
+            return _preprocess(self.value, point)[_preprocess(self.index, point)]
         return self
     def _legion_postprocess_task_argument(self, point):
         result = _postprocess(self.value, point)[_postprocess(self.index, point)]
@@ -2307,6 +2309,8 @@ class SymbolicCall(SymbolicExpr):
         return '%s(%s)' % (self.func, ', '.join(self.args))
     def __repr__(self):
         return '%s(%s)' % (self.func, ', '.join(self.args))
+    def _legion_preprocess_task_argument(self, point):
+        return _preprocess(self.func.expr, point)(*list(_preprocess(arg, point) for arg in self.args))
     def _legion_postprocess_task_argument(self, point):
         return _postprocess(self.func.expr, point)(*list(_postprocess(arg, point) for arg in self.args))
 
@@ -2322,6 +2326,19 @@ class SymbolicBinop(SymbolicExpr):
         return '%s %s %s' % (self.lhs, self.op, self.rhs)
     def __repr__(self):
         return '%s %s %s' % (self.lhs, self.op, self.rhs)
+
+    def _legion_preprocess_task_argument(self, point):
+        if op == '+':
+            return _preprocess(self.lhs, point) + _preprocess(self.rhs, point)
+        elif op == '*':
+            return _preprocess(self.lhs, point) * _preprocess(self.rhs, point)
+        elif op == '-':
+            return _preprocess(self.lhs, point) - _preprocess(self.rhs, point)
+        elif op == '//':
+            return _preprocess(self.lhs, point) // _preprocess(self.rhs, point)
+        elif op == '%':
+            return _preprocess(self.lhs, point) % _preprocess(self.rhs, point)
+
     def _legion_postprocess_task_argument(self, point):
         if op == '+':
             return _postprocess(self.lhs, point) + _postprocess(self.rhs, point)
@@ -2359,6 +2376,8 @@ class SymbolicLoopIndex(SymbolicExpr):
         return self.name
     def __repr__(self):
         return self.name
+    def _legion_preprocess_task_argument(self, point):
+        return point
     def _legion_postprocess_task_argument(self, point):
         return point
     def codegen(self):
