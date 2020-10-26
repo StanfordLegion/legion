@@ -2003,7 +2003,10 @@ class _TaskLauncher(object):
                         if isinstance(arg.index, SymbolicCall) and isinstance(arg.index.function, ProjectionFunctor):
                             return True, arg.index.function.proj_id
                         # P[i + ...] or P[ID + ...]
-                        if isinstance(arg.index, SymbolicExpr) and isinstance(arg.index.arg, (SymbolicLoopIndex, ConcreteLoopIndex)):
+                        if not isinstance(arg.index, SymbolicExpr):
+                            return False, None
+                        # Should it be arg.index.index?    
+                        if isinstance(arg.index.arg, (SymbolicLoopIndex, ConcreteLoopIndex)):
                             f = ProjectionFunctor(arg.index)
                             return True, f.proj_id
                         return False, None
