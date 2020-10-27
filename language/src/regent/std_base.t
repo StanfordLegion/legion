@@ -198,12 +198,28 @@ local gen_optimal = terralib.memoize(
     end
   end)
 
+local gen_optimal_skip_nan = terralib.memoize(
+  function(op, lhs_type, rhs_type)
+    return terra(lhs : lhs_type, rhs : rhs_type)
+      -- Do NOT propogate a NaN, if any.
+      if [base.quote_binary_op(op, lhs, rhs)] or rhs ~= rhs then
+        return lhs
+      else
+        return rhs
+      end
+    end
+  end)
+
 base.fmax = macro(
   function(lhs, rhs)
     local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
     local result_type = base.type_meet(lhs_type, rhs_type)
     assert(result_type)
-    return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
+    if result_type:isfloat() then
+      return `([gen_optimal_skip_nan(">", lhs_type, rhs_type)]([lhs], [rhs]))
+    else
+      return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
+    end
   end)
 
 base.fmin = macro(
@@ -211,7 +227,11 @@ base.fmin = macro(
     local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
     local result_type = base.type_meet(lhs_type, rhs_type)
     assert(result_type)
-    return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
+    if result_type:isfloat() then
+      return `([gen_optimal_skip_nan("<", lhs_type, rhs_type)]([lhs], [rhs]))
+    else
+      return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
+    end
   end)
 
 function base.quote_unary_op(op, rhs)
