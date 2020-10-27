@@ -2955,6 +2955,8 @@ namespace Legion {
       bool dominates(IndexPartNode *other);
       void find_interfering_children(IndexSpaceExpression *expr,
                                      std::vector<LegionColor> &colors);
+      virtual bool find_interfering_children_kd(IndexSpaceExpression *expr,
+                                     std::vector<LegionColor> &colors) = 0;
     public:
       static void handle_disjointness_computation(const void *args, 
                                                   RegionTreeForest *forest);
@@ -3017,6 +3019,71 @@ namespace Legion {
     }; 
 
     /**
+     * \struct KDLine
+     * A small helper struct for tracking splitting planes for 
+     * KD-tree construction
+     */
+    struct KDLine {
+    public:
+      KDLine(void)
+        : value(0), index(0), start(false) { }
+      KDLine(coord_t val, unsigned idx, bool st)
+        : value(val), index(idx), start(st) { }
+    public:
+      inline bool operator<(const KDLine &rhs) const
+      {
+        if (value < rhs.value)
+          return true;
+        if (value > rhs.value)
+          return false;
+        if (index < rhs.index)
+          return true;
+        if (index > rhs.index)
+          return false;
+        return start < rhs.start;
+      }
+      inline bool operator==(const KDLine &rhs) const
+      {
+        if (value != rhs.value)
+          return false;
+        if (index != rhs.index)
+          return false;
+        if (start != rhs.start)
+          return false;
+        return true;
+      }
+    public:
+      coord_t value;
+      unsigned index;
+      bool start;
+    };
+
+    /**
+     * \class KDNode
+     * A KDNode is used for performing fast interference tests for
+     * expressions against rectangles from child subregions in a partition.
+     */
+    template<int DIM, typename T>
+    class KDNode {
+    public:
+      KDNode(const Rect<DIM,T> &bounds, const int start_dim, 
+             std::vector<std::pair<Rect<DIM,T>,LegionColor> > &children);
+      KDNode(const KDNode &rhs);
+      ~KDNode(void);
+    public:
+      KDNode& operator=(const KDNode &rhs);
+    public:
+      void find_interfering_children(const Rect<DIM,T> &test,
+                std::set<LegionColor> &interfering_children);
+    public:
+      const Rect<DIM,T> bounds;
+    protected:
+      KDNode *left;
+      KDNode *right;
+      std::vector<std::pair<Rect<DIM,T>,LegionColor> > children;
+    };
+
+    /**
      * \class IndexPartNodeT
      * A template class for handling any templated realm calls
      * associated with realm index spaces
@@ -3041,6 +3108,11 @@ namespace Legion {
       virtual ~IndexPartNodeT(void);
     public:
       IndexPartNodeT& operator=(const IndexPartNodeT &rhs);
+    public:
+      virtual bool find_interfering_children_kd(IndexSpaceExpression *expr,
+                                         std::vector<LegionColor> &colors);
+    protected:
+      KDNode<DIM,T> *kd_root;
     };
 
     /**

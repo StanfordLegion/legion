@@ -10103,32 +10103,33 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!expr->is_empty());   
 #endif
-        // TODO: compute this using a distributed algorithm with K-D trees
-        // If not, test this against all the children
-        if (total_children == max_linearized_color)
+        if (!find_interfering_children_kd(expr, colors))
         {
-          for (LegionColor color = 0; color < total_children; color++)
+          if (total_children == max_linearized_color)
           {
-            IndexSpaceNode *child = get_child(color);
-            IndexSpaceExpression *intersection = 
-              context->intersect_index_spaces(expr, child);
-            if (!intersection->is_empty())
-              colors.push_back(color);
+            for (LegionColor color = 0; color < total_children; color++)
+            {
+              IndexSpaceNode *child = get_child(color);
+              IndexSpaceExpression *intersection = 
+                context->intersect_index_spaces(expr, child);
+              if (!intersection->is_empty())
+                colors.push_back(color);
+            }
           }
-        }
-        else
-        {
-          ColorSpaceIterator *itr = color_space->create_color_space_iterator();
-          while (itr->is_valid())
+          else
           {
-            const LegionColor color = itr->yield_color();
-            IndexSpaceNode *child = get_child(color);
-            IndexSpaceExpression *intersection = 
-              context->intersect_index_spaces(expr, child);
-            if (!intersection->is_empty())
-              colors.push_back(color);
+            ColorSpaceIterator *itr = color_space->create_color_space_iterator();
+            while (itr->is_valid())
+            {
+              const LegionColor color = itr->yield_color();
+              IndexSpaceNode *child = get_child(color);
+              IndexSpaceExpression *intersection = 
+                context->intersect_index_spaces(expr, child);
+              if (!intersection->is_empty())
+                colors.push_back(color);
+            }
+            delete itr;
           }
-          delete itr;
         }
       }
       else

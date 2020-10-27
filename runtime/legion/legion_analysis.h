@@ -923,46 +923,7 @@ namespace Legion {
       GenerationID merge_close_gen;
     }; 
 
-    /**
-     * \struct KDLine
-     * A small helper struct for tracking splitting planes for 
-     * KD-tree construction
-     */
-    struct KDLine {
-    public:
-      KDLine(void)
-        : value(0), index(0), start(false) { }
-      KDLine(coord_t val, unsigned idx, bool st)
-        : value(val), index(idx), start(st) { }
-    public:
-      inline bool operator<(const KDLine &rhs) const
-      {
-        if (value < rhs.value)
-          return true;
-        if (value > rhs.value)
-          return false;
-        if (index < rhs.index)
-          return true;
-        if (index > rhs.index)
-          return false;
-        return start < rhs.start;
-      }
-      inline bool operator==(const KDLine &rhs) const
-      {
-        if (value != rhs.value)
-          return false;
-        if (index != rhs.index)
-          return false;
-        if (start != rhs.start)
-          return false;
-        return true;
-      }
-    public:
-      coord_t value;
-      unsigned index;
-      bool start;
-    };
-
+#if NEWEQ 
     class KDTree {
     public:
       virtual ~KDTree(void) { }
@@ -1000,6 +961,7 @@ namespace Legion {
       // splitting plane in any dimension
       const int last_changed_dim;
     };
+#endif
 
     /**
      * \class InstanceRef

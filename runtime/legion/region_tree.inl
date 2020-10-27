@@ -5968,6 +5968,159 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // KD Node 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    KDNode<DIM,T>::KDNode(const Rect<DIM,T> &b, const int start_dim,
+                     std::vector<std::pair<Rect<DIM,T>,LegionColor> > &subrects)
+      : bounds(b), left(NULL), right(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // This is the base case
+      if (subrects.size() <= LEGION_MAX_BVH_FANOUT)
+      {
+        children.swap(subrects);
+        return;
+      }
+      for (int d = 0; d < DIM; d++)
+      {
+        const int refinement_dim = (start_dim + d) % DIM;
+        // Try to compute a splitting plane for this dimension
+        // Sort the start and end of each equivalence set bounding rectangle
+        // along the splitting dimension
+        std::set<KDLine> lines;
+        for (unsigned idx = 0; idx < subrects.size(); idx++)
+        {
+          const Rect<DIM,T> &subset_bounds = subrects[idx].first;
+          lines.insert(KDLine(subset_bounds.lo[refinement_dim], idx, true));
+          lines.insert(KDLine(subset_bounds.hi[refinement_dim], idx, false));
+        }
+        // Construct two lists by scanning from left-to-right and
+        // from right-to-left of the number of rectangles that would
+        // be inlcuded on the left or right side by each splitting plane
+        std::map<coord_t,unsigned> left_inclusive, right_inclusive;
+        unsigned count = 0;
+        for (typename std::set<KDLine>::const_iterator it =
+              lines.begin(); it != lines.end(); it++)
+        {
+          // Only increment for new rectangles
+          if (!it->start)
+            count++;
+          // Always record the count for all splits
+          left_inclusive[it->value] = count;
+        }
+        count = 0;
+        for (typename std::set<KDLine>::const_reverse_iterator it =
+              lines.rbegin(); it != lines.rend(); it++)
+        {
+          // End of rectangles are the beginning in this direction
+          if (it->start)
+            count++;
+          // Always record the count for all splits
+          right_inclusive[it->value] = count;
+        }
+#ifdef DEBUG_LEGION
+        assert(left_inclusive.size() == right_inclusive.size());
+#endif
+        // We want to take the mini-max of the two numbers in order
+        // to try to balance the splitting plane across the two sets
+        T split = 0;
+        unsigned split_max = subrects.size();
+        for (std::map<coord_t,unsigned>::const_iterator it = 
+              left_inclusive.begin(); it != left_inclusive.end(); it++)
+        {
+          const unsigned left = it->second;
+          const unsigned right = right_inclusive[it->first];
+          const unsigned max = (left > right) ? left : right;
+          if (max < split_max)
+          {
+            split_max = max;
+            split = it->first;
+          }
+        }
+        // Check for the case where we can't find a splitting plane
+        if (split_max == subrects.size())
+          continue;
+        // Sort the subsets into left and right
+        Rect<DIM,T> left_bounds(bounds);
+        Rect<DIM,T> right_bounds(bounds);
+        left_bounds.hi[refinement_dim] = split;
+        right_bounds.lo[refinement_dim] = split+1;
+        std::vector<std::pair<Rect<DIM,T>,LegionColor> > left_set, right_set;
+        for (typename std::vector<std::pair<Rect<DIM,T>,LegionColor> >::
+              const_iterator it = subrects.begin(); it != subrects.end(); it++)
+        {
+          const Rect<DIM,T> left_rect = it->first.intersection(left_bounds);
+          if (!left_rect.empty())
+            left_set.push_back(std::make_pair(left_rect, it->second));
+          const Rect<DIM,T> right_rect = it->first.intersection(right_bounds);
+          if (!right_rect.empty())
+            right_set.push_back(std::make_pair(right_rect, it->second));
+        }
+#ifdef DEBUG_LEGION
+        assert(left_set.size() < subrects.size());
+        assert(right_set.size() < subrects.size());
+#endif
+        // We found an actual splitting plane so recurse 
+        const int next_dim = (refinement_dim + 1) % DIM;
+        left = new KDNode<DIM,T>(left_bounds, next_dim, left_set);
+        right = new KDNode<DIM,T>(right_bounds, next_dim, right_set);
+        return;
+      }
+      // If we make it here then we couldn't find a splitting plane to refine 
+      // anymore so just record all the subrects as our children
+      children.swap(subrects);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    KDNode<DIM,T>::KDNode(const KDNode<DIM,T> &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    KDNode<DIM,T>::~KDNode(void)
+    //--------------------------------------------------------------------------
+    {
+      if (left != NULL)
+        delete left;
+      if (right != NULL)
+        delete right;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    KDNode<DIM,T>& KDNode<DIM,T>::operator=(const KDNode<DIM,T> &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void KDNode<DIM,T>::find_interfering_children(const Rect<DIM,T> &test,
+                                    std::set<LegionColor> &interfering_children)
+    //--------------------------------------------------------------------------
+    {
+      if ((left != NULL) && left->bounds.overlaps(test))
+        left->find_interfering_children(test, interfering_children);
+      if ((right != NULL) && right->bounds.overlaps(test))
+        right->find_interfering_children(test, interfering_children);
+      for (typename std::vector<std::pair<Rect<DIM,T>,LegionColor> >::
+            const_iterator it = children.begin(); it != children.end(); it++)
+        if (it->first.overlaps(test))
+          interfering_children.insert(it->second);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Templated Index Partition Node 
     /////////////////////////////////////////////////////////////
 
@@ -5981,7 +6134,7 @@ namespace Legion {
                                         ApEvent partition_ready, ApBarrier pend,
                                         RtEvent init, ShardMapping *map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint, complete, did, 
-                      partition_ready, pend, init, map)
+                      partition_ready, pend, init, map), kd_root(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -5996,7 +6149,7 @@ namespace Legion {
                                         ApEvent partition_ready, ApBarrier pend,
                                         RtEvent init, ShardMapping *map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint_event, comp, did,
-                      partition_ready, pend, init, map)
+                      partition_ready, pend, init, map), kd_root(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -6004,7 +6157,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexPartNodeT<DIM,T>::IndexPartNodeT(const IndexPartNodeT &rhs)
-      : IndexPartNode(rhs)
+      : IndexPartNode(rhs), kd_root(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6016,6 +6169,8 @@ namespace Legion {
     IndexPartNodeT<DIM,T>::~IndexPartNodeT(void)
     //--------------------------------------------------------------------------
     { 
+      if (kd_root != NULL)
+        delete kd_root;
     }
 
     //--------------------------------------------------------------------------
@@ -6028,6 +6183,79 @@ namespace Legion {
       assert(false);
       return *this;
     } 
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexPartNodeT<DIM,T>::find_interfering_children_kd(
+                   IndexSpaceExpression *expr, std::vector<LegionColor> &colors)
+    //--------------------------------------------------------------------------
+    {
+      if (kd_root == NULL)
+      {
+        if (total_children <= LEGION_MAX_BVH_FANOUT)
+          return false;
+        const TypeTag type_tag = handle.get_type_tag();
+        std::vector<std::pair<Rect<DIM,T>,LegionColor> > bounds;
+        bounds.reserve(total_children);
+        if (total_children == max_linearized_color)
+        {
+          for (LegionColor color = 0; color < total_children; color++)
+          {
+            IndexSpaceNode *child = get_child(color);
+            DomainT<DIM,T> space;
+            const ApEvent space_ready = 
+              child->get_expr_index_space(&space, type_tag, true/*tight*/);
+            if (space_ready.exists() && !space_ready.has_triggered())
+              space_ready.wait();
+            if (space.empty())
+              continue;
+            for (RectInDomainIterator<DIM,T> it(space); it(); it++)
+              bounds.push_back(std::make_pair(*it, color));
+          }
+        }
+        else
+        {
+          ColorSpaceIterator *itr = color_space->create_color_space_iterator();
+          while (itr->is_valid())
+          {
+            const LegionColor color = itr->yield_color();
+            IndexSpaceNode *child = get_child(color);
+            DomainT<DIM,T> space;
+            const ApEvent space_ready = 
+              child->get_expr_index_space(&space, type_tag, true/*tight*/);
+            if (space_ready.exists() && !space_ready.has_triggered())
+              space_ready.wait();
+            if (space.empty())
+              continue;
+            for (RectInDomainIterator<DIM,T> it(space); it(); it++)
+              bounds.push_back(std::make_pair(*it, color));
+          }
+          delete itr;
+        }
+        DomainT<DIM,T> parent_space;
+        const ApEvent parent_ready = 
+          parent->get_expr_index_space(&parent_space, type_tag, true/*tight*/);
+        if (parent_ready.exists() && !parent_ready.has_triggered())
+          parent_ready.wait();
+        KDNode<DIM,T> *root = new KDNode<DIM,T>(parent_space.bounds, 0, bounds);
+        AutoLock n_lock(node_lock);
+        if (kd_root == NULL)
+          kd_root = root;
+        else // Someone else beat us to it
+          delete root;
+      }
+      DomainT<DIM,T> space;
+      const ApEvent space_ready =
+        expr->get_expr_index_space(&space, handle.get_type_tag(),true/*tight*/);
+      if (space_ready.exists() && !space_ready.has_triggered())
+        space_ready.wait();
+      std::set<LegionColor> color_set;
+      for (RectInDomainIterator<DIM,T> itr(space); itr(); itr++)
+        kd_root->find_interfering_children(*itr, color_set);
+      if (!color_set.empty())
+        colors.insert(colors.end(), color_set.begin(), color_set.end());
+      return true;
+    }
 #endif // defined(DEFINE_NT_TEMPLATES)
 
   }; // namespace Internal
