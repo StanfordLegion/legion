@@ -1062,6 +1062,8 @@ class Channel(object):
             print()
         
     def __repr__(self):
+        if self.src is None and self.dst is None:
+            return 'Dependent Partition Channel'
         if self.src is None:
             return 'Fill ' + self.dst.__repr__() + ' Channel'
         else:

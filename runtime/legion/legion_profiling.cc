@@ -1400,13 +1400,29 @@ namespace Legion {
         serializer->serialize(mem_desc);
 	Machine::ProcessorQuery pq(machine);
 	pq.best_affinity_to(*it);
-        for(Machine::ProcessorQuery::iterator it2 = pq.begin(); it2; ++it2)
-	  {
-            LegionProfDesc::ProcMemDesc proc_mem_desc;
-            proc_mem_desc.proc_id = it2->id;
-            proc_mem_desc.mem_id = mem_desc.mem_id;
-            serializer->serialize(proc_mem_desc);
-	  }
+        if (pq.count() > 0)
+          {
+            for(Machine::ProcessorQuery::iterator it2 = pq.begin();
+                it2 != pq.end(); ++it2)
+              {
+                LegionProfDesc::ProcMemDesc proc_mem_desc;
+                proc_mem_desc.proc_id = it2->id;
+                proc_mem_desc.mem_id = mem_desc.mem_id;
+                serializer->serialize(proc_mem_desc);
+              }
+          }
+        else
+          {
+            pq.same_address_space_as(*it);
+            for(Machine::ProcessorQuery::iterator it2 = pq.begin();
+                it2 != pq.end(); ++it2)
+              {
+                LegionProfDesc::ProcMemDesc proc_mem_desc;
+                proc_mem_desc.proc_id = it2->id;
+                proc_mem_desc.mem_id = mem_desc.mem_id;
+                serializer->serialize(proc_mem_desc);
+              }
+          }
       }
       // log max dim
       LegionProfDesc::MaxDimDesc max_dim_desc;
