@@ -2864,6 +2864,20 @@ namespace Legion {
         InterferenceEntry *older;
         InterferenceEntry *newer;
       };
+      class RemoteKDTracker {
+      public:
+        RemoteKDTracker(std::set<LegionColor> &colors, Runtime *runtime);
+      public:
+        void find_remote_interfering(const std::set<AddressSpaceID> &targets,
+                          IndexPartition handle, IndexSpaceExpression *expr);
+        void process_remote_interfering_response(Deserializer &derez);
+      protected:
+        mutable LocalLock tracker_lock;
+        std::set<LegionColor> &colors;
+        Runtime *const runtime;
+        RtUserEvent done_event;
+        unsigned remaining;
+      };
     public:
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
@@ -2956,7 +2970,7 @@ namespace Legion {
       void find_interfering_children(IndexSpaceExpression *expr,
                                      std::vector<LegionColor> &colors);
       virtual bool find_interfering_children_kd(IndexSpaceExpression *expr,
-                                     std::vector<LegionColor> &colors) = 0;
+                 std::vector<LegionColor> &colors, bool local_only = false) = 0;
     public:
       static void handle_disjointness_computation(const void *args, 
                                                   RegionTreeForest *forest);
@@ -2982,6 +2996,20 @@ namespace Legion {
                                               Deserializer &derez);
       static void handle_notification(RegionTreeForest *context, 
                                       Deserializer &derez);
+    protected:
+      RtEvent request_shard_rects(void);
+      virtual void initialize_shard_rects(void) = 0;
+      virtual void pack_shard_rects(Serializer &rez, bool clear) = 0;
+      virtual void unpack_shard_rects(Deserializer &derez) = 0;
+      bool process_shard_rects_response(Deserializer &derez, AddressSpace src);
+    public:
+      static void handle_shard_rects_request(RegionTreeForest *forest,
+                                             Deserializer &derez);
+      static void handle_shard_rects_response(RegionTreeForest *forest,
+                                  Deserializer &derez, AddressSpaceID source);
+      static void handle_remote_interference_request(RegionTreeForest *forest,
+                                  Deserializer &derez, AddressSpaceID source);
+      static void handle_remote_interference_response(Deserializer &derez);
     public:
       const IndexPartition handle;
       IndexSpaceNode *const parent;
@@ -3016,6 +3044,11 @@ namespace Legion {
     protected:
       // Support for remote disjoint events being stored
       RtUserEvent remote_disjoint_ready;
+    protected:
+      // Help for building distributed kd-trees with shard mappings
+      RtUserEvent shard_rects_ready;
+      CollectiveMapping *collective_mapping;
+      unsigned remaining_rect_notifications;
     }; 
 
     /**
@@ -3063,24 +3096,23 @@ namespace Legion {
      * A KDNode is used for performing fast interference tests for
      * expressions against rectangles from child subregions in a partition.
      */
-    template<int DIM, typename T>
+    template<int DIM, typename T, typename RT>
     class KDNode {
     public:
       KDNode(const Rect<DIM,T> &bounds, const int start_dim, 
-             std::vector<std::pair<Rect<DIM,T>,LegionColor> > &children);
+             std::vector<std::pair<Rect<DIM,T>,RT> > &subrects);
       KDNode(const KDNode &rhs);
       ~KDNode(void);
     public:
       KDNode& operator=(const KDNode &rhs);
     public:
-      void find_interfering_children(const Rect<DIM,T> &test,
-                std::set<LegionColor> &interfering_children);
+      void find_interfering(const Rect<DIM,T> &test, std::set<RT> &interfering);
     public:
       const Rect<DIM,T> bounds;
     protected:
-      KDNode *left;
-      KDNode *right;
-      std::vector<std::pair<Rect<DIM,T>,LegionColor> > children;
+      KDNode<DIM,T,RT> *left;
+      KDNode<DIM,T,RT> *right;
+      std::vector<std::pair<Rect<DIM,T>,RT> > rects;
     };
 
     /**
@@ -3110,9 +3142,18 @@ namespace Legion {
       IndexPartNodeT& operator=(const IndexPartNodeT &rhs);
     public:
       virtual bool find_interfering_children_kd(IndexSpaceExpression *expr,
-                                         std::vector<LegionColor> &colors);
+                 std::vector<LegionColor> &colors, bool local_only = false);
     protected:
-      KDNode<DIM,T> *kd_root;
+      virtual void initialize_shard_rects(void);
+      virtual void pack_shard_rects(Serializer &rez, bool clear);
+      virtual void unpack_shard_rects(Deserializer &derez);
+    protected:
+      KDNode<DIM,T,LegionColor> *kd_root;
+      KDNode<DIM,T,AddressSpaceID> *kd_remote;
+      RtUserEvent kd_remote_ready;
+    protected:
+      std::vector<std::pair<Rect<DIM,T>,LegionColor> > *dense_shard_rects;
+      std::vector<std::pair<Rect<DIM,T>,AddressSpaceID> > *sparse_shard_rects;
     };
 
     /**

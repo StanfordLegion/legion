@@ -8859,7 +8859,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         first_valid(true),
 #endif
-        union_expr((has_complete && complete) ? parent : NULL),first_entry(NULL)
+        union_expr((has_complete && complete) ? parent : NULL),
+        first_entry(NULL), collective_mapping(NULL)
     //--------------------------------------------------------------------------
     { 
       parent->add_nested_resource_ref(did);
@@ -8894,7 +8895,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         first_valid(true),
 #endif
-        union_expr((has_complete && complete) ? parent : NULL),first_entry(NULL)
+        union_expr((has_complete && complete) ? parent : NULL),
+        first_entry(NULL), collective_mapping(NULL)
     //--------------------------------------------------------------------------
     {
       parent->add_nested_resource_ref(did);
@@ -8949,6 +8951,8 @@ namespace Legion {
             color_map.begin(); it != color_map.end(); it++)
         if (it->second->remove_nested_resource_ref(did))
           delete it->second;
+      if (collective_mapping != NULL)
+        delete collective_mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -10449,6 +10453,322 @@ namespace Legion {
       parent_node->record_remote_child(pid, part_color);
       // Now we can trigger the done event
       Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent IndexPartNode::request_shard_rects(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_mapping != NULL);
+#endif
+      AutoLock n_lock(node_lock);
+      if (shard_rects_ready.exists())
+        return shard_rects_ready;
+      shard_rects_ready = Runtime::create_rt_user_event();
+      // Add a reference to keep this node alive until this all done
+      add_base_resource_ref(RUNTIME_REF);
+#ifdef DEBUG_LEGION
+      assert(collective_mapping == NULL);
+#endif
+      collective_mapping = new CollectiveMapping(*shard_mapping,
+                                context->runtime->legion_collective_radix);
+      // Figure out how many downstream requests we have
+      std::vector<AddressSpaceID> children;
+      collective_mapping->get_children(owner_space, local_space, children);
+      remaining_rect_notifications = children.size();
+      if (!children.empty())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+        }
+        for (std::vector<AddressSpaceID>::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+          context->runtime->send_index_partition_shard_rects_request(*it, rez);
+      }
+      // Fill in all the local rectangle values
+      initialize_shard_rects();
+      if (children.empty())
+      {
+        if (!is_owner())
+        {
+          // Pack up the rectangles and send them upstream to the parent
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<bool>(true); // up
+            pack_shard_rects(rez, true/*clear*/);
+          }
+          context->runtime->send_index_partition_shard_rects_response(
+              collective_mapping->get_parent(owner_space, local_space), rez);
+        }
+        else
+        {
+          Runtime::trigger_event(shard_rects_ready);
+          if (remove_base_resource_ref(RUNTIME_REF))
+            assert(false); // should never hit this
+        }
+      }
+      return shard_rects_ready;
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::process_shard_rects_response(Deserializer &derez,
+                                                     AddressSpace source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_mapping != NULL);
+#endif
+      bool up;
+      derez.deserialize<bool>(up);
+      AutoLock n_lock(node_lock);
+      if (up)
+      {
+        std::vector<AddressSpaceID> children;
+        if (!shard_rects_ready.exists())
+        {
+          // Not initialized, so do the initialization
+          shard_rects_ready = Runtime::create_rt_user_event();
+          // Add a reference to keep this node alive until this all done
+          add_base_resource_ref(RUNTIME_REF);
+#ifdef DEBUG_LEGION
+          assert(collective_mapping == NULL);
+#endif
+          collective_mapping = new CollectiveMapping(*shard_mapping,
+                                    context->runtime->legion_collective_radix);
+          // Figure out how many downstream requests we have
+          collective_mapping->get_children(owner_space, local_space, children);
+#ifdef DEBUG_LEGION
+          assert(!children.empty());
+#endif
+          remaining_rect_notifications = children.size();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+          }
+          for (std::vector<AddressSpaceID>::const_iterator it = 
+                children.begin(); it != children.end(); it++)
+            if ((*it) != source)
+              context->runtime->send_index_partition_shard_rects_request(*it, 
+                                                                         rez);
+          initialize_shard_rects();
+        }
+        unpack_shard_rects(derez);
+#ifdef DEBUG_LEGION
+        assert(remaining_rect_notifications > 0);
+#endif
+        if (--remaining_rect_notifications == 0)
+        {
+          if (is_owner())
+          {
+#ifdef DEBUG_LEGION
+            assert(shard_rects_ready.exists());
+#endif
+            Runtime::trigger_event(shard_rects_ready);
+            if (children.empty())
+            {
+              collective_mapping->get_children(owner_space, 
+                                               local_space, children);
+#ifdef DEBUG_LEGION
+              assert(!children.empty());
+#endif
+            }
+            // We've got all the data now, so we can broadcast it back out
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(handle);
+              rez.serialize<bool>(false); // sending down the tree now
+              pack_shard_rects(rez, false/*clear*/);
+            }
+
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+              context->runtime->send_index_partition_shard_rects_response(*it,
+                                                                          rez);
+            return remove_base_resource_ref(RUNTIME_REF);
+          }
+          else
+          {
+            // Continue propagating it back up the tree
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(handle);
+              rez.serialize<bool>(true); // still going up
+              pack_shard_rects(rez, true/*clear*/);
+            }
+            context->runtime->send_index_partition_shard_rects_response(
+                collective_mapping->get_parent(owner_space, local_space), rez);
+          }
+        }
+      }
+      else
+      {
+        // Going down
+        unpack_shard_rects(derez);
+#ifdef DEBUG_LEGION
+        assert(shard_rects_ready.exists());
+        assert(collective_mapping != NULL);
+#endif
+        Runtime::trigger_event(shard_rects_ready);
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, children);
+        if (!children.empty())
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<bool>(false); // going down
+            pack_shard_rects(rez, false/*clear*/);
+          }
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            context->runtime->send_index_partition_shard_rects_response(*it, 
+                                                                        rez);
+        }
+        return remove_base_resource_ref(RUNTIME_REF);
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartNode::RemoteKDTracker::RemoteKDTracker(std::set<LegionColor> &c, 
+                                                    Runtime *rt)
+      : colors(c), runtime(rt), remaining(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::RemoteKDTracker::find_remote_interfering(
+        const std::set<AddressSpaceID> &targets, IndexPartition handle,
+        IndexSpaceExpression *expr)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remaining == 0);
+      assert(!targets.empty());
+#endif
+      remaining = targets.size();
+      for (std::set<AddressSpaceID>::const_iterator it =
+            targets.begin(); it != targets.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(runtime->address_space != *it);
+#endif
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          expr->pack_expression(rez, *it);
+          rez.serialize(this);
+        }
+        runtime->send_index_partition_remote_interference_request(*it, rez);
+      }
+      RtEvent wait_on;
+      {
+        AutoLock t_lock(tracker_lock);
+        if (remaining == 0)
+          return;
+        done_event = Runtime::create_rt_user_event();
+        wait_on = done_event;
+      }
+      if (!wait_on.has_triggered())
+        wait_on.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::RemoteKDTracker::process_remote_interfering_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_colors;
+      derez.deserialize(num_colors);
+      AutoLock t_lock(tracker_lock);
+      for (unsigned idx = 0; idx < num_colors; idx++)
+      {
+        LegionColor color;
+        derez.deserialize(color);
+        colors.insert(color);
+      }
+#ifdef DEBUG_LEGION
+      assert(remaining > 0);
+#endif
+      if ((--remaining == 0) && done_event.exists())
+        Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_shard_rects_request(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexPartition handle;
+      derez.deserialize(handle);
+      IndexPartNode *node = forest->get_node(handle);
+      node->request_shard_rects();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_shard_rects_response(
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexPartition handle;
+      derez.deserialize(handle);
+      IndexPartNode *node = forest->get_node(handle);
+      if (node->process_shard_rects_response(derez, source) &&
+          node->remove_base_resource_ref(RUNTIME_REF))
+        delete node;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_remote_interference_request(
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexPartition handle;
+      derez.deserialize(handle);
+      IndexSpaceExpression *expr = 
+        IndexSpaceExpression::unpack_expression(derez, forest, source);
+      RemoteKDTracker *tracker;
+      derez.deserialize(tracker);
+      
+      IndexPartNode *node = forest->get_node(handle);
+      std::vector<LegionColor> local_colors;
+      node->find_interfering_children_kd(expr, local_colors,true/*local only*/);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(tracker);
+        rez.serialize<size_t>(local_colors.size());
+        for (std::vector<LegionColor>::const_iterator it =
+              local_colors.begin(); it != local_colors.end(); it++)
+          rez.serialize(*it);
+      }
+      forest->runtime->send_index_partition_remote_interference_response(source,
+                                                                         rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_remote_interference_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      RemoteKDTracker *tracker;
+      derez.deserialize(tracker);
+      tracker->process_remote_interfering_response(derez);
     }
 
     /////////////////////////////////////////////////////////////

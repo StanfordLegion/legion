@@ -5972,16 +5972,16 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    KDNode<DIM,T>::KDNode(const Rect<DIM,T> &b, const int start_dim,
-                     std::vector<std::pair<Rect<DIM,T>,LegionColor> > &subrects)
+    template<int DIM, typename T, typename RT>
+    KDNode<DIM,T,RT>::KDNode(const Rect<DIM,T> &b, const int start_dim,
+                             std::vector<std::pair<Rect<DIM,T>,RT> > &subrects)
       : bounds(b), left(NULL), right(NULL)
     //--------------------------------------------------------------------------
     {
       // This is the base case
       if (subrects.size() <= LEGION_MAX_BVH_FANOUT)
       {
-        children.swap(subrects);
+        rects.swap(subrects);
         return;
       }
       for (int d = 0; d < DIM; d++)
@@ -6048,9 +6048,9 @@ namespace Legion {
         Rect<DIM,T> right_bounds(bounds);
         left_bounds.hi[refinement_dim] = split;
         right_bounds.lo[refinement_dim] = split+1;
-        std::vector<std::pair<Rect<DIM,T>,LegionColor> > left_set, right_set;
-        for (typename std::vector<std::pair<Rect<DIM,T>,LegionColor> >::
-              const_iterator it = subrects.begin(); it != subrects.end(); it++)
+        std::vector<std::pair<Rect<DIM,T>,RT> > left_set, right_set;
+        for (typename std::vector<std::pair<Rect<DIM,T>,RT> >::const_iterator
+              it = subrects.begin(); it != subrects.end(); it++)
         {
           const Rect<DIM,T> left_rect = it->first.intersection(left_bounds);
           if (!left_rect.empty())
@@ -6065,18 +6065,18 @@ namespace Legion {
 #endif
         // We found an actual splitting plane so recurse 
         const int next_dim = (refinement_dim + 1) % DIM;
-        left = new KDNode<DIM,T>(left_bounds, next_dim, left_set);
-        right = new KDNode<DIM,T>(right_bounds, next_dim, right_set);
+        left = new KDNode<DIM,T,RT>(left_bounds, next_dim, left_set);
+        right = new KDNode<DIM,T,RT>(right_bounds, next_dim, right_set);
         return;
       }
       // If we make it here then we couldn't find a splitting plane to refine 
-      // anymore so just record all the subrects as our children
-      children.swap(subrects);
+      // anymore so just record all the subrects as our rects
+      rects.swap(subrects);
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    KDNode<DIM,T>::KDNode(const KDNode<DIM,T> &rhs)
+    template<int DIM, typename T, typename RT>
+    KDNode<DIM,T,RT>::KDNode(const KDNode<DIM,T,RT> &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6084,8 +6084,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    KDNode<DIM,T>::~KDNode(void)
+    template<int DIM, typename T, typename RT>
+    KDNode<DIM,T,RT>::~KDNode(void)
     //--------------------------------------------------------------------------
     {
       if (left != NULL)
@@ -6095,8 +6095,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    KDNode<DIM,T>& KDNode<DIM,T>::operator=(const KDNode<DIM,T> &rhs)
+    template<int DIM, typename T, typename RT>
+    KDNode<DIM,T,RT>& KDNode<DIM,T,RT>::operator=(const KDNode<DIM,T,RT> &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6105,19 +6105,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void KDNode<DIM,T>::find_interfering_children(const Rect<DIM,T> &test,
-                                    std::set<LegionColor> &interfering_children)
+    template<int DIM, typename T, typename RT>
+    void KDNode<DIM,T,RT>::find_interfering(const Rect<DIM,T> &test,
+                                         std::set<RT> &interfering)
     //--------------------------------------------------------------------------
     {
       if ((left != NULL) && left->bounds.overlaps(test))
-        left->find_interfering_children(test, interfering_children);
+        left->find_interfering(test, interfering);
       if ((right != NULL) && right->bounds.overlaps(test))
-        right->find_interfering_children(test, interfering_children);
-      for (typename std::vector<std::pair<Rect<DIM,T>,LegionColor> >::
-            const_iterator it = children.begin(); it != children.end(); it++)
+        right->find_interfering(test, interfering);
+      for (typename std::vector<std::pair<Rect<DIM,T>,RT> >::
+            const_iterator it = rects.begin(); it != rects.end(); it++)
         if (it->first.overlaps(test))
-          interfering_children.insert(it->second);
+          interfering.insert(it->second);
     }
 
     /////////////////////////////////////////////////////////////
@@ -6134,7 +6134,8 @@ namespace Legion {
                                         ApEvent partition_ready, ApBarrier pend,
                                         RtEvent init, ShardMapping *map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint, complete, did, 
-                      partition_ready, pend, init, map), kd_root(NULL)
+                      partition_ready, pend, init, map), kd_root(NULL), 
+        kd_remote(NULL), dense_shard_rects(NULL), sparse_shard_rects(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -6149,7 +6150,8 @@ namespace Legion {
                                         ApEvent partition_ready, ApBarrier pend,
                                         RtEvent init, ShardMapping *map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint_event, comp, did,
-                      partition_ready, pend, init, map), kd_root(NULL)
+                      partition_ready, pend, init, map), kd_root(NULL), 
+        kd_remote(NULL), dense_shard_rects(NULL), sparse_shard_rects(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -6157,7 +6159,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexPartNodeT<DIM,T>::IndexPartNodeT(const IndexPartNodeT &rhs)
-      : IndexPartNode(rhs), kd_root(NULL)
+      : IndexPartNode(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6171,6 +6173,12 @@ namespace Legion {
     { 
       if (kd_root != NULL)
         delete kd_root;
+      if (kd_remote != NULL)
+        delete kd_remote;
+      if (dense_shard_rects != NULL)
+        delete dense_shard_rects;
+      if (sparse_shard_rects != NULL)
+        delete sparse_shard_rects;
     }
 
     //--------------------------------------------------------------------------
@@ -6187,74 +6195,249 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexPartNodeT<DIM,T>::find_interfering_children_kd(
-                   IndexSpaceExpression *expr, std::vector<LegionColor> &colors)
+       IndexSpaceExpression *expr, std::vector<LegionColor> &colors, bool local)
     //--------------------------------------------------------------------------
     {
       if (kd_root == NULL)
       {
         if (total_children <= LEGION_MAX_BVH_FANOUT)
           return false;
+        DomainT<DIM,T> parent_space;
         const TypeTag type_tag = handle.get_type_tag();
-        std::vector<std::pair<Rect<DIM,T>,LegionColor> > bounds;
-        bounds.reserve(total_children);
-        if (total_children == max_linearized_color)
+        const ApEvent parent_ready = 
+         parent->get_expr_index_space(&parent_space, type_tag, true/*tight*/); 
+        if (shard_mapping == NULL)
         {
-          for (LegionColor color = 0; color < total_children; color++)
+          // No shard mapping so we can build the full kd-tree here
+          std::vector<std::pair<Rect<DIM,T>,LegionColor> > bounds;
+          bounds.reserve(total_children);
+          if (total_children == max_linearized_color)
           {
-            IndexSpaceNode *child = get_child(color);
-            DomainT<DIM,T> space;
-            const ApEvent space_ready = 
-              child->get_expr_index_space(&space, type_tag, true/*tight*/);
-            if (space_ready.exists() && !space_ready.has_triggered())
-              space_ready.wait();
-            if (space.empty())
-              continue;
-            for (RectInDomainIterator<DIM,T> it(space); it(); it++)
-              bounds.push_back(std::make_pair(*it, color));
+            for (LegionColor color = 0; color < total_children; color++)
+            {
+              IndexSpaceNode *child = get_child(color);
+              DomainT<DIM,T> space;
+              const ApEvent space_ready = 
+                child->get_expr_index_space(&space, type_tag, true/*tight*/);
+              if (space_ready.exists() && !space_ready.has_triggered())
+                space_ready.wait();
+              if (space.empty())
+                continue;
+              for (RectInDomainIterator<DIM,T> it(space); it(); it++)
+                bounds.push_back(std::make_pair(*it, color));
+            }
           }
+          else
+          {
+            ColorSpaceIterator *itr =color_space->create_color_space_iterator();
+            while (itr->is_valid())
+            {
+              const LegionColor color = itr->yield_color();
+              IndexSpaceNode *child = get_child(color);
+              DomainT<DIM,T> space;
+              const ApEvent space_ready = 
+                child->get_expr_index_space(&space, type_tag, true/*tight*/);
+              if (space_ready.exists() && !space_ready.has_triggered())
+                space_ready.wait();
+              if (space.empty())
+                continue;
+              for (RectInDomainIterator<DIM,T> it(space); it(); it++)
+                bounds.push_back(std::make_pair(*it, color));
+            }
+            delete itr;
+          } 
+          if (parent_ready.exists() && !parent_ready.has_triggered())
+            parent_ready.wait();
+          KDNode<DIM,T,LegionColor> *root = 
+           new KDNode<DIM,T,LegionColor>(parent_space.bounds, 0/*dim*/, bounds);
+          AutoLock n_lock(node_lock);
+          if (kd_root == NULL)
+            kd_root = root;
+          else // Someone else beat us to it
+            delete root;
         }
         else
         {
-          ColorSpaceIterator *itr = color_space->create_color_space_iterator();
-          while (itr->is_valid())
+          // There is a shard-mapping so we're going to build two kd-trees
+          // One for storing any local or dense rectangles from remote nodes
+          // Another for upper bound rectanges of spaces from remote nodes
+          // First check to see if we're the first ones here
+          RtEvent wait_on;
           {
-            const LegionColor color = itr->yield_color();
-            IndexSpaceNode *child = get_child(color);
-            DomainT<DIM,T> space;
-            const ApEvent space_ready = 
-              child->get_expr_index_space(&space, type_tag, true/*tight*/);
-            if (space_ready.exists() && !space_ready.has_triggered())
-              space_ready.wait();
-            if (space.empty())
-              continue;
-            for (RectInDomainIterator<DIM,T> it(space); it(); it++)
-              bounds.push_back(std::make_pair(*it, color));
+            AutoLock n_lock(node_lock);
+            if (kd_remote_ready.exists() || (kd_remote != NULL))
+              wait_on = kd_remote_ready;
+            else
+              kd_remote_ready = Runtime::create_rt_user_event();
           }
-          delete itr;
+          if (!wait_on.exists() && (kd_remote == NULL))
+          {
+            const RtEvent rects_ready = request_shard_rects();
+            // Grab our local children for later
+            std::vector<IndexSpaceNode*> current_children;
+            {
+              AutoLock n_lock(node_lock,1,false/*exclusive*/);
+              current_children.reserve(color_map.size());
+              for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
+                    color_map.begin(); it != color_map.end(); it++)
+                current_children.push_back(it->second);
+            }
+            if (parent_ready.exists() && !parent_ready.has_triggered())
+              parent_ready.wait();
+            if (rects_ready.exists() && !rects_ready.has_triggered())
+              rects_ready.wait();
+            // Once we get the remote rectangles we can build the kd-trees
+            if (!sparse_shard_rects->empty())
+              kd_remote = new KDNode<DIM,T,AddressSpaceID>(
+                  parent_space.bounds, 0/*dim*/, *sparse_shard_rects);
+            // Add any local sparse paces into the dense remote rects
+            // All the local dense spaces are already included
+            for (unsigned idx = 0; idx < current_children.size(); idx++)
+            {
+              IndexSpaceNode *child = current_children[idx];
+              DomainT<DIM,T> space;
+              const ApEvent space_ready = 
+                child->get_expr_index_space(&space, type_tag, true/*tight*/);
+              if (space_ready.exists() && !space_ready.has_triggered())
+                space_ready.wait();
+              if (space.empty() || space.dense())
+                continue;
+              for (RectInDomainIterator<DIM,T> it(space); it(); it++)
+                dense_shard_rects->push_back(std::make_pair(*it, child->color));
+            }
+            KDNode<DIM,T,LegionColor> *root = new KDNode<DIM,T,LegionColor>(
+                          parent_space.bounds, 0/*dim*/, *dense_shard_rects);
+            AutoLock n_lock(node_lock);
+            kd_root = root;
+            Runtime::trigger_event(kd_remote_ready);
+            kd_remote_ready = RtUserEvent::NO_RT_USER_EVENT;
+          }
+          else if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
         }
-        DomainT<DIM,T> parent_space;
-        const ApEvent parent_ready = 
-          parent->get_expr_index_space(&parent_space, type_tag, true/*tight*/);
-        if (parent_ready.exists() && !parent_ready.has_triggered())
-          parent_ready.wait();
-        KDNode<DIM,T> *root = new KDNode<DIM,T>(parent_space.bounds, 0, bounds);
-        AutoLock n_lock(node_lock);
-        if (kd_root == NULL)
-          kd_root = root;
-        else // Someone else beat us to it
-          delete root;
       }
       DomainT<DIM,T> space;
       const ApEvent space_ready =
         expr->get_expr_index_space(&space, handle.get_type_tag(),true/*tight*/);
       if (space_ready.exists() && !space_ready.has_triggered())
         space_ready.wait();
+      // If we have a remote kd tree then we need to query that to see if 
+      // we have any remote colors to include
       std::set<LegionColor> color_set;
+      if ((kd_remote != NULL) && !local)
+      {
+        std::set<AddressSpaceID> remote_spaces;
+        for (RectInDomainIterator<DIM,T> itr(space); itr(); itr++)
+          kd_remote->find_interfering(*itr, remote_spaces);
+        if (!remote_spaces.empty())
+        {
+          RemoteKDTracker tracker(color_set, context->runtime);
+          tracker.find_remote_interfering(remote_spaces, handle, expr); 
+        }
+      }
       for (RectInDomainIterator<DIM,T> itr(space); itr(); itr++)
-        kd_root->find_interfering_children(*itr, color_set);
+        kd_root->find_interfering(*itr, color_set);
       if (!color_set.empty())
         colors.insert(colors.end(), color_set.begin(), color_set.end());
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexPartNodeT<DIM,T>::initialize_shard_rects(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(dense_shard_rects == NULL);
+      assert(sparse_shard_rects == NULL);
+#endif
+      dense_shard_rects = 
+        new std::vector<std::pair<Rect<DIM,T>,LegionColor> >();
+      sparse_shard_rects =
+        new std::vector<std::pair<Rect<DIM,T>,AddressSpaceID> >();
+      const TypeTag type_tag = handle.get_type_tag();
+      // No need for the lock here, it's being held the caller
+      for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
+            color_map.begin(); it != color_map.end(); it++)
+      {
+        DomainT<DIM,T> child_space;
+        const ApEvent child_ready = 
+          it->second->get_expr_index_space(&child_space,type_tag,true/*tight*/);
+        if (child_ready.exists() && !child_ready.has_triggered())
+          child_ready.wait();
+        if (child_space.dense())
+          dense_shard_rects->push_back(
+              std::make_pair(child_space.bounds, it->first));
+        else
+          sparse_shard_rects->push_back(
+              std::make_pair(child_space.bounds, local_space));
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexPartNodeT<DIM,T>::pack_shard_rects(Serializer &rez, bool clear)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(dense_shard_rects != NULL);
+      assert(sparse_shard_rects != NULL);
+#endif
+      rez.serialize<size_t>(dense_shard_rects->size());
+      for (typename std::vector<std::pair<Rect<DIM,T>,LegionColor> >::
+            const_iterator it = dense_shard_rects->begin(); it !=
+            dense_shard_rects->end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+      rez.serialize<size_t>(sparse_shard_rects->size());
+      for (typename std::vector<std::pair<Rect<DIM,T>,AddressSpaceID> >::
+            const_iterator it = sparse_shard_rects->begin(); it !=
+            sparse_shard_rects->end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexPartNodeT<DIM,T>::unpack_shard_rects(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(dense_shard_rects != NULL);
+      assert(sparse_shard_rects != NULL);
+#endif
+      size_t num_dense;
+      derez.deserialize(num_dense);
+      if (num_dense > 0)
+      {
+        unsigned offset = dense_shard_rects->size();
+        dense_shard_rects->resize(offset + num_dense);
+        for (unsigned idx = 0; idx < num_dense; idx++)
+        {
+          std::pair<Rect<DIM,T>,LegionColor> &next = 
+            (*dense_shard_rects)[offset + idx];
+          derez.deserialize(next.first);
+          derez.deserialize(next.second);
+        }
+      }
+      size_t num_sparse;
+      derez.deserialize(num_sparse);
+      if (num_sparse > 0)
+      {
+        unsigned offset = sparse_shard_rects->size();
+        sparse_shard_rects->resize(offset + num_sparse);
+        for (unsigned idx = 0; idx < num_sparse; idx++)
+        {
+          std::pair<Rect<DIM,T>,AddressSpaceID> &next = 
+            (*sparse_shard_rects)[offset + idx];
+          derez.deserialize(next.first);
+          derez.deserialize(next.second);
+        }
+      }
     }
 #endif // defined(DEFINE_NT_TEMPLATES)
 

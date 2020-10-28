@@ -9794,6 +9794,29 @@ namespace Legion {
               runtime->handle_index_partition_disjoint_update(derez);
               break;
             }
+          case SEND_INDEX_PARTITION_SHARD_RECTS_REQUEST:
+            {
+              runtime->handle_index_partition_shard_rects_request(derez);
+              break;
+            }
+          case SEND_INDEX_PARTITION_SHARD_RECTS_RESPONSE:
+            {
+              runtime->handle_index_partition_shard_rects_response(derez,
+                                                    remote_address_space);
+              break;
+            }
+          case SEND_INDEX_PARTITION_REMOTE_INTERFERENCE_REQUEST:
+            {
+              runtime->handle_index_partition_remote_interference_request(
+                                              derez, remote_address_space);
+              break;
+            }
+          case SEND_INDEX_PARTITION_REMOTE_INTERFERENCE_RESPONSE:
+            {
+              runtime->handle_index_partition_remote_interference_response(
+                                                                    derez);
+              break;
+            }
           case SEND_FIELD_SPACE_NODE:
             {
               runtime->handle_field_space_node(derez, remote_address_space);
@@ -19091,6 +19114,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_shard_rects_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_INDEX_PARTITION_SHARD_RECTS_REQUEST, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_shard_rects_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_INDEX_PARTITION_SHARD_RECTS_RESPONSE,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_remote_interference_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_INDEX_PARTITION_REMOTE_INTERFERENCE_REQUEST,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_remote_interference_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_INDEX_PARTITION_REMOTE_INTERFERENCE_RESPONSE,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_field_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -21096,6 +21159,38 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexPartNode::handle_node_disjoint_update(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_shard_rects_request(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_shard_rects_request(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_shard_rects_response(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_shard_rects_response(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_remote_interference_request(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_remote_interference_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_remote_interference_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_remote_interference_response(derez);
     }
 
     //--------------------------------------------------------------------------
