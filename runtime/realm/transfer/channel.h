@@ -193,6 +193,8 @@ namespace Realm {
       SequenceAssembler(const SequenceAssembler& copy_from);
       ~SequenceAssembler(void);
 
+      // NOT thread-safe - caller must ensure neither *this nor other is being
+      //  modified during this call
       void swap(SequenceAssembler& other);
 
       // asks if a span exists - return value is number of bytes from the
@@ -204,7 +206,7 @@ namespace Realm {
       size_t add_span(size_t pos, size_t count);
 
     protected:
-      atomic<size_t> contig_amount;  // everything from [0, contig_amount) is covered
+      atomic<size_t> contig_amount_x2;  // everything from [0, contig_amount) is covered - LSB indicates potential presence of noncontig spans
       atomic<size_t> first_noncontig; // nothing in [contig_amount, first_noncontig) 
       Mutex *mutex;
       std::map<size_t, size_t> spans;  // noncontiguous spans

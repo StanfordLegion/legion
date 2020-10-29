@@ -235,14 +235,14 @@ namespace Realm {
       }
 #endif
     SequenceAssembler::SequenceAssembler(void)
-      : contig_amount(0)
+      : contig_amount_x2(0)
       , first_noncontig((size_t)-1)
     {
       mutex = new Mutex;
     }
 
     SequenceAssembler::SequenceAssembler(const SequenceAssembler& copy_from)
-      : contig_amount(copy_from.contig_amount)
+      : contig_amount_x2(copy_from.contig_amount_x2)
       , first_noncontig(copy_from.first_noncontig)
       , spans(copy_from.spans)
     {
@@ -256,10 +256,8 @@ namespace Realm {
 
     void SequenceAssembler::swap(SequenceAssembler& other)
     {
-      // need both locks
-      AutoLock<> al1(*mutex);
-      AutoLock<> al2(*(other.mutex));
-      std::swap(contig_amount, other.contig_amount);
+      // NOT thread-safe - taking mutexes won't help
+      std::swap(contig_amount_x2, other.contig_amount_x2);
       std::swap(first_noncontig, other.first_noncontig);
       spans.swap(other.spans);
     }
@@ -269,16 +267,20 @@ namespace Realm {
     size_t SequenceAssembler::span_exists(size_t start, size_t count)
     {
       // lock-free case 1: start < contig_amount
-      size_t contig_sample = contig_amount.load_acquire();
-      if(start < contig_sample) {
-	size_t max_avail = contig_sample - start;
+      size_t contig_sample_x2 = contig_amount_x2.load_acquire();
+      if(start < (contig_sample_x2 >> 1)) {
+	size_t max_avail = (contig_sample_x2 >> 1) - start;
 	if(count < max_avail)
 	  return count;
 	else
 	  return max_avail;
       }
 
-      // lock-free case 2: contig_amount <= start < first_noncontig
+      // lock-free case 2a: no noncontig ranges known
+      if((contig_sample_x2 & 1) == 0)
+	return 0;
+
+      // lock-free case 2b: contig_amount <= start < first_noncontig
       size_t noncontig_sample = first_noncontig.load();
       if(start < noncontig_sample)
 	return 0;
@@ -289,8 +291,9 @@ namespace Realm {
 
 	// first, recheck the contig_amount, in case both it and the noncontig
 	//  counters were bumped in between looking at the two of them
-	if(start < contig_amount.load()) {
-	  size_t max_avail = contig_amount.load() - start;
+	size_t contig_sample = contig_amount_x2.load_acquire() >> 1;
+	if(start < contig_sample) {
+	  size_t max_avail = contig_sample - start;
 	  if(count < max_avail)
 	    return count;
 	  else
@@ -330,75 +333,103 @@ namespace Realm {
     //  (i.e. from [pos, pos+retval) )
     size_t SequenceAssembler::add_span(size_t pos, size_t count)
     {
-      // first try to bump the contiguous amount without a lock
-      size_t span_end = pos + count;
-      size_t expval = pos;
-      if(contig_amount.compare_exchange(expval, span_end)) {
-	// success: check to see if there are any spans we might need to 
-	//  tack on
-	if(span_end == first_noncontig.load()) {
-	  AutoLock<> al(*mutex);
-	  while(!spans.empty()) {
-	    std::map<size_t, size_t>::iterator it = spans.begin();
-	    if(it->first == span_end) {
-	      expval = span_end;
-	      bool ok = contig_amount.compare_exchange(expval,
-						       span_end + it->second);
-	      assert(ok);
-	      span_end += it->second;
-	      spans.erase(it);
-	    } else {
-	      // this is the new first noncontig
-	      first_noncontig.store(it->first);
-	      break;
-	    }
-	  }
-	  if(spans.empty())
-	    first_noncontig.store(size_t(-1));
-	}
+      // fastest case - try to bump the contig amount without a lock, assuming
+      //  there's no noncontig spans
+      size_t prev_x2 = pos << 1;
+      size_t next_x2 = (pos + count) << 1;
+      if(contig_amount_x2.compare_exchange(prev_x2, next_x2)) {
+	// success - we bumped by exactly 'count'
+	return count;
+      }
 
-	// return total change to contig_amount
-	return (span_end - pos);
-      } else {
-	// failure: have to add ourselves to the span list and possibly update
-	//  the 'first_noncontig', all while holding the lock
+      // second best case - the CAS failed, but only because there are
+      //  noncontig spans...  assuming spans aren't getting too out of order
+      //  in the common case, we take the mutex and pick up any other spans we
+      //  connect with
+      if((prev_x2 >> 1) == pos) {
+	size_t span_end = pos + count;
 	{
 	  AutoLock<> al(*mutex);
 
-	  // the checks above were done without the lock, so it is possible
-	  //  that by the time we've got the lock here, contig_amount has
-	  //  caught up to us
-	  expval = pos;
-	  if(contig_amount.compare_exchange(expval, span_end)) {
-	    // see if any other spans are now contiguous as well
+	  size_t new_noncontig = size_t(-1);
+	  while(!spans.empty()) {
+	    std::map<size_t, size_t>::iterator it = spans.begin();
+	    if(it->first == span_end) {
+	      span_end += it->second;
+	      spans.erase(it);
+	    } else {
+	      // stop here - this is the new first noncontig
+	      new_noncontig = it->first;
+	      break;
+	    }
+	  }
+
+	  // to avoid false negatives in 'span_exists', update contig amount
+	  //  before we bump first_noncontig
+	  next_x2 = (span_end << 1) + (spans.empty() ? 0 : 1);
+	  // this must succeed
+	  bool ok = contig_amount_x2.compare_exchange(prev_x2, next_x2);
+	  assert(ok);
+
+	  first_noncontig.store(new_noncontig);
+	}
+
+	return (span_end - pos);
+      }
+
+      // worst case - our span doesn't appear to be contiguous, so we have to
+      //  take the mutex and add to the noncontig list (we may end up being
+      //  contiguous if we're the first noncontig and things have caught up)
+      {
+	AutoLock<> al(*mutex);
+
+	spans[pos] = count;
+
+	if(pos > first_noncontig.load()) {
+	  // in this case, we also know that spans wasn't empty and somebody
+	  //  else has already set the LSB of contig_amount_x2
+	  return 0;
+	} else {
+	  // we need to re-check contig_amount_x2 and make sure the LSB is
+	  //  set - do both with an atomic OR
+	  prev_x2 = contig_amount_x2.fetch_or(1);
+
+	  if((prev_x2 >> 1) == pos) {
+	    // we've been caught, so gather up spans and do another bump
+	    size_t span_end = pos;
+	    size_t new_noncontig = size_t(-1);
 	    while(!spans.empty()) {
 	      std::map<size_t, size_t>::iterator it = spans.begin();
 	      if(it->first == span_end) {
-		expval = span_end;
-		bool ok = contig_amount.compare_exchange(expval,
-							 span_end + it->second);
-		assert(ok);
 		span_end += it->second;
 		spans.erase(it);
 	      } else {
-		// this is the new first noncontig
-		first_noncontig.store(it->first);
+		// stop here - this is the new first noncontig
+		new_noncontig = it->first;
 		break;
 	      }
 	    }
-	    if(spans.empty())
-	      first_noncontig.store(size_t(-1));
-	  } else {
-	    if(pos < first_noncontig.load())
-	      first_noncontig.store(pos);
+	    assert(span_end > pos);
 
-	    spans[pos] = count;
+	    // to avoid false negatives in 'span_exists', update contig amount
+	    //  before we bump first_noncontig
+	    next_x2 = (span_end << 1) + (spans.empty() ? 0 : 1);
+	    // this must succeed (as long as we remember we set the LSB)
+	    prev_x2 |= 1;
+	    bool ok = contig_amount_x2.compare_exchange(prev_x2, next_x2);
+	    assert(ok);
+
+	    first_noncontig.store(new_noncontig);
+
+	    return (span_end - pos);
+	  } else {
+	    // not caught, so no forward progress to report
+	    return 0;
 	  }
 	}
-	
-	return 0; // no change to contig_amount
       }
     }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
