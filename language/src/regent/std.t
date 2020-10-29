@@ -4517,13 +4517,13 @@ local function compile_tasks_in_parallel()
 end
 
 function std.start(main_task, extra_setup_thunk)
-  if std.config["offline"] then
-    error("Error: inline execution is not allowed in offline mode. " ..
-          "Please call regentlib.saveobj instead to convert your code into an executable.")
-  end
   if not data.is_luajit() then
     error("Error: inline execution is supported only with LuaJIT. " ..
           "Please use Terra built with LuaJIT or compile your code into an executable first.")
+  end
+  if std.config["offline"] then
+    error("Error: inline execution is not allowed in offline mode. " ..
+          "Please call regentlib.saveobj instead to convert your code into an executable.")
   end
   if not std.is_task(main_task) then
     report.error(
