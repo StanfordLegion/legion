@@ -1639,10 +1639,8 @@ namespace Realm {
       // If the hijack is not active set the cuda device for this thread to this GPU
 #ifdef REALM_USE_CUDART_HIJACK
       if(!cudart_hijack_active)
-        CHECK_CUDART( cudaSetDevice(gpu_proc->gpu->info->index) );
-#else
-      CHECK_CUDART( cudaSetDevice(gpu_proc->gpu->info->index) );
 #endif
+      CHECK_CUDART( cudaSetDevice(gpu_proc->gpu->info->index) );
 
       // bump the current stream
       // TODO: sanity-check whether this even works right when GPU tasks suspend
@@ -1682,12 +1680,15 @@ namespace Realm {
       CHECK_CU( cuStreamSynchronize(s->get_stream()) );
 #endif
 
-#ifdef REALM_USE_CUDART_HIJACK
       // if our hijack code is not active, the application may have put some work for this
       //  task on streams we don't know about, so it takes an expensive device synchronization
       //  to guarantee that any work enqueued on a stream in the future is ordered with respect
       //  to this task's results
-      if(!cudart_hijack_active) {
+#ifdef REALM_USE_CUDART_HIJACK
+      if(!cudart_hijack_active) 
+#endif
+      {
+#ifdef REALM_USE_CUDART_HIJACK
 	// print a warning if this is the first time and it hasn't been suppressed
 	if(!(gpu_proc->gpu->module->cfg_suppress_hijack_warning ||
 	     already_issued_hijack_warning)) {
@@ -1695,6 +1696,7 @@ namespace Realm {
 	  log_gpu.warning() << "CUDART hijack code not active"
 			    << " - device synchronizations required after every GPU task!";
 	}
+#endif
         // check to make sure the user didn't do something stupid and change
         // the device for this context, if so warn them and then restore
         // note we can't use the driver API here because cuCtxGetDevice just
@@ -1702,31 +1704,13 @@ namespace Realm {
         // we actually need to modify the state in the cuda runtime
         int current_device;
         CHECK_CUDART( cudaGetDevice(&current_device) );
-        if (current_device != gpu_proc->gpu->info->index) {
+        if (current_device != gpu_proc->gpu->info->index)
           log_gpu.warning() << "Detected change in CUDA device from GPU "
                             << gpu_proc->gpu->info->index << " to GPU " << current_device
                             << " - tasks should never modify the CUDA device.";
-          CHECK_CUDART( cudaSetDevice(gpu_proc->gpu->info->index) );
-        }
+        // no hijack at all, so always synchronize to ensure all effects are observable
 	CHECK_CU( cuCtxSynchronize() );
       }
-#else
-      // check to make sure the user didn't do something stupid and change
-      // the device for this context, if so warn them and then restore
-      // note we can't use the driver API here because cuCtxGetDevice just
-      // returns the device used to make the context which is not right
-      // we actually need to modify the state in the cuda runtime
-      int current_device;
-      CHECK_CUDART( cudaGetDevice(&current_device) );
-      if (current_device != gpu_proc->gpu->info->index) {
-        log_gpu.warning() << "Detected change in CUDA device from GPU "
-                          << gpu_proc->gpu->info->index << " to GPU " << current_device
-                          << " - tasks should never modify the CUDA device.";
-        CHECK_CUDART( cudaSetDevice(gpu_proc->gpu->info->index) );
-      }
-      // no hijack at all, so always synchronize to ensure all effects are observable
-      CHECK_CU( cuCtxSynchronize() );
-#endif
       // pop the CUDA context for this GPU back off
       gpu_proc->gpu->pop_context();
 
@@ -2540,7 +2524,9 @@ namespace Realm {
       // device on the other side of the wait since we might
       // have changed threads, do it before popping the context
 #ifdef REALM_USE_CUDART_HIJACK
-      if(!cudart_hijack_active) {
+      if(!cudart_hijack_active) 
+#endif
+      {
         int current_device;
         CHECK_CUDART( cudaGetDevice(&current_device) );
         if (current_device != gpu->info->index)
@@ -2548,14 +2534,6 @@ namespace Realm {
                             << gpu->info->index << " to GPU " << current_device
                             << " - tasks should never modify the CUDA device.";
       }
-#else
-      int current_device;
-      CHECK_CUDART( cudaGetDevice(&current_device) );
-      if (current_device != gpu->info->index)
-        log_gpu.warning() << "Detected change in CUDA device from GPU "
-                          << gpu->info->index << " to GPU " << current_device
-                          << " - tasks should never modify the CUDA device.";
-#endif
       // Realm threads don't obey a stack discipline for
       // preemption so we can't leave our context on the stack
       gpu->pop_context();
@@ -2566,10 +2544,8 @@ namespace Realm {
       // because the thread running this task might have changed
 #ifdef REALM_USE_CUDART_HIJACK
       if(!cudart_hijack_active)
-        CHECK_CUDART( cudaSetDevice(gpu->info->index) );
-#else
-      CHECK_CUDART( cudaSetDevice(gpu->info->index) );
 #endif
+      CHECK_CUDART( cudaSetDevice(gpu->info->index) );
     }
 
     void GPUProcessor::device_synchronize(void)
