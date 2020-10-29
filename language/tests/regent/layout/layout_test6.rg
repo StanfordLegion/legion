@@ -56,7 +56,7 @@ do
     print("Error: failed to compile " .. layout_test_cc)
     assert(false)
   end
-  terralib.linklibrary(layout_test_so)
+  regentlib.linklibrary(layout_test_so)
   clayout_test = terralib.includec("layout_test.h", include_dirs)
 end
 
