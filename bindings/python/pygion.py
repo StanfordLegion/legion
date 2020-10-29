@@ -1891,6 +1891,7 @@ def task(body=None, **kwargs):
         return lambda body: task(body, **kwargs)
     return Task(body, **kwargs)
 
+_proj_functor_cache = {}
 class _TaskLauncher(object):
     __slots__ = ['task']
 
@@ -2000,14 +2001,12 @@ class _TaskLauncher(object):
                         if isinstance(arg.index, (SymbolicLoopIndex, ConcreteLoopIndex)):
                             return True, 0
                         # P[f(i)] or P[f(ID)]
-                        if isinstance(arg.index, SymbolicCall) and isinstance(arg.index.function, ProjectionFunctor):
+                        if isinstance(arg.index, SymbolicCall) and isinstance(arg.index.function, ProjectionFunctor) and isinstance(arg.index.arg, (SymbolicLoopIndex, ConcreteLoopIndex)):
                             return True, arg.index.function.proj_id
                         # P[i + ...] or P[ID + ...]
-                        if not isinstance(arg.index, SymbolicExpr):
-                            return False, None
-                        # Should it be arg.index.index?    
-                        if isinstance(arg.index.arg, (SymbolicLoopIndex, ConcreteLoopIndex)):
+                        if isinstance(arg.index, SymbolicExpr):
                             f = ProjectionFunctor(arg.index)
+                            _proj_functor_cache[arg.index] = f
                             return True, f.proj_id
                         return False, None
 
@@ -2274,10 +2273,10 @@ class SymbolicIndexAccess(SymbolicExpr):
         return '%s[%s]' % (self.value, self.index)
     def __repr__(self):
         return '%s[%s]' % (self.value, self.index)
-    def _legion_preprocess_task_argument(self, point):
+    def _legion_preprocess_task_argument(self):
         if isinstance(self.index, SymbolicLoopIndex):
-            # return self.value[self.index._legion_preprocess_task_argument()]
-            return _preprocess(self.value, point)[_preprocess(self.index, point)]
+            return self.value[self.index._legion_preprocess_task_argument()]
+            # return _preprocess(self.value, point)[_preprocess(self.index, point)]
         return self
     def _legion_postprocess_task_argument(self, point):
         result = _postprocess(self.value, point)[_postprocess(self.index, point)]
@@ -2318,6 +2317,7 @@ class SymbolicCall(SymbolicExpr):
         return _postprocess(self.func.expr, point)(*list(_postprocess(arg, point) for arg in self.args))
 
 class SymbolicBinop(SymbolicExpr):
+    # add methods here __hash__ __eq__
     import petra as pt
     __slots__ = ['lhs', 'rhs', 'op']
     def __init__(self, lhs, rhs, op):
@@ -2325,33 +2325,47 @@ class SymbolicBinop(SymbolicExpr):
         self.lhs = lhs
         self.rhs = rhs
         self.op = op
+
     def __str__(self):
         return '%s %s %s' % (self.lhs, self.op, self.rhs)
+
     def __repr__(self):
         return '%s %s %s' % (self.lhs, self.op, self.rhs)
 
+    def get_sides(self):
+        return (self.lhs, self.rhs)
+
+    def __eq__(self, other):
+        if type(other) is type(self):
+            return self.get_sides() == other.get_sides()
+        else:
+            return False
+
+    def __hash__(self):
+        return hash(self.get_sides())
+
     def _legion_preprocess_task_argument(self, point):
-        if op == '+':
+        if self.op == '+':
             return _preprocess(self.lhs, point) + _preprocess(self.rhs, point)
-        elif op == '*':
+        elif self.op == '*':
             return _preprocess(self.lhs, point) * _preprocess(self.rhs, point)
-        elif op == '-':
+        elif self.op == '-':
             return _preprocess(self.lhs, point) - _preprocess(self.rhs, point)
-        elif op == '//':
+        elif self.op == '//':
             return _preprocess(self.lhs, point) // _preprocess(self.rhs, point)
-        elif op == '%':
+        elif self.op == '%':
             return _preprocess(self.lhs, point) % _preprocess(self.rhs, point)
 
     def _legion_postprocess_task_argument(self, point):
-        if op == '+':
+        if self.op == '+':
             return _postprocess(self.lhs, point) + _postprocess(self.rhs, point)
-        elif op == '*':
+        elif self.op == '*':
             return _postprocess(self.lhs, point) * _postprocess(self.rhs, point)
-        elif op == '-':
+        elif self.op == '-':
             return _postprocess(self.lhs, point) - _postprocess(self.rhs, point)
-        elif op == '//':
+        elif self.op == '//':
             return _postprocess(self.lhs, point) // _postprocess(self.rhs, point)
-        elif op == '%':
+        elif self.op == '%':
             return _postprocess(self.lhs, point) % _postprocess(self.rhs, point)
         
     def codegen(self):
@@ -2379,8 +2393,6 @@ class SymbolicLoopIndex(SymbolicExpr):
         return self.name
     def __repr__(self):
         return self.name
-    def _legion_preprocess_task_argument(self, point):
-        return point
     def _legion_postprocess_task_argument(self, point):
         return point
     def codegen(self):
@@ -2406,6 +2418,11 @@ class ConcreteLoopIndex(SymbolicExpr):
 _next_proj_functor_id = 100
 class ProjectionFunctor(object):
     __slots__ = ['expr', 'proj_id']
+    def __new__(cls, expr):
+        if isinstance(expr, SymbolicIndexAccess) and isinstance(expr.index, SymbolicExpr) and expr.index in _proj_functor_cache.keys():
+            return _proj_functor_cache[expr.index]
+        return super(ProjectionFunctor, cls).__new__(cls)
+
     def __init__(self, expr):
         if not isinstance(expr, SymbolicExpr):
             raise Exception('ProjectionFunctor requires a symbolic expression as an argument')
