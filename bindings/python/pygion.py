@@ -2317,7 +2317,6 @@ class SymbolicCall(SymbolicExpr):
         return _postprocess(self.func.expr, point)(*list(_postprocess(arg, point) for arg in self.args))
 
 class SymbolicBinop(SymbolicExpr):
-    # add methods here __hash__ __eq__
     import petra as pt
     __slots__ = ['lhs', 'rhs', 'op']
     def __init__(self, lhs, rhs, op):
@@ -2419,6 +2418,7 @@ _next_proj_functor_id = 100
 class ProjectionFunctor(object):
     __slots__ = ['expr', 'proj_id']
     def __new__(cls, expr):
+        
         if isinstance(expr, SymbolicIndexAccess) and isinstance(expr.index, SymbolicExpr) and expr.index in _proj_functor_cache.keys():
             return _proj_functor_cache[expr.index]
         return super(ProjectionFunctor, cls).__new__(cls)
