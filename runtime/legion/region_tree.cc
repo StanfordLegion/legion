@@ -20141,7 +20141,7 @@ namespace Legion {
       bool first_child = true;
 #endif
       FieldMask refined_children;
-      const bool need_filter = (child_overlap == 
+      const bool need_filter = (child_overlap !=
           state.written_disjoint_complete_children.get_valid_mask());
       for (FieldMaskSet<RegionTreeNode>::iterator it = 
             state.written_disjoint_complete_children.begin(); it !=
