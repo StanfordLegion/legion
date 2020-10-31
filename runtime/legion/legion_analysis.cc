@@ -4828,11 +4828,12 @@ namespace Legion {
         sources[dst_view].insert(update, helper->convert_src_to_dst(fill_mask));
       if (tracing_eq != NULL)
       {
-        update_tracing_valid_views(tracing_eq, src_view, dst_view, 
-                                   fill_mask, expr, 0/*redop*/, applied);
         if (dst_view->is_reduction_view())
           tracing_eq->update_tracing_anti_views(dst_view, expr, 
                                                 fill_mask, applied);
+        else
+          update_tracing_valid_views(tracing_eq, src_view, dst_view,
+                                     fill_mask, expr, 0/*redop*/, applied);
       }
     }
 
@@ -20620,7 +20621,7 @@ namespace Legion {
         if (tracing_postconditions == NULL)
           tracing_postconditions = 
             new TraceViewSet(runtime->forest, did, region_node);
-        const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
+        const RegionUsage usage(LEGION_WRITE_PRIV, LEGION_EXCLUSIVE, 0);
         for (FieldMaskSet<LogicalView>::const_iterator it =
               analysis.views.begin(); it != analysis.views.end(); it++)
           update_tracing_valid_views(it->first, expr, usage,
@@ -20883,6 +20884,13 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               not_dominated.begin(); it != not_dominated.end(); it++)
           tracing_preconditions->insert(view, it->first, it->second, &applied);
+        if (view->is_reduction_view())
+        {
+          // Invalidate this reduction view since we read it
+          if (tracing_postconditions != NULL)
+            tracing_postconditions->invalidate(view, expr, user_mask);
+          return;
+        }
       }
       if (tracing_postconditions != NULL)
       {

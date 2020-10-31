@@ -3656,7 +3656,7 @@ namespace Legion {
       trace_regions.clear();
       // Make a trace condition set for each one of them
       // Note for control replication, we're just letting multiple shards 
-      // race to their equivalence sets, whichever one gets their first for
+      // race to their equivalence sets, whichever one gets there first for
       // their fields will be the one to own the preconditions
       RegionTreeForest *forest = trace->runtime->forest;
       for (LegionMap<EquivalenceSet*,
