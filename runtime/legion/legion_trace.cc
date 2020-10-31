@@ -3191,6 +3191,7 @@ namespace Legion {
         if ((*it)->remove_reference())
           delete (*it);
       }
+      postcondition_analyses.clear();
       return satisfied;
     }
 
