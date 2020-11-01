@@ -455,9 +455,11 @@ namespace Legion {
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
       void clear_cached_template(void) { current_template = NULL; }
-      void check_template_preconditions(TraceReplayOp *op);
+      void check_template_preconditions(TraceReplayOp *op,
+                                        std::set<RtEvent> &applied_events);
       // Return true if we evaluated all the templates
       bool find_viable_templates(ReplTraceReplayOp *op, 
+                                 std::set<RtEvent> &applied_events,
                                  unsigned templates_to_find,
                                  std::vector<int> &viable_templates);
       void select_template(unsigned template_index);
@@ -582,13 +584,14 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_TRACE_PRECONDITION_TASK_ID;
       public:
         DeferTracePreconditionTestArgs(TraceConditionSet *s, Operation *o, 
-                                       RtUserEvent d)
+                                       RtUserEvent d, RtUserEvent a)
           : LgTaskArgs<DeferTracePreconditionTestArgs>(o->get_unique_op_id()),
-            set(s), op(o), done_event(d) { }
+            set(s), op(o), done_event(d), applied_event(a) { }
       public:
         TraceConditionSet *const set;
         Operation *const op;
         const RtUserEvent done_event;
+        const RtUserEvent applied_event;
       };
       struct DeferTracePostconditionTestArgs :
         public LgTaskArgs<DeferTracePostconditionTestArgs> {
@@ -642,7 +645,8 @@ namespace Legion {
       void dump_anticonditions(void) const;
       void dump_postconditions(void) const;
     public:
-      void test_require(Operation *op, std::set<RtEvent> &ready_events);
+      void test_require(Operation *op, std::set<RtEvent> &ready_events,
+                        std::set<RtEvent> &applied_events);
       bool check_require(void);
       void ensure(Operation *op, std::set<RtEvent> &applied_events);
     public:
@@ -787,11 +791,13 @@ namespace Legion {
                           std::vector<unsigned> &inv_topo_order);
     public:
       // Variants for normal traces
-      bool check_preconditions(TraceReplayOp *op);
+      bool check_preconditions(TraceReplayOp *op,
+                               std::set<RtEvent> &applied_events);
       void apply_postcondition(TraceSummaryOp *op,
                                std::set<RtEvent> &applied_events);
       // Variants for control replication traces 
-      bool check_preconditions(ReplTraceReplayOp *op); 
+      bool check_preconditions(ReplTraceReplayOp *op,
+                               std::set<RtEvent> &applied_events);
       void apply_postcondition(ReplTraceSummaryOp *op,
                                std::set<RtEvent> &applied_events);
     public:

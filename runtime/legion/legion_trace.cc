@@ -1534,7 +1534,8 @@ namespace Legion {
 #endif
 
         if (physical_trace->get_current_template() == NULL)
-          physical_trace->check_template_preconditions(this); 
+          physical_trace->check_template_preconditions(this,
+                                    map_applied_conditions);
 #ifdef DEBUG_LEGION
         assert(physical_trace->get_current_template() == NULL ||
                !physical_trace->get_current_template()->is_recording());
@@ -1878,14 +1879,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::check_template_preconditions(TraceReplayOp *op)
+    void PhysicalTrace::check_template_preconditions(TraceReplayOp *op,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       current_template = NULL;
       for (LegionVector<PhysicalTemplate*>::aligned::reverse_iterator it =
            templates.rbegin(); it != templates.rend(); ++it)
       {
-        if ((*it)->check_preconditions(op))
+        if ((*it)->check_preconditions(op, applied_events))
         {
 #ifdef DEBUG_LEGION
           assert((*it)->is_replayable());
@@ -1903,6 +1905,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalTrace::find_viable_templates(ReplTraceReplayOp *op,
+                                             std::set<RtEvent> &applied_events,
                                              unsigned templates_to_find,
                                              std::vector<int> &viable_templates)
     //--------------------------------------------------------------------------
@@ -1914,7 +1917,7 @@ namespace Legion {
             viable_templates.back() - 1; index >= 0; index--)
       {
         PhysicalTemplate *tpl = templates[index];
-        if (tpl->check_preconditions(op))
+        if (tpl->check_preconditions(op, applied_events))
         {
           // A good tmplate so add it to the list
           viable_templates.push_back(index);
@@ -3079,7 +3082,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceConditionSet::test_require(Operation *op, 
-                                         std::set<RtEvent> &ready_events)
+             std::set<RtEvent> &ready_events, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       // We should not need the lock here because the trace should be 
@@ -3092,10 +3095,12 @@ namespace Legion {
         if (ready.exists() && !ready.has_triggered())
         {
           const RtUserEvent tested = Runtime::create_rt_user_event();
-          DeferTracePreconditionTestArgs args(this, op, tested);
+          const RtUserEvent applied = Runtime::create_rt_user_event();
+          DeferTracePreconditionTestArgs args(this, op, tested, applied);
           forest->runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_DEFERRED_PRIORITY, ready);
           ready_events.insert(tested);
+          applied_events.insert(applied);
           return;
         }
       }
@@ -3118,13 +3123,17 @@ namespace Legion {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
             continue;
-          analysis->traverse(it->first, overlap, deferral_events, ready_events);
+          analysis->traverse(it->first, overlap,deferral_events,applied_events);
         }
         const RtEvent traversal_done = deferral_events.empty() ?
           RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-        RtEvent ready;
         if (traversal_done.exists() || analysis->has_remote_sets())
-          ready = analysis->perform_remote(traversal_done, ready_events);
+        {
+          const RtEvent ready = 
+            analysis->perform_remote(traversal_done, applied_events);
+          if (ready.exists() && !ready.has_triggered())
+            ready_events.insert(ready);
+        }
       }
       for (ExprViews::const_iterator eit =
             anticonditions.begin(); eit != anticonditions.end(); eit++)
@@ -3141,13 +3150,17 @@ namespace Legion {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
             continue;
-          analysis->traverse(it->first, overlap, deferral_events, ready_events);
+          analysis->traverse(it->first, overlap,deferral_events,applied_events);
         }
         const RtEvent traversal_done = deferral_events.empty() ?
           RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-        RtEvent ready;
         if (traversal_done.exists() || analysis->has_remote_sets())
-          ready = analysis->perform_remote(traversal_done, ready_events);
+        {
+          const RtEvent ready = 
+            analysis->perform_remote(traversal_done, applied_events);
+          if (ready.exists() && !ready.has_triggered())
+            ready_events.insert(ready);
+        }
       }
     }
 
@@ -3158,13 +3171,18 @@ namespace Legion {
     {
       const DeferTracePreconditionTestArgs *dargs = 
         (const DeferTracePreconditionTestArgs*)args;
-      std::set<RtEvent> ready_events;
-      dargs->set->test_require(dargs->op, ready_events);
+      std::set<RtEvent> ready_events, applied_events;
+      dargs->set->test_require(dargs->op, ready_events, applied_events);
       if (!ready_events.empty())
         Runtime::trigger_event(dargs->done_event, 
             Runtime::merge_events(ready_events));
       else
         Runtime::trigger_event(dargs->done_event);
+      if (!applied_events.empty())
+        Runtime::trigger_event(dargs->applied_event,
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(dargs->applied_event);
     }
 
     //--------------------------------------------------------------------------
@@ -3550,13 +3568,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTemplate::check_preconditions(TraceReplayOp *op)
+    bool PhysicalTemplate::check_preconditions(TraceReplayOp *op,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> ready_events;
       for (std::vector<TraceConditionSet*>::const_iterator it = 
             conditions.begin(); it != conditions.end(); it++)
-        (*it)->test_require(op, ready_events);
+        (*it)->test_require(op, ready_events, applied_events);
       if (!ready_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
@@ -3582,13 +3601,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTemplate::check_preconditions(ReplTraceReplayOp *op)
+    bool PhysicalTemplate::check_preconditions(ReplTraceReplayOp *op,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> ready_events;
       for (std::vector<TraceConditionSet*>::const_iterator it = 
             conditions.begin(); it != conditions.end(); it++)
-        (*it)->test_require(op, ready_events);
+        (*it)->test_require(op, ready_events, applied_events);
       if (!ready_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
