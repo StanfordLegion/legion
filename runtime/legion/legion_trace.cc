@@ -1519,7 +1519,7 @@ namespace Legion {
       bool recurrent = true;
       bool fence_registered = false;
       bool is_recording = local_trace->is_recording();
-      if (physical_trace->get_current_template() == NULL || is_recording)
+      if ((physical_trace->get_current_template() == NULL) || is_recording)
       {
         recurrent = false;
         {
@@ -4999,7 +4999,7 @@ namespace Legion {
             conditions.begin(); it != conditions.end(); it++)
         (*it)->dump_preconditions();
 
-      log_tracing.info() << "[Anit-Conditions]";
+      log_tracing.info() << "[Anticondition]";
       for (std::vector<TraceConditionSet*>::const_iterator it =
             conditions.begin(); it != conditions.end(); it++)
         (*it)->dump_anticonditions();

@@ -6665,9 +6665,7 @@ namespace Legion {
                                       template_completion);
         need_completion_trigger = false;
         Runtime::trigger_event(NULL, completion_event, execution_fence_barrier);
-        local_trace->end_trace_execution(this);
         parent_ctx->update_current_fence(this, true, true);
-        parent_ctx->record_previous_trace(local_trace);
         physical_trace->record_previous_template_completion(
             execution_fence_barrier);
         local_trace->initialize_tracing_state();
@@ -6734,6 +6732,9 @@ namespace Legion {
             "recorded. It is required that traces do not change their "
             "behavior.", local_trace->get_trace_id(),
             parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+#ifdef DEBUG_LEGION
+        assert(map_applied_conditions.empty());
+#endif
         // Do our arrival on the mapping fence
         Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
         complete_mapping(mapping_fence_barrier);
