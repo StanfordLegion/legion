@@ -1473,9 +1473,12 @@ namespace Legion {
                   reduction_indexes.begin(); it !=
                   reduction_indexes.end(); it++)
             {
+              MemoryConstraint mem_constraint =
+                find_memory_constraint(ctx, task, output.chosen_variant, *it);
               Memory target_memory = default_policy_select_target_memory(ctx,
                                                          task.target_proc,
-                                                         task.regions[*it]);
+                                                         task.regions[*it],
+                                                         mem_constraint);
               std::set<FieldID> copy = task.regions[*it].privilege_fields;
               size_t footprint;
               if (!default_create_custom_instances(ctx, task.target_proc,
@@ -1568,9 +1571,12 @@ namespace Legion {
             missing_fields[idx].empty())
           continue;
         // See if this is a reduction
+        MemoryConstraint mem_constraint =
+          find_memory_constraint(ctx, task, output.chosen_variant, idx);
         Memory target_memory = default_policy_select_target_memory(ctx,
                                                          task.target_proc,
-                                                         task.regions[idx]);
+                                                         task.regions[idx],
+                                                         mem_constraint);
         if (task.regions[idx].privilege == LEGION_REDUCE)
         {
           size_t footprint;
@@ -2001,8 +2007,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Memory DefaultMapper::default_policy_select_target_memory(MapperContext ctx,
-                                                   Processor target_proc,
-                                                   const RegionRequirement &req)
+                                       Processor target_proc,
+                                       const RegionRequirement &req,
+                                       MemoryConstraint mc)
     //--------------------------------------------------------------------------
     {
       bool prefer_rdma = ((req.tag & DefaultMapper::PREFER_RDMA_MEMORY) != 0);
@@ -2037,6 +2044,8 @@ namespace Legion {
       for (Machine::MemoryQuery::iterator it = visible_memories.begin();
             it != visible_memories.end(); it++)
       {
+        if (mc.is_valid() && mc.get_kind() != it->kind())
+          continue;
         affinity.clear();
         machine.get_proc_mem_affinity(affinity, target_proc, *it,
 				      false /*not just local affinities*/);
@@ -2052,7 +2061,13 @@ namespace Legion {
           best_rdma_bandwidth = affinity[0].bandwidth;
         }
       }
-      assert(best_memory.exists());
+      if (!best_memory.exists())
+      {
+        log_mapper.error()
+          << "Default mapper error: Failed to find a memory of kind "
+          << mc.get_kind() << " connected to processor " << target_proc;
+        assert(false);
+      }
       if (prefer_rdma)
       {
 	if (!best_rdma_memory.exists()) best_rdma_memory = best_memory;
@@ -3160,6 +3175,43 @@ namespace Legion {
 	  return true;
       }
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    MemoryConstraint DefaultMapper::find_memory_constraint(
+                                        const MapperContext ctx,
+                                        const Task& task, VariantID vid,
+                                        unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      MemoryConstraint result;
+      const TaskLayoutConstraintSet& constraints =
+        runtime->find_task_layout_constraints(ctx, task.task_id, vid);
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it =
+            constraints.layouts.lower_bound(index);
+           it != constraints.layouts.upper_bound(index); it++)
+      {
+        const MemoryConstraint& mem_constraint =
+          runtime->find_layout_constraints(ctx, it->second).memory_constraint;
+        if (!mem_constraint.is_valid())
+          continue;
+        if (!result.is_valid())
+        {
+          result = mem_constraint;
+          continue;
+        }
+        if (result.get_kind() != mem_constraint.get_kind())
+        {
+          log_mapper.error()
+            << "Default mapper error: The default mapper will place all "
+            << "physical instances for the same region requirement on the same "
+            << "memory, but variant " << vid << " of task "
+            << task.get_task_name() << " specifies two incompatible memory "
+            << "constraints for region requirement " << index << ".";
+          assert(false);
+        }
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
