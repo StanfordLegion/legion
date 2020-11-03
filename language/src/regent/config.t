@@ -67,6 +67,7 @@ local default_options = {
   ["openmp-strict"] = false,
   ["skip-empty-tasks"] = false,
   ["vectorize"] = true,
+  ["offline"] = not data.is_luajit(),
 
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,

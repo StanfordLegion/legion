@@ -88,7 +88,7 @@ do
       function cudahelper.check_cuda_available()
         return false, "cuda_runtime.h does not exist in INCLUDE_PATH"
       end
-    elseif config["cuda-offline"] then
+    elseif config["offline"] or config["cuda-offline"] then
       function cudahelper.check_cuda_available()
         return true
       end
@@ -149,7 +149,7 @@ do
   function cudahelper.link_driver_library()
     if cudaruntimelinked then return end
     local path = assert(cudapaths[ffi.os],"unknown OS?")
-    terralib.linklibrary(path)
+    base.linklibrary(path)
     cudaruntimelinked = true
   end
 end
@@ -286,7 +286,7 @@ do
     if cached_cuda_version ~= nil then
       return cached_cuda_version
     end
-    if not config["cuda-offline"] then
+    if not (config["offline"] or config["cuda-offline"]) then
       cached_cuda_version = get_cuda_version_terra()
     else
       cached_cuda_version = parse_cuda_arch(config["cuda-arch"])

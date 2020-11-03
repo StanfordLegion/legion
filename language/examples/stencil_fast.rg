@@ -70,7 +70,7 @@ if USE_FOREIGN then
     print("Error: failed to compile " .. stencil_cc)
     assert(false)
   end
-  terralib.linklibrary(stencil_so)
+  regentlib.linklibrary(stencil_so)
   cstencil = terralib.includec("stencil.h", {"-I", root_dir,
                               "-DDTYPE=" .. tostring(DTYPE),
                               "-DRESTRICT=__restrict__",
@@ -129,7 +129,7 @@ do
     print("Error: failed to compile " .. mapper_cc)
     assert(false)
   end
-  terralib.linklibrary(mapper_so)
+  regentlib.linklibrary(mapper_so)
   cmapper = terralib.includec("stencil_mapper.h", include_dirs)
 end
 

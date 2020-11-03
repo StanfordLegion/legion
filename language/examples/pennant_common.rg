@@ -61,7 +61,7 @@ do
     print("Error: failed to compile " .. pennant_cc)
     assert(false)
   end
-  terralib.linklibrary(pennant_so)
+  regentlib.linklibrary(pennant_so)
   cpennant = terralib.includec("pennant.h", include_dirs)
 end
 
@@ -1067,7 +1067,6 @@ terra read_input(runtime : c.legion_runtime_t,
 
   return result
 end
-read_input:compile()
 
 -- #####################################
 -- ## Distributed Mesh Generator
@@ -1403,7 +1402,6 @@ terra read_partitions(conf : config) : mesh_colorings
 
   return result
 end
-read_partitions:compile()
 
 -- This is in a task so that it can be called from Python.
 task read_partitions_task2(rz_all : region(zone),
@@ -2073,7 +2071,6 @@ terra validate_output(runtime : c.legion_runtime_t,
   c.free(solution_ze)
   c.free(solution_zp)
 end
-validate_output:compile()
 end
 
 local common = {}

@@ -27,7 +27,7 @@ if std.config["openmp"] == 0 then
 end
 
 local has_openmp = true
-if not std.config["openmp-offline"] then
+if not (std.config["offline"] or std.config["openmp-offline"]) then
   local dlfcn = terralib.includec("dlfcn.h")
   local terra find_openmp_symbols()
     var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)

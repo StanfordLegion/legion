@@ -64,10 +64,4 @@ terra GraphCfg:show()
 end
 --GraphCfg.methods['show']:compile()
 
--- compile all methods eagerly to catch errors
-for k,v in pairs(GraphCfg.methods) do
-  --print(k)
-  v:compile()
-end
-
 return GraphCfg

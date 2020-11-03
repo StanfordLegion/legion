@@ -63,7 +63,7 @@ do
     print("Error: failed to compile " .. legion_interop_cc)
     assert(false)
   end
-  terralib.linklibrary(legion_interop_so)
+  regentlib.linklibrary(legion_interop_so)
   cextern_task =
     terralib.includec("extern_task.h", include_dirs)
 end
