@@ -59,7 +59,7 @@ do
     print("Error: failed to compile " .. mapper_cc)
     assert(false)
   end
-  terralib.linklibrary(mapper_so)
+  regentlib.linklibrary(mapper_so)
   cmapper = terralib.includec("optimize_tracing_invalidate1.h", include_dirs)
 end
 

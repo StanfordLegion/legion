@@ -32,7 +32,7 @@ local log_task_id = log.make_logger("task_id")
 local std = {}
 
 std.config, std.args = base.config, base.args
-std.binding_library = base.binding_library
+std.linklibrary = base.linklibrary
 
 local c = base.c
 std.c = c
@@ -4182,9 +4182,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
     end)
   local cuda_setup = quote end
   if std.config["cuda"] and cudahelper.check_cuda_available() then
-    if data.is_luajit() then
-      cudahelper.link_driver_library()
-    end
+    cudahelper.link_driver_library()
     local all_kernels = {}
     variants:map(function(variant)
       if variant:is_cuda() then
@@ -4519,6 +4517,14 @@ local function compile_tasks_in_parallel()
 end
 
 function std.start(main_task, extra_setup_thunk)
+  if not data.is_luajit() then
+    error("Error: inline execution is supported only with LuaJIT. " ..
+          "Please use Terra built with LuaJIT or compile your code into an executable first.")
+  end
+  if std.config["offline"] then
+    error("Error: inline execution is not allowed in offline mode. " ..
+          "Please call regentlib.saveobj instead to convert your code into an executable.")
+  end
   if not std.is_task(main_task) then
     report.error(
         { span = ast.trivial_span() },
@@ -4572,6 +4578,8 @@ function std.start(main_task, extra_setup_thunk)
     [argv_setup];
     return main([argc], [argv])
   end
+
+  base.load_all_libraries()
 
   profile('compile', nil, function() wrapper:compile() end)()
 

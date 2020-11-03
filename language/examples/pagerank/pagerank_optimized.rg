@@ -118,7 +118,7 @@ do
     print("Error: failed to compile " .. legion_interop_cc)
     assert(false)
   end
-  terralib.linklibrary(legion_interop_so)
+  regentlib.linklibrary(legion_interop_so)
   clegion_interop =
     terralib.includec("legion_interop.h", {"-I", root_dir, "-I", runtime_dir,
                                            "-I", mapper_dir, "-I", legion_dir,

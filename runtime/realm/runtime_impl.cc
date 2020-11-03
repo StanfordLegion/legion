@@ -552,7 +552,7 @@ namespace Realm {
     , sysmem_size(512 << 20), stack_size(2 << 20)
     , pin_util_procs(false)
     , cpu_bgwork_timeslice(0)
-    , util_bgwork_timeslice(100 /*microseconds*/)
+    , util_bgwork_timeslice(0)
   {}
 
   CoreModule::~CoreModule(void)

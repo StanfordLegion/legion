@@ -84,7 +84,7 @@ namespace Realm {
   inline T atomic<T>::load_fenced(void) const
   {
 #ifdef REALM_USE_STD_ATOMIC
-    std::atomic_thread_fence(std::memory_order_acq_rel);
+    std::atomic_thread_fence(std::memory_order_seq_cst);
     return value.load(std::memory_order_acquire);
 #else
     __sync_synchronize();  // full memory fence is all we've got

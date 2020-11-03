@@ -55,14 +55,32 @@ end
 -- ## Legion Bindings
 -- #################
 
+do
+local linked_libraries = terralib.newlist()
+
+function base.linklibrary(library_name)
+  if base.config["offline"] then
+    linked_libraries:insert(library_name)
+  else
+    terralib.linklibrary(library_name)
+  end
+end
+
+function base.load_all_libraries()
+  assert(data.is_luajit())
+  linked_libraries:map(function(library)
+    terralib.linklibrary(library)
+  end)
+end
+
 if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
-  base.binding_library = "libregent.dylib"
+  base.linklibrary("libregent.dylib")
 else
-  base.binding_library = "libregent.so"
+  base.linklibrary("libregent.so")
 end
-if data.is_luajit() then
-  terralib.linklibrary(base.binding_library)
+
 end
+
 local c = terralib.includecstring([[
 #include "legion.h"
 #include "regent.h"
@@ -1082,6 +1100,9 @@ function base.variant:get_untyped_ast()
 end
 
 function base.variant:compile()
+  if base.config["offline"] then
+    error("Manual compile requests for individual task variants are prohibited in the offline mode.")
+  end
   self.task:complete()
   return self:get_definition():compile()
 end

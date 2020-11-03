@@ -1940,6 +1940,8 @@ namespace Legion {
       // Reset the nonreplayable count when a replayable template satisfies
       // the precondition
       nonreplayable_count = 0;
+      // Also reset the new template count as we found a replay
+      new_template_count = 0;
       current_template = templates[index]; 
     }
 

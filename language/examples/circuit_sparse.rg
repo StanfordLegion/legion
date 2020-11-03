@@ -71,7 +71,7 @@ do
     print("Error: failed to compile " .. mapper_cc)
     assert(false)
   end
-  terralib.linklibrary(mapper_so)
+  regentlib.linklibrary(mapper_so)
   cmapper = terralib.includec("circuit_mapper.h", include_dirs)
   cconfig = terralib.includec("circuit_config.h", include_dirs)
 end
