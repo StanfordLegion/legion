@@ -51,7 +51,7 @@ legion_cxx_tests = [
     ['tutorial/06_privileges/privileges', []],
     ['tutorial/07_partitioning/partitioning', []],
     ['tutorial/08_multiple_partitions/multiple_partitions', []],
-    ['tutorial/09_custom_mapper/custom_mapper', []], 
+    ['tutorial/09_custom_mapper/custom_mapper', []],
 
     # Examples
     ['examples/circuit/circuit', []],
@@ -95,6 +95,9 @@ if platform.system() != 'Darwin':
 legion_network_cxx_tests = [
     # Examples
     ['examples/mpi_interop/mpi_interop', []],
+
+    # Tests
+    ['test/bug954/bug954', ['-ll:rsize', '1024']],
 ]
 
 legion_openmp_cxx_tests = [
