@@ -10544,6 +10544,16 @@ namespace Legion {
           collective_mapping->get_children(owner_space, local_space, children);
 #ifdef DEBUG_LEGION
           assert(!children.empty());
+          bool found = false;
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+          {
+            if (*it != source)
+              continue;
+            found = true;
+            break;
+          }
+          assert(found);
 #endif
           remaining_rect_notifications = children.size();
           Serializer rez;
@@ -10554,10 +10564,27 @@ namespace Legion {
           for (std::vector<AddressSpaceID>::const_iterator it = 
                 children.begin(); it != children.end(); it++)
             if ((*it) != source)
-              context->runtime->send_index_partition_shard_rects_request(*it, 
+              context->runtime->send_index_partition_shard_rects_request(*it,
                                                                          rez);
           initialize_shard_rects();
         }
+#ifdef DEBUG_LEGION
+        else
+        {
+          collective_mapping->get_children(owner_space, local_space, children);
+          assert(!children.empty());
+          bool found = false;
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+          {
+            if (*it != source)
+              continue;
+            found = true;
+            break;
+          }
+          assert(found);
+        }
+#endif
         unpack_shard_rects(derez);
 #ifdef DEBUG_LEGION
         assert(remaining_rect_notifications > 0);
@@ -10571,13 +10598,8 @@ namespace Legion {
 #endif
             Runtime::trigger_event(shard_rects_ready);
             if (children.empty())
-            {
               collective_mapping->get_children(owner_space, 
                                                local_space, children);
-#ifdef DEBUG_LEGION
-              assert(!children.empty());
-#endif
-            }
             // We've got all the data now, so we can broadcast it back out
             Serializer rez;
             {

@@ -7379,7 +7379,7 @@ namespace Legion {
       assert(origin_index < unique_sorted_spaces.size());
 #endif
       const unsigned offset = convert_to_offset(local_index, origin_index);
-      const unsigned index = convert_to_index(offset / radix, origin_index);
+      const unsigned index = convert_to_index((offset-1) / radix, origin_index);
       return unique_sorted_spaces[index];
     }
 
