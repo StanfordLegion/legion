@@ -485,7 +485,10 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, ti
 
 def run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     build_dir = os.path.join(tmp_dir, 'build')
-    args = ['ctest', '-j', str(thread_count), '--output-on-failure']
+    args = ['ctest', '--output-on-failure']
+    # do not run tests in parallel if they use GPUs - might not all fit
+    if env['USE_CUDA'] != '1':
+        args.extend(['-j', str(thread_count)])
     if timelimit:
         args.extend(['--timeout', str(timelimit)])
     cmd(args,
