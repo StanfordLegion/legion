@@ -103,13 +103,9 @@ if platform.system() != 'Darwin':
 legion_network_cxx_tests = [
     # Examples
     ['examples/mpi_interop/mpi_interop', []],
-<<<<<<< HEAD
     ['examples/mpi_with_ctrl_repl/mpi_with_ctrl_repl', []],
-=======
-
     # Tests
     ['test/bug954/bug954', ['-ll:rsize', '1024']],
->>>>>>> master
 ]
 
 legion_openmp_cxx_tests = [
