@@ -164,7 +164,9 @@ class Context(object):
 def _DomainPoint_unpickle(values):
     return DomainPoint(values)
 
+import numpy as np
 class DomainPoint(object):
+    # add __add__ method and other math methods
     __slots__ = [
         'handle',
         '_point', # cached properties
@@ -191,6 +193,48 @@ class DomainPoint(object):
             self.handle = ffi.new('legion_domain_point_t *', handle)
 
         self._point = None
+
+    def __add__(self, other):
+        return self.point + other
+    def __radd__(self, other):
+        # point = self.point()
+        # if other is None:
+        #     return self.point
+        # print("RADD ARGS : ", other, self.point)
+        return other + self.point
+
+    def __sub__(self, other):
+        point = self.point()
+        if other is None:
+            return point
+        return np.substract(point, other.asarray())
+    def __rsub__(self, other):
+        point = self.point()
+        if other is None:
+            return point
+        return np.substract(point, other.asarray())
+
+    def __mul__(self, other):
+        point = self.point()
+        if other is None:
+            return point
+        return np.multiply(other.asarray(), point)
+    def __rmul__(self, other):
+        point = self.point()
+        if other is None:
+            return point
+        return np.multiply(point, other.asarray())
+
+    def __div__(self, other):
+        point = self.point()
+        if other is None:
+            return point
+        return np.divide(other.asarray(), point)
+    def __rdiv__(self, other):
+        point = self.point()
+        if other is None:
+            return point
+        return np.divide(point, other.asarray())
 
     def __reduce__(self):
         return (_DomainPoint_unpickle,
@@ -2001,8 +2045,8 @@ class _TaskLauncher(object):
                         if isinstance(arg.index, (SymbolicLoopIndex, ConcreteLoopIndex)):
                             return True, 0
                         # P[f(i)] or P[f(ID)]
-                        if isinstance(arg.index, SymbolicCall) and isinstance(arg.index.function, ProjectionFunctor) and isinstance(arg.index.arg, (SymbolicLoopIndex, ConcreteLoopIndex)):
-                            return True, arg.index.function.proj_id
+                        if isinstance(arg.index, SymbolicCall) and isinstance(arg.index.func, ProjectionFunctor) and len(arg.index.args) == 1 and isinstance(arg.index.args[0], (SymbolicLoopIndex, ConcreteLoopIndex)):
+                            return True, arg.index.func.proj_id
                         # P[i + ...] or P[ID + ...]
                         if isinstance(arg.index, SymbolicExpr):
                             f = ProjectionFunctor(arg.index)
@@ -2332,14 +2376,12 @@ class SymbolicBinop(SymbolicExpr):
         return '%s %s %s' % (self.lhs, self.op, self.rhs)
 
     def get_sides(self):
-        return (self.lhs, self.rhs)
-
+        return (self.lhs, self.op, self.rhs)
     def __eq__(self, other):
         if type(other) is type(self):
             return self.get_sides() == other.get_sides()
         else:
             return False
-
     def __hash__(self):
         return hash(self.get_sides())
 
@@ -2392,6 +2434,15 @@ class SymbolicLoopIndex(SymbolicExpr):
         return self.name
     def __repr__(self):
         return self.name
+
+    def __eq__(self, other):
+        if type(other) is type(self):
+            return self.name == other.name
+        else:
+            return False
+    def __hash__(self):
+        return hash(self.name)
+
     def _legion_postprocess_task_argument(self, point):
         return point
     def codegen(self):
@@ -2411,23 +2462,43 @@ class ConcreteLoopIndex(SymbolicExpr):
         return str(self.value)
     def __repr__(self):
         return repr(self.value)
+
+    def __eq__(self, other):
+        if type(other) is type(self):
+            return self.value == other.value
+        else:
+            return False
+    def __hash__(self):
+        return hash(self.value)
+
     def _legion_preprocess_task_argument(self):
         return self.value
 
 _next_proj_functor_id = 100
 class ProjectionFunctor(object):
     __slots__ = ['expr', 'proj_id']
-    def __new__(cls, expr):
-        
-        if isinstance(expr, SymbolicIndexAccess) and isinstance(expr.index, SymbolicExpr) and expr.index in _proj_functor_cache.keys():
-            return _proj_functor_cache[expr.index]
-        return super(ProjectionFunctor, cls).__new__(cls)
+    def __new__(cls, expr, force = False):
+        if not isinstance(expr, SymbolicExpr):
+            raise Exception('ProjectionFunctor requires a symbolic expression as an argument')
+        if expr in _proj_functor_cache:
+            print("WAS IN CACHE : ", len(_proj_functor_cache))
+            return _proj_functor_cache[expr]
+        print("JUST ADDED TO CACHE : ", len(_proj_functor_cache))
+        assert not force
+        curr_val = super(ProjectionFunctor, cls).__new__(cls)
+        _proj_functor_cache[expr] = curr_val 
+        return curr_val
 
-    def __init__(self, expr):
+    def __init__(self, expr, force = False):
+        assert not force
         if not isinstance(expr, SymbolicExpr):
             raise Exception('ProjectionFunctor requires a symbolic expression as an argument')
         self.expr = expr
         self.compile_and_register()
+
+    def __reduce__(self):
+
+        return (ProjectionFunctor.__new__, (ProjectionFunctor, self.expr, True))
 
     def __call__(self, *args, **kwargs):
         return SymbolicCall(self, *args, **kwargs)
