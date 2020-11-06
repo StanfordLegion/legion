@@ -1847,8 +1847,9 @@ namespace Legion {
       // TODO: support collective managers
       if (other->is_collective_manager())
         return false;
-      IndividualManager *manager = other->as_individual_manager(); 
-      return memory_manager->is_visible_memory(manager->memory_manager->memory);
+      const Processor gpu = memory_manager->get_local_gpu();
+      IndividualManager *manager = other->as_individual_manager();
+      return runtime->is_visible_memory(gpu, manager->memory_manager->memory);
     }
     
     //--------------------------------------------------------------------------
