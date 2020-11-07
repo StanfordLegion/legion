@@ -878,14 +878,6 @@ namespace Realm {
                || (kind == XFER_REMOTE_WRITE)
                || (kind == XFER_MEM_CPY);
       }
-      void print_request_info(Request* req)
-      {
-        printf("request(%dD): src_off(%zd) dst_off(%zd) src_str(%zd)"
-               " dst_str(%zd) nbytes(%zu) nlines(%zu)\n",
-               req->dim + 1, (ssize_t)req->src_off, (ssize_t)req->dst_off,
-               (ssize_t)req->src_str, (ssize_t)req->dst_str,
-               req->nbytes, req->nlines);
-      }
 
   size_t XferDes::update_control_info(ReadSequenceCache *rseqcache)
   {
