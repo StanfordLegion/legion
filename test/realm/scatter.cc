@@ -5,11 +5,9 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
-#include <csignal>
 #include <cmath>
 
-#include <time.h>
-#include <unistd.h>
+#include "osdep.h"
 
 using namespace Realm;
 
@@ -314,7 +312,13 @@ static Processor::TaskFuncID lookup_task_id()
     return it->second;
 
   Processor::TaskFuncID id = next_func_id++;
-  Event e = Processor::register_task_by_kind(Processor::LOC_PROC, true /*global*/,
+  Event e = Processor::register_task_by_kind(Processor::LOC_PROC,
+#ifdef _MSC_VER
+    // no portable task registration for windows yet
+                                             false /*!global*/,
+#else
+                                             true /*global*/,
+#endif
 					     id,
 					     CodeDescriptor(&T::task_body),
 					     ProfilingRequestSet());

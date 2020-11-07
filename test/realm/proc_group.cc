@@ -2,7 +2,8 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
-#include <unistd.h>
+
+#include "osdep.h"
 
 #include <time.h>
 

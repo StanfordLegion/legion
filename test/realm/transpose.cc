@@ -8,7 +8,8 @@
 #include <cmath>
 
 #include <time.h>
-#include <unistd.h>
+
+#include "osdep.h"
 
 using namespace Realm;
 
@@ -115,7 +116,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       ++it) {
     // src mem
     {
-      InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout(is_pad, ilc, it->dim_order);
+      InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N,FT>(is_pad, ilc, it->dim_order);
       RegionInstance s_inst;
       Event e = RegionInstance::create_instance(s_inst, src_mem, ilg,
 						ProfilingRequestSet());
@@ -131,7 +132,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
 
     // dst mem
     {
-      InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout(is, ilc, it->dim_order);
+      InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N,FT>(is, ilc, it->dim_order);
       RegionInstance d_inst;
       Event e = RegionInstance::create_instance(d_inst, dst_mem, ilg,
 						ProfilingRequestSet());

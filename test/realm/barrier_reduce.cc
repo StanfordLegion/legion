@@ -2,10 +2,9 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
-#include <unistd.h>
-#include <csignal>
-
 #include <time.h>
+
+#include "osdep.h"
 
 #include "realm.h"
 

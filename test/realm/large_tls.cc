@@ -18,7 +18,7 @@
 #include <realm.h>
 #include <realm/cmdline.h>
 
-#include <unistd.h>
+#include "osdep.h"
 
 using namespace Realm;
 
@@ -33,7 +33,7 @@ struct LargeStruct {
   char data[256000];
 };
 
-__thread LargeStruct large_tls_var;
+REALM_THREAD_LOCAL LargeStruct large_tls_var;
 
 void top_level_task(const void *args, size_t arglen,
 		    const void *userdata, size_t userlen, Processor p)
@@ -42,7 +42,9 @@ void top_level_task(const void *args, size_t arglen,
 
   log_app.print() << "task stack top: " << (void *)&stack_var;
   log_app.print() << "task tls base: " << (void *)(large_tls_var.data);
+#ifndef _MSC_VER
   log_app.print() << "pthread_stack_min: " << size_t(PTHREAD_STACK_MIN);
+#endif
 
   log_app.info() << "completed successfully";
   

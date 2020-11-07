@@ -40,7 +40,7 @@ int main(int argc, const char *argv[])
   // event
   {
     ID lo = ID::make_event(0, 0, 0);
-    ID hi = ID::make_event(-1U, -1U, -1U);
+    ID hi = ID::make_event(~0U, ~0U, ~0U);
     assert(ranges.count(lo.id) == 0);
     ranges[lo.id] = hi.id;
     names[lo.id] = "event";
@@ -51,7 +51,7 @@ int main(int argc, const char *argv[])
   // barrier
   {
     ID lo = ID::make_barrier(0, 0, 0);
-    ID hi = ID::make_barrier(-1U, -1U, -1U);
+    ID hi = ID::make_barrier(~0U, ~0U, ~0U);
     assert(ranges.count(lo.id) == 0);
     ranges[lo.id] = hi.id;
     names[lo.id] = "barrier";
@@ -67,7 +67,7 @@ int main(int argc, const char *argv[])
   // reservation
   {
     ID lo = ID::make_reservation(0, 0);
-    ID hi = ID::make_reservation(-1U, -1U);
+    ID hi = ID::make_reservation(~0U, ~0U);
     assert(ranges.count(lo.id) == 0);
     ranges[lo.id] = hi.id;
     names[lo.id] = "reservation";
@@ -78,7 +78,7 @@ int main(int argc, const char *argv[])
   // memory
   {
     ID lo = ID::make_memory(0, 0);
-    ID hi = ID::make_memory(-1U, -1U);
+    ID hi = ID::make_memory(~0U, ~0U);
     assert(ranges.count(lo.id) == 0);
     ranges[lo.id] = hi.id;
     names[lo.id] = "memory";
@@ -89,7 +89,7 @@ int main(int argc, const char *argv[])
   // ib_memory
   {
     ID lo = ID::make_ib_memory(0, 0);
-    ID hi = ID::make_ib_memory(-1U, -1U);
+    ID hi = ID::make_ib_memory(~0U, ~0U);
     assert(ranges.count(lo.id) == 0);
     ranges[lo.id] = hi.id;
     names[lo.id] = "ib_memory";
@@ -100,7 +100,7 @@ int main(int argc, const char *argv[])
   // instance
   {
     ID lo = ID::make_instance(0, 0, 0, 0);
-    ID hi = ID::make_instance(-1U, -1U, -1U, -1U);
+    ID hi = ID::make_instance(~0U, ~0U, ~0U, ~0U);
     assert(ranges.count(lo.id) == 0);
     ranges[lo.id] = hi.id;
     names[lo.id] = "instance";
@@ -111,7 +111,7 @@ int main(int argc, const char *argv[])
   // processor
   {
     ID lo = ID::make_processor(0, 0);
-    ID hi = ID::make_processor(-1U, -1U);
+    ID hi = ID::make_processor(~0U, ~0U);
     assert(ranges.count(lo.id) == 0);
     ranges[lo.id] = hi.id;
     names[lo.id] = "processor";
@@ -122,7 +122,7 @@ int main(int argc, const char *argv[])
   // procgroup
   {
     ID lo = ID::make_procgroup(0, 0, 0);
-    ID hi = ID::make_procgroup(-1U, -1U, -1U);
+    ID hi = ID::make_procgroup(~0U, ~0U, ~0U);
     assert(ranges.count(lo.id) == 0);
     ranges[lo.id] = hi.id;
     names[lo.id] = "procgroup";
@@ -133,7 +133,7 @@ int main(int argc, const char *argv[])
   // sparsity
   {
     ID lo = ID::make_sparsity(0, 0, 0);
-    ID hi = ID::make_sparsity(-1U, -1U, -1U);
+    ID hi = ID::make_sparsity(~0U, ~0U, ~0U);
     assert(ranges.count(lo.id) == 0);
     ranges[lo.id] = hi.id;
     names[lo.id] = "sparsity";
@@ -144,7 +144,7 @@ int main(int argc, const char *argv[])
   // compqueue
   {
     ID lo = ID::make_compqueue(0, 0);
-    ID hi = ID::make_compqueue(-1U, -1U);
+    ID hi = ID::make_compqueue(~0U, ~0U);
     assert(ranges.count(lo.id) == 0);
     ranges[lo.id] = hi.id;
     names[lo.id] = "compqueue";
@@ -155,7 +155,7 @@ int main(int argc, const char *argv[])
   // subgraph
   {
     ID lo = ID::make_subgraph(0, 0, 0);
-    ID hi = ID::make_subgraph(-1U, -1U, -1U);
+    ID hi = ID::make_subgraph(~0U, ~0U, ~0U);
     assert(ranges.count(lo.id) == 0);
     ranges[lo.id] = hi.id;
     names[lo.id] = "subgraph";
