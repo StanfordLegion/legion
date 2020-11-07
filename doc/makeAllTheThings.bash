@@ -35,7 +35,7 @@ mkdir -p ${PUBLISH_DIR}/messages
 BLOB=`git rev-parse HEAD`
 
 ( cd ${LG_RT_DIR} ; \
-	find . -name \*.cc | python "${TOOLS_DIR}/collate_messages.py" \
+	find . -name \*.cc | python3 "${TOOLS_DIR}/collate_messages.py" \
 	--prefix="https://github.com/StanfordLegion/legion/blob/${BLOB}/runtime" \
 	--strip=0 \
   --output_dir="${MESSAGES_DIR}" \

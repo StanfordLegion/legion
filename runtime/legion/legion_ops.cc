@@ -17597,10 +17597,9 @@ namespace Legion {
                                                    requirement, 
                                                    version_info,
                                                    preconditions);
-      // Add a valid reference to effective to the instances
-      // to act as an acquire to keep them valid through the end
-      // of mapping them, we'll release the valid references when
-      // we are done mapping
+      // Add a valid reference to the instances to act as an acquire to keep
+      // them valid through the end of mapping them, we'll release the valid
+      // references when we are done mapping
       InstanceSet references;
       region.impl->get_references(references);
 #ifdef DEBUG_LEGION
@@ -17695,10 +17694,7 @@ namespace Legion {
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
-        complete_mapping();
-      // We can remove the acquire reference that we added after we're mapped
-      if (manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
-        delete manager;
+        complete_mapping(); 
       request_early_complete(detach_event);
       complete_execution(Runtime::protect_event(detach_event));
     }
@@ -17718,6 +17714,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       result.impl->set_result(NULL, 0, true/*own*/);
+      InstanceSet references;
+      region.impl->get_references(references);
+#ifdef DEBUG_LEGION
+      assert(references.size() == 1);
+#endif
+      const InstanceRef &reference = references[0];
+      PhysicalManager *manager = reference.get_instance_manager();
+      // We can remove the acquire reference that we added after we're mapped
+      if (manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
+        delete manager;
       complete_operation();
     }
 

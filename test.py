@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Copyright 2020 Stanford University
 #
@@ -341,7 +341,7 @@ def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir])
     # TODO; Merge deppart branch into master after this makes it to stable Legion branch
     cmd(['git', 'checkout', 'deppart'], cwd=fuzz_dir)
-    cmd(['python', 'main.py'], env=env, cwd=fuzz_dir)
+    cmd(['python3', 'main.py'], env=env, cwd=fuzz_dir)
 
 def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     test_dir = os.path.join(root_dir, 'test/realm')
