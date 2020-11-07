@@ -912,7 +912,21 @@ namespace Legion {
       // Tell our parent context that we are committed
       // Do this before actually committing to avoid race conditions
       if (track_parent)
+      {
+        // Do a check here to make sure the completion event has triggered
+        // before we record that this operation is commited. This is crucial
+        // to ensuring that fence operations are working correctly in the
+        // parent context. If not triggered, then defer this until it does.
+        bool do_not_care;
+        if (!completion_event.has_triggered_faultaware(do_not_care))
+        {
+          DeferredCommitArgs args(this, do_deactivate);
+          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
+              Runtime::protect_event(completion_event));
+          return;
+        }
         parent_ctx->register_child_commit(this);
+      }
       // Mark that we are committed 
       {
         AutoLock o_lock(op_lock);
