@@ -979,6 +979,8 @@ namespace Legion {
       void add_to_local_ready_queue(Operation *op, LgPriority priority,
                                     RtEvent wait_on);
     public:
+      inline bool is_visible_memory(Memory memory) const
+        { return (visible_memories.find(memory) != visible_memories.end()); }
       inline void find_visible_memories(std::set<Memory> &visible) const
         { visible = visible_memories; }
     protected:
@@ -3603,6 +3605,7 @@ namespace Legion {
                                        bool can_fail = false);
     public:
       bool is_local(Processor proc) const;
+      bool is_visible_memory(Processor proc, Memory mem);
       void find_visible_memories(Processor proc, std::set<Memory> &visible);
     public:
       IndexSpaceID       get_unique_index_space_id(void);
