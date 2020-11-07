@@ -47,14 +47,14 @@ namespace Realm {
   //
   // class IntrusiveList<T, LINK, LT>
 
-  template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   inline IntrusiveList<T, LINK, LT>::IntrusiveList(void)
   {
     head.next = 0;
     lastlink = &head;
   }
 
-  template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   inline IntrusiveList<T, LINK, LT>::~IntrusiveList(void)
   {
 #ifdef DEBUG_REALM_LISTS
@@ -66,7 +66,7 @@ namespace Realm {
 
   // "copying" a list is only allowed if both lists are empty (this is most
   //  useful when creating lists inside of containers)
-  template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   inline IntrusiveList<T, LINK, LT>::IntrusiveList(const IntrusiveList<T, LINK, LT>& copy_from)
   {
     assert(copy_from.empty());
@@ -74,7 +74,7 @@ namespace Realm {
     lastlink = &head;
   }
 
-  template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   inline IntrusiveList<T, LINK, LT>& IntrusiveList<T, LINK, LT>::operator=(const IntrusiveList<T, LINK, LT>& copy_from)
   {
     assert(empty());
@@ -82,7 +82,7 @@ namespace Realm {
     return *this;
   }
 
-  template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   template <typename LT2>
   inline void IntrusiveList<T, LINK, LT>::swap(IntrusiveList<T, LINK, LT2>& swap_with)
   {
@@ -96,13 +96,13 @@ namespace Realm {
     if(!swap_with.head.next) swap_with.lastlink = &swap_with.head;
 #ifdef DEBUG_REALM_LISTS
     // fix current_list references
-    for(T *pos = head.next; pos; pos = (pos->*LINK).next) {
-      assert((pos->*LINK).current_list == &swap_with);
-      (pos->*LINK).current_list = this;
+    for(T *pos = head.next; pos; pos = REALM_PMTA_DEREF(pos,LINK).next) {
+      assert(REALM_PMTA_DEREF(pos,LINK).current_list == &swap_with);
+      REALM_PMTA_DEREF(pos,LINK).current_list = this;
     }
-    for(T *pos = swap_with.head.next; pos; pos = (pos->*LINK).next) {
-      assert((pos->*LINK).current_list == this);
-      (pos->*LINK).current_list = &swap_with;
+    for(T *pos = swap_with.head.next; pos; pos = REALM_PMTA_DEREF(pos,LINK).next) {
+      assert(REALM_PMTA_DEREF(pos,LINK).current_list == this);
+      REALM_PMTA_DEREF(pos,LINK).current_list = &swap_with;
     }
 #endif
     swap_with.lock.unlock();
@@ -110,16 +110,16 @@ namespace Realm {
   }
 
   // sucks the contents of 'take_from' into the end of the current list
-  template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   template <typename LT2>
   inline void IntrusiveList<T, LINK, LT>::absorb_append(IntrusiveList<T, LINK, LT2>& take_from)
   {
     lock.lock();
     take_from.lock.lock();
 #ifdef DEBUG_REALM_LISTS
-    for(T *pos = take_from.head.next; pos; pos = (pos->*LINK).next) {
-      assert((pos->*LINK).current_list == &take_from);
-      (pos->*LINK).current_list = this;
+    for(T *pos = take_from.head.next; pos; pos = REALM_PMTA_DEREF(pos,LINK).next) {
+      assert(REALM_PMTA_DEREF(pos,LINK).current_list == &take_from);
+      REALM_PMTA_DEREF(pos,LINK).current_list = this;
     }
 #endif
     if(take_from.head.next != 0) {
@@ -132,7 +132,7 @@ namespace Realm {
     lock.unlock();
   }
 
-  template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   inline bool IntrusiveList<T, LINK, LT>::empty(void) const
   {
 #ifndef TSAN_ENABLED
@@ -147,21 +147,21 @@ namespace Realm {
 #endif
   }
 
-  template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   inline void IntrusiveList<T, LINK, LT>::push_back(T *new_entry)
   {
     lock.lock();
 #ifdef DEBUG_REALM_LISTS
-    assert((new_entry->*LINK).current_list == 0);
-    (new_entry->*LINK).current_list = this;
-    assert((new_entry->*LINK).next == 0);
+    assert(REALM_PMTA_DEREF(new_entry,LINK).current_list == 0);
+    REALM_PMTA_DEREF(new_entry,LINK).current_list = this;
+    assert(REALM_PMTA_DEREF(new_entry,LINK).next == 0);
 #endif
     lastlink->next = new_entry;
-    lastlink = &(new_entry->*LINK);
+    lastlink = &REALM_PMTA_DEREF(new_entry,LINK);
     lock.unlock();
   }
 
-  template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   inline T *IntrusiveList<T, LINK, LT>::pop_front(void)
   {
     T *popped = 0;
@@ -169,18 +169,18 @@ namespace Realm {
     if(head.next) {
       popped = head.next;
 #ifdef DEBUG_REALM_LISTS
-      assert((popped->*LINK).current_list == this);
-      (popped->*LINK).current_list = 0;
+      assert(REALM_PMTA_DEREF(popped,LINK).current_list == this);
+      REALM_PMTA_DEREF(popped,LINK).current_list = 0;
 #endif
-      head.next = (popped->*LINK).next;
-      (popped->*LINK).next = 0;
+      head.next = REALM_PMTA_DEREF(popped,LINK).next;
+      REALM_PMTA_DEREF(popped,LINK).next = 0;
       if(!head.next) lastlink = &head;
     }
     lock.unlock();
     return popped;
   }
 
-  template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   inline size_t IntrusiveList<T, LINK, LT>::erase(T *entry)
   {
     size_t count = 0;
@@ -190,15 +190,15 @@ namespace Realm {
       if(pos->next == entry) {
 	// remove this from the list
 	count++;
-	T *nextnext = ((pos->next)->*LINK).next;
+	T *nextnext = REALM_PMTA_DEREF(pos->next,LINK).next;
 #ifdef DEBUG_REALM_LISTS
-	((pos->next)->*LINK).next = 0;
-	((pos->next)->*LINK).current_list = 0;
+	REALM_PMTA_DEREF(pos->next,LINK).next = 0;
+	REALM_PMTA_DEREF(pos->next,LINK).current_list = 0;
 #endif
 	pos->next = nextnext;
       } else {
 	// move to next entry
-	pos = &((pos->next)->*LINK);
+	pos = &REALM_PMTA_DEREF(pos->next,LINK);
       }
     }
     // make sure the lastlink is still right
@@ -238,12 +238,12 @@ namespace Realm {
   //
   // class IntrusivePriorityList<T, PT, LINK, PRI, LT>
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   IntrusivePriorityList<T, PT, LINK, PRI, LT>::IntrusivePriorityList(void)
     : head(0)
   {}
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   IntrusivePriorityList<T, PT, LINK, PRI, LT>::~IntrusivePriorityList(void)
   {
 #ifdef DEBUG_REALM_LISTS
@@ -255,14 +255,14 @@ namespace Realm {
 
   // "copying" a list is only allowed if both lists are empty (this is most
   //  useful when creating lists inside of containers)
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   IntrusivePriorityList<T, PT, LINK, PRI, LT>::IntrusivePriorityList(const IntrusivePriorityList<T, PT, LINK, PRI, LT>& copy_from)
     : head(0)
   {
     assert(copy_from.head == 0);
   }
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   IntrusivePriorityList<T, PT, LINK, PRI, LT>& IntrusivePriorityList<T, PT, LINK, PRI, LT>::operator=(const IntrusivePriorityList<T, PT, LINK, PRI, LT>& copy_from)
   {
     assert(head == 0);
@@ -271,23 +271,23 @@ namespace Realm {
   } 
 
 #ifdef DEBUG_REALM_LISTS
-  template <typename T, IntrusivePriorityListLink<T> T::*LINK>
+  template <typename T, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK)>
   static void fixup_current_list_pointers(T *head, void *from, void *to)
   {
     T *nextp = head;
     while(nextp != 0) {
       T *cur = nextp;
-      nextp = (nextp->*LINK).next_lower_pri;
+      nextp = REALM_PMTA_DEREF(nextp,LINK).next_lower_pri;
       while(cur != 0) {
-	assert((cur->*LINK).current_list == from);
-	(cur->*LINK).current_list = to;
-	cur = (cur->*LINK).next_within_pri;
+	assert(REALM_PMTA_DEREF(cur,LINK).current_list == from);
+	REALM_PMTA_DEREF(cur,LINK).current_list = to;
+	cur = REALM_PMTA_DEREF(cur,LINK).next_within_pri;
       }
     }
   }
 #endif
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   template <typename LT2>
   void IntrusivePriorityList<T, PT, LINK, PRI, LT>::swap(IntrusivePriorityList<T, PT, LINK, PRI, LT2>& swap_with)
   {
@@ -304,7 +304,7 @@ namespace Realm {
   }
 
     // sucks the contents of 'take_from' into the end of the current list
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   template <typename LT2>
   void IntrusivePriorityList<T, PT, LINK, PRI, LT>::absorb_append(IntrusivePriorityList<T, PT, LINK, PRI, LT2>& take_from)
   {
@@ -321,8 +321,8 @@ namespace Realm {
       // have something to merge
 
       // first, skip over any tiers that are higher priority in destination
-      while(*curdst && ((*curdst)->*PRI > cursrc->*PRI))
-	curdst = &(((*curdst)->*LINK).next_lower_pri);
+      while(*curdst && (REALM_PMTA_DEREF(*curdst,PRI) > REALM_PMTA_DEREF(cursrc,PRI)))
+	curdst = &(REALM_PMTA_DEREF(*curdst,LINK).next_lower_pri);
 
       // if no equal/lower priority stuff left in destination, absorb rest
       //  of entries in one go
@@ -331,24 +331,24 @@ namespace Realm {
 	break;
       }
 
-      if((*curdst)->*PRI == cursrc->*PRI) {
+      if(REALM_PMTA_DEREF(*curdst,PRI) == REALM_PMTA_DEREF(cursrc,PRI)) {
 	// equal priority - merge tiers
-	T *nextsrc = (cursrc->*LINK).next_lower_pri;
-	*(((*curdst)->*LINK).lastlink_within_pri) = cursrc;
-	((*curdst)->*LINK).lastlink_within_pri = (cursrc->*LINK).lastlink_within_pri;
+	T *nextsrc = REALM_PMTA_DEREF(cursrc,LINK).next_lower_pri;
+	*(REALM_PMTA_DEREF(*curdst,LINK).lastlink_within_pri) = cursrc;
+	REALM_PMTA_DEREF(*curdst,LINK).lastlink_within_pri = REALM_PMTA_DEREF(cursrc,LINK).lastlink_within_pri;
 #ifdef DEBUG_REALM_LISTS
 	// clean up now-unused pointers to make debugging easier
-	(cursrc->*LINK).next_lower_pri = 0;
-	(cursrc->*LINK).lastlink_within_pri = 0;
+	REALM_PMTA_DEREF(cursrc,LINK).next_lower_pri = 0;
+	REALM_PMTA_DEREF(cursrc,LINK).lastlink_within_pri = 0;
 #endif
-	curdst = &(((*curdst)->*LINK).next_lower_pri);
+	curdst = &(REALM_PMTA_DEREF(*curdst,LINK).next_lower_pri);
 	cursrc = nextsrc;
       } else {
 	// new priority level for destination - insert tier as is
-	T *nextsrc = (cursrc->*LINK).next_lower_pri;
-	(cursrc->*LINK).next_lower_pri = *curdst;
+	T *nextsrc = REALM_PMTA_DEREF(cursrc,LINK).next_lower_pri;
+	REALM_PMTA_DEREF(cursrc,LINK).next_lower_pri = *curdst;
 	*curdst = cursrc;
-	curdst = &((cursrc->*LINK).next_lower_pri);
+	curdst = &(REALM_PMTA_DEREF(cursrc,LINK).next_lower_pri);
 	cursrc = nextsrc;
       }
     }
@@ -362,88 +362,88 @@ namespace Realm {
   }
 
   // places new item at front or back of its priority level
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   void IntrusivePriorityList<T, PT, LINK, PRI, LT>::push_back(T *new_entry)
   {
     lock.lock();
     lock.unlock();
 #ifdef DEBUG_REALM_LISTS
     // entry being added should be unentangled
-    assert((new_entry->*LINK).next_within_pri == 0);
-    assert((new_entry->*LINK).lastlink_within_pri == 0);
-    assert((new_entry->*LINK).next_lower_pri == 0);
+    assert(REALM_PMTA_DEREF(new_entry,LINK).next_within_pri == 0);
+    assert(REALM_PMTA_DEREF(new_entry,LINK).lastlink_within_pri == 0);
+    assert(REALM_PMTA_DEREF(new_entry,LINK).next_lower_pri == 0);
     size_t exp_size = size() + 1;
 #endif
     // scan ahead to find right priority level to insert at
     T **curdst = &head;
-    while(*curdst && ((*curdst)->*PRI > new_entry->*PRI))
-      curdst = &(((*curdst)->*LINK).next_lower_pri);
+    while(*curdst && (REALM_PMTA_DEREF(*curdst,PRI) > REALM_PMTA_DEREF(new_entry,PRI)))
+      curdst = &(REALM_PMTA_DEREF(*curdst,LINK).next_lower_pri);
 
-    if(*curdst && ((*curdst)->*PRI == new_entry->*PRI)) {
+    if(*curdst && (REALM_PMTA_DEREF(*curdst,PRI) == REALM_PMTA_DEREF(new_entry,PRI))) {
       // insert at back of current tier
-      (new_entry->*LINK).next_within_pri = 0;
+      REALM_PMTA_DEREF(new_entry,LINK).next_within_pri = 0;
       // lastlink_with_pri and next_lower_pri are don't cares - we are not the first in our tier
-      *(((*curdst)->*LINK).lastlink_within_pri) = new_entry;
-      ((*curdst)->*LINK).lastlink_within_pri = &((new_entry->*LINK).next_within_pri);
+      *(REALM_PMTA_DEREF(*curdst,LINK).lastlink_within_pri) = new_entry;
+      REALM_PMTA_DEREF(*curdst,LINK).lastlink_within_pri = &(REALM_PMTA_DEREF(new_entry,LINK).next_within_pri);
     } else {
       // start new tier ahead of whatever's left (if anything)
-      (new_entry->*LINK).next_within_pri = 0;
-      (new_entry->*LINK).lastlink_within_pri = &((new_entry->*LINK).next_within_pri);
-      (new_entry->*LINK).next_lower_pri = *curdst;
+      REALM_PMTA_DEREF(new_entry,LINK).next_within_pri = 0;
+      REALM_PMTA_DEREF(new_entry,LINK).lastlink_within_pri = &(REALM_PMTA_DEREF(new_entry,LINK).next_within_pri);
+      REALM_PMTA_DEREF(new_entry,LINK).next_lower_pri = *curdst;
       *curdst = new_entry;
     }
 #ifdef DEBUG_REALM_LISTS
-    assert((new_entry->*LINK).current_list == 0);
-    (new_entry->*LINK).current_list = this;
+    assert(REALM_PMTA_DEREF(new_entry,LINK).current_list == 0);
+    REALM_PMTA_DEREF(new_entry,LINK).current_list = this;
     size_t act_size = size();
     assert(exp_size == act_size);
 #endif
   }
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   void IntrusivePriorityList<T, PT, LINK, PRI, LT>::push_front(T *new_entry)
   {
     lock.lock();
     lock.unlock();
 #ifdef DEBUG_REALM_LISTS
     // entry being added should be unentangled
-    assert((new_entry->*LINK).next_within_pri == 0);
-    assert((new_entry->*LINK).lastlink_within_pri == 0);
-    assert((new_entry->*LINK).next_lower_pri == 0);
+    assert(REALM_PMTA_DEREF(new_entry,LINK).next_within_pri == 0);
+    assert(REALM_PMTA_DEREF(new_entry,LINK).lastlink_within_pri == 0);
+    assert(REALM_PMTA_DEREF(new_entry,LINK).next_lower_pri == 0);
     size_t exp_size = size() + 1;
 #endif
     // scan ahead to find right priority level to insert at
     T **curdst = &head;
-    while(*curdst && ((*curdst)->*PRI > new_entry->*PRI))
-      curdst = &(((*curdst)->*LINK).next_lower_pri);
+    while(*curdst && (REALM_PMTA_DEREF(*curdst,PRI) > REALM_PMTA_DEREF(new_entry,PRI)))
+      curdst = &(REALM_PMTA_DEREF(*curdst,LINK).next_lower_pri);
 
-    if(*curdst && ((*curdst)->*PRI == new_entry->*PRI)) {
+    if(*curdst && (REALM_PMTA_DEREF(*curdst,PRI) == REALM_PMTA_DEREF(new_entry,PRI))) {
       // insert at front of current tier
-      (new_entry->*LINK).next_within_pri = *curdst;
-      (new_entry->*LINK).lastlink_within_pri = ((*curdst)->*LINK).lastlink_within_pri;
-      (new_entry->*LINK).next_lower_pri = ((*curdst)->*LINK).next_lower_pri;
+      REALM_PMTA_DEREF(new_entry,LINK).next_within_pri = *curdst;
+      REALM_PMTA_DEREF(new_entry,LINK).lastlink_within_pri = REALM_PMTA_DEREF(*curdst,LINK).lastlink_within_pri;
+      REALM_PMTA_DEREF(new_entry,LINK).next_lower_pri = REALM_PMTA_DEREF(*curdst,LINK).next_lower_pri;
 #ifdef DEBUG_REALM_LISTS
       // clean up now-unused pointers to make debugging easier
-      ((*curdst)->*LINK).lastlink_within_pri = 0;
-      ((*curdst)->*LINK).next_lower_pri = 0;
+      REALM_PMTA_DEREF(*curdst,LINK).lastlink_within_pri = 0;
+      REALM_PMTA_DEREF(*curdst,LINK).next_lower_pri = 0;
 #endif
       *curdst = new_entry;
     } else {
       // start new tier ahead of whatever's left (if anything)
-      (new_entry->*LINK).next_within_pri = 0;
-      (new_entry->*LINK).lastlink_within_pri = &((new_entry->*LINK).next_within_pri);
-      (new_entry->*LINK).next_lower_pri = *curdst;
+      REALM_PMTA_DEREF(new_entry,LINK).next_within_pri = 0;
+      REALM_PMTA_DEREF(new_entry,LINK).lastlink_within_pri = &(REALM_PMTA_DEREF(new_entry,LINK).next_within_pri);
+      REALM_PMTA_DEREF(new_entry,LINK).next_lower_pri = *curdst;
       *curdst = new_entry;
     }
 #ifdef DEBUG_REALM_LISTS
-    assert((new_entry->*LINK).current_list == 0);
-    (new_entry->*LINK).current_list = this;
+    assert(REALM_PMTA_DEREF(new_entry,LINK).current_list == 0);
+    REALM_PMTA_DEREF(new_entry,LINK).current_list = this;
     size_t act_size = size();
     assert(exp_size == act_size);
 #endif
   }
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   inline bool IntrusivePriorityList<T, PT, LINK, PRI, LT>::empty(void) const
   {
 #ifndef TSAN_ENABLED
@@ -458,25 +458,25 @@ namespace Realm {
 #endif
   }
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   inline bool IntrusivePriorityList<T, PT, LINK, PRI, LT>::empty(PT min_priority) const
   {
     // have to take lock here in order to test priority safely
     lock.lock();
-    bool found = (head != 0) && (head->*PRI >= min_priority);
+    bool found = (head != 0) && (REALM_PMTA_DEREF(head,PRI) >= min_priority);
     lock.unlock();
     return !found;
   }
 
   // this call isn't thread safe - the pointer returned may be accessed only
   //  if the caller can guarantee no concurrent pops have occurred
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   inline T *IntrusivePriorityList<T, PT, LINK, PRI, LT>::front(void) const
   {
     return head;
   }
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   T *IntrusivePriorityList<T, PT, LINK, PRI, LT>::pop_front(void)
   {
     lock.lock();
@@ -488,22 +488,22 @@ namespace Realm {
 #ifdef DEBUG_REALM_LISTS
       exp_size--;
 #endif
-      if((popped->*LINK).next_within_pri != 0) {
+      if(REALM_PMTA_DEREF(popped,LINK).next_within_pri != 0) {
 	// others in tier - next one becomes head
-        head = (popped->*LINK).next_within_pri;
-	(head->*LINK).lastlink_within_pri = (popped->*LINK).lastlink_within_pri;
-        (head->*LINK).next_lower_pri = (popped->*LINK).next_lower_pri;
+        head = REALM_PMTA_DEREF(popped,LINK).next_within_pri;
+	REALM_PMTA_DEREF(head,LINK).lastlink_within_pri = REALM_PMTA_DEREF(popped,LINK).lastlink_within_pri;
+        REALM_PMTA_DEREF(head,LINK).next_lower_pri = REALM_PMTA_DEREF(popped,LINK).next_lower_pri;
       } else {
 	// was only one in tier - point head at next priority tier
-        head = (popped->*LINK).next_lower_pri;
+        head = REALM_PMTA_DEREF(popped,LINK).next_lower_pri;
       }
 #ifdef DEBUG_REALM_LISTS
-      assert((popped->*LINK).current_list == this);
-      (popped->*LINK).current_list = 0;
+      assert(REALM_PMTA_DEREF(popped,LINK).current_list == this);
+      REALM_PMTA_DEREF(popped,LINK).current_list = 0;
       // clean up now-unused pointers to make debugging easier
-      (popped->*LINK).next_within_pri = 0;
-      (popped->*LINK).lastlink_within_pri = 0;
-      (popped->*LINK).next_lower_pri = 0;
+      REALM_PMTA_DEREF(popped,LINK).next_within_pri = 0;
+      REALM_PMTA_DEREF(popped,LINK).lastlink_within_pri = 0;
+      REALM_PMTA_DEREF(popped,LINK).next_lower_pri = 0;
 #endif
     }
 #ifdef DEBUG_REALM_LISTS
@@ -514,34 +514,34 @@ namespace Realm {
     return popped;
   }
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   T *IntrusivePriorityList<T, PT, LINK, PRI, LT>::pop_front(PT min_priority)
   {
     lock.lock();
 #ifdef DEBUG_REALM_LISTS
     size_t exp_size = size();
 #endif
-    T *popped = ((head && (head->*PRI >= min_priority)) ? head : 0);
+    T *popped = ((head && (REALM_PMTA_DEREF(head,PRI) >= min_priority)) ? head : 0);
     if(popped) {
 #ifdef DEBUG_REALM_LISTS
       exp_size--;
 #endif
-      if((popped->*LINK).next_within_pri != 0) {
+      if(REALM_PMTA_DEREF(popped,LINK).next_within_pri != 0) {
 	// others in tier - next one becomes head
-        head = (popped->*LINK).next_within_pri;
-	(head->*LINK).lastlink_within_pri = (popped->*LINK).lastlink_within_pri;
-        (head->*LINK).next_lower_pri = (popped->*LINK).next_lower_pri;
+        head = REALM_PMTA_DEREF(popped,LINK).next_within_pri;
+	REALM_PMTA_DEREF(head,LINK).lastlink_within_pri = REALM_PMTA_DEREF(popped,LINK).lastlink_within_pri;
+        REALM_PMTA_DEREF(head,LINK).next_lower_pri = REALM_PMTA_DEREF(popped,LINK).next_lower_pri;
       } else {
 	// was only one in tier - point head at next priority tier
-        head = (popped->*LINK).next_lower_pri;
+        head = REALM_PMTA_DEREF(popped,LINK).next_lower_pri;
       }
 #ifdef DEBUG_REALM_LISTS
-      assert((popped->*LINK).current_list == this);
-      (popped->*LINK).current_list = 0;
+      assert(REALM_PMTA_DEREF(popped,LINK).current_list == this);
+      REALM_PMTA_DEREF(popped,LINK).current_list = 0;
       // clean up now-unused pointers to make debugging easier
-      (popped->*LINK).next_within_pri = 0;
-      (popped->*LINK).lastlink_within_pri = 0;
-      (popped->*LINK).next_lower_pri = 0;
+      REALM_PMTA_DEREF(popped,LINK).next_within_pri = 0;
+      REALM_PMTA_DEREF(popped,LINK).lastlink_within_pri = 0;
+      REALM_PMTA_DEREF(popped,LINK).next_lower_pri = 0;
 #endif
     }
 #ifdef DEBUG_REALM_LISTS
@@ -553,7 +553,7 @@ namespace Realm {
   }
 
   // calls callback for each element in list
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   template <typename CALLABLE>
   inline void IntrusivePriorityList<T, PT, LINK, PRI, LT>::foreach(CALLABLE& cb)
   {
@@ -562,16 +562,16 @@ namespace Realm {
     while(cur) {
       cb(cur);
       T *cur2 = cur;
-      while((cur2->*LINK).next_within_pri != 0) {
-        cur2 = (cur2->*LINK).next_within_pri;
+      while(REALM_PMTA_DEREF(cur2,LINK).next_within_pri != 0) {
+        cur2 = REALM_PMTA_DEREF(cur2,LINK).next_within_pri;
 	cb(cur2);
       }
-      cur = (cur->*LINK).next_lower_pri;
+      cur = REALM_PMTA_DEREF(cur,LINK).next_lower_pri;
     }
     lock.unlock();
   }
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   size_t IntrusivePriorityList<T, PT, LINK, PRI, LT>::size(void) const
   {
     size_t count = 0;
@@ -580,39 +580,39 @@ namespace Realm {
     while(cur) {
       count++;
       const T *cur2 = cur;
-      while((cur2->*LINK).next_within_pri != 0) {
-        cur2 = (cur2->*LINK).next_within_pri;
+      while(REALM_PMTA_DEREF(cur2,LINK).next_within_pri != 0) {
+        cur2 = REALM_PMTA_DEREF(cur2,LINK).next_within_pri;
 #ifdef DEBUG_REALM_LISTS
-	assert(cur2->*PRI == cur->*PRI);
-	assert((cur2->*LINK).lastlink_within_pri == 0);
-	assert((cur2->*LINK).next_lower_pri == 0);
+	assert(REALM_PMTA_DEREF(cur2,PRI) == REALM_PMTA_DEREF(cur,PRI));
+	assert(REALM_PMTA_DEREF(cur2,LINK).lastlink_within_pri == 0);
+	assert(REALM_PMTA_DEREF(cur2,LINK).next_lower_pri == 0);
 #endif
 	count++;
       }
 #ifdef DEBUG_REALM_LISTS
-      assert((cur->*LINK).lastlink_within_pri == &((cur2->*LINK).next_within_pri));
+      assert(REALM_PMTA_DEREF(cur,LINK).lastlink_within_pri == &(REALM_PMTA_DEREF(cur2,LINK).next_within_pri));
 #endif
-      cur = (cur->*LINK).next_lower_pri;
+      cur = REALM_PMTA_DEREF(cur,LINK).next_lower_pri;
     }
     lock.unlock();
     return count;
   }
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   std::ostream& operator<<(std::ostream& os, const IntrusivePriorityList<T, PT, LINK, PRI, LT>& to_print)
   {
     to_print.lock.lock();
     os << "PriList(" << ((void *)&to_print) << ") {\n";
     const T *cur = to_print.head;
     while(cur) {
-      os << "  [" << (cur->*PRI) << "]: " << ((void *)cur);
-      const T *cur2 = (cur->*LINK).next_within_pri;
+      os << "  [" << (REALM_PMTA_DEREF(cur,PRI)) << "]: " << ((void *)cur);
+      const T *cur2 = REALM_PMTA_DEREF(cur,LINK).next_within_pri;
       while(cur2) {
 	os << ", " << ((void *)cur2);
-	cur2 = (cur2->*LINK).next_within_pri;
+	cur2 = REALM_PMTA_DEREF(cur2,LINK).next_within_pri;
       }
       os << "\n";
-      cur = (cur->*LINK).next_lower_pri;
+      cur = REALM_PMTA_DEREF(cur,LINK).next_lower_pri;
     }
     os << "}\n";
     to_print.lock.unlock();

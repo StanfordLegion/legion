@@ -16,6 +16,8 @@
 #ifndef LOWLEVEL_CHANNEL
 #define LOWLEVEL_CHANNEL
 
+#include "realm/realm_config.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -407,7 +409,9 @@ namespace Realm {
 
       // intrusive list for queued XDs in a channel
       IntrusivePriorityListLink<XferDes> xd_link;
-      typedef IntrusivePriorityList<XferDes, int, &XferDes::xd_link, &XferDes::priority, DummyLock> XferDesList;
+      REALM_PMTA_DEFN(XferDes,IntrusivePriorityListLink<XferDes>,xd_link);
+      REALM_PMTA_DEFN(XferDes,int,priority);
+      typedef IntrusivePriorityList<XferDes, int, REALM_PMTA_USE(XferDes,xd_link), REALM_PMTA_USE(XferDes,priority), DummyLock> XferDesList;
     protected:
       // this will be removed soon
       // queue that contains all available free requests
