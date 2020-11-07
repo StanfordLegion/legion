@@ -433,7 +433,7 @@ before_script:
     - free
     - |
       if [[ -z "$TEST_PYTHON_EXE" ]]; then
-        export TEST_PYTHON_EXE=`which python python3 | head -1`
+        export TEST_PYTHON_EXE=`which python3 python | head -1`
       fi
     - $TEST_PYTHON_EXE ./test.py
   retry:
@@ -455,7 +455,7 @@ before_script:
     - unset USE_DEFCHECK
     - |
       if [[ -z "$TEST_PYTHON_EXE" ]]; then
-        export TEST_PYTHON_EXE=`which python python3 | head -1`
+        export TEST_PYTHON_EXE=`which python3 python | head -1`
       fi
     - $TEST_PYTHON_EXE ./test.py --test=external --test=private
   retry:
