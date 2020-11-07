@@ -18,6 +18,26 @@
 #include "realm/network.h"
 #include "realm/cmdline.h"
 
+static void *aligned_malloc(size_t bytes, size_t alignment)
+{
+#ifdef REALM_ON_WINDOWS
+  return _aligned_malloc(bytes, alignment);
+#else
+  void *ptr = 0;
+  int ret = posix_memalign(&ptr, alignment, bytes);
+  return ((ret == 0) ? ptr : 0);
+#endif
+}
+
+static void aligned_free(void *ptr)
+{
+#ifdef REALM_ON_WINDOWS
+  _aligned_free(ptr);
+#else
+  free(ptr);
+#endif
+}
+
 namespace Realm {
 
   namespace Network {
@@ -142,11 +162,9 @@ namespace Realm {
 	it != segments.end();
 	++it) {
       if(((*it)->bytes > 0) && ((*it)->base == 0)) {
-	void *memptr;
-	int ret = posix_memalign(&memptr,
-				 std::max((*it)->alignment, sizeof(void *)),
-				 (*it)->bytes);
-	assert(ret == 0);
+        void *memptr = aligned_malloc((*it)->bytes,
+                                      std::max((*it)->alignment, sizeof(void *)));
+	assert(memptr != 0);
 	(*it)->base = memptr;
 	(*it)->add_rdma_info(this, &memptr, sizeof(void *));
       }
@@ -163,7 +181,7 @@ namespace Realm {
 	++it) {
       const ByteArray *rdma_info = (*it)->get_rdma_info(this);
       if(rdma_info) {
-	free((*it)->base);
+	aligned_free((*it)->base);
 	(*it)->base = 0;
       }
     }

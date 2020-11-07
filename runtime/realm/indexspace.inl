@@ -1056,10 +1056,10 @@ namespace Realm {
 
   template <int N, typename T>
   inline IndexSpaceIterator<N,T>::IndexSpaceIterator(const IndexSpace<N,T>& _space,
-						       const Rect<N,T>& _restrict)
+						       const Rect<N,T>& _restriction)
     : valid(false)
   {
-    reset(_space, _restrict);
+    reset(_space, _restriction);
   }
 
   template <int N, typename T>
@@ -1103,10 +1103,10 @@ namespace Realm {
 
   template <int N, typename T>
   inline void IndexSpaceIterator<N,T>::reset(const IndexSpace<N,T>& _space,
-					      const Rect<N,T>& _restrict)
+					      const Rect<N,T>& _restriction)
   {
     space = _space;
-    restriction = space.bounds.intersection(_restrict);
+    restriction = space.bounds.intersection(_restriction);
     if(restriction.empty()) {
       valid = false;
       return;

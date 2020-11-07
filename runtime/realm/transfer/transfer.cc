@@ -25,6 +25,11 @@
 #include "realm/hdf5/hdf5_access.h"
 #endif
 
+#ifdef REALM_ON_WINDOWS
+#include <basetsd.h>
+typedef SSIZE_T ssize_t;
+#endif
+
 namespace Realm {
 
   extern Logger log_dma;

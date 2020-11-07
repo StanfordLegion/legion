@@ -20,6 +20,47 @@
 #include <cstring>
 #include <cassert>
 
+#ifdef REALM_ON_WINDOWS
+#include <intrin.h>
+#endif
+
+static unsigned popcount(uint64_t v)
+{
+#ifdef REALM_ON_WINDOWS
+#ifdef _WIN64
+  return __popcnt64(v);
+#else
+  unsigned v_lo = v;
+  unsigned v_hi = v >> 32;
+  return __popcnt(v_lo) + __popcnt(v_hi);
+#endif
+#else
+  return __builtin_popcountll(v);
+#endif
+}
+
+static unsigned ctz(uint64_t v)
+{
+#ifdef REALM_ON_WINDOWS
+  unsigned long index;
+#ifdef _WIN64
+  if(_BitScanForward64(&index, v))
+    return index;
+#else
+  unsigned v_lo = v;
+  unsigned v_hi = v >> 32;
+  if(_BitScanForward(&index, v_lo))
+    return index;
+  else if(_BitScanForward(&index, v_hi))
+    return index + 32;
+#endif
+  else
+    return 0;
+#else
+  return __builtin_ctzll(v);
+#endif
+}
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
@@ -353,7 +394,7 @@ namespace Realm {
 	mask &= (bitmask_elem_t(2) << hi_ofs) - 1;
       mask &= ~bits[lo_idx];
       if(mask != 0) {
-	count += __builtin_popcountll(mask);
+	count += popcount(mask);
 	if(bitset_twolevel && (bits[lo_idx] == 0))
 	  l2_set(lo_idx);
 	bits[lo_idx] += mask;
@@ -364,7 +405,7 @@ namespace Realm {
 	bitmask_elem_t mask = (~bitmask_elem_t(0)) << lo_ofs;
 	mask &= ~bits[lo_idx];
 	if(mask != 0) {
-	  count += __builtin_popcountll(mask);
+	  count += popcount(mask);
 	  if(bitset_twolevel && (bits[lo_idx] == 0))
 	    l2_set(lo_idx);
 	  bits[lo_idx] += mask;
@@ -374,7 +415,7 @@ namespace Realm {
       for(size_t i = lo_idx + 1; i < hi_idx; i++) {
 	bitmask_elem_t mask = ~bits[i];
 	if(mask != 0) {
-	  count += __builtin_popcountll(mask);
+	  count += popcount(mask);
 	  if(bitset_twolevel && (bits[i] == 0))
 	    l2_set(i);
 	  bits[i] += mask;
@@ -385,7 +426,7 @@ namespace Realm {
 	bitmask_elem_t mask = (bitmask_elem_t(2) << hi_ofs) - 1;
 	mask &= ~bits[hi_idx];
 	if(mask != 0) {
-	  count += __builtin_popcountll(mask);
+	  count += popcount(mask);
 	  if(bitset_twolevel && (bits[hi_idx] == 0))
 	    l2_set(hi_idx);
 	  bits[hi_idx] += mask;
@@ -412,7 +453,7 @@ namespace Realm {
 	mask &= (bitmask_elem_t(2) << hi_ofs) - 1;
       mask &= bits[lo_idx];
       if(mask != 0) {
-	count += __builtin_popcountll(mask);
+	count += popcount(mask);
 	bits[lo_idx] -= mask;
 	if(bitset_twolevel && (bits[lo_idx] == 0))
 	  l2_clear(lo_idx);
@@ -423,7 +464,7 @@ namespace Realm {
 	bitmask_elem_t mask = (~bitmask_elem_t(0)) << lo_ofs;
 	mask &= bits[lo_idx];
 	if(mask != 0) {
-	  count += __builtin_popcountll(mask);
+	  count += popcount(mask);
 	  bits[lo_idx] -= mask;
 	  if(bitset_twolevel && (bits[lo_idx] == 0))
 	    l2_clear(lo_idx);
@@ -433,7 +474,7 @@ namespace Realm {
       for(size_t i = lo_idx + 1; i < hi_idx; i++) {
 	bitmask_elem_t mask = bits[i];
 	if(mask != 0) {
-	  count += __builtin_popcountll(mask);
+	  count += popcount(mask);
 	  bits[i] -= mask;
 	  if(bitset_twolevel && (bits[i] == 0))
 	    l2_clear(i);
@@ -444,7 +485,7 @@ namespace Realm {
 	bitmask_elem_t mask = (bitmask_elem_t(2) << hi_ofs) - 1;
 	mask &= bits[hi_idx];
 	if(mask != 0) {
-	  count += __builtin_popcountll(mask);
+	  count += popcount(mask);
 	  bits[hi_idx] -= mask;
 	  if(bitset_twolevel && (bits[hi_idx] == 0))
 	    l2_clear(hi_idx);
@@ -482,7 +523,7 @@ namespace Realm {
 #endif
       }
     }
-    size_t elmt_ofs = __builtin_ffsll(bits[elmt_idx]) - 1;
+    size_t elmt_ofs = ctz(bits[elmt_idx]);
     return (elmt_idx * BITS_PER_ELEM + elmt_ofs);
   }
 
@@ -498,8 +539,7 @@ namespace Realm {
     size_t elmt_ofs = (after + 1) % BITS_PER_ELEM;
     bitmask_elem_t v = bits[elmt_idx] >> elmt_ofs;
     if(v != 0) {
-      // the extra +1 in __builtin_ffsll's result is convenient here
-      return (after + __builtin_ffsll(v));
+      return (after + 1 + ctz(v));
     } else {
       if(bitset_twolevel) {
 	int found = l2_find(elmt_idx + 1);
@@ -509,12 +549,12 @@ namespace Realm {
 #ifdef DEBUG_REALM
 	assert(bits[elmt_idx] != 0);
 #endif
-	elmt_ofs = __builtin_ffsll(bits[elmt_idx]) - 1;
+	elmt_ofs = ctz(bits[elmt_idx]);
 	return (elmt_idx * BITS_PER_ELEM + elmt_ofs);
       } else {
 	while(++elmt_idx < bitset_elements)
 	  if(bits[elmt_idx] != 0) {
-	    elmt_ofs = __builtin_ffsll(bits[elmt_idx]) - 1;
+	    elmt_ofs = ctz(bits[elmt_idx]);
 	    return (elmt_idx * BITS_PER_ELEM + elmt_ofs);
 	  }
 	// no more bits...
@@ -547,11 +587,11 @@ namespace Realm {
     size_t l2_ofs = (first_idx % BITS_PER_ELEM);
     bitmask_elem_t v = bits[l2_idx] >> l2_ofs;
     if(v != 0)
-      return first_idx + (__builtin_ffsll(v) - 1);
+      return first_idx + ctz(v);
     size_t l2_max_idx = bitset_elements + bitset_twolevel - 1;
     while(++l2_idx <= l2_max_idx)
       if(bits[l2_idx] != 0) {
-	l2_ofs = __builtin_ffsll(bits[l2_idx]) - 1;
+	l2_ofs = ctz(bits[l2_idx]);
 	return (((l2_idx - bitset_elements) * BITS_PER_ELEM) + l2_ofs);
       }
     return -1;

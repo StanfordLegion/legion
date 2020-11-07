@@ -38,13 +38,19 @@
   #elif __cplusplus >= 201103L
     #define REALM_CXX_STANDARD 11
   #else
-    #define REALM_CXX_STANDARD 0
+    #ifdef _MSC_VER
+      // MSVC doesn't advertise it by default, but always supports at least C++11
+      #define REALM_CXX_STANDARD 11
+    #else
+      #define REALM_CXX_STANDARD 0
+    #endif
   #endif
 #endif
 
 // REALM_ON_LINUX   - defined if Realm is being built for a Linux host
 // REALM_ON_MACOS   - defined if Realm is being built for a macOS host
 // REALM_ON_FREEBSD - defined if Realm is being built for a FreeBSD host
+// REALM_ON_WINDOWS - defined if Realm is being built for a Windows host
 #ifdef __linux__
   #define REALM_ON_LINUX
 #endif
@@ -53,6 +59,9 @@
 #endif
 #ifdef __FreeBSD__
   #define REALM_ON_FREEBSD
+#endif
+#ifdef _MSC_VER
+  #define REALM_ON_WINDOWS
 #endif
 
 // REALM_BIG_ENDIAN - defined if Realm is being built for a big-endian host
@@ -70,7 +79,11 @@
 #endif
 
 // REALM_THREAD_LOCAL - type modifier for a thread-local variable
-#define REALM_THREAD_LOCAL __thread
+#ifdef _MSC_VER
+  #define REALM_THREAD_LOCAL __declspec(thread)
+#else
+  #define REALM_THREAD_LOCAL __thread
+#endif
 
 // REALM_ASSERT(cond, message) - abort program if 'cond' is not true
 #ifdef __CUDACC__
@@ -82,29 +95,53 @@
 // REALM_LIKELY(expr) - suggest that `expr` is usually true
 // REALM_UNLILELY(expr) - suggest that `expr` is usually false
 // REALM_EXPECT(expr, expval) - suggest that `expr` usually evaluates to `expval`
-#define REALM_LIKELY(expr)         __builtin_expect((expr), true)
-#define REALM_UNLIKELY(expr)       __builtin_expect((expr), false)
-#define REALM_EXPECT(expr, expval) __builtin_expect((expr), (expval))
+#ifdef _MSC_VER
+  // no __builtin_expect in MSVC
+  #define REALM_LIKELY(expr)         (expr)
+  #define REALM_UNLIKELY(expr)       (expr)
+  #define REALM_EXPECT(expr, expval) (expr)
+#else
+  #define REALM_LIKELY(expr)         __builtin_expect((expr), true)
+  #define REALM_UNLIKELY(expr)       __builtin_expect((expr), false)
+  #define REALM_EXPECT(expr, expval) __builtin_expect((expr), (expval))
+#endif
 
 // REALM_ATTR_UNUSED(thing) - indicate that `thing` is unused
 #define REALM_ATTR_UNUSED(thing)  thing __attribute__((unused))
 
 // REALM_ATTR_WARN_UNUSED(thing) - ask compiler to warn if result of `thing` is
 //  not used
-#define REALM_ATTR_WARN_UNUSED(thing)  thing __attribute__((warn_unused_result))
+#ifdef _MSC_VER
+  // MSVC has _Check_return_, but needs it on the definition too, which makes
+  //  it not a drop-in replacement
+  #define REALM_ATTR_WARN_UNUSED(thing)  /*_Check_return_*/ thing
+#else
+  #define REALM_ATTR_WARN_UNUSED(thing)  thing __attribute__((warn_unused_result))
+#endif
 
 // REALM_ATTR_PRINTF_FORMAT(thing, stridx, first) - check printf-style args
-#define REALM_ATTR_PRINTF_FORMAT(thing, stridx, first) \
+#ifdef _MSC_VER
+  #define REALM_ATTR_PRINTF_FORMAT(thing, stridx, first) thing
+#else
+  #define REALM_ATTR_PRINTF_FORMAT(thing, stridx, first) \
                           thing __attribute__((format(printf, stridx, first)))
+#endif
 
 // REALM_ATTR_NORETURN(thing) - indicates that `thing` never returns
-#define REALM_ATTR_NORETURN(thing)  thing __attribute__((noreturn))
+#ifdef _MSC_VER
+  #define REALM_ATTR_NORETURN(thing)  __declspec(noreturn) thing
+#else
+  #define REALM_ATTR_NORETURN(thing)  thing __attribute__((noreturn))
+#endif
 
 // REALM_ATTR_DEPRECATED(msg, thing) - indicates `thing` is deprecated, printing
 //                                     `msg` at compile time if possible
 #ifdef __ICC
   #define REALM_ATTR_DEPRECATED(msg, thing)				\
                                     thing __attribute__((deprecated))
+#elif defined(_MSC_VER)
+  #define REALM_ATTR_DEPRECATED(msg, thing)				\
+                                    __declspec(deprecated(msg)) thing
 #else
   #define REALM_ATTR_DEPRECATED(msg, thing)				\
                                     thing __attribute__((deprecated(msg)))
@@ -119,16 +156,28 @@
 
 // REALM_ALIGNED_TYPE_SAMEAS(newtype, origtype, reftype) - defines type `newtype`
 //         that is identical to `origtype` except that it is aligned as `reftype`
-#define REALM_ALIGNED_TYPE_SAMEAS(newtype, origtype, reftype) \
-          typedef origtype __attribute__((aligned(__alignof__(reftype)))) newtype
+#ifdef _MSC_VER
+  #define REALM_ALIGNED_TYPE_SAMEAS(newtype, origtype, reftype) \
+        typedef __declspec(align(__alignof(reftype))) origtype newtype
+#else
+  #define REALM_ALIGNED_TYPE_SAMEAS(newtype, origtype, reftype) \
+        typedef origtype __attribute__((aligned(__alignof__(reftype)))) newtype
+#endif
 
 // REALM_ALIGNED_TYPE_CONST(newtype, origtype, bytes) - defines type `newtype`
 //          that is identical to `origtype` except it is aligned to `bytes`
-#define REALM_ALIGNED_TYPE_CONST(newtype, origtype, bytes) \
-          typedef origtype __attribute__((aligned(bytes))) newtype
+#ifdef _MSC_VER
+  #define REALM_ALIGNED_TYPE_CONST(newtype, origtype, bytes) \
+        typedef __declspec(align(bytes)) origtype newtype
+#else
+  #define REALM_ALIGNED_TYPE_CONST(newtype, origtype, bytes) \
+        typedef origtype __attribute__((aligned(bytes))) newtype
+#endif
 
 // REALM_HAVE_CXXABI_H - defined if <cxxabi.h> is available
-#define REALM_HAVE_CXXABI_H
+#ifndef _MSC_VER
+  #define REALM_HAVE_CXXABI_H
+#endif
 
 // the following defines are used to communicate which declarations are part
 //  of the "official" public Realm API (as opposed to things that need to be in
@@ -145,5 +194,25 @@
 #define REALM_PUBLIC_API  __attribute__((visibility("default")))
 #define REALM_INTERNAL_API_EXTERNAL_LINKAGE  __attribute__((visibility("default")))
 #define REALM_INTERNAL_API  __attribute__((visibility("hidden")))
+
+// compiler-specific hackery
+
+// Microsoft Visual Studio
+#ifdef _MSC_VER
+#define _CRT_SECURE_NO_WARNINGS
+
+// MSVC gives a narrowing warning on explicit assignments, which is much too agressive
+#pragma warning(disable: 4244 4267)
+
+// MSVC warns if pieces of an explicit template instantiation are split across files
+#pragma warning(disable: 4661)
+
+// windows.h by default defines macros called 'min' and 'max' - suppress that
+#define NOMINMAX
+
+// ssize_t doesn't exist, so make it
+#include <basetsd.h>
+typedef SSIZE_T ssize_t;
+#endif
 
 #endif

@@ -21,14 +21,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#ifndef REALM_ON_WINDOWS
 #include <unistd.h>
+#include <pthread.h>
+#endif
 #include <fcntl.h>
 #include <map>
 #include <vector>
 #include <deque>
 #include <queue>
 #include <assert.h>
-#include <pthread.h>
 #include <string.h>
 #include "realm/transfer/lowlevel_dma.h"
 
@@ -1134,7 +1136,7 @@ namespace Realm {
 	amsg->next_port_idx = next_port_idx;
 	amsg->span_start = span_start;
 	assert(span_size <= UINT_MAX);
-	amsg->span_size = span_size;
+	amsg->span_size = (unsigned)span_size;
 	amsg->pre_bytes_total = pre_bytes_total;
 	amsg.commit();
       }
@@ -1156,7 +1158,8 @@ namespace Realm {
 	amsg->next_xd_guid = next_xd_guid;
 	amsg->next_port_idx = next_port_idx;
 	amsg->span_start = span_start;
-	amsg->span_size = span_size;
+        assert(span_size <= UINT_MAX);
+        amsg->span_size = (unsigned)span_size;
 	amsg->pre_bytes_total = pre_bytes_total;
 	amsg.commit();
       }

@@ -116,24 +116,33 @@ namespace Realm {
 
   CompiledInstanceLayout::~CompiledInstanceLayout()
   {
-    if(program_base)
-      free(program_base);
+     reset();
   }
 
   void *CompiledInstanceLayout::allocate_memory(size_t bytes)
   {
     // TODO: allocate where GPUs can see it
     assert(program_base == 0);
+#ifdef REALM_ON_WINDOWS
+    program_base = _aligned_malloc(bytes, 16);
+    assert(program_base != 0);
+#else
     int ret = posix_memalign(&program_base, 16, bytes);
     assert(ret == 0);
+#endif
     program_size = bytes;
     return program_base;
   }
 
   void CompiledInstanceLayout::reset()
   {
-    if(program_base)
+    if(program_base) {
+#ifdef REALM_ON_WINDOWS
+      _aligned_free(program_base);
+#else
       free(program_base);
+#endif
+    }
     program_base = 0;
     program_size = 0;
     fields.clear();

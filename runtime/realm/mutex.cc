@@ -57,6 +57,18 @@ REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_
 
 #else
 
+#ifdef REALM_ON_WINDOWS
+#include <windows.h>
+#include <synchapi.h>
+
+#define REALM_MUTEX_IMPL   CRITICAL_SECTION mutex
+#define REALM_CONDVAR_IMPL CONDITION_VARIABLE condvar
+struct RWLockImpl {
+  SRWLOCK rwlock;
+  bool exclusive;
+};
+#define REALM_RWLOCK_IMPL  RWLockImpl rwlock
+#else
 // use pthread mutex/condvar
 #include <pthread.h>
 #include <errno.h>
@@ -64,6 +76,7 @@ REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_
 #define REALM_MUTEX_IMPL   pthread_mutex_t mutex
 #define REALM_CONDVAR_IMPL pthread_cond_t  condvar
 #define REALM_RWLOCK_IMPL  pthread_rwlock_t rwlock
+#endif
 #endif
 
 #include "realm/mutex.h"
@@ -83,7 +96,11 @@ namespace Realm {
 #ifdef USE_GASNET_HSL_T
     gasnet_hsl_init(&mutex);
 #else
+#ifdef REALM_ON_WINDOWS
+    InitializeCriticalSection(&mutex);
+#else
     pthread_mutex_init(&mutex, 0);
+#endif
 #endif
   }
 
@@ -92,7 +109,11 @@ namespace Realm {
 #ifdef USE_GASNET_HSL_T
     gasnet_hsl_destroy(&mutex);
 #else
+#ifdef REALM_ON_WINDOWS
+    DeleteCriticalSection(&mutex);
+#else
     pthread_mutex_destroy(&mutex);
+#endif
 #endif
   }
 
@@ -101,7 +122,11 @@ namespace Realm {
 #ifdef USE_GASNET_HSL_T
     gasnet_hsl_lock(&mutex);
 #else
+#ifdef REALM_ON_WINDOWS
+    EnterCriticalSection(&mutex);
+#else
     pthread_mutex_lock(&mutex);
+#endif
 #endif
   }
 
@@ -110,7 +135,11 @@ namespace Realm {
 #ifdef USE_GASNET_HSL_T
     gasnet_hsl_unlock(&mutex);
 #else
+#ifdef REALM_ON_WINDOWS
+    LeaveCriticalSection(&mutex);
+#else
     pthread_mutex_unlock(&mutex);
+#endif
 #endif
   }
 
@@ -120,8 +149,13 @@ namespace Realm {
     int ret = gasnet_hsl_trylock(&mutex);
     return (ret == 0);
 #else
+#ifdef REALM_ON_WINDOWS
+    BOOL ret = TryEnterCriticalSection(&mutex);
+    return (ret != 0);
+#else
     int ret = pthread_mutex_trylock(&mutex);
     return (ret == 0);
+#endif
 #endif
   }
 
@@ -138,7 +172,11 @@ namespace Realm {
 #ifdef USE_GASNET_HSL_T
     gasnett_cond_init(&condvar);
 #else
+#ifdef REALM_ON_WINDOWS
+    InitializeConditionVariable(&condvar);
+#else
     pthread_cond_init(&condvar, 0);
+#endif
 #endif
   }
 
@@ -147,7 +185,11 @@ namespace Realm {
 #ifdef USE_GASNET_HSL_T
     gasnett_cond_destroy(&condvar);
 #else
+#ifdef REALM_ON_WINDOWS
+    // no destructor on windows?
+#else
     pthread_cond_destroy(&condvar);
+#endif
 #endif
   }
 
@@ -157,7 +199,11 @@ namespace Realm {
 #ifdef USE_GASNET_HSL_T
     gasnett_cond_signal(&condvar);
 #else
+#ifdef REALM_ON_WINDOWS
+    WakeConditionVariable(&condvar);
+#else
     pthread_cond_signal(&condvar);
+#endif
 #endif
   }
 
@@ -166,7 +212,11 @@ namespace Realm {
 #ifdef USE_GASNET_HSL_T
     gasnett_cond_broadcast(&condvar);
 #else
+#ifdef REALM_ON_WINDOWS
+    WakeAllConditionVariable(&condvar);
+#else
     pthread_cond_broadcast(&condvar);
+#endif
 #endif
   }
 
@@ -175,7 +225,11 @@ namespace Realm {
 #ifdef USE_GASNET_HSL_T
     gasnett_cond_wait(&condvar, &(mutex.mutex.lock));
 #else
+#ifdef REALM_ON_WINDOWS
+    SleepConditionVariableCS(&condvar, &mutex.mutex, INFINITE);
+#else
     pthread_cond_wait(&condvar, &mutex.mutex);
+#endif
 #endif
   }
 
@@ -186,6 +240,10 @@ namespace Realm {
 #ifdef USE_GASNET_HSL_T
     assert(0 && "gasnett_cond_t doesn't have timedwait!");
 #else
+#ifdef REALM_ON_WINDOWS
+    BOOL ret = SleepConditionVariableCS(&condvar, &mutex.mutex, max_nsec / 1000000LL);
+    return (ret != 0);
+#else
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     ts.tv_sec += (ts.tv_nsec + max_nsec) / 1000000000LL;
@@ -194,6 +252,7 @@ namespace Realm {
     if(ret == ETIMEDOUT) return false;
     // TODO: check other error codes?
     return true;
+#endif
 #endif
   }
 
@@ -208,39 +267,82 @@ namespace Realm {
     , reader(*this)
   {
     assert(sizeof(rwlock) <= sizeof(placeholder));
+#ifdef REALM_ON_WINDOWS
+    InitializeSRWLock(&rwlock.rwlock);
+#else
     pthread_rwlock_init(&rwlock, 0);
+#endif
   }
 
   RWLock::~RWLock(void)
   {
+#ifdef REALM_ON_WINDOWS
+    // no destructor on windows?
+#else
     pthread_rwlock_destroy(&rwlock);
+#endif
   }
 
   void RWLock::wrlock(void)
   {
+#ifdef REALM_ON_WINDOWS
+    AcquireSRWLockExclusive(&rwlock.rwlock);
+    rwlock.exclusive = true;
+#else
     pthread_rwlock_wrlock(&rwlock);
+#endif
   }
 
   void RWLock::rdlock(void)
   {
+#ifdef REALM_ON_WINDOWS
+    AcquireSRWLockShared(&rwlock.rwlock);
+    rwlock.exclusive = false;
+#else
     pthread_rwlock_rdlock(&rwlock);
+#endif
   }
 
   void RWLock::unlock(void)
   {
+#ifdef REALM_ON_WINDOWS
+    if(rwlock.exclusive)
+      ReleaseSRWLockExclusive(&rwlock.rwlock);
+    else
+      ReleaseSRWLockShared(&rwlock.rwlock);
+#else
     pthread_rwlock_unlock(&rwlock);
+#endif
   }
 
   bool RWLock::trywrlock(void)
   {
+#ifdef REALM_ON_WINDOWS
+    BOOL ret = TryAcquireSRWLockExclusive(&rwlock.rwlock);
+    if(ret != 0) {
+      rwlock.exclusive = true;
+      return true;
+    } else
+      return false;
+#else
     int ret = pthread_rwlock_trywrlock(&rwlock);
     return (ret == 0);
+#endif
   }
 
   bool RWLock::tryrdlock(void)
   {
+#ifdef REALM_ON_WINDOWS
+    BOOL ret = TryAcquireSRWLockShared(&rwlock.rwlock);
+    if(ret != 0) {
+      rwlock.exclusive = false;
+      return true;
+    } else
+      return false;
+#else
     int ret = pthread_rwlock_trywrlock(&rwlock);
     return (ret == 0);
+#endif
   }
 
 

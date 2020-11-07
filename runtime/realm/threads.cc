@@ -25,7 +25,11 @@
 #include <stdio.h>
 #endif
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+#define REALM_USE_PTHREADS
+#define REALM_USE_ALTSTACK
 #include <pthread.h>
+#endif
 #ifdef REALM_ON_LINUX
   #define HAVE_CPUSET
 #endif
@@ -40,6 +44,12 @@
 #ifdef REALM_ON_MACOS
 // for sched_yield
 #include <sched.h>
+#endif
+
+#ifdef REALM_ON_WINWDOWS
+#include <windows.h>
+#include <processthreadsapi.h>
+#include <process.h>
 #endif
 
 #ifdef REALM_USE_USER_THREADS
@@ -71,8 +81,10 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 
 #include <string.h>
 #include <stdlib.h>
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <unistd.h>
 #include <signal.h>
+#endif
 #include <string>
 #include <map>
 
@@ -547,6 +559,7 @@ namespace Realm {
   //
   // class Thread
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
   static atomic<bool> handler_registered(false);
   // Valgrind uses SIGUSR2 on Darwin
   static int handler_signal = SIGUSR1;
@@ -580,6 +593,7 @@ namespace Realm {
 
     CHECK_LIBC( sigaction(handler_signal, &act, 0) );
   }
+#endif
 
   void Thread::signal(Signal sig, bool asynchronous)
   {
@@ -677,16 +691,28 @@ namespace Realm {
     static void detect_static_tls_size(void);
 
   protected:
+#ifdef REALM_USE_PTHREADS
     static void *pthread_entry(void *data);
+#endif
+#ifdef REALM_ON_WINDOWS
+    static DWORD WINAPI winthread_entry(LPVOID data);
+#endif
 
     virtual void alert_thread(void);
 
     void *target;
     void (*entry_wrapper)(void *);
+#ifdef REALM_USE_PTHREADS
     pthread_t thread;
+#endif
+#ifdef REALM_ON_WINDOWS
+    HANDLE thread;
+#endif
     bool ok_to_delete;
+#ifdef REALM_USE_ALTSTACK
     void *altstack_base;
     size_t altstack_size;
+#endif
     static size_t static_tls_size;
   };
 
@@ -703,10 +729,12 @@ namespace Realm {
     assert(ok_to_delete);
   }
 
+#ifdef REALM_USE_PTHREADS
   /*static*/ void *KernelThread::pthread_entry(void *data)
   {
     KernelThread *thread = (KernelThread *)data;
 
+#ifdef REALM_USE_ALTSTACK
     // install our alt stack (if it exists) for signal handling
     if(thread->altstack_base != 0) {
       stack_t altstack;
@@ -716,6 +744,7 @@ namespace Realm {
       int ret = sigaltstack(&altstack, 0);
       assert(ret == 0);
     }
+#endif
 
     // set up TLS so people can find us
     ThreadLocal::current_thread = thread;
@@ -733,6 +762,7 @@ namespace Realm {
     log_thread.info() << "thread " << thread << " finished";
     thread->update_state(STATE_FINISHED);
 
+#ifdef REALM_USE_ALTSTACK
     // uninstall and free our alt stack (if it exists)
     if(thread->altstack_base != 0) {
       // so MacOS doesn't seem to want to let you disable a stack, returning
@@ -754,6 +784,7 @@ namespace Realm {
 #endif
       free(thread->altstack_base);
     }
+#endif
 
     // this is last so that the scheduler can delete us if it wants to
     if(thread->scheduler)
@@ -761,16 +792,50 @@ namespace Realm {
     
     return 0;
   }
+#endif
+
+#ifdef REALM_ON_WINDOWS
+  /*static*/ DWORD WINAPI KernelThread::winthread_entry(LPVOID data)
+  {
+    KernelThread *thread = (KernelThread *)data;
+
+    // set up TLS so people can find us
+    ThreadLocal::current_thread = thread;
+
+    log_thread.info() << "thread " << thread << " started";
+    thread->update_state(STATE_RUNNING);
+
+    if (thread->scheduler)
+      thread->scheduler->thread_starting(thread);
+
+    // call the actual thread body
+    (*thread->entry_wrapper)(thread->target);
+
+    // on return, we update our status and terminate
+    log_thread.info() << "thread " << thread << " finished";
+    thread->update_state(STATE_FINISHED);
+
+    // this is last so that the scheduler can delete us if it wants to
+    if (thread->scheduler)
+      thread->scheduler->thread_terminating(thread);
+
+    return 0;
+  }
+#endif
 
   void KernelThread::start_thread(const ThreadLaunchParameters& params,
 				  const CoreReservation& rsrv)
   {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     // before we create any threads, make sure we have our signal handler registered
     register_handler();
+#endif
 
+#ifdef REALM_USE_PTHREADS
     pthread_attr_t attr;
 
     CHECK_PTHREAD( pthread_attr_init(&attr) );
+#endif
 
     // allocation better exist...
     assert(rsrv.allocation);
@@ -782,11 +847,17 @@ namespace Realm {
 						 &(rsrv.allocation->allowed_cpus)) );
 #endif
 
+#ifdef REALM_USE_PTHREADS
     // now that we try to detect the static TLS size, we can use the
     //  advertised min stack size from the threading library as is
     const ptrdiff_t MIN_STACK_SIZE = PTHREAD_STACK_MIN;
 
     ptrdiff_t stack_size = 0;  // 0 == "pthread default"
+#endif
+#ifdef REALM_ON_WINDOWS
+    const ptrdiff_t MIN_STACK_SIZE = 0;
+    ptrdiff_t stack_size = 0;   // 0 == "windows default"
+#endif
 
     if(params.stack_size != params.STACK_SIZE_DEFAULT) {
       // make sure it's not too large
@@ -801,15 +872,18 @@ namespace Realm {
 					 MIN_STACK_SIZE);
       }
     }
+#ifdef REALM_USE_PTHREADS
     if(stack_size > 0) {
       // add in our estimate of the static TLS size
       CHECK_PTHREAD( pthread_attr_setstacksize(&attr,
 					       (stack_size +
 						KernelThread::static_tls_size)) );
     }
+#endif
 
     // TODO: actually use heap size
 
+#ifdef REALM_USE_ALTSTACK
     // default altstack size is 64KB
     altstack_size = 64 << 10;
     if(params.alt_stack_size != params.ALTSTACK_SIZE_DEFAULT)
@@ -824,39 +898,71 @@ namespace Realm {
       assert(ret == 0);
     } else
       altstack_base = 0;
+#endif
 
     update_state(STATE_STARTUP);
 
     // time to actually create the thread
+#ifdef REALM_USE_PTHREADS
     CHECK_PTHREAD( pthread_create(&thread, &attr, pthread_entry, this) );
 
     CHECK_PTHREAD( pthread_attr_destroy(&attr) );
 
     log_thread.info() << "thread created:" << this << " (" << rsrv.name << ") - pthread " << std::hex << thread << std::dec;
+#endif
+#ifdef REALM_ON_WINDOWS
+    // TODO: supposed to use _beginthreadex here?
+    thread = CreateThread(NULL,
+			  (stack_size +
+			   KernelThread::static_tls_size),
+			  winthread_entry, this, 0, 0);
+
+    log_thread.info() << "thread created:" << this << " (" << rsrv.name << ") - handle " << thread;
+#endif
     log_thread.debug() << "thread stack: " << this << " size=" << stack_size;
   }
 
   void KernelThread::join(void)
   {
+#ifdef REALM_USE_PTHREADS
     CHECK_PTHREAD( pthread_join(thread, 0 /* ignore retval */) );
+#endif
+#ifdef REALM_ON_WINDOWS
+    WaitForSingleObject(thread, INFINITE);
+#endif
     ok_to_delete = true;
   }
 
   void KernelThread::detach(void)
   {
+#ifdef REALM_USE_PTHREADS
     CHECK_PTHREAD( pthread_detach(thread) );
+#endif
+#ifdef REALM_ON_WINDOWS
+    CloseHandle(thread);
+#endif
     ok_to_delete = true;
   }
 
   void KernelThread::alert_thread(void)
   {
     // are we alerting ourself?
+#ifdef REALM_USE_PTHREADS
     if(this->thread == pthread_self()) {
       // just process the signals right here and now
       process_signals();
     } else {
       pthread_kill(this->thread, handler_signal);
     }
+#endif
+#ifdef REALM_ON_WINDOWS
+    if(this->thread == GetCurrentThread()) {
+      // just process the signals right here and now
+      process_signals();
+    } else {
+      assert(0);
+    }
+#endif
   }
 
   /*static*/ size_t KernelThread::static_tls_size = 0;
@@ -921,6 +1027,7 @@ namespace Realm {
     } while(0);
 #endif
 
+#ifdef REALM_USE_PTHREADS
     // case 4: empirically determine it by trying to create threads with small
     //  stacks (test up to 16MB)
     {
@@ -971,9 +1078,14 @@ namespace Realm {
       // none of the sizes we tried worked...
       CHECK_PTHREAD( pthread_attr_destroy(&attr) );
     }
+#endif
 
     // if all else fails, guess it's about 32KB
+#ifdef REALM_ON_WINDOWS
+    static_tls_size = 0;  // not on stack in win32?
+#else
     static_tls_size = 32768;
+#endif
     log_thread.debug() << "static tls size = " << static_tls_size << " (uneducated guess)";
   }
 
@@ -1339,10 +1451,15 @@ namespace Realm {
 
   /*static*/ void Thread::yield(void)
   {
+#ifdef REALM_USE_PTHREADS
 #ifdef REALM_ON_MACOS
     sched_yield();
 #else
     pthread_yield();
+#endif
+#endif
+#ifdef REALM_ON_WINDOWS
+    SwitchToThread();
 #endif
   }
 

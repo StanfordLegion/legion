@@ -532,7 +532,7 @@ namespace Realm {
 #endif
     // arrival uses the timestamp stored in this barrier object
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
-    impl->adjust_arrival(ID(id).barrier_generation(), -count, timestamp, wait_on,
+    impl->adjust_arrival(ID(id).barrier_generation(), -int(count), timestamp, wait_on,
 			 Network::my_node_id, false /*!forwarded*/,
 			 reduce_value, reduce_value_size,
 			 TimeLimit::responsive());
@@ -2743,7 +2743,7 @@ static void *bytedup(const void *data, size_t datalen)
 	//  any trigger notifications are needed
 	if(!already_subscribed && (impl->generation > impl->first_generation)) {
 	  std::map<unsigned, EventImpl::gen_t>::iterator it = impl->remote_trigger_gens.find(args.subscriber);
-	  if((it == impl->remote_trigger_gens.end()) or (it->second < impl->generation)) {
+	  if((it == impl->remote_trigger_gens.end()) || (it->second < impl->generation)) {
 	    previous_gen = ((it == impl->remote_trigger_gens.end()) ?
 			      impl->first_generation :
 			      it->second);

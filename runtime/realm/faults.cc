@@ -24,11 +24,17 @@
 #include <alloca.h>
 #endif
 #include <assert.h>
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <execinfo.h>
+#endif
 #ifdef REALM_HAVE_CXXABI_H
 #include <cxxabi.h>
 #endif
 #include <iomanip>
+
+#ifdef ERROR_CANCELLED
+#undef ERROR_CANCELLED
+#endif
 
 namespace Realm {
 
@@ -135,7 +141,11 @@ namespace Realm {
     //  the front we're going to skip
     assert(sizeof(void *) == sizeof(intptr_t));
     rawptrs = (intptr_t *)alloca(sizeof(void *) * (max_depth + skip));
+#ifdef REALM_ON_WINDOWS
+    int count = 0; // TODO: StackWalk appears to be the right API call?
+#else
     int count = backtrace((void **)rawptrs, max_depth + skip);
+#endif
     assert(count >= 0);
     
     pcs.clear();
@@ -159,12 +169,14 @@ namespace Realm {
 
     for(size_t i = 0; i < pcs.size(); i++) {
       // try backtrace_symbols() first
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
       char **s = backtrace_symbols((void * const *)&(pcs[i]), 1);
       if(s) {
 	symbols[i].assign(s[0]);
 	free(s);
 	continue;
       }
+#endif
 
       symbols[i] = "unknown";
     }

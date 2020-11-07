@@ -32,6 +32,12 @@
 typedef ptrdiff_t intptr_t;
 #endif
 
+#ifdef REALM_ON_WINDOWS
+// winerror.h defines this, polluting all namespaces, so get it out of the way now
+#include <winerror.h>
+#undef ERROR_CANCELLED
+#endif
+
 namespace Realm {
 
   class ProfilingMeasurementCollection;
