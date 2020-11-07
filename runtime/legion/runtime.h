@@ -1086,7 +1086,6 @@ namespace Legion {
         GCPriority min_priority;
         bool external;
         std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
-        // For tracking external instances and whether they can be used
       };
     public:
       struct FreeEagerInstanceArgs : public LgTaskArgs<FreeEagerInstanceArgs> {
