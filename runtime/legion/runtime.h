@@ -790,7 +790,6 @@ namespace Legion {
         unsigned pending_acquires;
         GCPriority min_priority;
         std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
-        // For tracking external instances and whether they can be used
       };
 #ifdef LEGION_MALLOC_INSTANCES
     public:
