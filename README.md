@@ -120,7 +120,7 @@ To get started with Legion, you'll need:
 
   * Linux, macOS, or another Unix
   * A C++ 11 (or newer) compiler (GCC, Clang, Intel, or PGI) and GNU Make
-  * *Optional*: Python 2.7 (used for profiling/debugging tools)
+  * *Optional*: Python 3.5 or newer (used for profiling/debugging tools)
   * *Optional*: CUDA 7.0 or newer (for NVIDIA GPUs)
   * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking, see
      [installation instructions](http://legion.stanford.edu/gasnet/))
