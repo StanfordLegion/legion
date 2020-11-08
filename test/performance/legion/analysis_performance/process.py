@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright 2020 NVIDIA Corporation
 #
@@ -238,7 +238,7 @@ def main():
     global task_groups
     global summaries
     parser = argparse.ArgumentParser()
-    # usage: python process.py <logfiles>
+    # usage: python3 process.py <logfiles>
     parser.add_argument(dest='filenames', nargs='+',
             help='input Legion Prof log filenames')
     args = parser.parse_args()

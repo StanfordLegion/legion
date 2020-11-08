@@ -1858,7 +1858,6 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void select_sources(const unsigned index,
                                   const InstanceRef &target,

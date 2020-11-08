@@ -25474,6 +25474,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool Runtime::is_visible_memory(Processor proc, Memory memory)
+    //--------------------------------------------------------------------------
+    {
+      // If we cached it locally for our processors, then just go
+      // ahead and get the result
+      std::map<Processor,ProcessorManager*>::const_iterator finder = 
+        proc_managers.find(proc);
+      if (finder != proc_managers.end())
+        return finder->second->is_visible_memory(memory);
+      // Otherwise look up the result
+      Machine::MemoryQuery visible_memories(machine);
+      // Have to handle the case where this is a processor group
+      if (proc.kind() == Processor::PROC_GROUP)
+      {
+        std::vector<Processor> group_members;
+        proc.get_group_members(group_members);
+        for (std::vector<Processor>::const_iterator it =
+              group_members.begin(); it != group_members.end(); it++)
+          visible_memories.has_affinity_to(*it);
+      }
+      else
+        visible_memories.has_affinity_to(proc);
+      for (Machine::MemoryQuery::iterator it =
+            visible_memories.begin(); it != visible_memories.end(); it++)
+        if ((*it) == memory)
+          return true;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::find_visible_memories(Processor proc, 
                                         std::set<Memory> &visible)
     //--------------------------------------------------------------------------

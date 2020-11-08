@@ -15,25 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionTest_bug954)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file_mini)
-add_subdirectory(legion_stl)
-add_subdirectory(output_requirements)
-add_subdirectory(rendering)
-add_subdirectory(realm)
-
-if(Legion_USE_HDF5)
-  add_subdirectory(hdf_attach_subregion_parallel)
-endif()
-
-if(Legion_USE_Python)
-  add_subdirectory(python_bindings)
-endif()
-
-if(Legion_NETWORKS)
-  add_subdirectory(bug954)
+add_executable(bug954 bug954.cc)
+target_link_libraries(bug954 Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME bug954 COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:bug954> ${Legion_TEST_ARGS} -ll:rsize 1024)
 endif()

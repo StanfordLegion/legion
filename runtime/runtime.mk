@@ -322,7 +322,7 @@ ifeq ($(strip $(USE_PYTHON)),1)
   # PYTHON_LIB to specify the path to the shared library directly.
   ifndef PYTHON_LIB
     ifndef PYTHON_ROOT
-      PYTHON_EXE := $(shell which python python3 | head -1)
+      PYTHON_EXE := $(shell which python3 python | head -1)
       ifeq ($(PYTHON_EXE),)
         $(error cannot find python - set PYTHON_ROOT if not in PATH)
       endif

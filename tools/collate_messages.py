@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Copyright 2020 Stanford University, NVIDIA Corporation
 #
@@ -357,7 +357,7 @@ parser.add_argument('--legion_config_h', dest='legionConfigH', action='store', h
 args = parser.parse_args()
 
 print 'this program parses a list of files.  it reads the filenames from stdin and writes html files as output.'
-print 'example: find . -name *.cc | python collate_messages.py --glossaryFile=glossaryFile.txt --glossaryURL="http://legion.stanford.edu"'
+print 'example: find . -name *.cc | python3 collate_messages.py --glossaryFile=glossaryFile.txt --glossaryURL="http://legion.stanford.edu"'
 
 legionConfigFile = open(args.legionConfigH, 'r')
 if legionConfigFile == None:
