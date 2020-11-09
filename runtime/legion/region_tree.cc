@@ -16870,16 +16870,14 @@ namespace Legion {
 #else
                   it++;
 #endif
-                  continue;
                 }
                 else
                 {
                   // hasn't commited, reset timeout and continue
                   it->timeout = LogicalUser::TIMEOUT;
                   it++;
-                  continue;
                 }
-                break;
+                continue;
               }
             default:
               assert(false); // should never get here
