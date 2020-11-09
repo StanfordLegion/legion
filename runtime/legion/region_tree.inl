@@ -2332,7 +2332,7 @@ namespace Legion {
         if (it->second == 0)
           continue;
         Point<DIM,T> lo, hi;
-        for (unsigned idx = 0; idx < (DIM-1); idx++)
+        for (int idx = 0; idx < (DIM-1); idx++)
         {
           lo[idx] = it->first[idx];
           hi[idx] = it->first[idx];

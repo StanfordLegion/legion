@@ -1046,6 +1046,7 @@ namespace Legion {
                               bool recurrent);
       virtual ApEvent get_completion(void) const;
       virtual ApEvent get_completion_for_deletion(void) const;
+      using PhysicalTemplate::record_merge_events;
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
@@ -1128,6 +1129,7 @@ namespace Legion {
                          const FieldMask &user_mask,
                          std::set<RtEvent> &applied,
                          int owner_shard = -1);
+      using PhysicalTemplate::record_fill_views;
       virtual void record_fill_views(const FieldMaskSet<FillView> &views,
                                      std::set<RtEvent> &applied_events);
     protected:

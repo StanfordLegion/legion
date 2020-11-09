@@ -7616,7 +7616,8 @@ namespace Legion {
     {
       // First do the normal clean-up operations
       // Remove profiling our guard and trigger the profiling event if necessary
-      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+      int diff = -1; // need this dumbness for PGI
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, diff) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       // Invalidate any context that we had so that the child

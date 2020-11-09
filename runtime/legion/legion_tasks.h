@@ -1021,6 +1021,7 @@ namespace Legion {
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
+      using SingleTask::get_version_info;
       virtual VersionInfo& get_version_info(unsigned idx);
     public:
       virtual void perform_physical_traversal(unsigned idx,
