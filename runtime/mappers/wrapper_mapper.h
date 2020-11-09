@@ -114,7 +114,7 @@ namespace Legion {
 	const char* get_mapper_name(void) const;
 	MapperSyncModel get_mapper_sync_model(void) const;
 
-
+        using Mapper::report_profiling;
       public: // Task mapping calls
 	void select_task_options(const MapperContext    ctx,
 	    const Task&            task,
