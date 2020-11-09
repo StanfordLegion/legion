@@ -165,6 +165,7 @@ def _DomainPoint_unpickle(values):
     return DomainPoint(values)
 
 import numpy as np
+from hashlib import sha1
 class DomainPoint(object):
     # add __add__ method and other math methods
     __slots__ = [
@@ -195,46 +196,35 @@ class DomainPoint(object):
         self._point = None
 
     def __add__(self, other):
-        return self.point + other
+        output = self.point + other
+        return self.coerce(output)
     def __radd__(self, other):
-        # point = self.point()
-        # if other is None:
-        #     return self.point
-        # print("RADD ARGS : ", other, self.point)
-        return other + self.point
+        if isinstance(other, int):
+            output = other + self.point
+        else:  # can other be a vector as well?
+            output = np.array(other) + self.point
+        return self.coerce(output)
 
     def __sub__(self, other):
-        point = self.point()
-        if other is None:
-            return point
-        return np.substract(point, other.asarray())
+        output = self.point - other
+        return self.coerce(output)
     def __rsub__(self, other):
-        point = self.point()
-        if other is None:
-            return point
-        return np.substract(point, other.asarray())
+        output = other - self.point
+        return self.coerce(output)
 
     def __mul__(self, other):
-        point = self.point()
-        if other is None:
-            return point
-        return np.multiply(other.asarray(), point)
+        output = self.point * other
+        return self.coerce(output)
     def __rmul__(self, other):
-        point = self.point()
-        if other is None:
-            return point
-        return np.multiply(point, other.asarray())
+        output = other * self.point
+        return self.coerce(output)
 
     def __div__(self, other):
-        point = self.point()
-        if other is None:
-            return point
-        return np.divide(other.asarray(), point)
+        output = self.point/other
+        return self.coerce(output)
     def __rdiv__(self, other):
-        point = self.point()
-        if other is None:
-            return point
-        return np.divide(point, other.asarray())
+        output = other/self.point
+        return self.coerce(output)
 
     def __reduce__(self):
         return (_DomainPoint_unpickle,
@@ -255,6 +245,10 @@ class DomainPoint(object):
         if not isinstance(other, DomainPoint):
             return NotImplemented
         return numpy.array_equal(self.point, other.point)
+
+    def __hash__(self):
+        # I got an error saying unhashable type numpy.ndarray so I used this:
+        return int(sha1(self.point.view(np.uint8)).hexdigest(), 16)
 
     def __str__(self):
         if self.dim == 1:
@@ -1728,6 +1722,11 @@ def _preprocess(arg, point):
         return arg._legion_preprocess_task_argument(point)
     return arg
 
+def _symbolize(arg):
+    if hasattr(arg, '_legion_symbolize_task_argument'):
+        return arg._legion_symbolize_task_argument()
+    return arg
+
 class Task (object):
     __slots__ = ['body', 'privileges', 'return_type',
                  'leaf', 'inner', 'idempotent', 'replicable',
@@ -2037,6 +2036,7 @@ class _TaskLauncher(object):
                                 launcher, req, arg.fspace.field_ids[field], True)
                 elif isinstance(arg, SymbolicExpr):
                     # FIXME: Support non-trivial projection functors
+                    arg = _symbolize(arg)
                     def arg_check():
                         # P[...]
                         if not isinstance(arg, SymbolicIndexAccess):
@@ -2049,6 +2049,9 @@ class _TaskLauncher(object):
                             return True, arg.index.func.proj_id
                         # P[i + ...] or P[ID + ...]
                         if isinstance(arg.index, SymbolicExpr):
+                            print("ARG INDEX : ", arg.index)
+                            print("ARG INDEX LHS : ", type(arg.index.lhs))
+                            print("ARG INDEX RHS : ", type(arg.index.rhs))
                             f = ProjectionFunctor(arg.index)
                             _proj_functor_cache[arg.index] = f
                             return True, f.proj_id
@@ -2320,14 +2323,18 @@ class SymbolicIndexAccess(SymbolicExpr):
     def _legion_preprocess_task_argument(self):
         if isinstance(self.index, SymbolicLoopIndex):
             return self.value[self.index._legion_preprocess_task_argument()]
-            # return _preprocess(self.value, point)[_preprocess(self.index, point)]
-        return self
+        return self.value # or self.index?
     def _legion_postprocess_task_argument(self, point):
         result = _postprocess(self.value, point)[_postprocess(self.index, point)]
         # FIXME: Clear parent field of regions being used as projection requirements
         if isinstance(result, Region):
             result.parent = None
         return result
+    # def _legion_symbolize_task_argument(self):
+    #     if isinstance(self.args, SymbolicLoopIndex):
+    #         return self.args
+    #     return _symbolize(SymbolicLoopIndex(self.args))
+
     def is_region(self):
         return isinstance(self.value, Partition)
     @property
@@ -2349,6 +2356,8 @@ class SymbolicCall(SymbolicExpr):
     __slots__ = ['func', 'args']
     def __init__(self, func, *args):
         assert(isinstance(func, ProjectionFunctor))
+        assert(len(args)==1) #is this correct?
+        # assert(isinstance(args, (SymbolicLoopIndex, ConcreteLoopIndex)))
         self.func = func
         self.args = args
     def __str__(self):
@@ -2356,9 +2365,14 @@ class SymbolicCall(SymbolicExpr):
     def __repr__(self):
         return '%s(%s)' % (self.func, ', '.join(self.args))
     def _legion_preprocess_task_argument(self, point):
-        return _preprocess(self.func.expr, point)(*list(_preprocess(arg, point) for arg in self.args))
+        return _preprocess(self.func.expr, point)
     def _legion_postprocess_task_argument(self, point):
-        return _postprocess(self.func.expr, point)(*list(_postprocess(arg, point) for arg in self.args))
+        return _postprocess(self.func.expr, point) 
+    def _legion_symbolize_task_argument(self):
+        if isinstance(self.args, SymbolicLoopIndex):
+            return self.args
+        return _symbolize(SymbolicLoopIndex(self.args))
+
 
 class SymbolicBinop(SymbolicExpr):
     import petra as pt
@@ -2470,7 +2484,8 @@ class ConcreteLoopIndex(SymbolicExpr):
             return False
     def __hash__(self):
         return hash(self.value)
-
+    def _legion_symbolize_task_argument(self):
+        return SymbolicLoopIndex(self.value)
     def _legion_preprocess_task_argument(self):
         return self.value
 
