@@ -18203,7 +18203,7 @@ namespace Legion {
     {
       // Easy case if the user asks for no IDs
       if (count == 0)
-        return LEGION_AUTO_GENERATE_ID;
+        return (ReductionOpID)LEGION_AUTO_GENERATE_ID;
       const std::string library_name(name); 
       // Take the lock in read only mode and see if we can find the result
       RtEvent wait_on;
@@ -18330,7 +18330,7 @@ namespace Legion {
     {
       // Easy case if the user asks for no IDs
       if (count == 0)
-        return LEGION_AUTO_GENERATE_ID;
+        return (CustomSerdezID)LEGION_AUTO_GENERATE_ID;
       const std::string library_name(name); 
       // Take the lock in read only mode and see if we can find the result
       RtEvent wait_on;
@@ -18503,7 +18503,7 @@ namespace Legion {
         AutoLock m_lock(message_manager_lock);
         // Re-check to see if we lost the race, force the compiler
         // to re-load the value here
-        result = *(((MessageManager**volatile)message_managers)+sid);
+        result = *(((MessageManager**)message_managers)+sid);
         if (result != NULL)
           return result;
         // Figure out if there is an event to wait on yet
@@ -18554,7 +18554,7 @@ namespace Legion {
       if (!wait_on.has_triggered())
         wait_on.wait();
       // When we wake up there should be a result
-      result = *(((MessageManager**volatile)message_managers)+sid);
+      result = *(((MessageManager**)message_managers)+sid);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif

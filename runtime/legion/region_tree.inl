@@ -2335,7 +2335,7 @@ namespace Legion {
         if (it->second == 0)
           continue;
         Point<DIM,T> lo, hi;
-        for (unsigned idx = 0; idx < (DIM-1); idx++)
+        for (int idx = 0; idx < (DIM-1); idx++)
         {
           lo[idx] = it->first[idx];
           hi[idx] = it->first[idx];
@@ -5549,7 +5549,7 @@ namespace Legion {
       get_realm_index_space(local_space, true/*tight*/);
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
-      PhysicalInstance result;
+      PhysicalInstance result = PhysicalInstance::NO_INST;
 
 #ifdef LEGION_USE_HDF5
       std::vector<PhysicalInstance::HDF5FieldInfo<DIM,T> >
@@ -5567,7 +5567,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < DIM; idx++)
           field_infos[i].dim_order[idx] = 
             dimension_order.ordering[DIM - 1 - idx];
-      }
+      }volatile
       ready_event = ApEvent(PhysicalInstance::create_hdf5_instance(result, 
                             file_name, local_space, field_infos,
 		            read_only, requests));
