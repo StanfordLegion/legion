@@ -4781,7 +4781,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < DIM; idx++)
           field_infos[i].dim_order[idx] = 
             dimension_order.ordering[DIM - 1 - idx];
-      }volatile
+      }
       ready_event = ApEvent(PhysicalInstance::create_hdf5_instance(result, 
                             file_name, local_space, field_infos,
 		            read_only, requests));
