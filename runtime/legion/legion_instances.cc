@@ -1256,7 +1256,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (is_owner())
-        assert(instance.exists());
+        assert(kind == UNBOUND || instance.exists());
 #endif
       // Shadow instances do not participate here
       if (shadow_instance)
@@ -1294,7 +1294,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (is_owner())
-        assert(instance.exists());
+        assert(kind == UNBOUND || instance.exists());
 #endif 
       prune_gc_events(); 
       // Shadow instances do not participate here
@@ -1467,6 +1467,8 @@ namespace Legion {
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
+      if (!use_event.has_triggered())
+        use_event.wait();
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
       assert(instance.exists());
@@ -1664,6 +1666,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndividualManager::DeferDeleteIndividualManager
+                     ::DeferDeleteIndividualManager(IndividualManager *manager_)
+      : LgTaskArgs<DeferDeleteIndividualManager>(implicit_provenance),
+        manager(manager_)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+
+    //--------------------------------------------------------------------------
     /*static*/ void IndividualManager::handle_defer_manager(const void *args,
                                                             Runtime *runtime)
     //--------------------------------------------------------------------------
@@ -1683,6 +1695,16 @@ namespace Legion {
       // Remove the local expression reference if necessary
       if (dargs->local_is && dargs->local_expr->remove_expression_reference())
         delete dargs->local_expr;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndividualManager::handle_defer_perform_deletion(
+                                             const void *args, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const DeferDeleteIndividualManager *dargs =
+        (const DeferDeleteIndividualManager*)args;
+      dargs->manager->perform_deletion(RtEvent::NO_RT_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -1757,8 +1779,17 @@ namespace Legion {
     void IndividualManager::perform_deletion(RtEvent deferred_event)
     //--------------------------------------------------------------------------
     {
+      if (!use_event.has_triggered())
+      {
+        DeferDeleteIndividualManager args(this);
+        runtime->issue_runtime_meta_task(
+            args, LG_LOW_PRIORITY, Runtime::protect_event(use_event));
+        return;
+      }
+
 #ifdef DEBUG_LEGION
       assert(is_owner());
+      assert(kind != UNBOUND);
 #endif
       log_garbage.spew("Deleting physical instance " IDFMT " in memory " 
                        IDFMT "", instance.id, memory_manager->memory.id);
