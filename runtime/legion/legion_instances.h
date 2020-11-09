@@ -416,6 +416,17 @@ namespace Legion {
         const size_t piece_list_size;
         const bool shadow_instance;
       };
+    public:
+      struct DeferDeleteIndividualManager :
+        public LgTaskArgs<DeferDeleteIndividualManager> {
+      public:
+        static const LgTaskID TASK_ID =
+          LG_DEFER_DELETE_INDIVIDUAL_MANAGER_TASK_ID;
+      public:
+        DeferDeleteIndividualManager(IndividualManager *manager_);
+      public:
+        IndividualManager *manager;
+      };
     private:
       struct BroadcastFunctor {
         BroadcastFunctor(Runtime *rt, Serializer &r) : runtime(rt), rez(r) { }
@@ -491,6 +502,8 @@ namespace Legion {
                                       AddressSpaceID source,
                                       Deserializer &derez); 
       static void handle_defer_manager(const void *args, Runtime *runtime);
+      static void handle_defer_perform_deletion(const void *args,
+                                                Runtime *runtime);
       static void create_remote_manager(Runtime *runtime, DistributedID did,
           AddressSpaceID owner_space, Memory mem, PhysicalInstance inst,
           size_t inst_footprint, IndexSpaceExpression *inst_domain,

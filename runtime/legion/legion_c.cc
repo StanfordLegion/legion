@@ -2421,6 +2421,53 @@ legion_logical_partition_retrieve_name(legion_runtime_t runtime_,
 // Region Requirement Operations
 // -----------------------------------------------------------------------
 
+legion_region_requirement_t
+legion_region_requirement_create_logical_region(
+  legion_logical_region_t handle_,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag,
+  bool verified)
+{
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  return CObjectWrapper::wrap(
+      new RegionRequirement(handle, priv, prop, parent, tag, verified));
+}
+
+legion_region_requirement_t
+legion_region_requirement_create_logical_partition(
+  legion_logical_partition_t handle_,
+  legion_projection_id_t proj,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag,
+  bool verified)
+{
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  return CObjectWrapper::wrap(
+      new RegionRequirement(handle, proj, priv, prop, parent, tag, verified));
+}
+
+void
+legion_region_requirement_add_field(legion_output_requirement_t req_,
+                                    legion_field_id_t field,
+                                    bool instance)
+{
+  CObjectWrapper::unwrap(req_)->add_field(field, instance);
+}
+
+void
+legion_region_requirement_destroy(legion_region_requirement_t handle_)
+{
+  delete CObjectWrapper::unwrap(handle_);
+}
+
 legion_logical_region_t
 legion_region_requirement_get_region(legion_region_requirement_t req_)
 {
@@ -2588,6 +2635,14 @@ legion_output_requirement_create(legion_field_space_t field_space_,
                                                  fields,
                                                  global_indexing);
   return CObjectWrapper::wrap(req);
+}
+
+legion_output_requirement_t
+legion_output_requirement_create_region_requirement(
+    legion_region_requirement_t handle_)
+{
+  return CObjectWrapper::wrap(
+      new OutputRequirement(*CObjectWrapper::unwrap(handle_)));
 }
 
 void

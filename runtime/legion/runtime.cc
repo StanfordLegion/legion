@@ -28867,6 +28867,11 @@ namespace Legion {
             IndividualManager::handle_defer_manager(args, runtime);
             break;
           }
+        case LG_DEFER_DELETE_INDIVIDUAL_MANAGER_TASK_ID:
+          {
+            IndividualManager::handle_defer_perform_deletion(args, runtime);
+            break;
+          }
         case LG_DEFER_COLLECTIVE_MANAGER_TASK_ID:
           {
             CollectiveManager::handle_defer_manager(args, runtime);
