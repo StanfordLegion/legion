@@ -702,7 +702,7 @@ namespace Realm {
 	  p.peer_port_idx = ii.peer_port_idx;
 	  p.indirect_port_idx = ii.indirect_port_idx;
 	  p.is_indirect_port = false;  // we'll set these below as needed
-	  p.needs_pbt_update = false;  // never needed for inputs
+	  p.needs_pbt_update.store(false);  // never needed for inputs
 	  p.local_bytes_total = 0;
 	  p.local_bytes_cons.store(0);
 	  p.remote_bytes_total.store(size_t(-1));
@@ -762,7 +762,7 @@ namespace Realm {
 	  }
 	  // TODO: further refine this to exclude peers that can figure out
 	  //  the end of a tranfer some othe way
-	  p.needs_pbt_update = (oi.peer_guid != XFERDES_NO_GUID);
+	  p.needs_pbt_update.store(oi.peer_guid != XFERDES_NO_GUID);
 	  p.local_bytes_total = 0;
 	  p.local_bytes_cons.store(0);
 	  p.remote_bytes_total.store(size_t(-1));
@@ -2075,14 +2075,15 @@ namespace Realm {
 	  it != output_ports.end();
 	  ++it) {
 	// see if we still need to send the total bytes
-	if(it->needs_pbt_update) {
+	if(it->needs_pbt_update.load()) {
 #ifdef DEBUG_REALM
 	  assert(it->peer_guid != XFERDES_NO_GUID);
 #endif
-	  it->needs_pbt_update = false;
-	  xferDes_queue->update_pre_bytes_total(it->peer_guid,
-						it->peer_port_idx,
-						it->local_bytes_total);
+	  // exchange sets the flag to false and tells us previous value
+	  if(it->needs_pbt_update.exchange(false))
+	    xferDes_queue->update_pre_bytes_total(it->peer_guid,
+						  it->peer_port_idx,
+						  it->local_bytes_total);
 	}
 	size_t lbc_snapshot = it->local_bytes_cons.load();
 	if(it->seq_local.span_exists(0, lbc_snapshot) != lbc_snapshot)
@@ -2156,11 +2157,13 @@ namespace Realm {
 	if(inc_amt > 0) update_progress();
 	if(out_port->peer_guid != XFERDES_NO_GUID) {
 	  // update bytes total if needed (and available)
-	  if(out_port->needs_pbt_update && iteration_completed.load_acquire()) {
-	    out_port->needs_pbt_update = false;
-	    xferDes_queue->update_pre_bytes_total(out_port->peer_guid,
-						  out_port->peer_port_idx,
-						  out_port->local_bytes_total);
+	  if(out_port->needs_pbt_update.load() &&
+	     iteration_completed.load_acquire()) {
+	    // exchange sets the flag to false and tells us previous value
+	    if(out_port->needs_pbt_update.exchange(false))
+	      xferDes_queue->update_pre_bytes_total(out_port->peer_guid,
+						    out_port->peer_port_idx,
+						    out_port->local_bytes_total);
 	  }
 	  // we can skip an update if this was empty
 	  if(inc_amt > 0) {
@@ -4466,8 +4469,11 @@ namespace Realm {
 	  assert((in_port->serdez_op == 0) && (out_port->serdez_op == 0));
 	  NodeID dst_node = ID(out_port->mem->me).memory_owner_node();
 	  size_t write_bytes_total = (size_t)-1;
-	  if(out_port->needs_pbt_update && req->xd->iteration_completed.load_acquire()) {
-	    out_port->needs_pbt_update = false;
+	  if(out_port->needs_pbt_update.load() &&
+	     req->xd->iteration_completed.load_acquire()) {
+	    // this can result in sending the pbt twice, but this code path
+	    //  is "mostly dead" and should be nuked soon
+	    out_port->needs_pbt_update.store(false);
 	    write_bytes_total = out_port->local_bytes_total;
 	  }
 	  // send a request if there's data or if there's a next XD to update

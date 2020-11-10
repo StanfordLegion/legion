@@ -355,7 +355,7 @@ namespace Realm {
 	int peer_port_idx;
 	int indirect_port_idx;
 	bool is_indirect_port;
-	bool needs_pbt_update;
+	atomic<bool> needs_pbt_update;
 	size_t local_bytes_total;
 	atomic<size_t> local_bytes_cons, remote_bytes_total;
 	SequenceAssembler seq_local, seq_remote;
