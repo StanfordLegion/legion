@@ -901,7 +901,7 @@ namespace Realm {
 
       // remember the work counter value before we start so that we don't iterate
       //   unnecessarily
-      long long old_work_counter = work_counter.read_counter();
+      //long long old_work_counter = work_counter.read_counter();
 
       // first choice - is there a resumable worker we can yield to?
       if(!resumable_workers.empty()) {
