@@ -290,7 +290,7 @@ namespace Realm {
 
     ReservationImpl::ReservationImpl(void)
     {
-      init(Reservation::NO_RESERVATION, -1);
+      init(Reservation::NO_RESERVATION, (unsigned)-1);
     }
 
     void ReservationImpl::init(Reservation _me, unsigned _init_owner,
@@ -792,7 +792,7 @@ namespace Realm {
 
   /*static*/ inline FastRsrvState& FastRsrvState::get_frs(FastReservation& frsv)
   {
-    char *base = frsv.opaque - sizeof(frsv.state);
+    uintptr_t base = reinterpret_cast<uintptr_t>(frsv.opaque) - sizeof(frsv.state);
     return *reinterpret_cast<FastRsrvState *>(base);
   }
 
@@ -1044,9 +1044,6 @@ namespace Realm {
       // now retry acquisition
       continue;
     }
-    // not reachable
-    assert(0);
-    return Event::NO_EVENT;
   }
 
   bool FastReservation::trywrlock_slow(void)
@@ -1136,9 +1133,6 @@ namespace Realm {
       // now retry acquisition
       continue;
     }
-    // not reachable
-    assert(0);
-    return false;
   }
 
   // WARNING: make sure any changes to this code have corresponding changes made
@@ -1292,9 +1286,6 @@ namespace Realm {
       // now retry acquisition
       continue;
     }
-    // not reachable
-    assert(0);
-    return Event::NO_EVENT;
   }
 
   bool FastReservation::tryrdlock_slow(void)

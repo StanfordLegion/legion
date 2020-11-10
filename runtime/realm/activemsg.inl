@@ -321,6 +321,7 @@ namespace Realm {
 	return mid;
     }
     assert(0);
+    return 0;
   }
 
 

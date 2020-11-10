@@ -762,13 +762,14 @@ namespace Realm {
 #endif
     default:
       assert(0);
+      return 0;
     }
   }
 
   void IBInfo::set(Memory _memory, size_t _size)
   {
     memory = _memory;
-    offset = size_t(-1);
+    offset = off_t(-1);
     size = _size;
   }
 
@@ -974,16 +975,16 @@ namespace Realm {
 	    xd_nodes[xd_idx].inputs.resize(1);
 	    xd_nodes[xd_idx].inputs[0].edge_id = ((i == 0) ?
 						    XDTemplate::SRC_INST :
-						    (ib_idx - 1)); // created by previous step
+						    int(ib_idx - 1)); // created by previous step
 	    xd_nodes[xd_idx].inputs[0].indirect_inst = RegionInstance::NO_INST;
 	    xd_nodes[xd_idx].outputs.resize(1);
 	    xd_nodes[xd_idx].outputs[0].edge_id = ((i == (pathlen - 1)) ?
 						     XDTemplate::DST_INST :
-						     ib_idx);
+						     int(ib_idx));
 	    xd_nodes[xd_idx].outputs[0].indirect_inst = RegionInstance::NO_INST;
 	    if(i < (pathlen - 1)) {
 	      ib_edges[ib_idx].memory = path_info.path[i + 1];
-	      ib_edges[ib_idx].offset = size_t(-1);
+	      ib_edges[ib_idx].offset = off_t(-1);
 	      ib_edges[ib_idx].size = ib_alloc_size;
 	      ib_idx++;
 	    }
@@ -2581,7 +2582,7 @@ namespace Realm {
 	size_t max_bytes = (size_t)-1;
 	size_t src_bytes = src_iter->step(max_bytes, src_info, 0,
 					  true /*tentative*/);
-	assert(src_bytes >= 0);
+	assert(src_bytes > 0);
 	size_t num_elems = src_bytes / src_elem_size;
 	size_t exp_dst_bytes = num_elems * redop->sizeof_rhs;
 	size_t dst_bytes = dst_iter->step(exp_dst_bytes, dst_info, 0);
@@ -3110,7 +3111,7 @@ namespace Realm {
 	unsigned flags = (TransferIterator::LINES_OK |
 			  TransferIterator::PLANES_OK);
 	size_t act_bytes = iter->step(max_bytes, info, flags);
-	assert(act_bytes >= 0);
+	assert(act_bytes > 0);
 
 	// decide whether to use the original fill buffer or one that
 	//  repeats the data several times

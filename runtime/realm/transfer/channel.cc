@@ -1523,7 +1523,7 @@ namespace Realm {
 	bool pbt_updated = false;
 	if(pre_bytes_total != (size_t)-1) {
 	  // try to swap -1 for the given total
-	  size_t val = -1;
+	  size_t val = (size_t)-1;
 	  pbt_updated = in_port->remote_bytes_total.compare_exchange(val, pre_bytes_total);
 	  if(!pbt_updated) {
 	    // failure should only happen if we already had the same value
@@ -1599,7 +1599,6 @@ namespace Realm {
 	kind = XFER_MEM_CPY;
 
 	// ignore requested max_nr and always use 1
-	max_nr = 1;
 	memcpy_req.xd = this;
       }
 

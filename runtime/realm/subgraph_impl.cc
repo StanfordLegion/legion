@@ -475,7 +475,7 @@ namespace Realm {
       case SubgraphDefinition::OPKIND_EXT_PRECOND:
 	{
 	  // external preconditions are encoded as negative indices
-	  int idx = -1 - it->src_op_index;
+	  int idx = -1 - (int)(it->src_op_index);
 	  schedule[tgt->second].preconditions.push_back(std::make_pair(it->tgt_op_port, idx));
 	  break;
 	}

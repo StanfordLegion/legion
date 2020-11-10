@@ -879,8 +879,6 @@ namespace Realm {
 	  assert(0);
 	};
       }
-      // should never get here
-      assert(0);
     }
 
 #ifdef DEBUG_THREAD_SCHEDULER
@@ -960,7 +958,7 @@ namespace Realm {
 
       // wait at least until some new work shows up (even if we don't end up getting it,
       //  it's better than a tight spin)
-      wait_for_work(old_work_counter);
+      //wait_for_work(old_work_counter);
     }
 
 #ifdef DEBUG_THREAD_SCHEDULER

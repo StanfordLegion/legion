@@ -1591,6 +1591,7 @@ namespace Realm {
   {
     // unused
     assert(0);
+    return 0;
   }
   
   void AddressSplitXferDesBase::notify_request_read_done(Request* req)
