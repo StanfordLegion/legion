@@ -5608,7 +5608,7 @@ namespace Legion {
         is_owner(m.address_space() == rt->address_space),
         capacity(m.capacity()), remaining_capacity(capacity), runtime(rt),
         eager_pool_instance(PhysicalInstance::NO_INST), eager_pool(0),
-        eager_allocator(NULL), next_allocation_id(0)
+        eager_allocator(NULL), eager_remaining_capacity(0),next_allocation_id(0)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_USE_CUDA
@@ -5658,6 +5658,7 @@ namespace Legion {
 
         eager_allocator = new EagerAllocator();
         eager_allocator->add_range(0, eager_pool_size - 1);
+        eager_remaining_capacity = eager_pool_size;
       }
     }
 
@@ -8736,6 +8737,7 @@ namespace Legion {
 
       if (allocated)
       {
+        eager_remaining_capacity -= size;
         uintptr_t ptr = eager_pool + offset;
         Realm::ProfilingRequestSet no_requests;
         wait_on = RtEvent(Realm::RegionInstance::create_external(
@@ -8745,12 +8747,13 @@ namespace Legion {
 #endif
         eager_instances[instance] = std::make_pair(ptr, allocation_id);
         log_eager.debug("allocate instance " IDFMT
-                        " (%p+%zd, %zd) on memory " IDFMT,
+                        " (%p+%zd, %zd) on memory " IDFMT ", %zd bytes left",
                         instance.id,
                         reinterpret_cast<void*>(eager_pool),
                         offset,
                         size,
-                        memory.id);
+                        memory.id,
+                        eager_remaining_capacity);
       }
       return wait_on;
     }
@@ -8777,10 +8780,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(finder != eager_instances.end());
 #endif
+          eager_remaining_capacity +=
+            eager_allocator->get_size(finder->second.second);
           eager_allocator->deallocate(finder->second.second);
           eager_instances.erase(finder);
-          log_eager.debug("deallocate instance " IDFMT " on memory " IDFMT,
-                          instance.id, memory.id);
+          log_eager.debug("deallocate instance " IDFMT " on memory " IDFMT
+                          ", %zd bytes left",
+                          instance.id, memory.id, eager_remaining_capacity);
         }
         instance.destroy();
       }

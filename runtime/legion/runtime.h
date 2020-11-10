@@ -1320,6 +1320,7 @@ namespace Legion {
       // Allocator object for eager allocations
       typedef BasicRangeAllocator<size_t, size_t> EagerAllocator;
       EagerAllocator *eager_allocator;
+      size_t eager_remaining_capacity;
       // Allocation counter
       size_t next_allocation_id;
       // Map each eager instance to its pointer and allocation id
