@@ -13497,7 +13497,7 @@ namespace Legion {
                                          layout, 0/*redop*/, 
                                          true/*register now*/,
                                          instance_footprint, ready_event,
-                                         IndividualManager::EXTERNAL_ATTACHED);
+                              PhysicalManager::EXTERNAL_ATTACHED_INSTANCE_KIND);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif

@@ -1158,8 +1158,8 @@ namespace Legion {
                         bool register_now, size_t footprint,
                         ApEvent u_event, InstanceKind k,
                         const ReductionOp *op /*= NULL*/, bool shadow/*=false*/)
-      : PhysicalManager(ctx, desc, encode_instance_did(did, k != INTERNAL,
-            (redop_id != 0), false/*collective*/),
+      : PhysicalManager(ctx, desc, encode_instance_did(did, 
+           (k != INTERNAL_INSTANCE_KIND), (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
           instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow),
@@ -1167,12 +1167,13 @@ namespace Legion {
         use_event(Realm::UserEvent::create_user_event()),
         instance_ready(Realm::UserEvent::create_user_event()),
         kind(k), external_pointer(-1UL),
-        producer_event(k == UNBOUND ? u_event : ApEvent::NO_AP_EVENT)
+        producer_event(
+            (k == UNBOUND_INSTANCE_KIND) ? u_event : ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       // If the manager was initialized with a valid Realm instance,
       // trigger the use event with the ready event of the instance metadata
-      if (kind != UNBOUND)
+      if (kind != UNBOUND_INSTANCE_KIND)
       {
 #ifdef DEBUG_LEGION
         assert(instance.exists());
@@ -1193,7 +1194,7 @@ namespace Legion {
                         LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, 
                         inst.id, memory->memory.id);
 #endif
-      if (runtime->legion_spy_enabled && kind != UNBOUND)
+      if (runtime->legion_spy_enabled && (kind != UNBOUND_INSTANCE_KIND))
       {
 #ifdef DEBUG_LEGION
         assert(unique_event.exists());
@@ -1239,7 +1240,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (is_owner())
-        assert(kind == UNBOUND || instance.exists());
+        assert((kind == UNBOUND_INSTANCE_KIND) || instance.exists());
 #endif
       // Shadow instances do not participate here
       if (shadow_instance)
@@ -1258,7 +1259,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (is_owner())
-        assert(kind == UNBOUND || instance.exists());
+        assert((kind == UNBOUND_INSTANCE_KIND) || instance.exists());
 #endif
       // Shadow instances do not participate here
       if (shadow_instance)
@@ -1277,7 +1278,7 @@ namespace Legion {
       // No need to do anything
 #ifdef DEBUG_LEGION
       if (is_owner())
-        assert(kind == UNBOUND || instance.exists());
+        assert((kind == UNBOUND_INSTANCE_KIND) || instance.exists());
 #endif
       // Shadow instances do not participate here
       if (shadow_instance)
@@ -1296,7 +1297,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (is_owner())
-        assert(kind == UNBOUND || instance.exists());
+        assert((kind == UNBOUND_INSTANCE_KIND) || instance.exists());
 #endif 
       prune_gc_events(); 
       // Shadow instances do not participate here
@@ -1349,7 +1350,7 @@ namespace Legion {
     ApEvent IndividualManager::get_use_event(ApEvent user) const
     //--------------------------------------------------------------------------
     {
-      if (kind != UNBOUND)
+      if (kind != UNBOUND_INSTANCE_KIND)
         return use_event;
       else
         // If the user is the one that is going to bind an instance
@@ -1558,7 +1559,7 @@ namespace Legion {
           rez.serialize(piece_list, piece_list_size);
         rez.serialize(field_space_node->handle);
         rez.serialize(tree_id);
-        if (kind != UNBOUND)
+        if (kind != UNBOUND_INSTANCE_KIND)
           rez.serialize(unique_event);
         else
           rez.serialize(producer_event);
@@ -1797,7 +1798,7 @@ namespace Legion {
 
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(kind != UNBOUND);
+      assert(kind != UNBOUND_INSTANCE_KIND);
 #endif
       log_garbage.spew("Deleting physical instance " IDFMT " in memory " 
                        IDFMT "", instance.id, memory_manager->memory.id);
@@ -1807,7 +1808,7 @@ namespace Legion {
 
 #ifndef LEGION_MALLOC_INSTANCES
       // If this is an owned external instance, deallocate it manually
-      if (kind == EXTERNAL_OWNED)
+      if (kind == EXTERNAL_OWNED_INSTANCE_KIND)
       {
         memory_manager->free_external_allocation(
             external_pointer, instance_footprint);
@@ -1817,7 +1818,7 @@ namespace Legion {
           instance.destroy(deferred_event);
       }
       // If this is an eager allocation, return it back to the eager pool
-      else if (kind == EAGER)
+      else if (kind == EAGER_INSTANCE_KIND)
         memory_manager->free_eager_instance(instance, deferred_event);
       else
 #endif
@@ -1880,7 +1881,7 @@ namespace Legion {
       layout->compute_destroyed_fields(serdez_fields);
 
       // If this is an owned external instance, deallocate it manually
-      if (kind == EXTERNAL_OWNED)
+      if (kind == EXTERNAL_OWNED_INSTANCE_KIND)
       {
         memory_manager->free_external_allocation(
             external_pointer, instance_footprint);
@@ -1890,7 +1891,7 @@ namespace Legion {
           instance.destroy();
       }
       // If this is an eager allocation, return it back to the eager pool
-      else if (kind == EAGER)
+      else if (kind == EAGER_INSTANCE_KIND)
         memory_manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
       else
 #endif
@@ -2144,14 +2145,15 @@ namespace Legion {
       {
         AutoLock lock(inst_lock);
 #ifdef DEBUG_LEGION
-        assert(kind == UNBOUND);
+        assert(kind == UNBOUND_INSTANCE_KIND);
         assert(instance_footprint == -1U);
 #endif
         instance = new_instance;
         kind = new_kind;
         external_pointer = new_pointer;
 #ifdef DEBUG_LEGION
-        assert(kind != EXTERNAL_OWNED || external_pointer != -1UL);
+        assert((kind != EXTERNAL_OWNED_INSTANCE_KIND) || 
+                (external_pointer != -1UL));
 #endif
 
         update_instance_footprint(new_footprint);
@@ -3818,7 +3820,7 @@ namespace Legion {
                                            layout, 0/*redop id*/,
                                            true/*register now*/, 
                                            instance_footprint, ready,
-                                           IndividualManager::INTERNAL);
+                                       PhysicalManager::INTERNAL_INSTANCE_KIND);
             // manager takes ownership of the piece list
             piece_list = NULL;
             break;
@@ -3833,7 +3835,7 @@ namespace Legion {
                                            tree_id, layout, redop_id,
                                            true/*register now*/,
                                            instance_footprint, ready,
-                                           IndividualManager::INTERNAL,
+                                        PhysicalManager::INTERNAL_INSTANCE_KIND,
                                            reduction_op, shadow_instance);
             // manager takes ownership of the piece list
             piece_list = NULL;

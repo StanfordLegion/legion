@@ -2840,6 +2840,8 @@ namespace Legion {
                                             const AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // Check to see if we have an instance ready event
+      const RtEvent inst_ready = manager->get_instance_ready_event();
       if (!is_logical_owner())
       {
         // Check to see if there are any replicated fields here which we
@@ -2970,7 +2972,9 @@ namespace Legion {
           remote_copy_pre_fields |= (new_remote_fields & replicated_fields);
           // Then fall through like normal
         }
-#endif
+#endif 
+        if (inst_ready.exists() && !inst_ready.has_triggered())
+          return Runtime::merge_events(inst_ready, ready_event);
         return ready_event;
       }
       else
@@ -2995,6 +2999,9 @@ namespace Legion {
         // Return any preconditions we found to the aggregator
         if (!preconditions.empty())
           aggregator.record_preconditions(this, reading, preconditions);
+        // Check to see if we have an instance ready event
+        if (inst_ready.exists() && !inst_ready.has_triggered())
+          return inst_ready;
         // We're done with the analysis
         return RtEvent::NO_RT_EVENT;
       }
@@ -4803,6 +4810,8 @@ namespace Legion {
                                             const AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // Check to see if we have an instance ready event
+      const RtEvent inst_ready = manager->get_instance_ready_event();
       if (!is_logical_owner())
       {
         RtUserEvent ready_event = Runtime::create_rt_user_event();
@@ -4821,6 +4830,8 @@ namespace Legion {
           rez.serialize<bool>(trace_recording);
         }
         runtime->send_view_find_copy_preconditions_request(logical_owner, rez);
+        if (inst_ready.exists() && !inst_ready.has_triggered())
+          return Runtime::merge_events(inst_ready, ready_event);
         return ready_event;
       }
       else
@@ -4851,6 +4862,8 @@ namespace Legion {
         // Return any preconditions we found to the aggregator
         if (!preconditions.empty())
           aggregator.record_preconditions(this, reading, preconditions);
+        if (inst_ready.exists() && !inst_ready.has_triggered())
+          return inst_ready;
         // We're done with the analysis
         return RtEvent::NO_RT_EVENT;
       }

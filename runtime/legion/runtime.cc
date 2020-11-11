@@ -3837,9 +3837,9 @@ namespace Legion {
 #endif
         // Finally we set the instance to the physical manager
         manager->update_physical_instance(instance,
-                                          info.eager_pool
-                                          ? IndividualManager::EAGER
-                                          : IndividualManager::EXTERNAL_OWNED,
+                                          info.eager_pool ? 
+                                          PhysicalManager::EAGER_INSTANCE_KIND :
+                                  PhysicalManager::EXTERNAL_OWNED_INSTANCE_KIND,
                                           bytes_used,
                                           info.ptr);
 
@@ -8312,7 +8312,7 @@ namespace Legion {
                               0/*redop id*/, true/*register now*/,
                               -1U/*instance_footprint*/,
                               ready_event,
-                              IndividualManager::UNBOUND,
+                              PhysicalManager::UNBOUND_INSTANCE_KIND,
                               NULL/*op*/,
                               false/*shadow_instance*/);
 
