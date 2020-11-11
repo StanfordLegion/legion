@@ -133,6 +133,7 @@ namespace Legion {
     public: 
       virtual ApEvent get_use_event(void) const = 0;
       virtual ApEvent get_use_event(ApEvent user) const = 0;
+      virtual RtEvent get_instance_ready_event(void) const = 0;
       virtual ApEvent get_unique_event(void) const = 0;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const = 0;
       virtual PointerConstraint 
@@ -463,6 +464,7 @@ namespace Legion {
     public:
       virtual ApEvent get_use_event(void) const;
       virtual ApEvent get_use_event(ApEvent user) const;
+      virtual RtEvent get_instance_ready_event(void) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const 
                                                    { return instance; }
       virtual PointerConstraint
@@ -543,6 +545,8 @@ namespace Legion {
       // Event that needs to trigger before we can start using
       // this physical instance.
       ApUserEvent use_event;
+      // Event that signifies if the instance name is available
+      RtUserEvent instance_ready;
       InstanceKind kind;
       // Keep the pointer for owned external instances
       uintptr_t external_pointer;
@@ -622,6 +626,7 @@ namespace Legion {
     public:
       virtual ApEvent get_use_event(void) const;
       virtual ApEvent get_use_event(ApEvent user) const;
+      virtual RtEvent get_instance_ready_event(void) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const;
       virtual PointerConstraint
                      get_pointer_constraint(const DomainPoint &key) const;
@@ -753,6 +758,7 @@ namespace Legion {
     public: 
       virtual ApEvent get_use_event(void) const;
       virtual ApEvent get_use_event(ApEvent user) const;
+      virtual RtEvent get_instance_ready_event(void) const;
       virtual ApEvent get_unique_event(void) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const;
       virtual PointerConstraint
