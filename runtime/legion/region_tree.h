@@ -738,10 +738,10 @@ namespace Legion {
       PartitionNode*  create_node(LogicalPartition p, RegionNode *par,
                                   std::set<RtEvent> *applied = NULL);
     public:
-      IndexSpaceNode* get_node(IndexSpace space, 
-                               RtEvent *defer = NULL, bool first = true);
-      IndexPartNode*  get_node(IndexPartition part, 
-                               RtEvent *defer = NULL, bool first = true);
+      IndexSpaceNode* get_node(IndexSpace space, RtEvent *defer = NULL, 
+                        const bool can_fail = false, const bool first = true);
+      IndexPartNode*  get_node(IndexPartition part, RtEvent *defer = NULL, 
+                        const bool can_fail = false, const bool first = true);
       FieldSpaceNode* get_node(FieldSpace space, 
                                RtEvent *defer = NULL, bool first = true);
       RegionNode*     get_node(LogicalRegion handle, 
@@ -1737,7 +1737,8 @@ namespace Legion {
     public:
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual void get_colors(std::vector<LegionColor> &colors) = 0;
-      virtual void send_node(AddressSpaceID target, bool up) = 0;
+      virtual bool send_node(AddressSpaceID target, RtEvent done,
+                             const bool above = false) = 0;
     public:
       virtual bool is_index_space_node(void) const = 0;
 #ifdef DEBUG_LEGION
@@ -1843,13 +1844,15 @@ namespace Legion {
       };
       class InvalidFunctor {
       public:
-        InvalidFunctor(IndexSpaceNode *n, ReferenceMutator *m)
-          : node(n), mutator(m) { }
+        InvalidFunctor(IndexSpaceNode *n, ReferenceMutator *m, RtEvent pre)
+          : node(n), mutator(m), precondition(pre) { }
       public:
         void apply(AddressSpaceID target);
       public:
         IndexSpaceNode *const node;
         ReferenceMutator *const mutator;
+        const RtEvent precondition;
+        std::set<RtEvent> applied;
       };
     public:
       IndexSpaceNode(RegionTreeForest *ctx, IndexSpace handle,
@@ -1908,7 +1911,8 @@ namespace Legion {
                                            IndexPartNode *left,
                                            IndexPartNode *right); 
     public:
-      virtual void send_node(AddressSpaceID target, bool up);
+      virtual bool send_node(AddressSpaceID target, RtEvent done,
+                             const bool above = false);
       void remove_send_reference(void);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
@@ -2130,20 +2134,23 @@ namespace Legion {
       IndexPartNode *const parent;
       const ApEvent index_space_ready;
     protected:
+      unsigned                  send_references;
+      // On the owner node track when the index space is set
+      RtUserEvent               realm_index_space_set;
+      // Keep track of whether we've tightened these bounds
+      RtUserEvent               tight_index_space_set;
+      bool                      index_space_set;
+      bool                      tight_index_space;
+      // Keep track of whether we're still valid on the owner
+      bool                      tree_valid;
+      // An event for tracking the effects of sends
+      RtEvent                   send_effects;
       // Must hold the node lock when accessing these data structures
       std::map<LegionColor,IndexPartNode*> color_map;
       std::map<LegionColor,IndexPartition> remote_colors;
       std::set<RegionNode*> logical_nodes;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
-    protected:
-      // On the owner node track when the index space is set
-      RtUserEvent               realm_index_space_set;
-      // Keep track of whether we've tightened these bounds
-      RtUserEvent               tight_index_space_set;
-      unsigned                  send_references;
-      bool                      index_space_set;
-      bool                      tight_index_space;
     };
 
     /**
@@ -2845,13 +2852,15 @@ namespace Legion {
       };
       class InvalidFunctor {
       public:
-        InvalidFunctor(IndexPartNode *n, ReferenceMutator *m)
-          : node(n), mutator(m) { }
+        InvalidFunctor(IndexPartNode *n, ReferenceMutator *m, RtEvent pre)
+          : node(n), mutator(m), precondition(pre) { }
       public:
         void apply(AddressSpaceID target);
       public:
         IndexPartNode *const node;
         ReferenceMutator *const mutator;
+        const RtEvent precondition;
+        std::set<RtEvent> applied;
       }; 
     protected:
       class InterferenceEntry {
@@ -2978,7 +2987,8 @@ namespace Legion {
                                            IndexSpaceNode *left,
                                            IndexSpaceNode *right);
     public:
-      virtual void send_node(AddressSpaceID target, bool up);
+      virtual bool send_node(AddressSpaceID target, RtEvent done,
+                             const bool above = false);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
@@ -3024,9 +3034,8 @@ namespace Legion {
       bool disjoint;
     protected:
       bool has_complete, complete;
-#ifdef DEBUG_LEGION
-      bool first_valid;                      
-#endif
+      bool tree_valid;
+      RtEvent send_effects;
       volatile IndexSpaceExpression *union_expr;
     protected:
       // Must hold the node lock when accessing

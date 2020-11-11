@@ -111,6 +111,18 @@ namespace Realm {
     //       call to commit or cancel)
     void *payload_ptr(size_t datalen);
 
+    // register callbacks to be called upon:
+    //  a) local completion - i.e. all source data has been read and can now
+    //      be safely overwritten
+    //  b) remote completion - message has been received AND HANDLED by target
+    //
+    // callbacks need to be "lightweight" - for heavier work, the message
+    //  handler on the target can send an explicit response message
+    template <typename CALLABLE>
+    void add_local_completion(const CALLABLE& callable);
+    template <typename CALLABLE>
+    void add_remote_completion(const CALLABLE& callable);
+
     // every active message must eventually be commit()'ed or cancel()'ed
     void commit(void);
     void cancel(void);
@@ -123,11 +135,44 @@ namespace Realm {
     uint64_t inline_capacity[INLINE_STORAGE / sizeof(uint64_t)];
   };
 
+  // type-erased wrappers for completion callbacks
+  class CompletionCallbackBase {
+  public:
+    virtual ~CompletionCallbackBase();
+    virtual void invoke() = 0;
+    virtual size_t size() const = 0;
+    virtual CompletionCallbackBase *clone_at(void *p) const = 0;
+
+    static const size_t ALIGNMENT = 8;
+
+    // helper functions for invoking/cloning/destroying a collection of callbacks
+    static void invoke_all(void *start, size_t bytes);
+    static void clone_all(void *dst, const void *src, size_t bytes);
+    static void destroy_all(void *start, size_t bytes);
+  };
+
+  template <typename CALLABLE>
+  class CompletionCallback : public CompletionCallbackBase {
+  public:
+    CompletionCallback(const CALLABLE &_callable);
+    virtual void invoke();
+    virtual size_t size() const;
+    virtual CompletionCallbackBase *clone_at(void *p) const;
+
+  protected:
+    CALLABLE callable;
+  };
+
   // per-network active message implementations are mostly opaque, but a few
   //  fields are exposed to avoid virtual function calls
   class ActiveMessageImpl {
   public:
     virtual ~ActiveMessageImpl() {}
+
+    // reserves space for a local/remote completion - caller will
+    //  placement-new the completion at the provided address
+    virtual void *add_local_completion(size_t size) = 0;
+    virtual void *add_remote_completion(size_t size) = 0;
 
     virtual void commit(size_t act_payload_size) = 0;
     virtual void cancel() = 0;

@@ -22,6 +22,14 @@
 
 #ifdef REALM_TIMELIMIT_USE_RDTSC
 #include <x86intrin.h>
+#ifdef __PGI
+// PGI's x86intrin doesn't define __rdtsc?
+static inline unsigned long long __rdtsc()
+{
+  unsigned int dummy;
+  return __rdtscp(&dummy);
+}
+#endif
 #endif
 
 namespace Realm {

@@ -263,11 +263,8 @@ template <typename FT>
 const std::map<Point<N,T>, Maybe<FT> >& DistributedData<N,T>::get_ref_data(FieldID field_id) const
 {
   typename std::map<FieldID, RefDataEntry>::const_iterator it = ref_data.find(field_id);
-  if(it != ref_data.end()) {
-    return *reinterpret_cast<const std::map<Point<N,T>, Maybe<FT> > *>(it->second.data);
-  } else {
-    assert(0);
-  }
+  assert(it != ref_data.end());
+  return *reinterpret_cast<const std::map<Point<N,T>, Maybe<FT> > *>(it->second.data);
 }
 
 template <int N, typename T, typename FT, typename LAMBDA>
@@ -972,8 +969,8 @@ bool scatter_gather_test(const std::vector<Memory>& mems,
   inst1.destroy();
   inst2a.destroy();
   inst2b.destroy();
-#endif
   return true;
+#endif
 }
 
 template <typename DT>

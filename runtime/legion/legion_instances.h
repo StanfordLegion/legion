@@ -133,7 +133,6 @@ namespace Legion {
     public: 
       virtual ApEvent get_use_event(void) const = 0;
       virtual ApEvent get_use_event(ApEvent user) const = 0;
-      virtual RtEvent get_instance_ready_event(void) const = 0;
       virtual ApEvent get_unique_event(void) const = 0;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const = 0;
       virtual PointerConstraint 
@@ -200,6 +199,19 @@ namespace Legion {
      * of data; this includes both individual instances and collective instances
      */
     class PhysicalManager : public InstanceManager {
+    public:
+      enum InstanceKind {
+        // Normal Realm allocations
+        INTERNAL_INSTANCE_KIND,
+        // External allocations imported by attach operations
+        EXTERNAL_ATTACHED_INSTANCE_KIND,
+        // External allocations from output regions, owned by the runtime
+        EXTERNAL_OWNED_INSTANCE_KIND,
+        // Allocations drawn from the eager pool
+        EAGER_INSTANCE_KIND,
+        // Instance not yet bound
+        UNBOUND_INSTANCE_KIND,
+      };
     public:
       struct GarbageCollectionArgs : public LgTaskArgs<GarbageCollectionArgs> {
       public:
@@ -271,6 +283,7 @@ namespace Legion {
       virtual void force_deletion(void) = 0;
       virtual void set_garbage_collection_priority(MapperID mapper_id, 
                                 Processor p, GCPriority priority) = 0; 
+      virtual RtEvent get_instance_ready_event(void) const = 0;
       virtual RtEvent attach_external_instance(void) = 0;
       virtual RtEvent detach_external_instance(void) = 0;
       virtual bool has_visible_from(const std::set<Memory> &memories) const = 0;
@@ -367,20 +380,7 @@ namespace Legion {
      * most common kind of instance that gets made.
      */
     class IndividualManager : public PhysicalManager,
-                              public LegionHeapify<IndividualManager> { 
-    public:
-      enum InstanceKind {
-        // Normal Realm allocations
-        INTERNAL,
-        // External allocations imported by attach operations
-        EXTERNAL_ATTACHED,
-        // External allocations from output regions, owned by the runtime
-        EXTERNAL_OWNED,
-        // Allocations drawn from the eager pool
-        EAGER,
-        // Instance not yet bound
-        UNBOUND,
-      };
+                              public LegionHeapify<IndividualManager> {
     public:
       static const AllocationType alloc_type = INDIVIDUAL_INST_MANAGER_ALLOC;
     public:
@@ -533,8 +533,9 @@ namespace Legion {
           ReductionOpID redop, ReductionView *view);
 #endif
     public:
-      inline bool is_unbound() const { return kind == UNBOUND; }
-      void update_physical_instance(PhysicalInstance new_instance,
+      inline bool is_unbound() const 
+        { return kind == UNBOUND_INSTANCE_KIND; }
+      bool update_physical_instance(PhysicalInstance new_instance,
                                     InstanceKind new_kind,
                                     size_t new_footprint,
                                     uintptr_t new_pointer = 0);

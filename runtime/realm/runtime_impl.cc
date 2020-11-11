@@ -1884,20 +1884,19 @@ namespace Realm {
 						  Event::NO_EVENT,
 						  INT_MAX); // runs with max priority
       
-      Event main_event;
       if(task_id != 0) {
 	if(style == Runtime::ONE_TASK_ONLY) {
 	  // everybody needs to agree on this...
 	  Processor p = nodes[0].processors[0]->me;
-	  main_event = collective_spawn(p, task_id, args, arglen, init_event);
+	  collective_spawn(p, task_id, args, arglen, init_event);
 	} else {
-	  main_event = collective_spawn_by_kind(Processor::NO_KIND, task_id, args, arglen,
-						(style == Runtime::ONE_TASK_PER_NODE),
-						init_event, 0 /*priority*/);
+	  collective_spawn_by_kind(Processor::NO_KIND, task_id, args, arglen,
+				   (style == Runtime::ONE_TASK_PER_NODE),
+				   init_event, 0 /*priority*/);
 	}
       } else {
 	// no main task!?
-	main_event = init_event;
+	assert(0);
       }
 
       // if we're in background mode, we just return to the caller now

@@ -375,6 +375,9 @@ namespace Realm {
   
     virtual ~GASNet1MessageImpl();
 
+    virtual void *add_local_completion(size_t size);
+    virtual void *add_remote_completion(size_t size);
+
     virtual void commit(size_t act_payload_size);
     virtual void cancel();
 
@@ -386,6 +389,7 @@ namespace Realm {
     size_t src_payload_lines;
     size_t src_payload_line_stride;
     void *dest_payload_addr;
+    PendingCompletion *comp;
     size_t header_size;
     struct FullHeader : public BaseMedium {
       unsigned short msgid;
@@ -410,6 +414,7 @@ namespace Realm {
     , src_payload_lines(_src_payload_lines)
     , src_payload_line_stride(_src_payload_line_stride)
     , dest_payload_addr(_dest_payload_addr)
+    , comp(0)
     , header_size(_header_size)
   {
     if(_max_payload_size && (src_payload_addr == 0)) {
@@ -436,6 +441,7 @@ namespace Realm {
     , src_payload_lines(_src_payload_lines)
     , src_payload_line_stride(_src_payload_line_stride)
     , dest_payload_addr(0)
+    , comp(0)
     , header_size(_header_size)
   {
     if(_max_payload_size && (src_payload_addr == 0)) {
@@ -453,6 +459,22 @@ namespace Realm {
   {
   }
 
+  void *GASNet1MessageImpl::add_local_completion(size_t size)
+  {
+    // if we don't already have a pending completion object, get one
+    if(!comp)
+      comp = completion_manager.get_available();
+    return comp->add_local_completion(size);
+  }
+
+  void *GASNet1MessageImpl::add_remote_completion(size_t size)
+  {
+    // if we don't already have a pending completion object, get one
+    if(!comp)
+      comp = completion_manager.get_available();
+    return comp->add_remote_completion(size);
+  }
+
   void GASNet1MessageImpl::commit(size_t act_payload_size)
   {
     args.set_magic();
@@ -461,6 +483,7 @@ namespace Realm {
 
     if(is_multicast) {
       assert(dest_payload_addr == 0);
+      assert(comp == 0);
       size_t count = targets.size();
       if(count > 0) {
 	for(NodeSet::const_iterator it = targets.begin();
@@ -473,17 +496,17 @@ namespace Realm {
 			      src_payload_addr,
 			      act_payload_size / src_payload_lines,
 			      src_payload_line_stride, src_payload_lines,
-			      PAYLOAD_KEEP);
+			      PAYLOAD_KEEP, 0);
 	    else
 	      enqueue_message(*it, MSGID_NEW_ACTIVEMSG,
 			      &args, header_size+24,
 			      src_payload_addr, act_payload_size,
-			      PAYLOAD_KEEP);
+			      PAYLOAD_KEEP, 0);
 	  } else
 	    enqueue_message(*it, MSGID_NEW_ACTIVEMSG,
 			    &args, header_size+24,
 			    payload_base, act_payload_size,
-			    ((count > 0) ? PAYLOAD_COPY : PAYLOAD_FREE));
+			    ((count > 0) ? PAYLOAD_COPY : PAYLOAD_FREE), 0);
 	  count--;
 	}
       } else {
@@ -498,22 +521,23 @@ namespace Realm {
 			  &args, header_size+24,
 			  src_payload_addr, (act_payload_size / src_payload_lines),
 			  src_payload_line_stride, src_payload_lines,
-			  PAYLOAD_KEEP, dest_payload_addr);
+			  PAYLOAD_KEEP, comp, dest_payload_addr);
 	else
 	  enqueue_message(target, MSGID_NEW_ACTIVEMSG,
 			  &args, header_size+24,
 			  src_payload_addr, act_payload_size, PAYLOAD_KEEP,
-			  dest_payload_addr);
+			  comp, dest_payload_addr);
       } else
 	enqueue_message(target, MSGID_NEW_ACTIVEMSG,
 			&args, header_size+24,
 			payload_base, act_payload_size, PAYLOAD_FREE,
-			dest_payload_addr);
+			comp, dest_payload_addr);
     }
   }
 
   void GASNet1MessageImpl::cancel()
   {
+    assert(comp == 0);
     if((payload_size > 0) && (src_payload_addr == 0))
       free(payload_base);
   }

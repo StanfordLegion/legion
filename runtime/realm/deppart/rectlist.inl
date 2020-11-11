@@ -276,6 +276,10 @@ namespace Realm {
     //std::cout << "slow path!\n";
     // our rectangle may break into multiple pieces that we have to 
     //  iteratively add
+#ifdef __PGI
+    // suppress "dynamic initialization in unreachable code" warning
+#pragma diag_suppress initialization_not_reachable
+#endif
     std::vector<Rect<N,T> > to_add(1, _r);
 #ifdef REALM_DEBUG_RECT_MERGING
     std::vector<Rect<N,T> > orig_rects(rects);

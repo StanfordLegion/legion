@@ -193,6 +193,8 @@ namespace Realm {
       SequenceAssembler(const SequenceAssembler& copy_from);
       ~SequenceAssembler(void);
 
+      // NOT thread-safe - caller must ensure neither *this nor other is being
+      //  modified during this call
       void swap(SequenceAssembler& other);
 
       // asks if a span exists - return value is number of bytes from the
@@ -204,7 +206,7 @@ namespace Realm {
       size_t add_span(size_t pos, size_t count);
 
     protected:
-      atomic<size_t> contig_amount;  // everything from [0, contig_amount) is covered
+      atomic<size_t> contig_amount_x2;  // everything from [0, contig_amount) is covered - LSB indicates potential presence of noncontig spans
       atomic<size_t> first_noncontig; // nothing in [contig_amount, first_noncontig) 
       Mutex *mutex;
       std::map<size_t, size_t> spans;  // noncontiguous spans
@@ -288,6 +290,49 @@ namespace Realm {
       CustomSerdezID serdez_id;
     };
 
+    class AddressList {
+    public:
+      AddressList();
+
+      size_t *begin_nd_entry(int max_dim);
+      void commit_nd_entry(int act_dim, size_t bytes);
+
+      size_t bytes_pending() const;
+      
+    protected:
+      friend class AddressListCursor;
+
+      const size_t *read_entry();
+
+      size_t total_bytes;
+      unsigned write_pointer;
+      unsigned read_pointer;
+      static const size_t MAX_ENTRIES = 1000;
+      size_t data[MAX_ENTRIES];
+    };
+
+    class AddressListCursor {
+    public:
+      AddressListCursor();
+
+      void set_addrlist(AddressList *_addrlist);
+
+      int get_dim();
+      uintptr_t get_offset();
+      uintptr_t get_stride(int dim);
+      size_t remaining(int dim);
+      void advance(int dim, size_t amount);
+
+      void skip_bytes(size_t bytes);
+      
+    protected:
+      AddressList *addrlist;
+      bool partial;
+      static const int MAX_DIM = 8;
+      int partial_dim;
+      size_t pos[MAX_DIM];
+    };
+
     class XferDes {
     public:
       // a pointer to the DmaRequest that contains this XferDes
@@ -310,6 +355,7 @@ namespace Realm {
 	int peer_port_idx;
 	int indirect_port_idx;
 	bool is_indirect_port;
+	atomic<bool> needs_pbt_update;
 	size_t local_bytes_total;
 	atomic<size_t> local_bytes_cons, remote_bytes_total;
 	SequenceAssembler seq_local, seq_remote;
@@ -318,6 +364,8 @@ namespace Realm {
 	//  to complete)
 	Memory ib_mem;
 	size_t ib_offset, ib_size;
+	AddressList addrlist;
+	AddressListCursor addrcursor;
       };
       std::vector<XferPort> input_ports, output_ports;
       struct ControlPortState {
@@ -365,6 +413,7 @@ namespace Realm {
       // queue that contains all available free requests
       Mutex available_req_mutex;
       std::queue<Request*> available_reqs;
+
     public:
       XferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
 	      const std::vector<XferDesPortInfo>& inputs_info,
@@ -398,7 +447,8 @@ namespace Realm {
 
       virtual void update_bytes_read(int port_idx, size_t offset, size_t size);
       virtual void update_bytes_write(int port_idx, size_t offset, size_t size);
-      void update_pre_bytes_write(int port_idx, size_t offset, size_t size, size_t pre_bytes_total);
+      void update_pre_bytes_write(int port_idx, size_t offset, size_t size);
+      void update_pre_bytes_total(int port_idx, size_t pre_bytes_total);
       void update_next_bytes_read(int port_idx, size_t offset, size_t size);
 
       bool is_completed(void);
@@ -480,6 +530,46 @@ namespace Realm {
 	XferDes *xd; // TODO: eliminate this based on a known offset
       };
       DeferredXDEnqueue deferred_enqueue;
+
+      // helper widget to cache spans so that SequenceAssembler updates are as
+      //  large as possible
+      template <void (XferDes::*UPDATE)(int port_idx, size_t offset, size_t size)>
+      class SequenceCache {
+      public:
+	SequenceCache(XferDes *_xd);
+
+	void add_span(int port_idx, size_t offset, size_t size);
+	void flush();
+
+      protected:
+	static const size_t MAX_ENTRIES = 4;
+
+	XferDes *xd;
+	int ports[MAX_ENTRIES];
+	size_t offsets[MAX_ENTRIES];
+	size_t sizes[MAX_ENTRIES];
+      };
+      typedef SequenceCache<&XferDes::update_bytes_read> ReadSequenceCache;
+      typedef SequenceCache<&XferDes::update_bytes_write> WriteSequenceCache;
+
+      size_t update_control_info(ReadSequenceCache *rseqcache);
+
+      // a helper routine for individual XferDes implementations - tries to get
+      //  addresses and check flow control for at least 'min_xfer_size' bytes
+      //  worth of transfers from a single input to a single output, and returns
+      //  the number of bytes that can be transferred before another call to
+      //  this method
+      // returns 0 if the transfer is complete OR if there are fewer than the
+      //  minimum requested bytes available and there's reason to believe that
+      //  trying again later will result in a larger chunk
+      // as a side effect, the input/output control information is updated - the
+      //  actual input/output ports involved in the next transfer are stored there
+      size_t get_addresses(size_t min_xfer_size, ReadSequenceCache *rseqcache);
+
+      // after a call to 'get_addresses', this call updates the various data
+      //  structures to record that transfers for 'total_bytes' bytes were at
+      //  least initiated - return value is whether iteration is complete
+      bool record_address_consumption(size_t total_bytes);
     };
 
     class MemcpyChannel;
@@ -507,6 +597,7 @@ namespace Realm {
     private:
       bool memcpy_req_in_use;
       MemcpyRequest memcpy_req;
+      bool has_serdez;
       //const char *src_buf_base, *dst_buf_base;
     };
 
@@ -563,6 +654,23 @@ namespace Realm {
       virtual void update_bytes_write(int port_idx, size_t offset, size_t size);
 
       bool progress_xd(RemoteWriteChannel *channel, TimeLimit work_until);
+
+      // writes directly to a contiguous chunk of destination
+      struct Write1DMessage {
+	XferDesID next_xd_guid;
+	int next_port_idx;
+	size_t span_start, pre_bytes_total;
+
+	static void handle_message(NodeID sender,
+				   const Write1DMessage &args,
+				   const void *data,
+				   size_t datalen);
+	static bool handle_inline(NodeID sender,
+				  const Write1DMessage &args,
+				  const void *data,
+				  size_t datalen,
+				  TimeLimit work_until);
+      };
 
     private:
       RemoteWriteRequest* requests;
@@ -1182,6 +1290,17 @@ namespace Realm {
       }
     };
 
+    struct UpdateBytesTotalMessage {
+      XferDesID guid;
+      int port_idx;
+      size_t pre_bytes_total;
+
+      static void handle_message(NodeID sender,
+				 const UpdateBytesTotalMessage &args,
+				 const void *data,
+				 size_t datalen);
+    };
+      
     struct UpdateBytesWriteMessage {
       XferDesID guid;
       int port_idx;
@@ -1322,68 +1441,11 @@ namespace Realm {
       }
 
       void update_pre_bytes_write(XferDesID xd_guid, int port_idx,
-				  size_t span_start, size_t span_size,
-				  size_t pre_bytes_total)
-      {
-        NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
-        if (execution_node == Network::my_node_id) {
-	  RWLock::AutoWriterLock al(guid_lock);
-          std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
-          if (it != guid_to_xd.end()) {
-            if (it->second.xd != NULL) {
-              //it->second.xd->update_pre_bytes_write(bytes_write);
-	      it->second.xd->update_pre_bytes_write(port_idx, span_start, span_size, pre_bytes_total);
-            } else {
-	      it->second.seq_pre_write[port_idx].add_span(span_start, span_size);
-
-	      std::map<int, size_t>::iterator it2 = it->second.pre_bytes_total.find(port_idx);
-	      if(it2 != it->second.pre_bytes_total.end()) {
-		if(pre_bytes_total != size_t(-1)) {
-		  assert((it2->second == pre_bytes_total) ||
-			 (it2->second == size_t(-1)));
-		  it2->second = pre_bytes_total;
-		}
-	      } else
-		it->second.pre_bytes_total[port_idx] = pre_bytes_total;
-
-            }
-          } else {
-            XferDesWithUpdates& xdup = guid_to_xd[xd_guid];
-	    xdup.seq_pre_write[port_idx].add_span(span_start, span_size);
-	    xdup.pre_bytes_total[port_idx] = pre_bytes_total;
-          }
-        }
-        else {
-          // send a active message to remote node
-          UpdateBytesWriteMessage::send_request(execution_node, xd_guid,
-						port_idx,
-						span_start, span_size,
-						pre_bytes_total);
-        }
-      }
-
+				  size_t span_start, size_t span_size);
+      void update_pre_bytes_total(XferDesID xd_guid, int port_idx,
+				  size_t pre_bytes_total);
       void update_next_bytes_read(XferDesID xd_guid, int port_idx,
-				  size_t span_start, size_t span_size)
-      {
-        NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
-        if (execution_node == Network::my_node_id) {
-	  RWLock::AutoReaderLock al(guid_lock);
-          std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
-          if (it != guid_to_xd.end()) {
-	    assert(it->second.xd != NULL);
-	    it->second.xd->update_next_bytes_read(port_idx, span_start, span_size);
-	  } else {
-            // This means this update goes slower than future updates, which marks
-            // completion of xfer des (ID = xd_guid). In this case, it is safe to drop the update
-	  }
-        }
-        else {
-          // send a active message to remote node
-          UpdateBytesReadMessage::send_request(execution_node, xd_guid,
-					       port_idx,
-					       span_start, span_size);
-        }
-      }
+				  size_t span_start, size_t span_size);
 
       void destroy_xferDes(XferDesID guid) {
 	XferDes *xd;

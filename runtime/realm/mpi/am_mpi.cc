@@ -37,7 +37,7 @@ namespace MPI {
 
   atomic<size_t> messages_sent(0);
 
-#define AM_MSG_HEADER_SIZE 4 * sizeof(int)
+#define AM_MSG_HEADER_SIZE (4 * sizeof(int) + sizeof(uintptr_t))
 
 
 void AM_Init(int *p_node_this, int *p_node_size)
@@ -100,6 +100,19 @@ void AM_init_long_messages(MPI_Win win, void *am_base,
     g_message_manager = message_manager;
 }
 
+static void incoming_message_handled(NodeID sender, uintptr_t data)
+{
+    struct AM_msg msg;
+    msg.type = 3; // completion reply
+    msg.msgid = 0x7fff; // no hander needed
+    msg.header_size = 0;
+    msg.payload_size = 0;
+    msg.comp_ptr = data;
+
+    CHECK_MPI( MPI_Send(&msg, AM_MSG_HEADER_SIZE, MPI_CHAR,
+			sender, 0x1, MPI_COMM_WORLD) );
+}
+
 void AMPoll()
 {
     struct AM_msg *msg;
@@ -135,6 +148,10 @@ void AMPoll()
             header = msg->stuff + 4;
             payload = (char *) g_am_base + offset;
 	    payload_mode = PAYLOAD_KEEP;  // already in dest memory
+        } else if (msg->type == 3) {
+	    AMComplete(reinterpret_cast<void *>(msg->comp_ptr));
+	    header = 0;
+	    payload = 0;
         } else {
             assert(0 && "invalid message type");
             header = 0;
@@ -142,19 +159,28 @@ void AMPoll()
             msg->msgid = 0x7fff; // skips handler below
         }
 
+	uintptr_t completion = 0;  // do we need to send a completion here?
         if (msg->msgid != 0x7fff) {
-	    g_message_manager->add_incoming_message(tn_src, msg->msgid,
-						    header, msg->header_size,
-						    PAYLOAD_COPY,
-						    payload, msg->payload_size,
-						    payload_mode,
-						    0, 0,
-						    TimeLimit());
+	    bool handled = g_message_manager->add_incoming_message(tn_src, msg->msgid,
+								   header, msg->header_size,
+								   PAYLOAD_COPY,
+								   payload, msg->payload_size,
+								   payload_mode,
+								   ((msg->comp_ptr != 0) ?
+								      incoming_message_handled :
+								      0),
+								   msg->comp_ptr,
+								   TimeLimit());
+	    if (handled)
+	        completion = msg->comp_ptr;
         }
 
         CHECK_MPI( MPI_Irecv(buf_recv_list[i_recv_list], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_recv_list]) );
         i_recv_list = (i_recv_list + 1) % n_am_mult_recv;
         buf_recv = buf_recv_list[i_recv_list];
+
+	if (completion)
+            incoming_message_handled(tn_src, completion);
     }
 
 }
@@ -166,7 +192,7 @@ void AMPoll_cancel()
     }
 }
 
-void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int payload_lines, int payload_line_stride, int has_dest, MPI_Aint dest)
+void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int payload_lines, int payload_line_stride, int has_dest, MPI_Aint dest, void *remote_comp)
 {
     char buf_send[1024];
 
@@ -174,6 +200,7 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
     msg->msgid = msgid;
     msg->header_size = header_size;
     msg->payload_size = payload_size;
+    msg->comp_ptr = reinterpret_cast<uintptr_t>(remote_comp);
     char *msg_header = msg->stuff;
 
     if (has_dest) {

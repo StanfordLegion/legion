@@ -196,7 +196,7 @@ foreach(N1 RANGE 1 ${REALM_MAX_DIM})
       # echo -e is not portable, so use perl and try to limit the escape
       #  characters we need to tunnel through cmake
       add_custom_command(
-	COMMAND perl -e "$x='#define INST_N1 ${N1}EOL#define INST_N2 ${N2}EOL#include QTrealm/deppart/${SRC}_tmpl.ccQT'; $x=~s/EOL/chr(10)/ge; $x=~s/QT/chr(34)/ge; print $x;" > ${SRC}_${N1}_${N2}.cc
+	COMMAND perl -e "$x='#define INST_N1 ${N1}EOL#define INST_N2 ${N2}EOL#include QTrealm/deppart/${SRC}_tmpl.ccQTEOL'; $x=~s/EOL/chr(10)/ge; $x=~s/QT/chr(34)/ge; print $x;" > ${SRC}_${N1}_${N2}.cc
 	OUTPUT ${SRC}_${N1}_${N2}.cc
 	VERBATIM
 	)
@@ -496,7 +496,7 @@ foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
   # echo -e is not portable, so use perl and try to limit the escape
   #  characters we need to tunnel through cmake
   add_custom_command(
-    COMMAND perl -e "$x='#define INST_N1 ${N1}EOL#include QTlegion/region_tree_tmpl.ccQT'; $x=~s/EOL/chr(10)/ge; $x=~s/QT/chr(34)/ge; print $x;" > region_tree_${N1}.cc
+    COMMAND perl -e "$x='#define INST_N1 ${N1}EOL#include QTlegion/region_tree_tmpl.ccQTEOL'; $x=~s/EOL/chr(10)/ge; $x=~s/QT/chr(34)/ge; print $x;" > region_tree_${N1}.cc
     OUTPUT region_tree_${N1}.cc
     VERBATIM
     )
@@ -504,7 +504,7 @@ foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
   
   foreach(N2 RANGE 1 ${LEGION_MAX_DIM})
     add_custom_command(
-      COMMAND perl -e "$x='#define INST_N1 ${N1}EOL#define INST_N2 ${N2}EOL#include QTlegion/region_tree_tmpl.ccQT'; $x=~s/EOL/chr(10)/ge; $x=~s/QT/chr(34)/ge; print $x;" > region_tree_${N1}_${N2}.cc
+      COMMAND perl -e "$x='#define INST_N1 ${N1}EOL#define INST_N2 ${N2}EOL#include QTlegion/region_tree_tmpl.ccQTEOL'; $x=~s/EOL/chr(10)/ge; $x=~s/QT/chr(34)/ge; print $x;" > region_tree_${N1}_${N2}.cc
       OUTPUT region_tree_${N1}_${N2}.cc
       VERBATIM
       )
