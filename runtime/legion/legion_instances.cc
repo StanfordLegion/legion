@@ -1164,8 +1164,9 @@ namespace Legion {
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
           instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow),
         memory_manager(memory), instance(inst),
-        use_event(Realm::UserEvent::create_user_event()),
-        instance_ready(Realm::UserEvent::create_user_event()),
+        use_event(Runtime::create_ap_user_event(NULL)),
+        instance_ready((k == UNBOUND_INSTANCE_KIND) ? 
+            Runtime::create_rt_user_event() : RtUserEvent::NO_RT_USER_EVENT),
         kind(k), external_pointer(-1UL),
         producer_event(
             (k == UNBOUND_INSTANCE_KIND) ? u_event : ApEvent::NO_AP_EVENT)
@@ -1178,10 +1179,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(instance.exists());
 #endif
-        Runtime::trigger_event(
-            NULL, use_event, fetch_metadata(instance, u_event));
-        Runtime::trigger_event(instance_ready);
+        Runtime::trigger_event(NULL,use_event,fetch_metadata(instance,u_event));
       }
+      else // add a resource reference to remove once this manager is set
+        add_base_resource_ref(PENDING_UNBOUND_REF);
 
       if (!is_owner() && !shadow_instance)
       {
@@ -1477,8 +1478,6 @@ namespace Legion {
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
-      if (!instance_ready.has_triggered())
-        use_event.wait();
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
       assert(instance.exists());
@@ -2135,7 +2134,7 @@ namespace Legion {
 #endif // LEGION_GPU_REDUCTIONS
 
     //--------------------------------------------------------------------------
-    void IndividualManager::update_physical_instance(
+    bool IndividualManager::update_physical_instance(
                                                   PhysicalInstance new_instance,
                                                   InstanceKind new_kind,
                                                   size_t new_footprint,
@@ -2174,6 +2173,7 @@ namespace Legion {
         Runtime::trigger_event(
             NULL, use_event, fetch_metadata(instance, producer_event));
       }
+      return remove_base_resource_ref(PENDING_UNBOUND_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -2213,8 +2213,9 @@ namespace Legion {
       if (manager_ready.exists() && !manager_ready.has_triggered())
         manager_ready.wait();
 
-      manager->as_individual_manager()->update_physical_instance(
-          instance, kind, footprint);
+      if (manager->as_individual_manager()->update_physical_instance(
+                                              instance, kind, footprint))
+        delete manager;
     }
 
     /////////////////////////////////////////////////////////////

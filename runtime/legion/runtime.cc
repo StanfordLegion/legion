@@ -3836,7 +3836,7 @@ namespace Legion {
         assert(instance.exists());
 #endif
         // Finally we set the instance to the physical manager
-        manager->update_physical_instance(instance,
+        const bool delete_now = manager->update_physical_instance(instance,
                                           info.eager_pool ? 
                                           PhysicalManager::EAGER_INSTANCE_KIND :
                                   PhysicalManager::EXTERNAL_OWNED_INSTANCE_KIND,
@@ -3849,6 +3849,8 @@ namespace Legion {
         // instance.
         if (info.eager_pool)
           manager->memory_manager->link_eager_instance(instance, info.ptr);
+        if (delete_now)
+          delete manager;
       }
     }
 

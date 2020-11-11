@@ -532,7 +532,7 @@ namespace Legion {
     public:
       inline bool is_unbound() const 
         { return kind == UNBOUND_INSTANCE_KIND; }
-      void update_physical_instance(PhysicalInstance new_instance,
+      bool update_physical_instance(PhysicalInstance new_instance,
                                     InstanceKind new_kind,
                                     size_t new_footprint,
                                     uintptr_t new_pointer = 0);
