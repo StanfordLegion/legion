@@ -8343,15 +8343,12 @@ namespace Legion {
           return tree_valid;
         update_remote_instances(target);
         // First see if we are still valid
-        if (tree_valid)
+        if (tree_valid && ((parent == NULL) || (send_references > 0)))
         {
           still_valid = true;
           // Grab a reference on the parent to keep it from being deleted
           if (parent != NULL)
           {
-#ifdef DEBUG_LEGION
-            assert(send_references > 0);
-#endif
             send_references++;
             has_reference = true;
           }
