@@ -177,7 +177,7 @@ namespace Realm {
       IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
 	      ((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
 #ifdef DEBUG_REALM
-      assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
+      assert(((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE);
 #endif
 
       NodeBase *child = inner->elems[i].load_acquire();
@@ -272,7 +272,7 @@ namespace Realm {
       IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
 	      ((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
 #ifdef DEBUG_REALM
-      assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
+      assert(((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE);
 #endif
 
       NodeBase *child = inner->elems[i].load_acquire();

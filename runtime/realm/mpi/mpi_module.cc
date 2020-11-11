@@ -30,14 +30,14 @@ void enqueue_message(int target, int msgid,
                      const void *args, size_t arg_size,
                      const void *payload, size_t payload_size,
 		     size_t payload_lines, size_t payload_line_stride,
-                     void *dstptr)
+                     void *dstptr, void *remote_comp)
 {
     MPI_Aint disp = (MPI_Aint)dstptr;
     if (disp) {
         /* Displacement is shifted by DISP_OFFSET */
-        Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, payload_lines, payload_line_stride, 1, disp - DISP_OFFSET);
+        Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, payload_lines, payload_line_stride, 1, disp - DISP_OFFSET, remote_comp);
     } else {
-        Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, payload_lines, payload_line_stride, 0, 0);
+        Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, payload_lines, payload_line_stride, 0, 0, remote_comp);
     }
 }
 
@@ -325,6 +325,22 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // struct CompletionList
+    //
+
+    struct CompletionList {
+      size_t bytes;
+
+      static const size_t TOTAL_CAPACITY = 256;
+      typedef char Storage_unaligned[TOTAL_CAPACITY];
+      REALM_ALIGNED_TYPE_CONST(Storage_aligned, Storage_unaligned,
+			       Realm::CompletionCallbackBase::ALIGNMENT);
+      Storage_aligned storage;
+    };
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class MPIMessageImpl
     //
 
@@ -348,6 +364,11 @@ namespace Realm {
 
         virtual ~MPIMessageImpl();
 
+        // reserves space for a local/remote completion - caller will
+        //  placement-new the completion at the provided address
+        virtual void *add_local_completion(size_t size);
+        virtual void *add_remote_completion(size_t size);
+
         virtual void commit(size_t act_payload_size);
         virtual void cancel();
 
@@ -361,9 +382,11 @@ namespace Realm {
         size_t src_payload_line_stride;
         void *dest_payload_addr;
         size_t header_size;
+        CompletionList *local_comp, *remote_comp;
 
         unsigned short msgid;
         unsigned long msg_header;
+        // nothing should appear after 'msg_header'
     };
 
     MPIMessageImpl::MPIMessageImpl(NodeID _target,
@@ -381,6 +404,8 @@ namespace Realm {
 	, src_payload_line_stride(_src_payload_line_stride)
         , dest_payload_addr(_dest_payload_addr)
         , header_size(_header_size)
+	, local_comp(0)
+	, remote_comp(0)
         , msgid(_msgid)
     {
         if(_max_payload_size && (src_payload_addr == 0)) {
@@ -406,6 +431,8 @@ namespace Realm {
 	, src_payload_line_stride(_src_payload_line_stride)
         , dest_payload_addr(0)
         , header_size(_header_size)
+	, local_comp(0)
+	, remote_comp(0)
         , msgid(_msgid)
     {
         if(_max_payload_size && (src_payload_addr == 0)) {
@@ -421,10 +448,35 @@ namespace Realm {
     {
     }
 
+    void *MPIMessageImpl::add_local_completion(size_t size)
+    {
+      if(local_comp == 0) {
+	local_comp = new CompletionList;
+	local_comp->bytes = 0;
+      }
+      size_t ofs = local_comp->bytes;
+      local_comp->bytes += size;
+      assert(local_comp->bytes <= CompletionList::TOTAL_CAPACITY);
+      return (local_comp->storage + ofs);
+    }
+
+    void *MPIMessageImpl::add_remote_completion(size_t size)
+    {
+      if(remote_comp == 0) {
+	remote_comp = new CompletionList;
+	remote_comp->bytes = 0;
+      }
+      size_t ofs = remote_comp->bytes;
+      remote_comp->bytes += size;
+      assert(remote_comp->bytes <= CompletionList::TOTAL_CAPACITY);
+      return (remote_comp->storage + ofs);
+    }
+
     void MPIMessageImpl::commit(size_t act_payload_size)
     {
         if(is_multicast) {
 	    assert(dest_payload_addr == 0);
+	    assert(remote_comp == 0);
 	    for(NodeSet::const_iterator it = targets.begin();
 		it != targets.end();
 		++it)
@@ -432,23 +484,43 @@ namespace Realm {
 		enqueue_message(*it, msgid, &msg_header, header_size,
 				src_payload_addr, act_payload_size,
 				src_payload_lines, src_payload_line_stride,
-				NULL);
+				NULL, 0);
 	      else
 		enqueue_message(*it, msgid, &msg_header, header_size,
-				payload_base, act_payload_size, 0, 0, NULL);
+				payload_base, act_payload_size, 0, 0, NULL, 0);
         } else {
 	    if(src_payload_addr != 0)
 	      enqueue_message(target, msgid, &msg_header, header_size,
 			      src_payload_addr, act_payload_size,
 			      src_payload_lines, src_payload_line_stride,
-			      dest_payload_addr);
+			      dest_payload_addr, remote_comp);
 	    else
 	      enqueue_message(target, msgid, &msg_header, header_size,
 			      payload_base, act_payload_size, 0, 0,
-			      dest_payload_addr);
+			      dest_payload_addr, remote_comp);
         }
 	if(payload_size && (src_payload_addr == 0))
 	  free(payload_base);
+	// we're only doing blocking transfers right now, so we can always do
+	//  local completion here
+	if(local_comp != 0) {
+	  CompletionCallbackBase::invoke_all(local_comp->storage,
+					     local_comp->bytes);
+	  CompletionCallbackBase::destroy_all(local_comp->storage,
+					      local_comp->bytes);
+	  delete local_comp;
+	}	  
+    }
+
+    // callback to invoke remote completions
+    void MPI::AMComplete(void *comp)
+    {
+        CompletionList *remote_comp = static_cast<CompletionList *>(comp);
+	CompletionCallbackBase::invoke_all(remote_comp->storage,
+					   remote_comp->bytes);
+	CompletionCallbackBase::destroy_all(remote_comp->storage,
+					    remote_comp->bytes);
+	delete remote_comp;
     }
 
     void MPIMessageImpl::cancel()

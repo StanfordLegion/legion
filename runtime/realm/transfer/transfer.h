@@ -33,6 +33,7 @@ namespace Realm {
   //  can hold an arbitrary IndexSpace and dispatch based on its type
 
   class XferDes;
+  class AddressList;
 
   class TransferIterator {
   public:
@@ -100,6 +101,8 @@ namespace Realm {
 #endif
     virtual void confirm_step(void) = 0;
     virtual void cancel_step(void) = 0;
+
+    virtual bool get_addresses(AddressList &addrlist) = 0;
   };
 
   template <typename S>

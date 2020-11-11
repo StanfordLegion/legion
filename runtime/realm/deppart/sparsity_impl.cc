@@ -104,7 +104,7 @@ namespace Realm {
   // class SparsityMapImplWrapper
 
   SparsityMapImplWrapper::SparsityMapImplWrapper(void)
-    : me((ID::IDType)-1), owner(-1), type_tag(0), map_impl(0)
+    : me((ID::IDType)-1), owner((unsigned)-1), type_tag(0), map_impl(0)
   {}
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)

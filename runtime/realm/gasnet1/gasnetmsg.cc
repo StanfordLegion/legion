@@ -57,6 +57,7 @@ REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_
 using namespace Realm;
 
 enum { MSGID_CHANNEL_FLUSH = 250,
+       MSGID_COMPLETION_REPLY = 252,
        MSGID_LONG_EXTENSION = 253,
        MSGID_FLIP_REQ = 254,
        MSGID_FLIP_ACK = 255 };
@@ -87,10 +88,12 @@ NodeID get_message_source(token_t token)
   return src;
 }  
 
+#if 0
 void send_srcptr_release(token_t token, uint64_t srcptr)
 {
   CHECK_GASNET( gasnet_AMReplyShort2(reinterpret_cast<gasnet_token_t>(token), MSGID_RELEASE_SRCPTR, (handlerarg_t)srcptr, (handlerarg_t)(srcptr >> 32)) );
 }
+#endif
 
 #ifdef DEBUG_MEM_REUSE
 static int payload_count = 0;
@@ -152,7 +155,8 @@ void deferred_free(void *ptr)
 
 
 struct OutgoingMessage {
-  OutgoingMessage(unsigned _msgid, unsigned _num_args, const void *_args);
+  OutgoingMessage(unsigned _msgid, unsigned _num_args, const void *_args,
+		  PendingCompletion *_comp);
   ~OutgoingMessage(void);
 
   void set_payload(PayloadSource *_payload, size_t _payload_size,
@@ -173,6 +177,7 @@ struct OutgoingMessage {
 
   unsigned msgid;
   unsigned num_args;
+  PendingCompletion *comp;
   void *payload;
   size_t payload_size;
   int payload_mode;
@@ -251,6 +256,14 @@ static SrcDataPool *srcdatapool = 0;
 size_t SrcDataPool::max_spill_bytes = 0;  // default = no limit
 size_t SrcDataPool::print_spill_threshold = 1 << 30;  // default = 1 GB
 size_t SrcDataPool::print_spill_step = 1 << 30;       // default = 1 GB
+
+class SrcptrReleaser {
+public:
+  SrcptrReleaser(void *_ptr) : ptr(_ptr) {}
+  void operator()() const { srcdatapool->release_srcptr(ptr); }
+protected:
+  void *ptr;
+};
 
 namespace Realm {
   namespace ThreadLocal {
@@ -669,8 +682,9 @@ void record_spill_free(int msgid, size_t bytes)
 #endif
 
 OutgoingMessage::OutgoingMessage(unsigned _msgid, unsigned _num_args,
-				 const void *_args)
+				 const void *_args, PendingCompletion *_comp)
   : msgid(_msgid), num_args(_num_args),
+    comp(_comp),
     payload(0), payload_size(0), payload_mode(PAYLOAD_NONE), dstptr(0),
     payload_src(0)
 {
@@ -1230,21 +1244,23 @@ public:
     return was_empty;
   }
 
-  // returns true if a message is enqueue AND we were empty before
-  bool handle_long_msgptr(const void *ptr)
+  int long_msgptr_to_index(const void *ptr)
   {
-    // can figure out which buffer it is without holding lock
-    int r_buffer = -1;
+    // use 0 to mean "no match", so add 1 to any index we match
     for(int i = 0; i < num_lmbs; i++)
-      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + lmb_size))) {
-      r_buffer = i;
-      break;
-    }
-    if(r_buffer < 0) {
-      // probably a medium message?
+      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + lmb_size)))
+	return i + 1;
+
+    return 0;
+  }
+
+  // returns true if a message is enqueue AND we were empty before
+  bool handle_long_msgptr(int msgptr_index)
+  {
+    if(msgptr_index <= 0)
       return false;
-    }
-    //assert(r_buffer >= 0);
+
+    int r_buffer = msgptr_index - 1;
 
 #ifdef DEBUG_LMB
     printf("LMB: received %p for %d->%d in buffer %d, [%p, %p)\n",
@@ -1265,7 +1281,7 @@ public:
 #endif
 
       message_added_to_empty_queue = out_short_hdrs.empty() && out_long_hdrs.empty();
-      OutgoingMessage *hdr = new OutgoingMessage(MSGID_FLIP_ACK, 1, &r_buffer);
+      OutgoingMessage *hdr = new OutgoingMessage(MSGID_FLIP_ACK, 1, &r_buffer, 0);
       out_short_hdrs.push(hdr);
       // wake up a sender
       cond.signal();
@@ -1274,9 +1290,10 @@ public:
     return message_added_to_empty_queue;
   }
 
-  bool adjust_long_msgsize(void *&ptr, size_t &buffer_size, 
-                           int message_id, int chunks)
+  bool adjust_long_msgsize(void *&ptr, size_t &buffer_size, int frag_info)
   {
+    int message_id = frag_info >> 12;
+    int chunks = frag_info & 4095;
 #ifdef DEBUG_AMREQUESTS
     printf("%d: adjust(%p, %zd, %d, %d)\n", gasnet_mynode(), ptr, buffer_size, message_id, chunks);
 #endif
@@ -1343,7 +1360,7 @@ public:
 #endif
 
       message_added_to_empty_queue = out_short_hdrs.empty() && out_long_hdrs.empty();
-      OutgoingMessage *hdr = new OutgoingMessage(MSGID_FLIP_ACK, 1, &buffer);
+      OutgoingMessage *hdr = new OutgoingMessage(MSGID_FLIP_ACK, 1, &buffer, 0);
       out_short_hdrs.push(hdr);
       // Wake up a sender
       cond.signal();
@@ -1433,6 +1450,29 @@ protected:
   void send_short(OutgoingMessage *hdr)
   {
     Realm::DetailedTimer::ScopedPush sp(TIME_AM);
+
+    if(hdr->msgid == MSGID_NEW_ACTIVEMSG) {
+      // sanity check that we know where the frag/comp_info fields are
+      int info_start;
+      if(hdr->args[0] == BaseMedium::FRAG_INFO_MAGIC) {
+	assert(hdr->args[1] == BaseMedium::COMP_INFO_MAGIC);
+	info_start = 0;
+      } else {
+	assert(0);
+      }
+
+      hdr->args[info_start + 0] = 0; // no fragmentation for these messages
+
+      // do we need local/remote completion?
+      if((hdr->comp != 0) && completion_manager.mark_ready(hdr->comp)) {
+	handlerarg_t comp_info = hdr->comp->index << 2;
+	// bottom two bits of state are the remote/local completion bits
+	comp_info += (hdr->comp->state.load() & 3);
+	hdr->args[info_start + 1] = comp_info;
+      } else
+	hdr->args[info_start + 1] = 0; // no completion needed
+    }
+
 #ifdef DEBUG_AMREQUESTS
     printf("%d->%d: %s %d %d %p %zd / %x %x %x %x / %x %x %x %x / %x %x %x %x / %x %x %x %x\n",
 	   gasnet_mynode(), peer, 
@@ -1694,38 +1734,39 @@ protected:
   {
     Realm::DetailedTimer::ScopedPush sp(TIME_AM);
 
-    const size_t max_long_req = gasnet_AMMaxLongRequest();
+    // sanity check that we know where the frag/comp_info fields are
+    int info_start;
+    if(hdr->args[0] == BaseMedium::FRAG_INFO_MAGIC) {
+      assert(hdr->args[1] == BaseMedium::COMP_INFO_MAGIC);
+      info_start = 0;
+    } else {
+      assert(0);
+    }
 
-    // Get a new message ID for this message
-    // We know that all medium and long active messages use the
-    // BaseMedium class as their base type for sending so the first
-    // two fields hdr->args[0] and hdr->args[1] can be used for
-    // storing the message ID and the number of chunks
-    int message_id_start;
-    if(hdr->args[0] == BaseMedium::MESSAGE_ID_MAGIC) {
-      assert(hdr->args[1] == BaseMedium::MESSAGE_CHUNKS_MAGIC);
-      message_id_start = 0;
-      //printf("CASE 1\n");
+    // is fragmentation required?
+    int chunks;
+    const size_t max_long_req = gasnet_AMMaxLongRequest();
+    if(hdr->payload_size <= max_long_req) {
+      // nope, no fragmentation
+      chunks = 1;
+      hdr->args[info_start + 0] = 0;
     } else {
-      assert(hdr->args[2] == BaseMedium::MESSAGE_ID_MAGIC);
-      assert(hdr->args[3] == BaseMedium::MESSAGE_CHUNKS_MAGIC);
-      message_id_start = 2;
-      //printf("CASE 2\n");
+      chunks = 1 + ((hdr->payload_size - 1) / max_long_req);
+      assert(chunks <= 4095);  // 12 bits for chunk count
+      hdr->args[info_start + 0] = ((next_outgoing_message_id << 12) +
+				   chunks);
+      next_outgoing_message_id++;
     }
-    hdr->args[message_id_start] = next_outgoing_message_id++;
-    int chunks = (hdr->payload_size + max_long_req - 1) / max_long_req;
-    hdr->args[message_id_start + 1] = chunks;
-    if(hdr->payload_mode == PAYLOAD_SRCPTR) {
-      //srcdatapool->record_srcptr(hdr->payload);
-      gasnet_handlerarg_t srcptr_lo = ((uint64_t)(hdr->payload)) & 0x0FFFFFFFFULL;
-      gasnet_handlerarg_t srcptr_hi = ((uint64_t)(hdr->payload)) >> 32;
-      hdr->args[message_id_start + 2] = srcptr_lo;
-      hdr->args[message_id_start + 3] = srcptr_hi;
-    } else {
-      hdr->args[message_id_start + 2] = 0;
-      hdr->args[message_id_start + 3] = 0;
-    }
-      
+
+    // do we need local/remote completion?
+    if((hdr->comp != 0) && completion_manager.mark_ready(hdr->comp)) {
+      handlerarg_t comp_info = hdr->comp->index << 2;
+      // bottom two bits of state are the remote/local completion bits
+      comp_info += (hdr->comp->state.load() & 3);
+      hdr->args[info_start + 1] = comp_info;
+    } else
+      hdr->args[info_start + 1] = 0; // no completion needed
+
     for (int i = (chunks-1); i >= 0; i--)
     {
       // every chunk but the last is the max size - the last one is whatever
@@ -1996,6 +2037,13 @@ void OutgoingMessage::reserve_srcdata(void)
 	//  we've released the lock
 	payload_mode = PAYLOAD_SRCPTR;
 	payload = srcptr;
+	if(comp) {
+	  // TODO: pull out local completions and do them after the memcpy below
+	} else {
+	  comp = completion_manager.get_available();
+	}
+	void *lc = comp->add_local_completion(sizeof(CompletionCallback<SrcptrReleaser>));
+	new(lc) CompletionCallback<SrcptrReleaser>(SrcptrReleaser(srcptr));
       } else {
 	// if the allocation fails, we have to queue ourselves up
 
@@ -2008,6 +2056,7 @@ void OutgoingMessage::reserve_srcdata(void)
 	  delete payload_src;
 	  payload_src = new ContiguousPayload(copy_ptr, payload_size,
 					      PAYLOAD_FREE);
+	  // TODO: can do local completions after this point
 	}
 
 	payload_mode = PAYLOAD_PENDING;
@@ -2037,6 +2086,7 @@ void OutgoingMessage::reserve_srcdata(void)
       delete payload_src;
       payload_src = 0;
       payload_mode = PAYLOAD_FREE;
+      // TODO: can do local completions after this point
     }
   }
 }
@@ -2046,6 +2096,14 @@ void OutgoingMessage::assign_srcdata_pointer(void *ptr)
   assert(payload_mode == PAYLOAD_PENDING);
   assert(payload_src != 0);
   payload_src->copy_data(ptr);
+
+  if(comp) {
+    // TODO: do local completions here
+  } else {
+    comp = completion_manager.get_available();
+  }
+  void *lc = comp->add_local_completion(sizeof(CompletionCallback<SrcptrReleaser>));
+  new(lc) CompletionCallback<SrcptrReleaser>(SrcptrReleaser(ptr));
 
   bool was_using_spill = (payload_src->get_payload_mode() == PAYLOAD_FREE);
 
@@ -2211,16 +2269,20 @@ public:
     if(was_empty)
       add_todo_entry(target);
   }
-  void handle_long_msgptr(gasnet_node_t source, const void *ptr)
+  int long_msgptr_to_index(gasnet_node_t source, const void *ptr)
   {
-    bool was_empty = endpoints[source]->handle_long_msgptr(ptr);
+    return endpoints[source]->long_msgptr_to_index(ptr);
+  }
+  void handle_long_msgptr(gasnet_node_t source, int msgptr_index)
+  {
+    bool was_empty = endpoints[source]->handle_long_msgptr(msgptr_index);
     if(was_empty)
       add_todo_entry(source);
   }
   bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer_size,
-                           int message_id, int chunks)
+                           int frag_info)
   {
-    return endpoints[source]->adjust_long_msgsize(ptr, buffer_size, message_id, chunks);
+    return endpoints[source]->adjust_long_msgsize(ptr, buffer_size, frag_info);
   }
   void report_activemsg_status(FILE *f)
   {
@@ -2444,10 +2506,25 @@ typedef union {
   gasnet_handlerarg_t args[16];
 } MessageHeader;
 
-static void incoming_message_handled(NodeID sender, uintptr_t buf)
+static void incoming_message_handled(NodeID sender, uintptr_t data)
 {
   endpoint_manager->count_handled_message(sender);
-  handle_long_msgptr(sender, reinterpret_cast<const void *>(buf));
+  uintptr_t comp_info = data >> 8;
+  int msgptr_index = data & 255;
+  handle_long_msgptr(sender, msgptr_index);
+  if(comp_info != 0)
+    CHECK_GASNET( gasnet_AMRequestShort1(sender, MSGID_COMPLETION_REPLY,
+					 comp_info) );
+}
+
+static void handle_completion_reply(gasnet_token_t token,
+				    gasnet_handlerarg_t arg0)
+{
+  int index = arg0 >> 2;
+  bool do_local = ((arg0 & PendingCompletion::LOCAL_PENDING_BIT) != 0);
+  bool do_remote = ((arg0 & PendingCompletion::REMOTE_PENDING_BIT) != 0);
+  //printf("handle completion %d %d %d\n", index, do_local, do_remote);
+  completion_manager.invoke_completions(index, do_local, do_remote);
 }
 
 static void handle_new_activemsg(gasnet_token_t token,
@@ -2470,7 +2547,12 @@ static void handle_new_activemsg(gasnet_token_t token,
 				 gasnet_handlerarg_t arg15)
 {
   NodeID src = get_message_source(token);
-  bool handle_now = adjust_long_msgsize(src, buf, nbytes, arg0, arg1);
+
+  gasnet_handlerarg_t frag_info = arg0;
+  gasnet_handlerarg_t comp_info = arg1;
+  
+  bool handle_now = ((frag_info == 0) ||
+		     adjust_long_msgsize(src, buf, nbytes, frag_info));
   if(handle_now) {
     unsigned short msgid = arg4 & 0xffff;
 
@@ -2492,9 +2574,6 @@ static void handle_new_activemsg(gasnet_token_t token,
     header.args[14] = arg14;
     header.args[15] = arg15;
 
-    /* save a copy of the srcptr - imsg may be freed any time*/
-    /*  after we enqueue it */
-    uint64_t srcptr = reinterpret_cast<uintptr_t>(header.hdr.base.srcptr);
 #ifdef ACTIVE_MESSAGE_TRACE
     log_amsg_trace.info("Active Message Received: %d %d %ld",
 			msg->get_msgid(), msg->get_peer(), msg->get_msgsize());
@@ -2503,6 +2582,18 @@ static void handle_new_activemsg(gasnet_token_t token,
     printf("%d: incoming(%d, %p)\n", gasnet_mynode(), src, msg);
 #endif
     assert(incoming_message_manager != 0);
+    // we'll always do local completion here, but remote completion has to be
+    //  deferred if the message isn't handled inline
+    int deferred_comp_info;
+    if((comp_info & PendingCompletion::REMOTE_PENDING_BIT) != 0)
+      deferred_comp_info = comp_info & ~PendingCompletion::LOCAL_PENDING_BIT;
+    else
+      deferred_comp_info = 0;
+
+    int msgptr_index = endpoint_manager->long_msgptr_to_index(src, buf);
+    assert((msgptr_index >= 0) && (msgptr_index <= 255));
+    uintptr_t callback_data = (deferred_comp_info << 8) + msgptr_index;
+	
     bool handled = 
       incoming_message_manager->add_incoming_message(src, msgid,
 						     &header.args[6], 10*4,
@@ -2510,22 +2601,26 @@ static void handle_new_activemsg(gasnet_token_t token,
 						     buf, nbytes,
 						     PAYLOAD_KEEP,
 						     incoming_message_handled,
-						     reinterpret_cast<uintptr_t>(buf),
+						     callback_data,
 						     ((ThreadLocal::gasnet_work_until != 0) ?
 						        *ThreadLocal::gasnet_work_until :
 						        TimeLimit()));
     if(handled) {
-      // we need to call the callback ourselves
-      incoming_message_handled(src, reinterpret_cast<uintptr_t>(buf));
+      // we need to call the callback ourselves - we'll both local and remote
+      //  completions as a gasnet reply (incoming_message_handled would use a
+      //  request, which is not legal here)
+      incoming_message_handled(src, msgptr_index);
+      if(comp_info != 0)
+	CHECK_GASNET( gasnet_AMReplyShort1(token, MSGID_COMPLETION_REPLY,
+					   comp_info) );
+    } else {
+      if((comp_info & PendingCompletion::LOCAL_PENDING_BIT) != 0) {
+	gasnet_handlerarg_t local_comp_only = (comp_info &
+					       ~PendingCompletion::REMOTE_PENDING_BIT);
+	CHECK_GASNET( gasnet_AMReplyShort1(token, MSGID_COMPLETION_REPLY,
+					   local_comp_only) );
+      }
     }
-
-    /* we can (and should) release the srcptr immediately */
-    if(srcptr) {
-      assert(nbytes > 0);
-      record_message(src, true);
-      send_srcptr_release(token, srcptr);
-    } else
-      record_message(src, false);
   } else
     record_message(src, false);
 }
@@ -2607,8 +2702,8 @@ void init_endpoints(size_t gasnet_mem_size,
   handlers[hcount].index = MSGID_FLIP_ACK;
   handlers[hcount].fnptr = (void (*)())handle_flip_ack;
   hcount++;
-  handlers[hcount].index = MSGID_RELEASE_SRCPTR;
-  handlers[hcount].fnptr = (void (*)())SrcDataPool::release_srcptr_handler;
+  handlers[hcount].index = MSGID_COMPLETION_REPLY;
+  handlers[hcount].fnptr = (void (*)())handle_completion_reply;
   hcount++;
   handlers[hcount].index = MSGID_CHANNEL_FLUSH;
   handlers[hcount].fnptr = (void (*)())handle_channel_flush;
@@ -2809,13 +2904,15 @@ void stop_activemsg_threads(void)
 void enqueue_message(NodeID target, int msgid,
 		     const void *args, size_t arg_size,
 		     const void *payload, size_t payload_size,
-		     int payload_mode, void *dstptr)
+		     int payload_mode, PendingCompletion *comp,
+		     void *dstptr)
 {
   assert((gasnet_node_t)target != gasnet_mynode());
 
   OutgoingMessage *hdr = new OutgoingMessage(msgid, 
 					     (arg_size + sizeof(int) - 1) / sizeof(int),
-					     args);
+					     args,
+					     comp);
 
   // if we have a contiguous payload that is in the KEEP mode, and in
   //  registered memory, we may be able to avoid a copy
@@ -2841,13 +2938,15 @@ void enqueue_message(NodeID target, int msgid,
 		     const void *args, size_t arg_size,
 		     const void *payload, size_t line_size,
 		     off_t line_stride, size_t line_count,
-		     int payload_mode, void *dstptr)
+		     int payload_mode, PendingCompletion *comp,
+		     void *dstptr)
 {
   assert((gasnet_node_t)target != gasnet_mynode());
 
   OutgoingMessage *hdr = new OutgoingMessage(msgid, 
 					     (arg_size + sizeof(int) - 1) / sizeof(int),
-					     args);
+					     args,
+					     comp);
 
   if (payload_mode != PAYLOAD_NONE)
   {
@@ -2867,13 +2966,15 @@ void enqueue_message(NodeID target, int msgid,
 void enqueue_message(NodeID target, int msgid,
 		     const void *args, size_t arg_size,
 		     const SpanList& spans, size_t payload_size,
-		     int payload_mode, void *dstptr)
+		     int payload_mode, PendingCompletion *comp,
+		     void *dstptr)
 {
   assert((gasnet_node_t)target != gasnet_mynode());
 
   OutgoingMessage *hdr = new OutgoingMessage(msgid, 
   					     (arg_size + sizeof(int) - 1) / sizeof(int),
-  					     args);
+  					     args,
+					     comp);
 
   if (payload_mode != PAYLOAD_NONE)
   {
@@ -2889,11 +2990,11 @@ void enqueue_message(NodeID target, int msgid,
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
 
-void handle_long_msgptr(NodeID source, const void *ptr)
+void handle_long_msgptr(NodeID source, int msgptr_index)
 {
   assert((gasnet_node_t)source != gasnet_mynode());
 
-  endpoint_manager->handle_long_msgptr(source, ptr);
+  endpoint_manager->handle_long_msgptr(source, msgptr_index);
 }
 
 /*static*/ void SrcDataPool::release_srcptr_handler(gasnet_token_t token,
@@ -2914,7 +3015,7 @@ void handle_long_msgptr(NodeID source, const void *ptr)
 
 
 extern bool adjust_long_msgsize(NodeID source, void *&ptr, size_t &buffer_size,
-				int message_id, int chunks)
+				int frag_info)
 {
   // special case: if the buffer size is zero, it's an empty message and no adjustment
   //   is needed
@@ -2924,7 +3025,7 @@ extern bool adjust_long_msgsize(NodeID source, void *&ptr, size_t &buffer_size,
   assert((gasnet_node_t)source != gasnet_mynode());
 
   return endpoint_manager->adjust_long_msgsize(source, ptr, buffer_size,
-					       message_id, chunks);
+					       frag_info);
 }
 
 extern void report_activemsg_status(FILE *f)
@@ -3054,3 +3155,246 @@ void SpanPayload::copy_data(void *dest)
   assert(bytes_left == 0);
 }
 
+////////////////////////////////////////////////////////////////////////
+//
+// struct PendingCompletion
+//
+
+PendingCompletion::PendingCompletion()
+  : index(-1)
+  , next_free(0)
+  , state(0)
+  , local_bytes(0)
+  , remote_bytes(0)
+{}
+
+void *PendingCompletion::add_local_completion(size_t bytes)
+{
+  assert((state.load() & READY_BIT) == 0);
+#ifdef DEBUG_REALM
+  assert((bytes % Realm::CompletionCallbackBase::ALIGNMENT) == 0);
+#endif
+  assert((local_bytes + remote_bytes + bytes) <= TOTAL_CAPACITY);
+
+  // local completions are stored from the front
+  void *ptr = storage + local_bytes;
+  local_bytes += bytes;
+  state.fetch_or(LOCAL_PENDING_BIT);
+
+  return ptr;
+}
+
+void *PendingCompletion::add_remote_completion(size_t bytes)
+{
+  assert((state.load() & READY_BIT) == 0);
+#ifdef DEBUG_REALM
+  assert((bytes % Realm::CompletionCallbackBase::ALIGNMENT) == 0);
+#endif
+  assert((local_bytes + remote_bytes + bytes) <= TOTAL_CAPACITY);
+
+  // remote completions are stored from the back
+  remote_bytes += bytes;
+  void *ptr = storage + (TOTAL_CAPACITY - remote_bytes);
+  state.fetch_or(REMOTE_PENDING_BIT);
+
+  return ptr;
+}
+
+bool PendingCompletion::mark_ready()
+{
+  if(state.load() != 0) {
+    unsigned prev = state.fetch_or_acqrel(READY_BIT);
+    assert((prev & READY_BIT) == 0);
+    return true;
+  } else {
+    // we're empty, so don't set ready and tell the caller to recycle us
+    return false;
+  }
+}
+
+bool PendingCompletion::invoke_local_completions()
+{
+  // sanity-check that we have local completions pending, but do not clear
+  //  the bit until we've invoked and destroyed those completions
+  // however, if we observe now that the remote pending bit is not set, we
+  //  don't need to check again later
+  unsigned prev_state = state.load_acquire();
+  assert((prev_state & LOCAL_PENDING_BIT) != 0);
+
+  // local completions are at the start of the storage
+  Realm::CompletionCallbackBase::invoke_all(storage, local_bytes);
+  Realm::CompletionCallbackBase::destroy_all(storage, local_bytes);
+  local_bytes = 0;
+
+  // if the remote pending bit was set before, atomically clear the local
+  //  bit while checking if remote is still set - if it still is, the remote
+  //  completion callback will take care of freeing us
+  if((prev_state & REMOTE_PENDING_BIT) != 0) {
+    prev_state = state.fetch_and_acqrel(~LOCAL_PENDING_BIT);
+    if((prev_state & REMOTE_PENDING_BIT) != 0)
+      return false;
+  }
+
+  // clear ready bit (and local pending bit if we skipped the remote check)
+  state.store_release(0);
+  return true;
+}
+  
+bool PendingCompletion::invoke_remote_completions()
+{
+  // sanity-check that we have remote completions pending, but do not clear
+  //  the bit until we've invoked and destroyed those completions
+  // however, if we observe now that the local pending bit is not set, we
+  //  don't need to check again later
+  unsigned prev_state = state.load_acquire();
+  assert((prev_state & REMOTE_PENDING_BIT) != 0);
+
+  // remote completions are at the end of the storage
+  void *remote_start = storage + (TOTAL_CAPACITY - remote_bytes);
+  Realm::CompletionCallbackBase::invoke_all(remote_start, remote_bytes);
+  Realm::CompletionCallbackBase::destroy_all(remote_start, remote_bytes);
+  remote_bytes = 0;
+
+  // if the local pending bit was set before, atomically clear the remote
+  //  bit while checking if local is still set - if it still is, the local
+  //  completion callback will take care of freeing us
+  if((prev_state & LOCAL_PENDING_BIT) != 0) {
+    prev_state = state.fetch_and_acqrel(~REMOTE_PENDING_BIT);
+    if((prev_state & LOCAL_PENDING_BIT) != 0)
+      return false;
+  }
+
+  // clear ready bit (and remote pending bit if we skipped the remote check)
+  state.store_release(0);
+  return true;
+}
+
+////////////////////////////////////////////////////////////////////////
+//
+// struct PendingCompletionManager
+//
+
+/*extern*/ PendingCompletionManager completion_manager;
+
+PendingCompletionManager::PendingCompletionManager()
+  : first_free(0)
+  , num_groups(0)
+{
+  for(size_t i = 0; i < (1 << LOG2_MAXGROUPS); i++)
+    groups[i].store(0);
+}
+
+PendingCompletionManager::~PendingCompletionManager()
+{
+  size_t i = num_groups.load();
+  while(i > 0)
+    delete groups[--i].load();
+}
+
+PendingCompletion *PendingCompletionManager::get_available()
+{
+  // a pop attempt must take the mutex, but if we fail, we drop the
+  //  mutex while we allocate and initialize another block
+  {
+    AutoLock<> al(mutex);
+    // pop can still lose to a concurrent push, so iterate until we
+    //  succeed or obseve an empty free list
+    PendingCompletion *pc = first_free.load_acquire();
+    while(pc != 0) {
+      if(first_free.compare_exchange(pc, pc->next_free)) {
+	// success - return completion we popped
+	pc->next_free = 0;
+	return pc;
+      } else
+	continue;  // try again - `index` was updated
+    }
+  }
+
+  // allocate a new group and then add it to the list, playing nice with
+  //  any other threads that are doing the same
+  PendingCompletionGroup *newgrp = new PendingCompletionGroup;
+  size_t grp_index = num_groups.load();
+  while(true) {
+    PendingCompletionGroup *expected = 0;
+    if(groups[grp_index].compare_exchange(expected, newgrp)) {
+      // success - this is our index
+      break;
+    } else {
+      grp_index++;
+      assert(grp_index < (1 << LOG2_MAXGROUPS));
+    }
+  }
+  // increment the num_groups - it's ok if these increments happen out of
+  //  order
+  num_groups.fetch_add(1);
+
+  // give all these new completions their indices
+  for(size_t i = 0; i < (1 << PendingCompletionGroup::LOG2_GROUPSIZE); i++)
+    newgrp->entries[i].index = ((grp_index << PendingCompletionGroup::LOG2_GROUPSIZE) + i);
+
+  // we'll return the first entry to the caller, but we need to add the rest
+  //  to the free list
+  PendingCompletion *new_head = &newgrp->entries[1];
+  for(size_t i = 2; i < (1 << PendingCompletionGroup::LOG2_GROUPSIZE); i++)
+    newgrp->entries[i - 1].next_free = &newgrp->entries[i];
+  PendingCompletion **new_tail = &newgrp->entries[(1 << PendingCompletionGroup::LOG2_GROUPSIZE) - 1].next_free;
+
+  // compare-exchange loop to push to the free list
+  PendingCompletion *prev_head = first_free.load();
+  while(true) {
+    *new_tail = prev_head;
+    if(first_free.compare_exchange(prev_head, new_head))
+      break;
+  }
+
+  return &newgrp->entries[0];
+}
+
+bool PendingCompletionManager::mark_ready(PendingCompletion *comp)
+{
+  if(comp->mark_ready()) {
+    // completion is non-empty
+    return true;
+  } else {
+    // completion is empty - add it back to the free list
+#ifdef DEBUG_REALM
+    assert(comp->next_free == 0);
+#endif
+    PendingCompletion *prev_head = first_free.load();
+    while(true) {
+      comp->next_free = prev_head;
+      if(first_free.compare_exchange(prev_head, comp))
+	break;
+    }
+    // tell caller to forget about 'comp'
+    return false;
+  }
+}
+
+void PendingCompletionManager::invoke_completions(int index, bool do_local,
+						  bool do_remote)
+{
+  int grp_index = index >> PendingCompletionGroup::LOG2_GROUPSIZE;
+  assert((grp_index >= 0) && (grp_index < (1 << LOG2_MAXGROUPS)));
+  PendingCompletionGroup *grp = groups[grp_index].load();
+  assert(grp != 0);
+  int sub_index = index & ((1 << PendingCompletionGroup::LOG2_GROUPSIZE) - 1);
+  PendingCompletion *comp = &grp->entries[sub_index];
+
+  bool done;
+  if(do_local && comp->invoke_local_completions()) {
+    done = true; // no need to check remote
+  } else {
+    done = do_remote && comp->invoke_remote_completions();
+  }
+
+  // if we're done with this completion, put it back on the free list
+  if(done) {
+    PendingCompletion *prev_head = first_free.load();
+    while(true) {
+      comp->next_free = prev_head;
+      if(first_free.compare_exchange(prev_head, comp))
+	break;
+    }
+  }
+}

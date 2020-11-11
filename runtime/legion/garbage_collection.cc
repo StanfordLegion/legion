@@ -1521,7 +1521,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_valid_increment(
+    RtEvent DistributedCollectable::send_remote_valid_increment(
                                AddressSpaceID target, ReferenceMutator *mutator,
                                RtEvent precondition, unsigned count)
     //--------------------------------------------------------------------------
@@ -1541,9 +1541,8 @@ namespace Legion {
       {
         DeferRemoteReferenceUpdateArgs args(this, target, done_event,
                                             signed_count, true/*valid*/);
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
-                                         precondition);
-        return;
+        return runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_MESSAGE_PRIORITY, precondition);
       }
       Serializer rez;
       {
@@ -1554,10 +1553,11 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_did_remote_valid_update(target, rez);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_valid_decrement(
+    RtEvent DistributedCollectable::send_remote_valid_decrement(
                                AddressSpaceID target, ReferenceMutator *mutator,
                                RtEvent precondition, unsigned count)
     //--------------------------------------------------------------------------
@@ -1577,9 +1577,8 @@ namespace Legion {
       {
         DeferRemoteReferenceUpdateArgs args(this, target, done_event,
                                             signed_count, true/*valid*/);
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
-                                         precondition);
-        return;
+        return runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_MESSAGE_PRIORITY, precondition);
       }
       Serializer rez;
       {
@@ -1590,10 +1589,11 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_did_remote_valid_update(target, rez);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_gc_increment(
+    RtEvent DistributedCollectable::send_remote_gc_increment(
                                AddressSpaceID target, ReferenceMutator *mutator,
                                RtEvent precondition, unsigned count)
     //--------------------------------------------------------------------------
@@ -1613,9 +1613,8 @@ namespace Legion {
       {
         DeferRemoteReferenceUpdateArgs args(this, target, done_event,
                                             signed_count, false/*valid*/);
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
-                                         precondition);
-        return;
+        return runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_MESSAGE_PRIORITY, precondition);
       }
       Serializer rez;
       {
@@ -1626,10 +1625,11 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_did_remote_gc_update(target, rez);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_gc_decrement(
+    RtEvent DistributedCollectable::send_remote_gc_decrement(
                                AddressSpaceID target, ReferenceMutator *mutator,
                                RtEvent precondition, unsigned count)
     //--------------------------------------------------------------------------
@@ -1649,9 +1649,8 @@ namespace Legion {
       {
         DeferRemoteReferenceUpdateArgs args(this, target, done_event,
                                             signed_count, false/*valid*/);
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
-                                         precondition);
-        return;
+        return runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_MESSAGE_PRIORITY, precondition);
       }
       Serializer rez;
       {
@@ -1662,6 +1661,7 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_did_remote_gc_update(target, rez);
+      return RtEvent::NO_RT_EVENT;
     }
 
 #ifdef USE_REMOTE_REFERENCES

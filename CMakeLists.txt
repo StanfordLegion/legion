@@ -117,6 +117,10 @@ endif()
 # detect use of the cxx_defcheck wrapper and enable build checks
 check_cxx_compiler_flag("--defcheck __test__" COMPILER_SUPPORTS_DEFCHECK)
 
+# task registration across nodes often relies on being able to map function
+#  pointers back to symbol names, so ask cmake to export symbols in binaries
+set(CMAKE_ENABLE_EXPORTS ON)
+
 #------------------------------------------------------------------------------#
 # Optimizations
 #------------------------------------------------------------------------------#
