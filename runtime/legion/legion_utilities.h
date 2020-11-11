@@ -736,7 +736,7 @@ namespace Legion {
       void deallocate(TT tag, bool missing_ok = false);
       bool lookup(TT tag, RT& first, RT& size);
       size_t get_size(TT tag);
-      void dump_all_free_ranges();
+      void dump_all_free_ranges(Realm::Logger logger);
 
     protected:
       unsigned first_free_range;
@@ -2494,13 +2494,15 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template <typename RT, typename TT>
-    inline void BasicRangeAllocator<RT,TT>::dump_all_free_ranges()
+    inline void BasicRangeAllocator<RT,TT>::dump_all_free_ranges(
+                                                          Realm::Logger logger)
     //-------------------------------------------------------------------------
     {
       unsigned idx = ranges[SENTINEL].next_free;
       while (idx != SENTINEL) {
         Range &r = ranges[idx];
-        fprintf(stderr, "range %u: %zd bytes\n", idx, r.last - r.first);
+        logger.print("range %u: %zd bytes [%lx,%lx)",
+                     idx, r.last - r.first, r.first, r.last);
         idx = r.next_free;
       }
     }

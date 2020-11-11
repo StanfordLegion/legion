@@ -8445,7 +8445,7 @@ namespace Legion {
       // to avoid races with deletions
       bool early_valid = acquire || (priority == LEGION_GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
-      bool external = !manager->is_external_instance();
+      bool external = manager->is_external_instance();
       // Since we're going to put this in the table add a reference
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       {
@@ -8538,7 +8538,7 @@ namespace Legion {
                   cit->second.begin(); it != cit->second.end(); it++)
             {
               if ((it->second.current_state != COLLECTABLE_STATE) ||
-                  (it->second.external == external))
+                  (it->second.external != external))
                 continue;
               const size_t inst_size = it->first->get_instance_size();
               if ((inst_size >= needed_size) || !larger_only)
@@ -8585,7 +8585,7 @@ namespace Legion {
                   cit->second.begin(); it != cit->second.end(); it++)
             {
               if ((it->second.current_state != ACTIVE_STATE) ||
-                  (it->second.external == external))
+                  (it->second.external != external))
                 continue;
               const size_t inst_size = it->first->get_instance_size();
               if ((inst_size >= needed_size) || !larger_only)
@@ -8730,10 +8730,28 @@ namespace Legion {
       AutoLock lock(manager_lock);
       size_t allocation_id = next_allocation_id++;
 
+      bool allocated = false;
+      const size_t size = layout->bytes_used;
       size_t offset = 0;
-      size_t size = layout->bytes_used;
-      bool allocated = eager_allocator->allocate(
-          allocation_id, size, layout->alignment_reqd, offset);
+
+      while (!allocated)
+      {
+        allocated = eager_allocator->allocate(
+            allocation_id, size, layout->alignment_reqd, offset);
+        if (allocated) break;
+        else {
+          lock.release();
+          if (delete_by_size_and_state(size,
+                                       COLLECTABLE_STATE,
+                                       false/*larger only*/,
+                                       true/*external*/))
+          {
+            lock.reacquire();
+            break;
+          }
+          lock.reacquire();
+        }
+      }
 
       if (allocated)
       {
@@ -8780,13 +8798,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(finder != eager_instances.end());
 #endif
-          eager_remaining_capacity +=
-            eager_allocator->get_size(finder->second.second);
+          const size_t size = eager_allocator->get_size(finder->second.second);
+          eager_remaining_capacity += size;
           eager_allocator->deallocate(finder->second.second);
           eager_instances.erase(finder);
-          log_eager.debug("deallocate instance " IDFMT " on memory " IDFMT
-                          ", %zd bytes left",
-                          instance.id, memory.id, eager_remaining_capacity);
+          log_eager.debug(
+            "deallocate instance " IDFMT " of size %zd on memory " IDFMT
+            ", %zd bytes left", instance.id, size, memory.id,
+            eager_remaining_capacity);
         }
         instance.destroy();
       }
