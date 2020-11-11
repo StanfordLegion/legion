@@ -1211,6 +1211,7 @@ namespace Legion {
           instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow),
         memory_manager(memory), instance(inst),
         use_event(Realm::UserEvent::create_user_event()),
+        instance_ready(Realm::UserEvent::create_user_event()),
         kind(k), external_pointer(-1UL),
         producer_event(k == UNBOUND ? u_event : ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
@@ -1224,6 +1225,7 @@ namespace Legion {
 #endif
         Runtime::trigger_event(
             NULL, use_event, fetch_metadata(instance, u_event));
+        Runtime::trigger_event(instance_ready);
       }
 
       if (!is_owner() && !shadow_instance)
@@ -1402,6 +1404,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent IndividualManager::get_instance_ready_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      return instance_ready;
+    }
+
+    //--------------------------------------------------------------------------
     PointerConstraint IndividualManager::get_pointer_constraint(
                                                    const DomainPoint &key) const
     //--------------------------------------------------------------------------
@@ -1513,7 +1522,7 @@ namespace Legion {
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
-      if (!use_event.has_triggered())
+      if (!instance_ready.has_triggered())
         use_event.wait();
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
@@ -1825,11 +1834,10 @@ namespace Legion {
     void IndividualManager::perform_deletion(RtEvent deferred_event)
     //--------------------------------------------------------------------------
     {
-      if (!use_event.has_triggered())
+      if (!instance_ready.has_triggered())
       {
         DeferDeleteIndividualManager args(this);
-        runtime->issue_runtime_meta_task(
-            args, LG_LOW_PRIORITY, Runtime::protect_event(use_event));
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, instance_ready);
         return;
       }
 
@@ -2194,6 +2202,8 @@ namespace Legion {
 
         update_instance_footprint(new_footprint);
 
+        Runtime::trigger_event(instance_ready);
+
         if (runtime->legion_spy_enabled)
         {
           LegionSpy::log_physical_instance(unique_event, instance.id,
@@ -2341,6 +2351,15 @@ namespace Legion {
       // TODO: implement this
       assert(false);
       return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent CollectiveManager::get_instance_ready_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      // TODO: implement this
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -3567,6 +3586,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent VirtualManager::get_instance_ready_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------

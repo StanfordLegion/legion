@@ -735,6 +735,8 @@ namespace Legion {
       bool allocate(TT tag, RT size, RT alignment, RT& first);
       void deallocate(TT tag, bool missing_ok = false);
       bool lookup(TT tag, RT& first, RT& size);
+      size_t get_size(TT tag);
+      void dump_all_free_ranges(Realm::Logger logger);
 
     protected:
       unsigned first_free_range;
@@ -2472,6 +2474,38 @@ namespace Legion {
       FieldMask set_mask;
       std::set<T> elements;
     };
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline size_t BasicRangeAllocator<RT,TT>::get_size(TT tag)
+    //-------------------------------------------------------------------------
+    {
+      typename std::map<TT, unsigned>::iterator it = allocated.find(tag);
+      if(it == allocated.end()) {
+        assert(false);
+        return 0;
+      }
+      unsigned idx = it->second;
+      if (idx == SENTINEL) return 0;
+
+      Range& r = ranges[idx];
+      return r.last - r.first;
+    }
+
+    //-------------------------------------------------------------------------
+    template <typename RT, typename TT>
+    inline void BasicRangeAllocator<RT,TT>::dump_all_free_ranges(
+                                                          Realm::Logger logger)
+    //-------------------------------------------------------------------------
+    {
+      unsigned idx = ranges[SENTINEL].next_free;
+      while (idx != SENTINEL) {
+        Range &r = ranges[idx];
+        logger.print("range %u: %zd bytes [%lx,%lx)",
+                     idx, r.last - r.first, r.first, r.last);
+        idx = r.next_free;
+      }
+    }
 
     //--------------------------------------------------------------------------
     template<typename T>
