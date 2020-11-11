@@ -7741,9 +7741,6 @@ namespace Legion {
       // and check whether they are still valid
       if (!is_owner())
       {
-#ifdef DEBUG_LEGION
-        assert(above);
-#endif
         if (parent != NULL)
         {
           // Try to get a reference on the parent
