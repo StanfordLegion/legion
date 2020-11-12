@@ -664,7 +664,7 @@ namespace Legion {
                                   std::set<RtEvent> *applied = NULL);
     public:
       IndexSpaceNode* get_node(IndexSpace space, RtEvent *defer = NULL,
-                              const bool can_fail = false);
+                               const bool can_fail = false);
       IndexPartNode*  get_node(IndexPartition part, RtEvent *defer = NULL,
                                const bool can_fail = false);
       FieldSpaceNode* get_node(FieldSpace space, RtEvent *defer = NULL);
