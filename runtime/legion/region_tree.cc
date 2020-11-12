@@ -8641,14 +8641,9 @@ namespace Legion {
 
       IndexPartNode *parent_node = NULL;
       if (parent != IndexPartition::NO_PART)
-      {
-        parent_node = context->get_node(parent);
-#ifdef DEBUG_LEGION
-        assert(parent_node != NULL);
-#endif
-      }
-      IndexSpaceNode *node = context->create_node(handle, index_space_ptr,false,
-                    parent_node, color, did, initialized, ready_event, expr_id);
+        parent_node = context->get_node(parent, NULL, true/*can fail*/);
+      IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
+          false, parent_node, color, did, initialized, ready_event, expr_id);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -10467,10 +10462,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_shard_mapping; idx++)
           derez.deserialize((*mapping)[idx]);
       }
-      IndexSpaceNode *parent_node = 
-        context->get_node(parent, NULL, true/* can fail*/);
-      if (parent_node == NULL)
-        return;
+      IndexSpaceNode *parent_node = context->get_node(parent);
       IndexSpaceNode *color_space_node = context->get_node(color_space);
 #ifdef DEBUG_LEGION
       assert(parent_node != NULL);
