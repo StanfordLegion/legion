@@ -4067,6 +4067,8 @@ namespace Legion {
             else
               return finder->second;
           }
+          else if (can_fail)
+            return NULL;
           else
             wait_on = RtEvent::NO_RT_EVENT;
         }
@@ -4175,6 +4177,8 @@ namespace Legion {
             else
               return finder->second;
           }
+          else if (can_fail)
+            return NULL;
           else
             wait_on = RtEvent::NO_RT_EVENT;
         }
