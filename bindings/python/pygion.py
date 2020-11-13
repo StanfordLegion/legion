@@ -165,7 +165,6 @@ def _DomainPoint_unpickle(values):
     return DomainPoint(values)
 
 import numpy as np
-from hashlib import sha1
 class DomainPoint(object):
     # add __add__ method and other math methods
     __slots__ = [
@@ -199,10 +198,7 @@ class DomainPoint(object):
         output = self.point + other
         return self.coerce(output)
     def __radd__(self, other):
-        if isinstance(other, int):
-            output = other + self.point
-        else:  # can other be a vector as well?
-            output = np.array(other) + self.point
+        output = other + self.point
         return self.coerce(output)
 
     def __sub__(self, other):
@@ -247,8 +243,7 @@ class DomainPoint(object):
         return numpy.array_equal(self.point, other.point)
 
     def __hash__(self):
-        # I got an error saying unhashable type numpy.ndarray so I used this:
-        return int(sha1(self.point.view(np.uint8)).hexdigest(), 16)
+        return hash(tuple(self.point)) 
 
     def __str__(self):
         if self.dim == 1:
@@ -2035,8 +2030,6 @@ class _TaskLauncher(object):
                             add_field(
                                 launcher, req, arg.fspace.field_ids[field], True)
                 elif isinstance(arg, SymbolicExpr):
-                    # FIXME: Support non-trivial projection functors
-                    arg = _symbolize(arg)
                     def arg_check():
                         # P[...]
                         if not isinstance(arg, SymbolicIndexAccess):
@@ -2049,16 +2042,16 @@ class _TaskLauncher(object):
                             return True, arg.index.func.proj_id
                         # P[i + ...] or P[ID + ...]
                         if isinstance(arg.index, SymbolicExpr):
-                            print("ARG INDEX : ", arg.index)
-                            print("ARG INDEX LHS : ", type(arg.index.lhs))
-                            print("ARG INDEX RHS : ", type(arg.index.rhs))
-                            f = ProjectionFunctor(arg.index)
-                            _proj_functor_cache[arg.index] = f
+                            # nonlocal arg
+                            curr_arg = _symbolize(arg)
+                            f = ProjectionFunctor(curr_arg.index)
+                            _proj_functor_cache[curr_arg.index] = f
                             return True, f.proj_id
                         return False, None
 
                     valid, proj_id = arg_check()
                     assert valid
+                    #check what's in the cache
 
                     parent = arg.parent if arg.parent is not None else arg
                     parent = parent.parent if parent.parent is not None else parent
@@ -2330,10 +2323,9 @@ class SymbolicIndexAccess(SymbolicExpr):
         if isinstance(result, Region):
             result.parent = None
         return result
+
     # def _legion_symbolize_task_argument(self):
-    #     if isinstance(self.args, SymbolicLoopIndex):
-    #         return self.args
-    #     return _symbolize(SymbolicLoopIndex(self.args))
+    #     return _symbolize(self.index)
 
     def is_region(self):
         return isinstance(self.value, Partition)
@@ -2357,7 +2349,7 @@ class SymbolicCall(SymbolicExpr):
     def __init__(self, func, *args):
         assert(isinstance(func, ProjectionFunctor))
         assert(len(args)==1) #is this correct?
-        # assert(isinstance(args, (SymbolicLoopIndex, ConcreteLoopIndex)))
+        assert(isinstance(args[0], (SymbolicLoopIndex, ConcreteLoopIndex)))
         self.func = func
         self.args = args
     def __str__(self):
@@ -2369,9 +2361,8 @@ class SymbolicCall(SymbolicExpr):
     def _legion_postprocess_task_argument(self, point):
         return _postprocess(self.func.expr, point) 
     def _legion_symbolize_task_argument(self):
-        if isinstance(self.args, SymbolicLoopIndex):
-            return self.args
-        return _symbolize(SymbolicLoopIndex(self.args))
+        symbolized_args = map(_symbolize, self.args)
+        return SymbolicCall(self.func, symbolized_args)
 
 
 class SymbolicBinop(SymbolicExpr):
@@ -2398,6 +2389,11 @@ class SymbolicBinop(SymbolicExpr):
             return False
     def __hash__(self):
         return hash(self.get_sides())
+
+    def _legion_symbolize_task_argument(self):
+        left = _symbolize(self.lhs)
+        right = _symbolize(self.rhs)
+        return SymbolicBinop(left, right, self.op)
 
     def _legion_preprocess_task_argument(self, point):
         if self.op == '+':
@@ -2457,6 +2453,9 @@ class SymbolicLoopIndex(SymbolicExpr):
     def __hash__(self):
         return hash(self.name)
 
+    def _legion_symbolize_task_argument(self):
+        return _symbolize(self.value)
+
     def _legion_postprocess_task_argument(self, point):
         return point
     def codegen(self):
@@ -2485,7 +2484,7 @@ class ConcreteLoopIndex(SymbolicExpr):
     def __hash__(self):
         return hash(self.value)
     def _legion_symbolize_task_argument(self):
-        return SymbolicLoopIndex(self.value)
+        return _symbolize(self.value)
     def _legion_preprocess_task_argument(self):
         return self.value
 
@@ -2495,10 +2494,12 @@ class ProjectionFunctor(object):
     def __new__(cls, expr, force = False):
         if not isinstance(expr, SymbolicExpr):
             raise Exception('ProjectionFunctor requires a symbolic expression as an argument')
+
+        print("THIS IS PROJ FUNCTOR CACHE : ", _proj_functor_cache)
         if expr in _proj_functor_cache:
-            print("WAS IN CACHE : ", len(_proj_functor_cache))
+            # print("WAS IN CACHE : ", len(_proj_functor_cache))
             return _proj_functor_cache[expr]
-        print("JUST ADDED TO CACHE : ", len(_proj_functor_cache))
+        # print("JUST ADDED TO CACHE : ", len(_proj_functor_cache))
         assert not force
         curr_val = super(ProjectionFunctor, cls).__new__(cls)
         _proj_functor_cache[expr] = curr_val 
