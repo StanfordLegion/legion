@@ -1705,7 +1705,6 @@ namespace Legion {
                                    DependenceType dtype,
                                    const FieldMask &dependent_mask);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual Memoizable* get_memoizable(void);
     protected:
       // These things are really only needed for tracing
       // Information about the operation that generated
