@@ -6135,6 +6135,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (launcher.fields.empty())
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_EMPTY_FILL_FIELDS,
+            "Ignoring fill request with no fields in ask %s (UID %lld)",
+            get_task_name(), get_unique_id())
+        return;
+      }
       FillOp *fill_op = runtime->get_available_fill_op();
       fill_op->initialize(this, launcher);
 #ifdef DEBUG_LEGION
@@ -6171,6 +6178,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (launcher.fields.empty())
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_EMPTY_FILL_FIELDS,
+            "Ignoring index fill request with no fields in ask %s (UID %lld)",
+            get_task_name(), get_unique_id())
+        return;
+      }
       if (launcher.launch_domain.exists() && 
           (launcher.launch_domain.get_volume() == 0))
       {

@@ -1745,8 +1745,9 @@ namespace Realm {
         return is_valid;
       }
     }
-#endif
+#else
     return is_valid;
+#endif
   }
 
   bool ProcessorQueryImpl::cached_query(Processor p, Processor& pval)
@@ -1775,8 +1776,9 @@ namespace Realm {
         return is_valid;
       }
     }
-#endif
+#else
     return is_valid;
+#endif
   }
 
  bool ProcessorQueryImpl::cached_query(size_t &count) const
@@ -1797,8 +1799,9 @@ namespace Realm {
         return is_valid;
       }
     }
-#endif
+#else
     return is_valid;
+#endif
   }
 
   Processor ProcessorQueryImpl::mutated_cached_query(Processor after)
@@ -2575,8 +2578,9 @@ namespace Realm {
         return is_valid;
       }
     }
-#endif
+#else
     return is_valid;
+#endif
   }
 
   bool MemoryQueryImpl::cached_query(Memory m, Memory& mval)
@@ -2605,8 +2609,9 @@ namespace Realm {
         return is_valid;
       }
     }
-#endif
+#else
     return is_valid;
+#endif
   }
 
  bool MemoryQueryImpl::cached_query(size_t &count) const
@@ -2627,8 +2632,9 @@ namespace Realm {
         return is_valid;
       }
     }
-#endif
+#else
     return is_valid;
+#endif
   }
 
   Memory MemoryQueryImpl::mutated_cached_query(Memory after)

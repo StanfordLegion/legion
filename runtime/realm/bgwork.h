@@ -91,7 +91,7 @@ namespace Realm {
     void stop_dedicated_workers(void);
 
     typedef unsigned long long BitMask;
-    static const size_t MAX_WORK_ITEMS = 64;
+    static const size_t MAX_WORK_ITEMS = 256;
     static const size_t BITMASK_BITS = 8 * sizeof(BitMask);
     static const size_t BITMASK_ARRAY_SIZE = (MAX_WORK_ITEMS + BITMASK_BITS - 1) / BITMASK_BITS;
 

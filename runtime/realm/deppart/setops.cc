@@ -34,15 +34,6 @@ namespace Realm {
   template <int N, typename T>
   static bool union_is_rect(const Rect<N,T>& lhs, const Rect<N,T>& rhs)
   {
-    if(N == 1) {
-      // 1-D case is simple - no gap allowed
-      if((lhs.hi[0] < rhs.lo[0]) && ((lhs.hi[0] + 1) != rhs.lo[0]))
-	return false;
-      if((rhs.hi[0] < lhs.lo[0]) && ((rhs.hi[0] + 1) != lhs.lo[0]))
-	return false;
-      return true;
-    }
-    
     // containment case is easy
     if(lhs.contains(rhs) || rhs.contains(lhs))
       return true;
@@ -64,6 +55,17 @@ namespace Realm {
       if((lhs.lo[i] != rhs.lo[i]) || (lhs.hi[i] != rhs.hi[i]))
 	return false;
 
+    return true;
+  }
+
+  // specialize for 1-D case: simple - no gap allowed
+  template <typename T>
+  static bool union_is_rect(const Rect<1,T>& lhs, const Rect<1,T>& rhs)
+  {
+    if((lhs.hi[0] < rhs.lo[0]) && ((lhs.hi[0] + 1) != rhs.lo[0]))
+      return false;
+    if((rhs.hi[0] < lhs.lo[0]) && ((rhs.hi[0] + 1) != lhs.lo[0]))
+      return false;
     return true;
   }
 
@@ -1134,11 +1136,14 @@ namespace Realm {
 	  // we have at least partial overlap - add the intersection and then consume whichever
 	  //  rectangle ended first (or both if equal)
 	  bitmask.add_rect(it_lhs.rect.intersection(it_rhs.rect));
-	  T diff = it_lhs.rect.hi.x - it_rhs.rect.hi.x;
-	  if(diff <= 0)
+	  if(it_lhs.rect.hi.x < it_rhs.rect.hi.x) {
 	    it_lhs.step();
-	  if(diff >= 0)
+	  } else if(it_lhs.rect.hi.x > it_rhs.rect.hi.x) {
 	    it_rhs.step();
+	  } else {
+	    it_lhs.step();
+	    it_rhs.step();
+	  }
 	}
       } else {
 	assert(0);

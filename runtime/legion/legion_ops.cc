@@ -912,7 +912,21 @@ namespace Legion {
       // Tell our parent context that we are committed
       // Do this before actually committing to avoid race conditions
       if (track_parent)
+      {
+        // Do a check here to make sure the completion event has triggered
+        // before we record that this operation is commited. This is crucial
+        // to ensuring that fence operations are working correctly in the
+        // parent context. If not triggered, then defer this until it does.
+        bool do_not_care;
+        if (!completion_event.has_triggered_faultaware(do_not_care))
+        {
+          DeferredCommitArgs args(this, do_deactivate);
+          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
+              Runtime::protect_event(completion_event));
+          return;
+        }
         parent_ctx->register_child_commit(this);
+      }
       // Mark that we are committed 
       {
         AutoLock o_lock(op_lock);
@@ -17297,6 +17311,18 @@ namespace Legion {
                                                    requirement, 
                                                    version_info,
                                                    preconditions);
+      // Add a valid reference to the instances to act as an acquire to keep
+      // them valid through the end of mapping them, we'll release the valid
+      // references when we are done mapping
+      InstanceSet references;
+      region.impl->get_references(references);
+#ifdef DEBUG_LEGION
+      assert(references.size() == 1);
+#endif
+      const InstanceRef &reference = references[0];
+      WrapperReferenceMutator mutator(preconditions);
+      PhysicalManager *manager = reference.get_instance_manager();
+      manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -17316,7 +17342,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(references.size() == 1);
 #endif
-      InstanceRef reference = references[0]; 
+      const InstanceRef &reference = references[0]; 
       const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
       std::set<ApEvent> detach_events;
       // If we need to flush then register this operation to bring the
@@ -17382,7 +17408,7 @@ namespace Legion {
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
-        complete_mapping();
+        complete_mapping(); 
       request_early_complete(detach_event);
       complete_execution(Runtime::protect_event(detach_event));
     }
@@ -17402,6 +17428,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       result.impl->set_result(NULL, 0, true/*own*/);
+      InstanceSet references;
+      region.impl->get_references(references);
+#ifdef DEBUG_LEGION
+      assert(references.size() == 1);
+#endif
+      const InstanceRef &reference = references[0];
+      PhysicalManager *manager = reference.get_instance_manager();
+      // We can remove the acquire reference that we added after we're mapped
+      if (manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
+        delete manager;
       complete_operation();
     }
 

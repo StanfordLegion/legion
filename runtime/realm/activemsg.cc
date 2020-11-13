@@ -40,6 +40,57 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class CompletionCallbackBase
+  //
+
+  CompletionCallbackBase::~CompletionCallbackBase()
+  {}
+
+  /*static*/ void CompletionCallbackBase::invoke_all(void *start, size_t bytes)
+  {
+    size_t ofs = 0;
+    while(ofs < bytes) {
+      CompletionCallbackBase *cc = static_cast<CompletionCallbackBase *>(start);
+      cc->invoke();
+      size_t step = cc->size();
+      start = static_cast<char *>(start) + step;
+      ofs += step;
+    }
+    assert(ofs == bytes);
+  }
+
+  /*static*/ void CompletionCallbackBase::clone_all(void *dst,
+						    const void *src,
+						    size_t bytes)
+  {
+    size_t ofs = 0;
+    while(ofs < bytes) {
+      const CompletionCallbackBase *cc = static_cast<const CompletionCallbackBase *>(src);
+      cc->clone_at(dst);
+      size_t step = cc->size();
+      src = static_cast<const char *>(src) + step;
+      dst = static_cast<char *>(dst) + step;
+      ofs += step;
+    }
+    assert(ofs == bytes);
+  }
+
+  /*static*/ void CompletionCallbackBase::destroy_all(void *start, size_t bytes)
+  {
+    size_t ofs = 0;
+    while(ofs < bytes) {
+      CompletionCallbackBase *cc = static_cast<CompletionCallbackBase *>(start);
+      size_t step = cc->size();
+      cc->~CompletionCallbackBase();
+      start = static_cast<char *>(start) + step;
+      ofs += step;
+    }
+    assert(ofs == bytes);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // struct ActiveMessageHandlerStats
   //
 

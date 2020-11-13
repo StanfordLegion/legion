@@ -87,6 +87,8 @@ namespace Realm {
     virtual void confirm_step(void);
     virtual void cancel_step(void);
 
+    virtual bool get_addresses(AddressList &addrlist);
+
   protected:
     virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
 			       size_t& offset, size_t& fsize) = 0;
@@ -455,6 +457,160 @@ namespace Realm {
   {
     assert(tentative_valid);
     tentative_valid = false;
+  }
+
+  template <int N, typename T>
+  bool TransferIteratorBase<N,T>::get_addresses(AddressList &addrlist)
+  {
+#ifdef DEBUG_REALM
+    assert(!tentative_valid);
+#endif
+
+    while(!done()) {
+      if(!have_rect)
+	return false; // no more addresses at the moment, but expect more later
+
+      // we may be able to compact dimensions, but ask for space to write a
+      //  an address record of the maximum possible dimension (i.e. N)
+      size_t *addr_data = addrlist.begin_nd_entry(N);
+      if(!addr_data)
+	return true; // out of space for now
+
+      // find the layout piece the current point is in
+      const InstanceLayoutPiece<N,T> *layout_piece;
+      size_t field_rel_offset;
+      {
+	std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(cur_field_id);
+	assert(it != inst_layout->fields.end());
+	assert((cur_field_offset + cur_field_size) <= size_t(it->second.size_in_bytes));
+	const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
+	layout_piece = piece_list.find_piece(cur_point);
+	assert(layout_piece != 0);
+	field_rel_offset = it->second.rel_offset + cur_field_offset;
+      }
+
+      // figure out the largest iteration-consistent subrectangle that fits in
+      //  the current piece
+      Rect<N,T> target_subrect;
+      target_subrect.lo = cur_point;
+      target_subrect.hi = cur_point;
+      have_rect = false;  // tentatively clear - we'll (re-)set it below if needed
+      for(int di = 0; di < N; di++) {
+	int d = dim_order[di];
+
+	// our target subrect in this dimension can be trimmed at the front by
+	//  having already done a partial step, or trimmed at the end by the layout
+	if(cur_rect.hi[d] <= layout_piece->bounds.hi[d]) {
+	  if(cur_point[d] == cur_rect.lo[d]) {
+	    // simple case - we are at the start in this dimension and the piece
+	    //  covers the entire range
+	    target_subrect.hi[d] = cur_rect.hi[d];
+	    continue;
+	  } else {
+	    // we started in the middle, so we can finish this dimension, but
+	    //  not continue to further dimensions
+	    target_subrect.hi[d] = cur_rect.hi[d];
+	    if(di < (N - 1)) {
+	      // rewind the first di+1 dimensions and any after that that are
+	      //  at the end
+	      int d2 = 0;
+	      while((d2 < N) &&
+		    ((d2 <= di) ||
+		     (cur_point[dim_order[d2]] == cur_rect.hi[dim_order[d2]]))) {
+		cur_point[dim_order[d2]] = cur_rect.lo[dim_order[d2]];
+		d2++;
+	      }
+	      if(d2 < N) {
+		// carry didn't propagate all the way, so we have some left for
+		//  next time
+		cur_point[dim_order[d2]]++;
+		have_rect = true;
+	      }
+	    }
+	    break;
+	  }
+	} else {
+	  // stopping short (doesn't matter where we started) - limit this subrect
+	  //  based on the piece and start just past it in this dimension
+	  //  (rewinding previous dimensions)
+	  target_subrect.hi[d] = layout_piece->bounds.hi[d];
+	  have_rect = true;
+	  for(int d2 = 0; d2 < di; d2++)
+	    cur_point[dim_order[d2]] = cur_rect.lo[dim_order[d2]];
+	  cur_point[d] = layout_piece->bounds.hi[d] + 1;
+	  break;
+	}
+      }
+      //log_dma.print() << "step: cr=" << cur_rect << " bounds=" << layout_piece->bounds << " tgt=" << target_subrect << " next=" << cur_point << " (" << have_rect << ")";
+#ifdef DEBUG_REALM
+      assert(layout_piece->bounds.contains(target_subrect));
+#endif
+
+      if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType) {
+	const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
+
+	// offset of initial entry is easy to compute
+	addr_data[1] = (inst_impl->metadata.inst_offset +
+			affine->offset +
+			affine->strides.dot(target_subrect.lo) +
+			field_rel_offset);
+
+	size_t bytes = cur_field_size;
+	int cur_dim = 1;
+	int di = 0;
+	// compact any dimensions that are contiguous first
+	for(; di < N; di++) {
+	  // follow the agreed-upon dimension ordering
+	  int d = dim_order[di];
+
+	  // skip degenerate dimensions
+	  if(target_subrect.lo[d] == target_subrect.hi[d])
+	    continue;
+
+	  // if the stride doesn't match the current size, stop
+	  if(affine->strides[d] != bytes)
+	    break;
+
+	  // it's contiguous - multiply total bytes by extent and continue
+	  bytes *= (target_subrect.hi[d] - target_subrect.lo[d] + 1);
+	}
+
+	// if any dimensions are left, they need to become count/stride pairs
+	size_t total_bytes = bytes;
+	while(di < N) {
+	  size_t total_count = 1;
+	  size_t stride = affine->strides[dim_order[di]];
+
+	  for(; di < N; di++) {
+	    int d = dim_order[di];
+
+	    if(target_subrect.lo[d] == target_subrect.hi[d])
+	      continue;
+
+	    size_t count = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
+
+	    if(affine->strides[d] != (stride * total_count))
+	      break;
+
+	    total_count *= count;
+	  }
+
+	  addr_data[cur_dim * 2] = total_count;
+	  addr_data[cur_dim * 2 + 1] = stride;
+	  total_bytes *= total_count;
+	  cur_dim++;
+	}
+
+	// now that we know the compacted dimension, we can finish the address
+	//  record
+	addr_data[0] = (bytes << 4) + cur_dim;
+	addrlist.commit_nd_entry(cur_dim, total_bytes);
+      } else {
+	assert(0 && "no support for non-affine pieces yet");
+      }
+    }
+
+    return true; // we have no more addresses to produce
   }
 
 
@@ -1591,6 +1747,7 @@ namespace Realm {
   {
     // unused
     assert(0);
+    return 0;
   }
   
   void AddressSplitXferDesBase::notify_request_read_done(Request* req)
@@ -1672,118 +1829,133 @@ namespace Realm {
   {
     assert(!iteration_completed.load());
 
-    size_t output_bytes = 0;
-    bool input_done = false;
+    ReadSequenceCache rseqcache(this);
+    WriteSequenceCache wseqcache(this);
+
+    bool did_work = false;
     while(true) {
-      // step 1: get some points if we are out
-      if(point_index >= point_count) {
-	if(input_ports[0].iter->done()) {
-	  input_done = true;
-	  break;
-	}
-	
-	TransferIterator::AddressInfo p_info;
-	size_t max_bytes = MAX_POINTS * sizeof(Point<N,T>);
-	if(input_ports[0].peer_guid != XFERDES_NO_GUID) {
-	  max_bytes = input_ports[0].seq_remote.span_exists(input_ports[0].local_bytes_total, max_bytes);
-	  if(max_bytes < sizeof(Point<N,T>))
+      size_t output_bytes = 0;
+      bool input_done = false;
+      while(true) {
+	// step 1: get some points if we are out
+	if(point_index >= point_count) {
+	  if(input_ports[0].iter->done()) {
+	    input_done = true;
 	    break;
+	  }
+	
+	  TransferIterator::AddressInfo p_info;
+	  size_t max_bytes = MAX_POINTS * sizeof(Point<N,T>);
+	  if(input_ports[0].peer_guid != XFERDES_NO_GUID) {
+	    max_bytes = input_ports[0].seq_remote.span_exists(input_ports[0].local_bytes_total, max_bytes);
+	    if(max_bytes < sizeof(Point<N,T>))
+	      break;
+	  }
+	  size_t bytes = input_ports[0].iter->step(max_bytes, p_info,
+						   0, false /*!tentative*/);
+	  if(bytes == 0) break;
+	  point_count = bytes / sizeof(Point<N,T>);
+	  assert(bytes == (point_count * sizeof(Point<N,T>)));
+	  const void *srcptr = input_ports[0].mem->get_direct_ptr(p_info.base_offset,
+								  bytes);
+	  assert(srcptr != 0);
+	  memcpy(points, srcptr, bytes);
+	  point_index = 0;
+	  rseqcache.add_span(0, input_ports[0].local_bytes_total, bytes);
+	  input_ports[0].local_bytes_total += bytes;
+	  did_work = true;
 	}
-	size_t bytes = input_ports[0].iter->step(max_bytes, p_info,
-						 0, false /*!tentative*/);
-	if(bytes == 0) break;
-	point_count = bytes / sizeof(Point<N,T>);
-	assert(bytes == (point_count * sizeof(Point<N,T>)));
-	const void *srcptr = input_ports[0].mem->get_direct_ptr(p_info.base_offset,
-								bytes);
-	assert(srcptr != 0);
-	memcpy(points, srcptr, bytes);
-	point_index = 0;
-	update_bytes_read(0, input_ports[0].local_bytes_total, bytes);
-	input_ports[0].local_bytes_total += bytes;
+
+	// step 2: process the first point we've got on hand
+	int new_space_id = find_point_in_spaces(points[point_index],
+						output_space_id);
+
+	// can only extend an existing run with another point from the same
+	//  space
+	if(output_count == 0)
+	  output_space_id = new_space_id;
+	else
+	  if(new_space_id != output_space_id)
+	    break;
+
+	// can't let our count overflow a 24-bit value
+	if((((output_count + 1) * element_size) >> 24) > 0)
+	  break;
+
+	// if it matched a space, we have to emit the point to that space's
+	//  output address stream before we can accept the point
+	if(output_space_id != -1) {
+	  XferPort &op = output_ports[output_space_id];
+	  if(op.seq_remote.span_exists(op.local_bytes_total + output_bytes,
+				       sizeof(Point<N,T>)) < sizeof(Point<N,T>))
+	    break;
+	  TransferIterator::AddressInfo o_info;
+	  size_t bytes = op.iter->step(sizeof(Point<N,T>), o_info,
+				       0, false /*!tentative*/);
+	  assert(bytes == sizeof(Point<N,T>));
+	  void *dstptr = op.mem->get_direct_ptr(o_info.base_offset,
+						sizeof(Point<N,T>));
+	  assert(dstptr != 0);
+	  memcpy(dstptr, &points[point_index], sizeof(Point<N,T>));
+	  output_bytes += sizeof(Point<N,T>);
+	}
+	output_count++;
+	point_index++;
+      }
+        
+      // if we wrote any points out, update their validity now
+      if(output_bytes > 0) {
+	assert(output_space_id >= 0);
+	wseqcache.add_span(output_space_id,
+			   output_ports[output_space_id].local_bytes_total,
+			   output_bytes);
+	output_ports[output_space_id].local_bytes_total += output_bytes;
+	did_work = true;
       }
 
-      // step 2: process the first point we've got on hand
-      int new_space_id = find_point_in_spaces(points[point_index],
-					      output_space_id);
+      // now try to write the control information
+      if((output_count > 0) || input_done) {
+	unsigned cword = (((output_count * element_size) << 8) +
+			  (input_done ? 128 : 0) + // bit 7
+			  (output_space_id + 1));
+	assert(cword != 0);
+      
+	XferPort &cp = output_ports[spaces.size()];
+	if(cp.seq_remote.span_exists(cp.local_bytes_total,
+				     sizeof(unsigned)) < sizeof(unsigned))
+	  break;  // no room to write control work
 
-      // can only extend an existing run with another point from the same
-      //  space
-      if(output_count == 0)
-	output_space_id = new_space_id;
-      else
-	if(new_space_id != output_space_id)
-	  break;
+	TransferIterator::AddressInfo c_info;
+	size_t bytes = cp.iter->step(sizeof(unsigned), c_info,
+				     0, false /*!tentative*/);
+	assert(bytes == sizeof(unsigned));
+	void *dstptr = cp.mem->get_direct_ptr(c_info.base_offset, sizeof(unsigned));
+	assert(dstptr != 0);
+	memcpy(dstptr, &cword, sizeof(unsigned));
 
-      // can't let our count overflow a 24-bit value
-      if((((output_count + 1) * element_size) >> 24) > 0)
+	if(input_done) {
+	  iteration_completed.store_release(true);
+	  // mark all address streams as done (dummy write update)
+	  for(size_t i = 0; i < spaces.size(); i++)
+	    wseqcache.add_span(i, output_ports[i].local_bytes_total, 0);
+	}
+	size_t old_lbt = cp.local_bytes_total;
+	cp.local_bytes_total += sizeof(unsigned);
+	wseqcache.add_span(spaces.size(), old_lbt, sizeof(unsigned));
+	output_space_id = -1;
+	output_count = 0;
+	did_work = true;
+      } else
 	break;
 
-      // if it matched a space, we have to emit the point to that space's
-      //  output address stream before we can accept the point
-      if(output_space_id != -1) {
-	XferPort &op = output_ports[output_space_id];
-	if(op.seq_remote.span_exists(op.local_bytes_total + output_bytes,
-				     sizeof(Point<N,T>)) < sizeof(Point<N,T>))
-	  break;
-	TransferIterator::AddressInfo o_info;
-	size_t bytes = op.iter->step(sizeof(Point<N,T>), o_info,
-				     0, false /*!tentative*/);
-	assert(bytes == sizeof(Point<N,T>));
-	void *dstptr = op.mem->get_direct_ptr(o_info.base_offset,
-					      sizeof(Point<N,T>));
-	assert(dstptr != 0);
-	memcpy(dstptr, &points[point_index], sizeof(Point<N,T>));
-	output_bytes += sizeof(Point<N,T>);
-      }
-      output_count++;
-      point_index++;
-    }
-    
-    // if we wrote any points out, update their validity now
-    if(output_bytes > 0) {
-      assert(output_space_id >= 0);
-      update_bytes_write(output_space_id,
-			 output_ports[output_space_id].local_bytes_total,
-			 output_bytes);
-      output_ports[output_space_id].local_bytes_total += output_bytes;
+      if(iteration_completed.load() || work_until.is_expired())
+	break;
     }
 
-    // now try to write the control information
-    if((output_count > 0) || input_done) {
-      unsigned cword = (((output_count * element_size) << 8) +
-			(input_done ? 128 : 0) + // bit 7
-			(output_space_id + 1));
-      assert(cword != 0);
+    rseqcache.flush();
+    wseqcache.flush();
 
-      XferPort &cp = output_ports[spaces.size()];
-      if(cp.seq_remote.span_exists(cp.local_bytes_total,
-				   sizeof(unsigned)) < sizeof(unsigned))
-	return false;  // temporarily blocked
-      TransferIterator::AddressInfo c_info;
-      size_t bytes = cp.iter->step(sizeof(unsigned), c_info,
-				   0, false /*!tentative*/);
-      assert(bytes == sizeof(unsigned));
-      void *dstptr = cp.mem->get_direct_ptr(c_info.base_offset, sizeof(unsigned));
-      assert(dstptr != 0);
-      memcpy(dstptr, &cword, sizeof(unsigned));
-
-      if(input_done) {
-	iteration_completed.store_release(true);
-	// mark all address streams as done (dummy write update)
-	for(size_t i = 0; i < spaces.size(); i++)
-	  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
-      }
-      size_t old_lbt = cp.local_bytes_total;
-      cp.local_bytes_total += sizeof(unsigned);
-      update_bytes_write(spaces.size(), old_lbt, sizeof(unsigned));
-      output_space_id = -1;
-      output_count = 0;
-
-      return !input_done;
-    }
-
-    return false;
+    return did_work;
   }
   
   

@@ -4763,7 +4763,7 @@ namespace Legion {
       get_realm_index_space(local_space, true/*tight*/);
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
-      PhysicalInstance result;
+      PhysicalInstance result = PhysicalInstance::NO_INST;
 
 #ifdef LEGION_USE_HDF5
       std::vector<PhysicalInstance::HDF5FieldInfo<DIM,T> >

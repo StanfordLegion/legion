@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Copyright 2020 Stanford University, NVIDIA Corporation
 #
@@ -124,7 +124,7 @@ class Dummy(object):
 def main():
     parser = argparse.ArgumentParser()
 
-    # usage: python span_example.py <task0> <task1> <logfile0> <logfile1>
+    # usage: python3 span_example.py <task0> <task1> <logfile0> <logfile1>
     parser.add_argument("-t", "--tasks", nargs=2, type=str,
                         help="The two task names you want to find the span between. These are interpreted as regexes")
     parser.add_argument("-s", "--skip", nargs=2, type=int,

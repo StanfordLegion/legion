@@ -1250,6 +1250,7 @@ namespace Realm {
     off_t RemoteMemory::alloc_bytes_local(size_t size)
     {
       assert(0);
+      return 0;
     }
 
     void RemoteMemory::free_bytes_local(off_t offset, size_t size)

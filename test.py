@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Copyright 2020 Stanford University
 #
@@ -51,7 +51,7 @@ legion_cxx_tests = [
     ['tutorial/06_privileges/privileges', []],
     ['tutorial/07_partitioning/partitioning', []],
     ['tutorial/08_multiple_partitions/multiple_partitions', []],
-    ['tutorial/09_custom_mapper/custom_mapper', []], 
+    ['tutorial/09_custom_mapper/custom_mapper', []],
 
     # Examples
     ['examples/circuit/circuit', []],
@@ -95,6 +95,9 @@ if platform.system() != 'Darwin':
 legion_network_cxx_tests = [
     # Examples
     ['examples/mpi_interop/mpi_interop', []],
+
+    # Tests
+    ['test/bug954/bug954', ['-ll:rsize', '1024']],
 ]
 
 legion_openmp_cxx_tests = [
@@ -330,7 +333,7 @@ def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir])
     # TODO; Merge deppart branch into master after this makes it to stable Legion branch
     cmd(['git', 'checkout', 'deppart'], cwd=fuzz_dir)
-    cmd(['python', 'main.py'], env=env, cwd=fuzz_dir)
+    cmd(['python3', 'main.py'], env=env, cwd=fuzz_dir)
 
 def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     test_dir = os.path.join(root_dir, 'test/realm')
@@ -482,7 +485,10 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, ti
 
 def run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     build_dir = os.path.join(tmp_dir, 'build')
-    args = ['ctest', '-j', str(thread_count), '--output-on-failure']
+    args = ['ctest', '--output-on-failure']
+    # do not run tests in parallel if they use GPUs - might not all fit
+    if env['USE_CUDA'] != '1':
+        args.extend(['-j', str(thread_count)])
     if timelimit:
         args.extend(['--timeout', str(timelimit)])
     cmd(args,

@@ -53,7 +53,7 @@ do
     print("Error: failed to compile " .. external_test_cc)
     assert(false)
   end
-  terralib.linklibrary(external_test_so)
+  regentlib.linklibrary(external_test_so)
   cexternal_test =
     terralib.includec("external_test.h", include_dirs)
 end

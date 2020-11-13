@@ -40,11 +40,11 @@ extern void dsyrk_(char *uplo, char* trans, int* n, int* k,
 ]]
 
 if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
-  terralib.linklibrary("libblas.dylib")
-  terralib.linklibrary("liblapack.dylib")
+  regentlib.linklibrary("libblas.dylib")
+  regentlib.linklibrary("liblapack.dylib")
 else
-  terralib.linklibrary("libblas.so")
-  terralib.linklibrary("liblapack.so")
+  regentlib.linklibrary("libblas.so")
+  regentlib.linklibrary("liblapack.so")
 end
 
 local c = regentlib.c

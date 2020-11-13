@@ -15347,7 +15347,7 @@ namespace Legion {
     {
       // Easy case if the user asks for no IDs
       if (count == 0)
-        return LEGION_AUTO_GENERATE_ID;
+        return (ReductionOpID)LEGION_AUTO_GENERATE_ID;
       const std::string library_name(name); 
       // Take the lock in read only mode and see if we can find the result
       RtEvent wait_on;
@@ -15474,7 +15474,7 @@ namespace Legion {
     {
       // Easy case if the user asks for no IDs
       if (count == 0)
-        return LEGION_AUTO_GENERATE_ID;
+        return (CustomSerdezID)LEGION_AUTO_GENERATE_ID;
       const std::string library_name(name); 
       // Take the lock in read only mode and see if we can find the result
       RtEvent wait_on;
@@ -15647,7 +15647,7 @@ namespace Legion {
         AutoLock m_lock(message_manager_lock);
         // Re-check to see if we lost the race, force the compiler
         // to re-load the value here
-        result = *(((MessageManager**volatile)message_managers)+sid);
+        result = *(((MessageManager**)message_managers)+sid);
         if (result != NULL)
           return result;
         // Figure out if there is an event to wait on yet
@@ -15698,7 +15698,7 @@ namespace Legion {
       if (!wait_on.has_triggered())
         wait_on.wait();
       // When we wake up there should be a result
-      result = *(((MessageManager**volatile)message_managers)+sid);
+      result = *(((MessageManager**)message_managers)+sid);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -21531,6 +21531,36 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (local_procs.find(proc) != local_procs.end());
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::is_visible_memory(Processor proc, Memory memory)
+    //--------------------------------------------------------------------------
+    {
+      // If we cached it locally for our processors, then just go
+      // ahead and get the result
+      std::map<Processor,ProcessorManager*>::const_iterator finder = 
+        proc_managers.find(proc);
+      if (finder != proc_managers.end())
+        return finder->second->is_visible_memory(memory);
+      // Otherwise look up the result
+      Machine::MemoryQuery visible_memories(machine);
+      // Have to handle the case where this is a processor group
+      if (proc.kind() == Processor::PROC_GROUP)
+      {
+        std::vector<Processor> group_members;
+        proc.get_group_members(group_members);
+        for (std::vector<Processor>::const_iterator it =
+              group_members.begin(); it != group_members.end(); it++)
+          visible_memories.has_affinity_to(*it);
+      }
+      else
+        visible_memories.has_affinity_to(proc);
+      for (Machine::MemoryQuery::iterator it =
+            visible_memories.begin(); it != visible_memories.end(); it++)
+        if ((*it) == memory)
+          return true;
+      return false;
     }
 
     //--------------------------------------------------------------------------

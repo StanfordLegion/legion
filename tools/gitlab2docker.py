@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # parses a GitLab CI YAML configuration file and generates a Dockerfile for
 #  a specified job

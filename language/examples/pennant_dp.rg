@@ -1517,7 +1517,6 @@ terra read_input(runtime : c.legion_runtime_t,
 
   return rawcolors
 end
-read_input:compile()
 
 terra create_colorings(runtime : c.legion_runtime_t,
 		       ctx : c.legion_context_t,
@@ -1676,7 +1675,6 @@ terra create_colorings(runtime : c.legion_runtime_t,
 
   return result
 end
-create_colorings:compile()
 
 task toplevel()
   c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)

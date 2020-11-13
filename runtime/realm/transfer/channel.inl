@@ -417,4 +417,80 @@ namespace Realm {
   }
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class XferDes::SequenceCache<UPDATE>
+  //
+
+  template <void (XferDes::*UPDATE)(int port_idx, size_t offset, size_t size)>
+  XferDes::SequenceCache<UPDATE>::SequenceCache(XferDes *_xd)
+    : xd(_xd)
+  {
+    for(size_t i = 0; i < MAX_ENTRIES; i++)
+      ports[i] = -1;
+  }
+
+  template <void (XferDes::*UPDATE)(int port_idx, size_t offset, size_t size)>
+  void XferDes::SequenceCache<UPDATE>::add_span(int port_idx, size_t offset, size_t size)
+  {
+    // invalid ports are ignored (don't filter empty spans - used for flushes)
+    if(port_idx < 0) return;
+
+    // see if we've seen this port index before
+    for(size_t i = 0; i < MAX_ENTRIES; i++)
+      if(ports[i] == port_idx) {
+	// ok, now see if we can append to the existing span
+	if(offset == (offsets[i] + sizes[i])) {
+	  // we can add to the existing span
+	  sizes[i] += size;
+	} else {
+	  // not contiguous - push old span out and start a new one
+	  (xd->*UPDATE)(port_idx, offsets[i], sizes[i]);
+	  offsets[i] = offset;
+	  sizes[i] = size;
+	}
+	return;
+      }
+
+    // no match - replace the largest existing span or use an available slot
+    int biggest_idx = 0;
+    size_t biggest_size = sizes[0];
+    for(size_t i = 0; i < MAX_ENTRIES; i++) {
+      if(ports[i] < 0) {
+	ports[i] = port_idx;
+	offsets[i] = offset;
+	sizes[i] = size;
+	return;
+      }
+
+      if(sizes[i] > biggest_size) {
+	biggest_idx = i;
+	biggest_size = sizes[i];
+      }
+    }
+
+    if(size > biggest_size) {
+      // new span is the biggest, so just send it through
+      (xd->*UPDATE)(port_idx, offset, size);
+    } else {
+      // kick out an old entry and use its slot
+      (xd->*UPDATE)(ports[biggest_idx], offsets[biggest_idx], biggest_size);
+
+      ports[biggest_idx] = port_idx;
+      offsets[biggest_idx] = offset;
+      sizes[biggest_idx] = size;
+    }	
+  }
+
+  template <void (XferDes::*UPDATE)(int port_idx, size_t offset, size_t size)>
+  void XferDes::SequenceCache<UPDATE>::flush()
+  {
+    for(size_t i = 0; i < MAX_ENTRIES; i++)
+      if(ports[i] >= 0) {
+	(xd->*UPDATE)(ports[i], offsets[i], sizes[i]);
+	ports[i] = -1;
+      }
+  }
+
+
 };

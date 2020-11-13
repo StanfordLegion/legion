@@ -173,7 +173,7 @@ public:
   {
 #define INT_ARG(s, v) if(!strcmp(argv[i], s)) { v = atoi(argv[++i]); continue; }
     for(int i = 1; i < argc; i++) {
-      INT_ARG("-type", (int&)problem_type);
+      if(!strcmp(argv[i], "-type")) { problem_type = (ProblemType)atoi(argv[++i]); continue; }
       INT_ARG("-gx",   global_x);
       INT_ARG("-gy",   global_y);
       INT_ARG("-gz",   global_z);

@@ -277,7 +277,7 @@ namespace Legion {
         DeferRemoteReferenceUpdateArgs(DistributedCollectable *d, 
             AddressSpaceID t, RtUserEvent e, unsigned c, bool v)
           : LgTaskArgs<DeferRemoteReferenceUpdateArgs>(implicit_provenance),
-            did(d->did), target(t), count(c), 
+            did(d->did), target(t), done_event(e), count(c),
             owner(d->owner_space == t), valid(v) { } 
       public:
         const DistributedID did;
@@ -388,19 +388,20 @@ namespace Legion {
                                                 Deserializer &derez);
     public:
       virtual void send_remote_registration(ReferenceMutator *mutator);
-      void send_remote_valid_increment(AddressSpaceID target,
+      // Return events indicate when message is on the virtual channel
+      RtEvent send_remote_valid_increment(AddressSpaceID target,
                                     ReferenceMutator *mutator,
                                     RtEvent precondition = RtEvent::NO_RT_EVENT,
                                     unsigned count = 1);
-      void send_remote_valid_decrement(AddressSpaceID target,
+      RtEvent send_remote_valid_decrement(AddressSpaceID target,
                                     ReferenceMutator *mutator = NULL,
                                     RtEvent precondition = RtEvent::NO_RT_EVENT,
                                     unsigned count = 1);
-      void send_remote_gc_increment(AddressSpaceID target,
+      RtEvent send_remote_gc_increment(AddressSpaceID target,
                                     ReferenceMutator *mutator,
                                     RtEvent precondition = RtEvent::NO_RT_EVENT,
                                     unsigned count = 1);
-      void send_remote_gc_decrement(AddressSpaceID target,
+      RtEvent send_remote_gc_decrement(AddressSpaceID target,
                                     ReferenceMutator *mutator = NULL,
                                     RtEvent precondition = RtEvent::NO_RT_EVENT,
                                     unsigned count = 1);
