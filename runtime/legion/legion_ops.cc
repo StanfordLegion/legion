@@ -8525,6 +8525,14 @@ namespace Legion {
       return create_op->find_parent_index(creator_req_idx);
     }
 
+    //--------------------------------------------------------------------------
+    Memoizable* InternalOp::get_memoizable(void)
+    //--------------------------------------------------------------------------
+    {
+      // Forward this request on to the creator op
+      return create_op->get_memoizable();
+    }
+
     /////////////////////////////////////////////////////////////
     // External Close 
     /////////////////////////////////////////////////////////////
