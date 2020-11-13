@@ -101,7 +101,7 @@ do
   end
   local cxx = os.getenv('NVCC') or 'nvcc'
 
-  local cxx_flags = os.getenv('CC_FLAGS') or ''
+  local cxx_flags = os.getenv('CXXFLAGS') or ''
   -- cxx_flags = cxx_flags
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =

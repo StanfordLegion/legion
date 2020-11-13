@@ -87,20 +87,20 @@ variables:
   PRIVILEGE_CHECKS: "1"
 
 .cxx11_normal: &cxx11_normal
-  CC_FLAGS: "-std=c++11"
+  CXXFLAGS: "-std=c++11"
   CXX_STANDARD: "11"
 .cxx11_hardened: &cxx11_hardened
-  CC_FLAGS: "-std=c++11 -D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
+  CXXFLAGS: "-std=c++11 -D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
   CXX_STANDARD: "11"
 .cxx14_normal: &cxx14_normal
-  CC_FLAGS: "-std=c++14"
+  CXXFLAGS: "-std=c++14"
   CXX_STANDARD: "14"
 .cxx17_normal: &cxx17_normal
-  CC_FLAGS: "-std=c++17"
+  CXXFLAGS: "-std=c++17"
   CXX_STANDARD: "17"
 .cxx11_32bit_normal: &cxx11_32bit_normal
-  CC_FLAGS: "-std=c++11 -m32"
-  LD_FLAGS: "-m32 -latomic"
+  CXXFLAGS: "-std=c++11 -m32"
+  LDFLAGS: "-m32 -latomic"
   MARCH: "i686"
   CXX_STANDARD: "11"
 .shared: &shared
@@ -254,8 +254,8 @@ before_script:
       elif [[ "$CXX" = "clang++-8" ]]; then
         module load clang/8.0.0
         export CXX=clang++
-        export CC_FLAGS="$CC_FLAGS --gcc-toolchain=/projects/opt/ppc64le/gcc/8.3.0"
-        export LD_FLAGS="$LD_FLAGS --gcc-toolchain=/projects/opt/ppc64le/gcc/8.3.0"
+        export CXXFLAGS="$CXXFLAGS --gcc-toolchain=/projects/opt/ppc64le/gcc/8.3.0"
+        export LDFLAGS="$LDFLAGS --gcc-toolchain=/projects/opt/ppc64le/gcc/8.3.0"
       else
         echo "Failed to detect Darwin compiler version"
         false
