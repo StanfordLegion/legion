@@ -2313,10 +2313,11 @@ class SymbolicIndexAccess(SymbolicExpr):
         return '%s[%s]' % (self.value, self.index)
     def __repr__(self):
         return '%s[%s]' % (self.value, self.index)
-    def _legion_preprocess_task_argument(self):
-        if isinstance(self.index, SymbolicLoopIndex):
-            return self.value[self.index._legion_preprocess_task_argument()]
-        return self.value # or self.index?
+    # def _legion_preprocess_task_argument(self):
+    #     if isinstance(self.index, ConcreteLoopIndex):
+    #         return self.value[self.index._legion_preprocess_task_argument()]
+    #     return self
+    # commit code first then remove preprocess everywhere
     def _legion_postprocess_task_argument(self, point):
         result = _postprocess(self.value, point)[_postprocess(self.index, point)]
         # FIXME: Clear parent field of regions being used as projection requirements
@@ -2325,6 +2326,9 @@ class SymbolicIndexAccess(SymbolicExpr):
         return result
 
     # def _legion_symbolize_task_argument(self):
+    #     new_value = _symbolize(self.value)
+
+    #     # do value and index and return a symbolicIndexAccess
     #     return _symbolize(self.index)
 
     def is_region(self):
@@ -2356,8 +2360,8 @@ class SymbolicCall(SymbolicExpr):
         return '%s(%s)' % (self.func, ', '.join(self.args))
     def __repr__(self):
         return '%s(%s)' % (self.func, ', '.join(self.args))
-    def _legion_preprocess_task_argument(self, point):
-        return _preprocess(self.func.expr, point)
+    # def _legion_preprocess_task_argument(self, point):
+    #     return _preprocess(self.func.expr, point)
     def _legion_postprocess_task_argument(self, point):
         return _postprocess(self.func.expr, point) 
     def _legion_symbolize_task_argument(self):
@@ -2395,17 +2399,17 @@ class SymbolicBinop(SymbolicExpr):
         right = _symbolize(self.rhs)
         return SymbolicBinop(left, right, self.op)
 
-    def _legion_preprocess_task_argument(self, point):
-        if self.op == '+':
-            return _preprocess(self.lhs, point) + _preprocess(self.rhs, point)
-        elif self.op == '*':
-            return _preprocess(self.lhs, point) * _preprocess(self.rhs, point)
-        elif self.op == '-':
-            return _preprocess(self.lhs, point) - _preprocess(self.rhs, point)
-        elif self.op == '//':
-            return _preprocess(self.lhs, point) // _preprocess(self.rhs, point)
-        elif self.op == '%':
-            return _preprocess(self.lhs, point) % _preprocess(self.rhs, point)
+    # def _legion_preprocess_task_argument(self, point):
+    #     if self.op == '+':
+    #         return _preprocess(self.lhs, point) + _preprocess(self.rhs, point)
+    #     elif self.op == '*':
+    #         return _preprocess(self.lhs, point) * _preprocess(self.rhs, point)
+    #     elif self.op == '-':
+    #         return _preprocess(self.lhs, point) - _preprocess(self.rhs, point)
+    #     elif self.op == '//':
+    #         return _preprocess(self.lhs, point) // _preprocess(self.rhs, point)
+    #     elif self.op == '%':
+    #         return _preprocess(self.lhs, point) % _preprocess(self.rhs, point)
 
     def _legion_postprocess_task_argument(self, point):
         if self.op == '+':
@@ -2454,7 +2458,7 @@ class SymbolicLoopIndex(SymbolicExpr):
         return hash(self.name)
 
     def _legion_symbolize_task_argument(self):
-        return _symbolize(self.value)
+        return self
 
     def _legion_postprocess_task_argument(self, point):
         return point
@@ -2484,8 +2488,8 @@ class ConcreteLoopIndex(SymbolicExpr):
     def __hash__(self):
         return hash(self.value)
     def _legion_symbolize_task_argument(self):
-        return _symbolize(self.value)
-    def _legion_preprocess_task_argument(self):
+        return ID
+    def _legion_postprocess_task_argument(self, point):
         return self.value
 
 _next_proj_functor_id = 100

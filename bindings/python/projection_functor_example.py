@@ -22,9 +22,14 @@ def main():
         print("python region %s is %s %s %s" % (i, P[i].handle[0].tree_id, P[i].handle[0].index_space.tid, P[i].handle[0].index_space.id))
     pygion.fill(R, "x", 0)
 
+    # for i in IndexLaunch([3]):
+    #     hello(P[f(i)], i)
+
+    # for i in IndexLaunch([3]):
+    #     hello(P[i], i)
+
     for i in IndexLaunch([3]):
-        hello(P[f(i)], i)
-        # hello(P[i+1], i)
+        hello(P[i+1], i)
 
     # index_launch([3], hello, P[ID], ID)
 
