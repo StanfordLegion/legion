@@ -3237,12 +3237,12 @@ namespace Legion {
           return;
         }
       }
-      // Make analyses for the precondition and anticondition tests
+      // Perform an overwrite analysis for each of the postconditions
       unsigned index = 0;
       const TraceInfo trace_info(op, false/*init*/);
       const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
       for (ExprViews::const_iterator eit = 
-            preconditions.begin(); eit != preconditions.end(); eit++, index++)
+            postconditions.begin(); eit != postconditions.end(); eit++, index++)
       {
         OverwriteAnalysis *analysis = new OverwriteAnalysis(forest->runtime,
             op, index, usage, eit->first, eit->second, 
