@@ -5124,14 +5124,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(tracing_eq != NULL);
 #endif
-      const RegionUsage read_usage(LEGION_READ_ONLY, LEGION_EXCLUSIVE, 0);
+      const RegionUsage read_usage(LEGION_READ_PRIV, LEGION_EXCLUSIVE, 0);
       tracing_eq->update_tracing_valid_views(src, expr, read_usage, mask, 
                                    false/*invalidates*/, applied_events);
       // Only record the destination if this is not a copy across
       if (src_index == dst_index)
       {
-        const RegionUsage write_usage((redop > 0) ? LEGION_REDUCE : 
-            LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
+        const RegionUsage write_usage((redop > 0) ? LEGION_REDUCE_PRIV : 
+            LEGION_WRITE_PRIV, LEGION_EXCLUSIVE, redop);
         tracing_eq->update_tracing_valid_views(dst, expr, write_usage, mask, 
                     false/*do not invalidate copies here*/, applied_events);
       }
