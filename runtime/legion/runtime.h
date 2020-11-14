@@ -2100,6 +2100,7 @@ namespace Legion {
 #else
             check_privileges(false),
 #endif
+            dump_free_ranges(false),
             num_profiling_nodes(0),
             serializer_type("binary"),
             prof_footprint_threshold(128 << 20),
@@ -2150,6 +2151,7 @@ namespace Legion {
         bool physical_logging_only;
 #endif
         bool check_privileges;
+        bool dump_free_ranges;
       public:
         unsigned num_profiling_nodes;
         std::string serializer_type;
@@ -2297,6 +2299,7 @@ namespace Legion {
       const bool physical_logging_only;
 #endif
       const bool check_privileges;
+      const bool dump_free_ranges;
     public:
       const unsigned num_profiling_nodes;
     public:
