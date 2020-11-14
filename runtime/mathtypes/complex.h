@@ -26,9 +26,9 @@
 
 #include <cmath>
 #ifdef __CUDACC__
-#if __CUDA_VER_MAJOR__ == 9 && __CUDA_VER_MINOR__ == 2
+#if __CUDACC_VER_MAJOR__ == 9 && __CUDACC_VER_MINOR__ == 2
 #error "No complex number support for GPUs due to a Thrust bug in CUDA 9.2"
-#elif __CUDA_VER_MAJOR__ == 10 && __CUDA_VER_MINOR__ == 0
+#elif __CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MINOR__ == 0
 #error "No complex number support for GPUs due to a Thrust bug in CUDA 10.0"
 #else
 #include <thrust/complex.h>
