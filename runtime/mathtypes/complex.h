@@ -24,16 +24,16 @@
 #endif
 #endif
 
-#if __cplusplus >= 201103L
-#define __CEXPR__ constexpr
-#else
-#define __CEXPR__
-#endif
-
 #include <cmath>
 #ifdef __CUDACC__
+#if __CUDA_VER_MAJOR__ == 9 && __CUDA_VER_MINOR__ == 2
+#error "No complex number support for GPUs due to a Thrust bug in CUDA 9.2"
+#elif __CUDA_VER_MAJOR__ == 10 && __CUDA_VER_MINOR__ == 0
+#error "No complex number support for GPUs due to a Thrust bug in CUDA 10.0"
+#else
 #include <thrust/complex.h>
 #define COMPLEX_NAMESPACE thrust
+#endif
 #else
 #include <complex>
 #define COMPLEX_NAMESPACE std
@@ -53,7 +53,7 @@ using complex = COMPLEX_NAMESPACE::complex<T>;
 // Overload for __half defined after complex<__half>
 namespace thrust {
 template<class T>
-__CUDA_HD__ __CEXPR__ T fabs(const complex<T>& arg) {
+__CUDA_HD__ constexpr T fabs(const complex<T>& arg) {
   return abs(arg);
 }
 }
@@ -123,25 +123,25 @@ struct convert_complex<float>
 // Need to put this in COMPLEX_NAMESPACE namespace for ADL. The namespace has to
 // be changed/removed if another implementation of complex is used
 namespace COMPLEX_NAMESPACE {
-template<typename T> __CUDA_HD__ __CEXPR__
+template<typename T> __CUDA_HD__ constexpr
 inline bool operator<(const complex<T>& c1, const complex<T>& c2) {
     return (c1.real() < c2.real()) || 
       (!(c2.real() < c1.real()) && (c1.imag() < c2.imag()));
 }
 
-template<typename T> __CUDA_HD__ __CEXPR__
+template<typename T> __CUDA_HD__ constexpr
 inline bool operator>(const complex<T>& c1, const complex<T>& c2) {
     return (c1.real() > c2.real()) || 
       (!(c2.real() > c1.real()) && (c1.imag() > c2.imag()));
 }
 
-template<typename T> __CUDA_HD__ __CEXPR__
+template<typename T> __CUDA_HD__ constexpr 
 inline bool operator<=(const complex<T>& c1, const complex<T>& c2) {
     return (c1 == c2) || (c1.real() < c2.real()) || 
       (!(c2.real() < c1.real()) && (c1.imag() < c2.imag()));
 }
 
-template<typename T> __CUDA_HD__ __CEXPR__
+template<typename T> __CUDA_HD__ constexpr 
 inline bool operator>=(const complex<T>& c1, const complex<T>& c2) {
     return (c1 == c2) || (c1.real() > c2.real()) || 
       (!(c2.real() > c1.real()) && (c1.imag() > c2.imag()));
@@ -314,8 +314,6 @@ inline complex<__half> operator/(const complex<__half> &one, const complex<__hal
 }
 
 #endif // COMPLEX_HALF
-
-#undef __CEXPR__
 
 #endif // complex_H__ 
 

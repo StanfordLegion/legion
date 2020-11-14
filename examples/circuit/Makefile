@@ -22,10 +22,11 @@ endif
 DEBUG           ?= 1		# Include debugging symbols
 MAX_DIM         ?= 3		# Maximum number of dimensions
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
-USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
+USE_CUDA        ?= 1		# Include CUDA support (requires CUDA)
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
+GPU_ARCH	= turing
 
 # Put the binary file name here
 OUTFILE		?= circuit
@@ -37,7 +38,7 @@ endif
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=
-CC_FLAGS	?=
+CC_FLAGS	?= -DLEGION_REDOP_COMPLEX
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
