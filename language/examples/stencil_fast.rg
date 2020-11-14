@@ -55,7 +55,7 @@ if USE_FOREIGN then
     end
   end
 
-  local cxx_flags = os.getenv('CC_FLAGS') or ''
+  local cxx_flags = os.getenv('CXXFLAGS') or ''
   cxx_flags = cxx_flags .. " -O3 " .. march_flag .. " -Wall -Werror -DDTYPE=" .. tostring(DTYPE) .. " -DRESTRICT=__restrict__ -DRADIUS=" .. tostring(RADIUS)
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
@@ -112,7 +112,7 @@ do
   end
   local cxx = os.getenv('CXX') or 'c++'
 
-  local cxx_flags = os.getenv('CC_FLAGS') or ''
+  local cxx_flags = os.getenv('CXXFLAGS') or ''
   cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
   if map_locally then cxx_flags = cxx_flags .. " -DMAP_LOCALLY " end
   if os.execute('test "$(uname)" = Darwin') == 0 then
