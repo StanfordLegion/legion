@@ -32,7 +32,7 @@ do
 
   local cxx = os.getenv('CXX') or 'c++'
 
-  local cxx_flags = "-O2 -Wall -Werror"
+  local cxx_flags = "-O2 -Wall -Werror " .. (os.getenv('CXXFLAGS') or "")
 
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = binding_dir
