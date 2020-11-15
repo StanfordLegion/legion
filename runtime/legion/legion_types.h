@@ -33,6 +33,7 @@
 #include <deque>
 #include <vector>
 #include <typeinfo>
+#include <type_traits>
 
 #include "legion/legion_config.h"
 #include "legion/legion_template_help.h"
@@ -176,12 +177,12 @@ namespace Legion {
   // Helper for saving instantiated template functions
   struct SerdezRedopFns;
   // Some typedefs for making things nicer for users with C++11 support
-#if __cplusplus >= 201103L
   template<typename FT, int N, typename T = ::legion_coord_t>
   using GenericAccessor = Realm::GenericAccessor<FT,N,T>;
   template<typename FT, int N, typename T = ::legion_coord_t>
   using AffineAccessor = Realm::AffineAccessor<FT,N,T>;
-#endif
+  template<typename FT, int N, typename T = ::legion_coord_t>
+  using MultiAffineAccessor = Realm::MultiAffineAccessor<FT,N,T>;
 
   // Forward declarations for compiler level objects
   // legion.h

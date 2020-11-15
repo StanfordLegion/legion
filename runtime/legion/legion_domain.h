@@ -28,102 +28,12 @@
 
 namespace Legion {
 
-#if __cplusplus >= 201103L
-  // If we've got c++11 we can just include these directly
   template<int DIM, typename T = coord_t>
   using Point = Realm::Point<DIM,T>;
   template<int DIM, typename T = coord_t>
   using Rect = Realm::Rect<DIM,T>;
   template<int M, int N, typename T = coord_t>
   using Transform = Realm::Matrix<M,N,T>;
-#else
-  /**
-   * \class Point
-   * Our way of importing the templated Realm Point class
-   * into the Legion namespace without c++11 features
-   */
-#define ONLY_IF_INTEGRAL(T) \
-  typename Realm::enable_if<Realm::is_integral<T2>::value, Realm::monostate>::type = Realm::monostate()
-#define ONLY_IF_INTEGRAL_DEFN(T) \
-  typename Realm::enable_if<Realm::is_integral<T2>::value, Realm::monostate>::type /*= Realm::monostate()*/
-
-  template<int DIM, typename T = coord_t>
-  struct Point : public Realm::Point<DIM,T> {
-  public:
-    __CUDA_HD__
-    Point(void);
-    __CUDA_HD__
-    explicit Point(T val); // same value for all dimensions
-    template <typename T2>
-    __CUDA_HD__
-    explicit Point(T2 val,
-		   ONLY_IF_INTEGRAL(T2)); // same value for all dimensions
-    template <typename T2>
-    __CUDA_HD__
-    explicit Point(T2 vals[DIM], ONLY_IF_INTEGRAL(T2));
-    // copies allow type coercion (assuming the underlying type does)
-    template<typename T2> __CUDA_HD__
-    Point(const Point<DIM,T2> &rhs);
-    template<typename T2> __CUDA_HD__
-    Point(const Realm::Point<DIM,T2> &rhs);
-  public:
-    template<typename T2> __CUDA_HD__
-    Point<DIM,T>& operator=(const Point<DIM,T2> &rhs);
-    template<typename T2> __CUDA_HD__
-    Point<DIM,T>& operator=(const Realm::Point<DIM,T2> &rhs);
-  public:
-    __CUDA_HD__ 
-    static Point<DIM,T> ZEROES(void);
-    __CUDA_HD__
-    static Point<DIM,T> ONES(void);
-  };
-
-  /**
-   * \class Rect
-   * Our way of importing the templated Realm Rect class
-   * into the Legion namespace without c++11 features
-   */
-  template<int DIM, typename T = coord_t>
-  struct Rect : public Realm::Rect<DIM,T> {
-  public:
-    __CUDA_HD__
-    Rect(void);
-    __CUDA_HD__
-    Rect(const Point<DIM,T> &lo, const Point<DIM,T> &hi);
-    // copies allow type coercion (assuming the underlying type does)
-    template<typename T2> __CUDA_HD__
-    Rect(const Rect<DIM,T2> &rhs);
-    template<typename T2> __CUDA_HD__
-    Rect(const Realm::Rect<DIM,T2> &rhs);
-  public:
-    template<typename T2> __CUDA_HD__
-    Rect<DIM,T>& operator=(const Rect<DIM,T2> &rhs);
-    template<typename T2> __CUDA_HD__
-    Rect<DIM,T>& operator=(const Realm::Rect<DIM,T2> &rhs);
-  };
-
-  /**
-   * \class Transform 
-   * Our way of importing the templated Realm Rect class
-   * into the Legion namespace without c++11 features
-   */
-  template<int M, int N, typename T = coord_t>
-  struct Transform : public Realm::Matrix<M,N,T> {
-  public:
-    __CUDA_HD__
-    Transform(void);
-    // copies allow type coercion (assuming the underlying type does)
-    template<typename T2> __CUDA_HD__
-    Transform(const Transform<M,N,T2> &rhs);
-    template<typename T2> __CUDA_HD__
-    Transform(const Realm::Matrix<M,N,T2> &rhs);
-  public:
-    template<typename T2> __CUDA_HD__
-    Transform<M,N,T>& operator=(const Transform<M,N,T2> &rhs);
-    template<typename T2> __CUDA_HD__
-    Transform<M,N,T>& operator=(const Realm::Matrix<M,N,T2> &rhs);
-  };
-#endif
 
   /**
    * \class AffineTransform
@@ -202,37 +112,9 @@ namespace Legion {
     Point<M,T>       divisor; // d
   };
 
-#if __cplusplus >= 201103L
   // If we've got c++11 we can just include this directly
   template<int DIM, typename T = coord_t>
   using DomainT = Realm::IndexSpace<DIM,T>;
-#else
-  /**
-   * \class DomainT
-   * Our way of importing the templated Realm Rect class
-   * into the Legion namespace without c++11 features
-   */
-  template<int DIM, typename T = coord_t>
-  struct DomainT : public Realm::IndexSpace<DIM,T> {
-  public:
-    DomainT(void);
-    // Support type conversions for rects, but not other spaces
-    template<typename T2>
-    DomainT(const Rect<DIM,T2> &bounds);
-    template<typename T2>
-    DomainT(const Realm::Rect<DIM,T2> &bounds);
-    DomainT(const DomainT<DIM,T> &rhs);
-    DomainT(const Realm::IndexSpace<DIM,T> &rhs);
-  public:
-    // Support type conversions for rects, but not other spaces
-    template<typename T2>
-    DomainT<DIM,T>& operator=(const Rect<DIM,T2> &bounds);
-    template<typename T2>
-    DomainT<DIM,T>& operator=(const Realm::Rect<DIM,T2> &bounds);
-    DomainT<DIM,T>& operator=(const DomainT<DIM,T> &rhs);
-    DomainT<DIM,T>& operator=(const Realm::IndexSpace<DIM,T> &rhs);
-  };
-#endif
 
   /**
    * \class DomainPoint
@@ -751,11 +633,6 @@ namespace Legion {
 }; // namespace Legion
 
 #include "legion/legion_domain.inl"
-
-#if __cplusplus < 201103L
-#undef ONLY_IF_INTEGRAL
-#undef ONLY_IF_INTEGRAL_DEFN
-#endif
 
 #endif // __LEGION_DOMAIN_H__
 
