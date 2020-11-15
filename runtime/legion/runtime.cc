@@ -8775,6 +8775,15 @@ namespace Legion {
                         memory.id,
                         eager_remaining_capacity);
       }
+      else
+      {
+        log_eager.debug("failed to allocate an instance of size %zd on memory "
+                        IDFMT " (%zd bytes left)",
+                        size, memory.id, eager_remaining_capacity);
+        if (runtime->dump_free_ranges)
+          eager_allocator->dump_all_free_ranges(log_eager);
+      }
+
       return wait_on;
     }
 
@@ -13793,6 +13802,7 @@ namespace Legion {
         physical_logging_only(config.physical_logging_only),
 #endif
         check_privileges(config.check_privileges),
+        dump_free_ranges(config.dump_free_ranges),
         num_profiling_nodes(config.num_profiling_nodes),
         legion_collective_radix(config.legion_collective_radix),
         mpi_rank_table((mpi_rank >= 0) ? new MPIRankTable(this) : NULL),
@@ -13994,6 +14004,7 @@ namespace Legion {
         physical_logging_only(rhs.physical_logging_only),
 #endif
         check_privileges(rhs.check_privileges),
+        dump_free_ranges(rhs.dump_free_ranges),
         num_profiling_nodes(rhs.num_profiling_nodes),
         legion_collective_radix(rhs.legion_collective_radix),
         mpi_rank_table(NULL), local_procs(rhs.local_procs), 
@@ -26730,6 +26741,8 @@ namespace Legion {
                         config.initial_meta_task_vector_width, !filter)
         .add_option_int("-lg:eager_alloc_percentage",
                         config.eager_alloc_percentage, !filter)
+        .add_option_bool("-lg:dump_free_ranges",
+                         config.dump_free_ranges, !filter)
         .add_option_int("-lg:message",config.max_message_size, !filter)
         .add_option_int("-lg:epoch", config.gc_epoch_size, !filter)
         .add_option_int("-lg:local", config.max_local_fields, !filter)

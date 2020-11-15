@@ -378,7 +378,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, t
     stencil_env = dict(list(env.items()) + [
         ('OUTFILE', 'stencil'),
         ('GEN_SRC', 'stencil.cc'),
-        ('CC_FLAGS', (env['CC_FLAGS'] if 'CC_FLAGS' in env else '') +
+        ('CXXFLAGS', (env['CXXFLAGS'] if 'CXXFLAGS' in env else '') +
          ' -DRADIUS=2 -DRESTRICT_KEYWORD -DDISABLE_BARRIER_MIGRATION'),
     ])
     makefile = os.path.join(root_dir, 'apps/Makefile.template')
@@ -477,7 +477,7 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, ti
     pennant_env = dict(list(env.items()) + [
         ('OUTFILE', 'pennant'),
         ('GEN_SRC', ' '.join(glob.glob(os.path.join(pennant_dir, 'src/*.cc')))),
-        ('CC_FLAGS', (env['CC_FLAGS'] if 'CC_FLAGS' in env else '') +
+        ('CXXFLAGS', (env['CXXFLAGS'] if 'CXXFLAGS' in env else '') +
          ' -std=c++11 -Wno-sign-compare -Wno-unknown-pragmas -Wno-unused-variable' +
          ' -D__STDC_FORMAT_MACROS -DDISABLE_BARRIER_MIGRATION'),
         ('WARN_AS_ERROR', '0'),
@@ -711,8 +711,6 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
             cmdline.append('-DLegion_TEST_LAUNCHER=%s' % env['LAUNCHER'])
     else:
         cmdline.append('-DLegion_ENABLE_TESTING=OFF')
-    if 'CC_FLAGS' in env:
-        cmdline.append('-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS'])
     if test_regent or test_legion_cxx or test_external or test_perf or test_ctest:
         cmdline.append('-DLegion_BUILD_ALL=ON')
     # several different conditions force the use of shared libraries
@@ -963,10 +961,10 @@ def run_tests(test_modules=None,
 
         # Gcov doesn't get a USE_GCOV flag, but instead stuff the GCC
         # options for Gcov on to the compile and link flags.
-        [('CC_FLAGS', (os.environ['CC_FLAGS'] + gcov_flags
-                       if 'CC_FLAGS' in os.environ else gcov_flags)),
-         ('LD_FLAGS', (os.environ['LD_FLAGS'] + gcov_flags
-                       if 'LD_FLAGS' in os.environ else gcov_flags)),
+        [('CXXFLAGS', (os.environ['CXXFLAGS'] + gcov_flags
+                       if 'CXXFLAGS' in os.environ else gcov_flags)),
+         ('LDFLAGS', (os.environ['LDFLAGS'] + gcov_flags
+                       if 'LDFLAGS' in os.environ else gcov_flags)),
         ] if use_gcov else []))
 
     try:

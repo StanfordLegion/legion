@@ -23,21 +23,9 @@
 #include "legion/legion_config.h"
 
 namespace Legion {
-
   
-#if __cplusplus >= 201103L
 #define LEGION_STATIC_ASSERT(condition, message) \
   static_assert(condition, message)
-#else
-  /**
-   * \struct LegionStaticAssert
-   * Help with static assertions.
-   */
-  template<bool> struct LegionStaticAssert;
-  template<> struct LegionStaticAssert<true> { };
-#define LEGION_STATIC_ASSERT(condition, message) \
-  do { LegionStaticAssert<(condition)>(); } while (0)
-#endif
 
   /**
    * \struct LegionTypeEquality

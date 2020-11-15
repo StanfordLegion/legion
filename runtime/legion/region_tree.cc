@@ -15757,7 +15757,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
 #endif
-      FieldStateDeque new_states;
+      LegionDeque<FieldState>::aligned new_states;
       // Before looking at any child states, first check to see if we need
       // to do any closes to flush open reductions. This should be a pretty
       // rare operation since we often won't have lots of reductions going
@@ -15840,7 +15840,7 @@ namespace Legion {
                 {
                   FieldState new_state(closer.user, already_open, 
                                        next_child, applied_events);
-                  new_states.emplace(new_state);
+                  new_states.emplace_back(std::move(new_state));
                 }
                 // See if there are still any valid open fields
                 if (!it->valid_fields())
@@ -15911,7 +15911,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                       assert(!!new_state.valid_fields());
 #endif
-                      new_states.emplace(new_state);
+                      new_states.emplace_back(std::move(new_state));
                       // Update the current child, mark that we need to
                       // recompute the valid fields for the state
                       cit.filter(already_open);
@@ -15959,7 +15959,7 @@ namespace Legion {
                                          next_child, applied_events);
                     // We always have to go to read-write mode here
                     new_state.open_state = OPEN_READ_WRITE;
-                    new_states.emplace(new_state);
+                    new_states.emplace_back(std::move(new_state));
                   }
                 }
               }
@@ -16107,7 +16107,7 @@ namespace Legion {
       if ((next_child != NULL) && !!open_mask)
       {
         FieldState new_state(closer.user, open_mask, next_child,applied_events);
-        new_states.emplace(new_state);
+        new_states.emplace_back(std::move(new_state));
       }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
@@ -16130,7 +16130,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
 #endif
-      FieldStateDeque new_states;
+      LegionDeque<FieldState>::aligned new_states;
       // First let's see if we need to flush any reductions
       RegionTreeNode *no_next_child = NULL; // never a next child here
       if (!!state.reduction_fields)
@@ -16264,7 +16264,7 @@ namespace Legion {
                            proj_info.projection, proj_info.projection_space, 
                            proj_info.sharding_function,proj_info.sharding_space,
                            applied_events, this, true/*dirty reduce*/);
-                  new_states.emplace(new_state);
+                  new_states.emplace_back(std::move(new_state));
                   // If we are a reduction, we can go straight there
                   it->filter(overlap);
                   if (!it->valid_fields())
@@ -16308,7 +16308,7 @@ namespace Legion {
                         context->runtime->find_projection_function(0),
                         color_space, NULL/*sharding func*/, 
                         NULL/*sharding space*/, applied_events, this);
-                    new_states.emplace(new_state);
+                    new_states.emplace_back(std::move(new_state));
                   }
                   else
                     closer.record_close_operation(overlap);
@@ -16352,7 +16352,7 @@ namespace Legion {
                         context->runtime->find_projection_function(0),
                         color_space, NULL/*sharding func*/, 
                         NULL/*sharding space*/, applied_events, this);
-                    new_states.emplace(new_state);
+                    new_states.emplace_back(std::move(new_state));
                   }
                   else
                     closer.record_close_operation(overlap);
@@ -16384,7 +16384,7 @@ namespace Legion {
               proj_info.projection, proj_info.projection_space, 
               proj_info.sharding_function, proj_info.sharding_space, 
               applied_events, this);
-        new_states.emplace(new_state);
+        new_states.emplace_back(std::move(new_state));
       }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
@@ -16398,7 +16398,7 @@ namespace Legion {
                                               FieldMask &reduction_flush_fields,
                                                   bool record_close_operations,
                                                   RegionTreeNode *next_child,
-                                                  FieldStateDeque &new_states)
+                                   LegionDeque<FieldState>::aligned &new_states)
     //--------------------------------------------------------------------------
     {
       // If we are doing a reduction too, check to see if they are 
@@ -16770,13 +16770,12 @@ namespace Legion {
         }
       }
       // Otherwise just push it on the back
-      state.field_states.resize(state.field_states.size() + 1);
-      new_state.move_to(state.field_states.back());
+      state.field_states.emplace_back(std::move(new_state));
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::merge_new_field_states(LogicalState &state,
-                                                FieldStateDeque &new_states)
+                                   LegionDeque<FieldState>::aligned &new_states)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < new_states.size(); idx++)
@@ -17259,7 +17258,7 @@ namespace Legion {
       assert(next_child != NULL);
       sanity_check_logical_state(state);
 #endif
-      FieldStateDeque new_states;
+      LegionDeque<FieldState>::aligned new_states;
       for (LegionList<FieldState>::aligned::iterator it = 
             state.field_states.begin(); it != 
             state.field_states.end(); /*nothing*/)

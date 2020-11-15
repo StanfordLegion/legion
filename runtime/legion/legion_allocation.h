@@ -29,9 +29,7 @@
 #include <stdlib.h>
 #include "legion/legion_config.h"
 #include "legion/legion_template_help.h" // StaticAssert
-#if __cplusplus >= 201103L
 #include <utility>
-#endif
 
 namespace Legion {
   namespace Internal {
@@ -142,19 +140,6 @@ namespace Legion {
       LAST_ALLOC, // must be last
     };
 
-    /**
-     * A helper class for determining alignment of types
-     */
-    template<typename T>
-    class AlignmentTrait {
-    public:
-      struct AlignmentFinder {
-        char a;
-        T b;
-      };
-      enum { AlignmentOf = sizeof(AlignmentFinder) - sizeof(T) };
-    };
-
     //--------------------------------------------------------------------------
     template<size_t SIZE, size_t ALIGNMENT, bool BYTES>
     inline void* legion_alloc_aligned(size_t cnt)
@@ -206,11 +191,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T, bool BYTES>
-    inline void* legion_alloc_aligned(size_t cnt)
+    inline void* legion_alloc_aligned(size_t count)
     //--------------------------------------------------------------------------
     {
-      return legion_alloc_aligned<sizeof(T),
-              AlignmentTrait<T>::AlignmentOf,BYTES>(cnt);
+      return legion_alloc_aligned<sizeof(T), alignof(T), BYTES>(count);
     }
 
 #ifdef TRACE_ALLOCATION
@@ -459,8 +443,27 @@ namespace Legion {
         return std::numeric_limits<size_type>::max() / sizeof(T);
       }
     public:
-      inline void construct(pointer p, const T &t) { new(p) T(t); }
-      inline void destroy(pointer p) { p->~T(); }
+#if __cplusplus >= 202002L
+      template<class U, class... Args>
+      inline constexpr U* construct_at( U* p, Args&&... args ) 
+        { return ::new (const_cast<void*>(static_cast<const volatile void*>(p)))
+                        U(std::forward<Args>(args)...); } 
+
+#else
+      template<class U, class... Args>
+      inline void construct(U* p, Args&&... args) 
+        { ::new((void*)p) U(std::forward<Args>(args)...); }
+#endif
+#if __cplusplus >= 202002L
+      template<class U>
+      inline constexpr void destroy_at(U* p) { p->~U(); }
+#elif __cplusplus >= 201703L
+      template<class U>
+      inline void destroy_at(U* p) { p->~U(); }
+#else
+      template<class U>
+      inline void destroy(U* p) { p->~U(); }
+#endif
     public:
       inline bool operator==(AlignedAllocator const&) const { return true; }
       inline bool operator!=(AlignedAllocator const& a) const
@@ -553,16 +556,11 @@ namespace Legion {
         return std::numeric_limits<size_type>::max() / sizeof(T);
       }
     public:
-#if __cplusplus >= 201103L
       template<class U, class... Args>
       inline void construct(U *p, Args&&... args) 
         { ::new((void*)p) U(std::forward<Args>(args)...); }
       template<class U>
       inline void destroy(U *p) { p->~U(); }
-#else
-      inline void construct(pointer p, const T &t) { new(p) T(t); }
-      inline void destroy(pointer p) { p->~T(); }
-#endif
     public:
       inline bool operator==(LegionAllocator const&) const { return true; }
       inline bool operator!=(LegionAllocator const& a) const

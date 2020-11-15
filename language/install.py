@@ -256,7 +256,6 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, 
             shutil.rmtree(build_dir)
         if not os.path.exists(build_dir):
             os.mkdir(build_dir)
-        cc_flags = os.environ['CC_FLAGS'] if 'CC_FLAGS' in os.environ else ''
         flags = (
             ['-DCMAKE_BUILD_TYPE=%s' % ('Debug' if debug else 'Release'),
              '-DLegion_USE_CUDA=%s' % ('ON' if cuda else 'OFF'),
@@ -271,9 +270,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, 
             ] +
             extra_flags +
             (['-DGASNet_ROOT_DIR=%s' % gasnet_dir] if gasnet_dir is not None else []) +
-            (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []) +
-            (['-DCMAKE_CXX_COMPILER=%s' % os.environ['CXX']] if 'CXX' in os.environ else []) +
-            (['-DCMAKE_CXX_FLAGS=%s' % cc_flags] if cc_flags else []))
+            (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []))
         if llvm:
             # mess with a few things so that Realm uses terra's LLVM
             flags.append('-DLegion_ALLOW_MISSING_LLVM_LIBS=ON')
