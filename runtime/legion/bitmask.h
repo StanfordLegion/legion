@@ -260,11 +260,7 @@
     // SSE Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-#if __cplusplus >= 201103L
     class alignas(16) SSEBitMask 
-#else
-    class SSEBitMask // alignment handled below
-#endif
       : public BitMaskHelp::Heapify<SSEBitMask<MAX> > {
     public:
       explicit SSEBitMask(uint64_t init = 0);
@@ -333,21 +329,13 @@
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
-#if __cplusplus >= 201103L
-    }; // alignment handled above
-#else
-    } __attribute__((aligned(16)));
-#endif
+    };
 
     /////////////////////////////////////////////////////////////
     // SSE Two-Level Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-#if __cplusplus >= 201103L
     class alignas(16) SSETLBitMask
-#else
-    class SSETLBitMask 
-#endif
       : public BitMaskHelp::Heapify<SSETLBitMask<MAX> > {
     public:
       explicit SSETLBitMask(uint64_t init = 0);
@@ -418,11 +406,7 @@
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
-#if __cplusplus >= 201103L
     };
-#else
-    } __attribute__((aligned(16)));
-#endif
 #endif // __SSE2__
 
 #ifdef __AVX__
@@ -430,11 +414,7 @@
     // AVX Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-#if __cplusplus >= 201103L
     class alignas(32) AVXBitMask 
-#else
-    class AVXBitMask // alignment handled below
-#endif
       : public BitMaskHelp::Heapify<AVXBitMask<MAX> > {
     public:
       explicit AVXBitMask(uint64_t init = 0);
@@ -506,21 +486,13 @@
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
-#if __cplusplus >= 201103L
-    }; // alignment handled above
-#else
-    } __attribute__((aligned(32)));
-#endif
+    };
     
     /////////////////////////////////////////////////////////////
     // AVX Two-Level Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-#if __cplusplus >= 201103L
     class alignas(32) AVXTLBitMask
-#else
-    class AVXTLBitMask // alignment handled below
-#endif
       : public BitMaskHelp::Heapify<AVXTLBitMask<MAX> > {
     public:
       explicit AVXTLBitMask(uint64_t init = 0);
@@ -595,11 +567,7 @@
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
-#if __cplusplus >= 201103L
-    }; // alignment handled above
-#else
-    } __attribute__((aligned(32)));
-#endif
+    };
 #endif // __AVX__
 
 #ifdef __ALTIVEC__
@@ -607,7 +575,7 @@
     // PPC Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-    class PPCBitMask // alignment handled below
+    class alignas(16) PPCBitMask
       : public BitMaskHelp::Heapify<PPCBitMask<MAX> > {
     public:
       explicit PPCBitMask(uint64_t init = 0);
@@ -680,13 +648,13 @@
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
-    } __attribute__((aligned(16)));
+    };
     
     /////////////////////////////////////////////////////////////
     // PPC Two-Level Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-    class PPCTLBitMask // alignment handled below
+    class alignas(16) PPCTLBitMask
       : public BitMaskHelp::Heapify<PPCTLBitMask<MAX> > {
     public:
       explicit PPCTLBitMask(uint64_t init = 0);
@@ -761,7 +729,7 @@
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
-    } __attribute__((aligned(16)));
+    };
 #endif // __ALTIVEC__
 
     template<typename BITMASK, unsigned int MAX, unsigned int WORDS>

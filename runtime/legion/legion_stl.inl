@@ -236,13 +236,6 @@ namespace Legion {
                                            ptrs_##x, offset_##x, runtime, ctx);
 
     namespace Detail {
-      template<int DIM>
-      static inline void compare_offsets(const ByteOffset a[DIM], 
-                                         const ByteOffset b[DIM])
-      {
-        for (unsigned idx = 0; idx < DIM; idx++)
-          assert(a[idx] == b[idx]);
-      }
 
       template<typename T, int DIM>
       static inline void get_raw_pointers(const RegionRequirement &req,
@@ -252,28 +245,23 @@ namespace Legion {
         if ((req.privilege == NO_ACCESS) || !region.is_mapped())
           return;
         unsigned idx = 0;
-        LegionRuntime::Arrays::Rect<DIM> region_bounds = 
-          runtime->get_index_space_domain(req.region.get_index_space()).get_rect<DIM>();
-        LegionRuntime::Arrays::Rect<DIM> actual_bounds;
+        const Rect<DIM> region_bounds = runtime->get_index_space_domain(
+            req.region.get_index_space()).template bounds<DIM>();
         for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
               it != req.privilege_fields.end(); it++, idx++)
         {
-          LegionRuntime::Accessor::RegionAccessor<
-            LegionRuntime::Accessor::AccessorType::Generic,T> facc = 
-            region.get_field_accessor(*it).typeify<T>();
+          FieldAccessor<LEGION_READ_ONLY,T,DIM> facc(region, *it);
+          size_t strides[DIM];
+          ptrs[idx] = const_cast<T*>(facc.ptr(region_bounds, strides));
           if (idx != 0)
           {
-            ByteOffset temp_offsets[DIM];
-            ptrs[idx] = facc.template raw_rect_ptr<DIM>(region_bounds, 
-                                          actual_bounds, temp_offsets);
-            assert(region_bounds == actual_bounds);
-            compare_offsets<DIM>(offsets, temp_offsets);       
+            for (unsigned idx = 0; idx < DIM; idx++)
+              assert(offsets[idx] == (strides[idx] * sizeof(T)));
           }
           else
           {
-            ptrs[idx] = facc.template raw_rect_ptr<DIM>(region_bounds, 
-                                              actual_bounds, offsets);
-            assert(region_bounds == actual_bounds);
+            for (unsigned idx = 0; idx < DIM; idx++)
+              offsets[idx] = strides[idx] * sizeof(T);
           }
         }
       }
@@ -286,30 +274,15 @@ namespace Legion {
         if ((req.privilege == NO_ACCESS) || !region.is_mapped())
           return;
         unsigned idx = 0;
-        LegionRuntime::Arrays::Rect<DIM> region_bounds = 
-          runtime->get_index_space_domain(req.region.get_index_space()).get_rect<DIM>();
-        LegionRuntime::Arrays::Rect<DIM> actual_bounds;
+        const Rect<DIM> region_bounds = runtime->get_index_space_domain(
+            req.region.get_index_space()).template bounds<DIM>();
         for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
               it != req.privilege_fields.end(); it++, idx++)
         {
-          LegionRuntime::Accessor::RegionAccessor<
-            LegionRuntime::Accessor::AccessorType::Generic,T> facc = 
-            region.get_field_accessor(*it).typeify<T>();
-          if (idx != 0)
-          {
-            ByteOffset temp_offset;
-            ptrs[idx] = facc.template raw_dense_ptr<DIM>(region_bounds, 
-                                          actual_bounds, temp_offset);
-            assert(region_bounds == actual_bounds);
-            assert(temp_offset == offset);
-          }
-          else
-          {
-            ptrs[idx] = facc.template raw_dense_ptr<DIM>(region_bounds, 
-                                                actual_bounds, offset);
-            assert(region_bounds == actual_bounds);
-          }
+          FieldAccessor<LEGION_READ_ONLY,T,DIM> facc(region, *it);
+          ptrs[idx] = const_cast<T*>(facc.ptr(region_bounds));
         }
+        offset = ByteOffset(sizeof(T));
       }
     };
 

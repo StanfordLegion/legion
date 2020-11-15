@@ -1058,11 +1058,7 @@ namespace Legion {
                 helper->records.begin(); it != 
                 helper->records.end(); it++, index++)
           {
-#if __cplusplus < 201103L
-            indirect->spaces[index] = DomainT<N2::N,T2>((*it)->domain);
-#else
             indirect->spaces[index] = (*it)->domain;
-#endif
             indirect->insts[index] = (*it)->inst; 
           }
           helper->result = indirect;
@@ -3538,7 +3534,7 @@ namespace Legion {
                                     FieldMask &reduction_flush_fields,
                                     bool record_close_operations,
                                     RegionTreeNode *next_child,
-                                    FieldStateDeque &new_states);
+                                    LegionDeque<FieldState>::aligned &states);
       // Note that 'allow_next_child' and 
       // 'record_closed_fields' are mutually exclusive
       void perform_close_operations(LogicalCloser &closer,
@@ -3555,7 +3551,7 @@ namespace Legion {
                                     FieldMask &output_mask); 
       void merge_new_field_state(LogicalState &state, FieldState &new_state);
       void merge_new_field_states(LogicalState &state, 
-                                  FieldStateDeque &new_states);
+                                  LegionDeque<FieldState>::aligned &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,

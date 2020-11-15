@@ -169,43 +169,56 @@ namespace Legion {
         }
       };
 
+#if __cplusplus >= 201703L
+      template<typename T, typename = int>
+      struct HasBuffer : std::false_type { };
+
       template<typename T>
-      struct HasSerialize {
-        typedef char no[1];
-        typedef char yes[2];
+      struct HasBuffer<T, decltype((void) T::legion_buffer_size, 0)>
+                        : std::true_type { };
 
-        struct Fallback { void legion_serialize(void *); };
-        struct Derived : T, Fallback { };
+      template<typename T, typename = int>
+      struct HasSerialize : std::false_type { };
 
-        template<typename U, U> struct Check;
+      template<typename T>
+      struct HasSerialize<T, decltype((void) T::legion_serialize, 0)>
+                          : std::true_type { };
 
-        template<typename U>
-        static no& test_for_serialize(
-                  Check<void (Fallback::*)(void*), &U::legion_serialize> *);
+      template<typename T, typename = int>
+      struct HasDeserialize : std::false_type { };
 
-        template<typename U>
-        static yes& test_for_serialize(...);
+      template<typename T>
+      struct HasDeserialize<T, decltype((void) T::legion_deserialize, 0)>
+                            : std::true_type { };
 
-        static const bool value = 
-          (sizeof(test_for_serialize<Derived>(0)) == sizeof(yes));
-      };
+      template<typename T>
+      struct IsSerdezType : 
+        std::conjunction<HasBuffer<T>,HasSerialize<T>,HasDeserialize<T> > { };
+#else
+      template<typename T, typename = int>
+      struct IsSerdezType : std::false_type { };
+
+      template<typename T>
+      struct IsSerdezType<T, decltype((void) T::legion_serialize, 0)>
+                          : std::true_type { };
+#endif
 
       template<typename T, bool IS_STRUCT>
       struct StructHandler {
         static inline void end_task(Runtime *rt, Context ctx, T *result)
         {
           // Otherwise this is a struct, so see if it has serialization methods
-          NonPODSerializer<T,HasSerialize<T>::value>::end_task(rt, ctx, result);
+          NonPODSerializer<T,IsSerdezType<T>::value>::end_task(rt, ctx, result);
         }
         static inline Future from_value(Runtime *rt, const T *value)
         {
-          return NonPODSerializer<T,HasSerialize<T>::value>::from_value(
+          return NonPODSerializer<T,IsSerdezType<T>::value>::from_value(
                                                                   rt, value);
         }
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
         {
-          return NonPODSerializer<T,HasSerialize<T>::value>::unpack(f,
+          return NonPODSerializer<T,IsSerdezType<T>::value>::unpack(f,
                                     silence_warnings, warning_string); 
         }
       };
@@ -228,37 +241,25 @@ namespace Legion {
         }
       };
 
-      template<typename T>
-      struct IsAStruct {
-        typedef char no[1];
-        typedef char yes[2];
-        
-        template <typename U> static yes& test_for_struct(int U:: *x);
-        template <typename U> static no& test_for_struct(...);
-
-        static const bool value = 
-                        (sizeof(test_for_struct<T>(0)) == sizeof(yes));
-      };
-
       // Figure out whether this is a struct or not 
       // and call the appropriate Finisher
       template<typename T>
       static inline void end_task(Runtime *rt, Context ctx, T *result)
       {
-        StructHandler<T,IsAStruct<T>::value>::end_task(rt, ctx, result);
+        StructHandler<T,std::is_class<T>::value>::end_task(rt, ctx, result);
       }
 
       template<typename T>
       static inline Future from_value(Runtime *rt, const T *value)
       {
-        return StructHandler<T,IsAStruct<T>::value>::from_value(rt, value);
+        return StructHandler<T,std::is_class<T>::value>::from_value(rt, value);
       }
 
       template<typename T>
       static inline T unpack(const Future &f, bool silence_warnings,
                              const char *warning_string)
       {
-        return StructHandler<T,IsAStruct<T>::value>::unpack(f, 
+        return StructHandler<T,std::is_class<T>::value>::unpack(f, 
                             silence_warnings, warning_string);
       }
 
@@ -340,7 +341,7 @@ namespace Legion {
                                               ReductionOpID redop_id,
                                               bool permit_duplicates)
         {
-          SerdezRedopHandler<REDOP_RHS,HasSerialize<REDOP_RHS>::value>::
+          SerdezRedopHandler<REDOP_RHS,IsSerdezType<REDOP_RHS>::value>::
             register_reduction(redop, redop_id, permit_duplicates);
         }
       };
@@ -351,7 +352,7 @@ namespace Legion {
                                             bool permit_duplicates)
       {
         StructRedopHandler<typename REDOP::RHS, 
-          IsAStruct<typename REDOP::RHS>::value>::register_reduction(
+          std::is_class<typename REDOP::RHS>::value>::register_reduction(
               Realm::ReductionOpUntyped::create_reduction_op<REDOP>(),
               redop_id, permit_duplicates);
       }
@@ -20565,8 +20566,8 @@ namespace Legion {
           "FutureMap types are not permitted as return types for Legion tasks");
       // Assert that the return type size is within the required size
       LEGION_STATIC_ASSERT((sizeof(T) <= LEGION_MAX_RETURN_SIZE) ||
-         (LegionSerialization::IsAStruct<T>::value && 
-          LegionSerialization::HasSerialize<T>::value),
+         (std::is_class<T>::value && 
+          LegionSerialization::IsSerdezType<T>::value),
          "Task return values must be less than or equal to "
           "LEGION_MAX_RETURN_SIZE bytes");
 

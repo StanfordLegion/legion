@@ -2757,6 +2757,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldState::FieldState(FieldState &&rhs) noexcept
+    //--------------------------------------------------------------------------
+    {
+      open_children.swap(rhs.open_children);
+      open_state = rhs.open_state;
+      redop = rhs.redop;
+      projections.swap(rhs.projections);
+      rebuild_timeout = rhs.rebuild_timeout;
+      disjoint_shallow = rhs.disjoint_shallow;
+    }
+
+    //--------------------------------------------------------------------------
     FieldState::~FieldState(void)
     //--------------------------------------------------------------------------
     {
@@ -2778,6 +2790,19 @@ namespace Legion {
 #endif
       open_state = rhs.open_state;
       redop = rhs.redop;
+      rebuild_timeout = rhs.rebuild_timeout;
+      disjoint_shallow = rhs.disjoint_shallow;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldState& FieldState::operator=(FieldState &&rhs) noexcept
+    //--------------------------------------------------------------------------
+    {
+      open_children.swap(rhs.open_children);
+      open_state = rhs.open_state;
+      redop = rhs.redop;
+      projections.swap(rhs.projections);
       rebuild_timeout = rhs.rebuild_timeout;
       disjoint_shallow = rhs.disjoint_shallow;
       return *this;

@@ -7851,7 +7851,11 @@ namespace Legion {
 #else
       if (current_execution_fence_event.exists())
       {
-        if (current_execution_fence_event.has_triggered())
+        // We can't have internal operations pruning out fences
+        // because we can't test if they are memoizing or not
+        // Their 'get_memoizable' method will always return NULL
+        if (current_execution_fence_event.has_triggered() &&
+            !op->is_internal_op())
         {
           // We can only do this optimization safely if we're not 
           // recording a physical trace, otherwise the physical
