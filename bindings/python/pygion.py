@@ -166,7 +166,6 @@ def _DomainPoint_unpickle(values):
 
 import numpy as np
 class DomainPoint(object):
-    # add __add__ method and other math methods
     __slots__ = [
         'handle',
         '_point', # cached properties
@@ -2042,7 +2041,6 @@ class _TaskLauncher(object):
                             return True, arg.index.func.proj_id
                         # P[i + ...] or P[ID + ...]
                         if isinstance(arg.index, SymbolicExpr):
-                            # nonlocal arg
                             curr_arg = _symbolize(arg)
                             f = ProjectionFunctor(curr_arg.index)
                             _proj_functor_cache[curr_arg.index] = f
@@ -2051,7 +2049,6 @@ class _TaskLauncher(object):
 
                     valid, proj_id = arg_check()
                     assert valid
-                    #check what's in the cache
 
                     parent = arg.parent if arg.parent is not None else arg
                     parent = parent.parent if parent.parent is not None else parent
@@ -2313,11 +2310,7 @@ class SymbolicIndexAccess(SymbolicExpr):
         return '%s[%s]' % (self.value, self.index)
     def __repr__(self):
         return '%s[%s]' % (self.value, self.index)
-    # def _legion_preprocess_task_argument(self):
-    #     if isinstance(self.index, ConcreteLoopIndex):
-    #         return self.value[self.index._legion_preprocess_task_argument()]
-    #     return self
-    # commit code first then remove preprocess everywhere
+
     def _legion_postprocess_task_argument(self, point):
         result = _postprocess(self.value, point)[_postprocess(self.index, point)]
         # FIXME: Clear parent field of regions being used as projection requirements
@@ -2325,11 +2318,10 @@ class SymbolicIndexAccess(SymbolicExpr):
             result.parent = None
         return result
 
-    # def _legion_symbolize_task_argument(self):
-    #     new_value = _symbolize(self.value)
-
-    #     # do value and index and return a symbolicIndexAccess
-    #     return _symbolize(self.index)
+    def _legion_symbolize_task_argument(self):
+        new_value = _symbolize(self.value)
+        new_index = _symbolize(self.index)
+        return SymbolicIndexAccess(new_value, new_index)
 
     def is_region(self):
         return isinstance(self.value, Partition)
@@ -2352,7 +2344,7 @@ class SymbolicCall(SymbolicExpr):
     __slots__ = ['func', 'args']
     def __init__(self, func, *args):
         assert(isinstance(func, ProjectionFunctor))
-        assert(len(args)==1) #is this correct?
+        assert(len(args)==1) 
         assert(isinstance(args[0], (SymbolicLoopIndex, ConcreteLoopIndex)))
         self.func = func
         self.args = args
@@ -2360,8 +2352,6 @@ class SymbolicCall(SymbolicExpr):
         return '%s(%s)' % (self.func, ', '.join(self.args))
     def __repr__(self):
         return '%s(%s)' % (self.func, ', '.join(self.args))
-    # def _legion_preprocess_task_argument(self, point):
-    #     return _preprocess(self.func.expr, point)
     def _legion_postprocess_task_argument(self, point):
         return _postprocess(self.func.expr, point) 
     def _legion_symbolize_task_argument(self):
@@ -2373,7 +2363,7 @@ class SymbolicBinop(SymbolicExpr):
     import petra as pt
     __slots__ = ['lhs', 'rhs', 'op']
     def __init__(self, lhs, rhs, op):
-        assert op in ['+', '-', '//', '*', '%'] # FIXME
+        assert op in ['+', '-', '//', '*', '%'] 
         self.lhs = lhs
         self.rhs = rhs
         self.op = op
@@ -2398,18 +2388,6 @@ class SymbolicBinop(SymbolicExpr):
         left = _symbolize(self.lhs)
         right = _symbolize(self.rhs)
         return SymbolicBinop(left, right, self.op)
-
-    # def _legion_preprocess_task_argument(self, point):
-    #     if self.op == '+':
-    #         return _preprocess(self.lhs, point) + _preprocess(self.rhs, point)
-    #     elif self.op == '*':
-    #         return _preprocess(self.lhs, point) * _preprocess(self.rhs, point)
-    #     elif self.op == '-':
-    #         return _preprocess(self.lhs, point) - _preprocess(self.rhs, point)
-    #     elif self.op == '//':
-    #         return _preprocess(self.lhs, point) // _preprocess(self.rhs, point)
-    #     elif self.op == '%':
-    #         return _preprocess(self.lhs, point) % _preprocess(self.rhs, point)
 
     def _legion_postprocess_task_argument(self, point):
         if self.op == '+':
