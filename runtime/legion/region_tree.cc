@@ -10832,9 +10832,16 @@ namespace Legion {
       for (std::set<AddressSpaceID>::const_iterator it =
             targets.begin(); it != targets.end(); it++)
       {
+        if ((*it) == runtime->address_space)
+        {
+          AutoLock t_lock(tracker_lock);
 #ifdef DEBUG_LEGION
-        assert(runtime->address_space != *it);
+          assert(remaining > 0);
 #endif
+          if (--remaining == 0)
+            return;
+          continue;
+        }
         Serializer rez;
         {
           RezCheck z(rez);

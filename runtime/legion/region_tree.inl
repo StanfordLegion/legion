@@ -6078,6 +6078,8 @@ namespace Legion {
         // so we'll include the absolute value of the difference in the
         // two costs as part of computing the average cost
         // If the savings are identical then this will be zero extra cost
+        // Note this cost metric should always produce values between
+        // 1.0 and 2.0, with 1.0 being a perfect 50% reduction on each side
         float cost_diff = (cost_left < cost_right) ? 
           (cost_right - cost_left) : (cost_left - cost_right);
         float total_cost = (cost_left + cost_right + cost_diff);
@@ -6097,8 +6099,8 @@ namespace Legion {
       if (best_dim >= 0)
       {
         // Check to see if the cost is considered to be a "good" refinement
-        // For now we'll say that this is a good cost if it is less than 1.5
-        // which occurs if we get 25% reduction on each of the two sides
+        // For now we'll say that this is a good cost if it is less than
+        // or equal to 1.5, halfway between the range of costs from 1.0 to 2.0
         const bool good = (best_cost <= 1.5f);
         if (good || (consecutive_bad < DIM))
         {
