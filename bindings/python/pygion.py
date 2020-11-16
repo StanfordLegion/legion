@@ -1711,11 +1711,6 @@ def _postprocess(arg, point):
         return arg._legion_postprocess_task_argument(point)
     return arg
 
-def _preprocess(arg, point):
-    if hasattr(arg, '_legion_preprocess_task_argument'):
-        return arg._legion_preprocess_task_argument(point)
-    return arg
-
 def _symbolize(arg):
     if hasattr(arg, '_legion_symbolize_task_argument'):
         return arg._legion_symbolize_task_argument()
@@ -1935,12 +1930,6 @@ class _TaskLauncher(object):
     def __init__(self, task):
         self.task = task
 
-    def preprocess_args(self, args):
-        return [
-            arg._legion_preprocess_task_argument()
-            if hasattr(arg, '_legion_preprocess_task_argument') else arg
-            for arg in args]
-
     def gather_futures(self, args):
         normal = []
         futures = []
@@ -2078,7 +2067,6 @@ class _TaskLauncher(object):
         assert(isinstance(_my.ctx, Context))
 
         args, futures = self.gather_futures(args)
-        args = self.preprocess_args(args)
         task_args, task_args_root = self.encode_args(args)
 
         # Construct the task launcher.
@@ -2138,7 +2126,7 @@ class _IndexLauncher(_TaskLauncher):
         raise Exception('IndexLaunch does not support spawn_task')
 
     def attach_local_args(self, index, *args):
-        task_args, _ = self.encode_args(self.preprocess_args(args))
+        task_args, _ = self.encode_args(args)
         c.legion_argument_map_set_point(
             self.local_args, index.value.raw_value(), task_args[0], False)
 
@@ -2158,7 +2146,7 @@ class _IndexLauncher(_TaskLauncher):
     def launch(self):
         # Encode global args (if any).
         if self.global_args is not None:
-            global_args, global_args_root = self.encode_args(self.preprocess_args(self.global_args))
+            global_args, global_args_root = self.encode_args(self.global_args)
         else:
             global_args = ffi.new('legion_task_argument_t *')
             global_args[0].args = ffi.NULL
