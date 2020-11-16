@@ -5973,8 +5973,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T, typename RT>
-    KDNode<DIM,T,RT>::KDNode(const Rect<DIM,T> &b, const int start_dim,
-                             std::vector<std::pair<Rect<DIM,T>,RT> > &subrects)
+    KDNode<DIM,T,RT>::KDNode(const Rect<DIM,T> &b,
+                             std::vector<std::pair<Rect<DIM,T>,RT> > &subrects,
+                             const int consecutive_bad /* = 0*/)
       : bounds(b), left(NULL), right(NULL)
     //--------------------------------------------------------------------------
     {
@@ -5984,9 +5985,15 @@ namespace Legion {
         rects.swap(subrects);
         return;
       }
+      // If we have sub-optimal bad sets we will track them here
+      // so we can iterate through other dimensions to look for
+      // better splitting planes
+      int best_dim = -1;
+      float best_cost = 0.f;
+      Rect<DIM,T> best_left_bounds, best_right_bounds;
+      std::vector<std::pair<Rect<DIM,T>,RT> > best_left_set, best_right_set;
       for (int d = 0; d < DIM; d++)
       {
-        const int refinement_dim = (start_dim + d) % DIM;
         // Try to compute a splitting plane for this dimension
         // Sort the start and end of each equivalence set bounding rectangle
         // along the splitting dimension
@@ -5994,45 +6001,45 @@ namespace Legion {
         for (unsigned idx = 0; idx < subrects.size(); idx++)
         {
           const Rect<DIM,T> &subset_bounds = subrects[idx].first;
-          lines.insert(KDLine(subset_bounds.lo[refinement_dim], idx, true));
-          lines.insert(KDLine(subset_bounds.hi[refinement_dim], idx, false));
+          lines.insert(KDLine(subset_bounds.lo[d], idx, true));
+          lines.insert(KDLine(subset_bounds.hi[d], idx, false));
         }
         // Construct two lists by scanning from left-to-right and
         // from right-to-left of the number of rectangles that would
         // be inlcuded on the left or right side by each splitting plane
-        std::map<coord_t,unsigned> left_inclusive, right_inclusive;
+        std::map<coord_t,unsigned> left_exclusive, right_exclusive;
         unsigned count = 0;
         for (typename std::set<KDLine>::const_iterator it =
               lines.begin(); it != lines.end(); it++)
         {
-          // Only increment for new rectangles
-          if (!it->start)
-            count++;
           // Always record the count for all splits
-          left_inclusive[it->value] = count;
+          left_exclusive[it->value] = count;
+          // Only increment for new rectangles
+          if (it->start)
+            count++;
         }
         count = 0;
         for (typename std::set<KDLine>::const_reverse_iterator it =
               lines.rbegin(); it != lines.rend(); it++)
         {
-          // End of rectangles are the beginning in this direction
-          if (it->start)
-            count++;
           // Always record the count for all splits
-          right_inclusive[it->value] = count;
+          right_exclusive[it->value] = count;
+          // End of rectangles are the beginning in this direction
+          if (!it->start)
+            count++;
         }
 #ifdef DEBUG_LEGION
-        assert(left_inclusive.size() == right_inclusive.size());
+        assert(left_exclusive.size() == right_exclusive.size());
 #endif
         // We want to take the mini-max of the two numbers in order
         // to try to balance the splitting plane across the two sets
         T split = 0;
         unsigned split_max = subrects.size();
         for (std::map<coord_t,unsigned>::const_iterator it = 
-              left_inclusive.begin(); it != left_inclusive.end(); it++)
+              left_exclusive.begin(); it != left_exclusive.end(); it++)
         {
           const unsigned left = it->second;
-          const unsigned right = right_inclusive[it->first];
+          const unsigned right = right_exclusive[it->first];
           const unsigned max = (left > right) ? left : right;
           if (max < split_max)
           {
@@ -6046,8 +6053,8 @@ namespace Legion {
         // Sort the subsets into left and right
         Rect<DIM,T> left_bounds(bounds);
         Rect<DIM,T> right_bounds(bounds);
-        left_bounds.hi[refinement_dim] = split;
-        right_bounds.lo[refinement_dim] = split+1;
+        left_bounds.hi[d] = split;
+        right_bounds.lo[d] = split+1;
         std::vector<std::pair<Rect<DIM,T>,RT> > left_set, right_set;
         for (typename std::vector<std::pair<Rect<DIM,T>,RT> >::const_iterator
               it = subrects.begin(); it != subrects.end(); it++)
@@ -6063,11 +6070,44 @@ namespace Legion {
         assert(left_set.size() < subrects.size());
         assert(right_set.size() < subrects.size());
 #endif
-        // We found an actual splitting plane so recurse 
-        const int next_dim = (refinement_dim + 1) % DIM;
-        left = new KDNode<DIM,T,RT>(left_bounds, next_dim, left_set);
-        right = new KDNode<DIM,T,RT>(right_bounds, next_dim, right_set);
-        return;
+        // Compute the cost of this refinement
+        // First get the percentage reductions of both sets
+        float cost_left = float(left_set.size()) / float(subrects.size());
+        float cost_right = float(right_set.size()) / float(subrects.size());
+        // We want to give better scores to sets that are closer together
+        // so we'll include the absolute value of the difference in the
+        // two costs as part of computing the average cost
+        // If the savings are identical then this will be zero extra cost
+        float cost_diff = (cost_left < cost_right) ? 
+          (cost_right - cost_left) : (cost_left - cost_right);
+        float total_cost = (cost_left + cost_right + cost_diff);
+        // See if this is the first splitting plane we've found or 
+        // whether we have a better cost here
+        if ((best_dim < 0) || (total_cost < best_cost))
+        {
+          best_dim = d;
+          best_cost = total_cost;
+          best_left_set.swap(left_set);
+          best_right_set.swap(right_set);
+          best_left_bounds = left_bounds;
+          best_right_bounds = right_bounds;
+        }
+      }
+      // See if we had at least one possible refinement
+      if (best_dim >= 0)
+      {
+        // Check to see if the cost is considered to be a "good" refinement
+        // For now we'll say that this is a good cost if it is less than 1.5
+        // which occurs if we get 25% reduction on each of the two sides
+        const bool good = (best_cost <= 1.5f);
+        if (good || (consecutive_bad < DIM))
+        {
+          left = new KDNode<DIM,T,RT>(best_left_bounds, best_left_set, 
+                                      good ? 0 : consecutive_bad + 1);
+          right = new KDNode<DIM,T,RT>(best_right_bounds, best_right_set,
+                                       good ? 0 : consecutive_bad + 1);
+          return;
+        }
       }
       // If we make it here then we couldn't find a splitting plane to refine 
       // anymore so just record all the subrects as our rects
@@ -6249,7 +6289,7 @@ namespace Legion {
           if (parent_ready.exists() && !parent_ready.has_triggered())
             parent_ready.wait();
           KDNode<DIM,T,LegionColor> *root = 
-           new KDNode<DIM,T,LegionColor>(parent_space.bounds, 0/*dim*/, bounds);
+           new KDNode<DIM,T,LegionColor>(parent_space.bounds, bounds);
           AutoLock n_lock(node_lock);
           if (kd_root == NULL)
             kd_root = root;
@@ -6289,7 +6329,7 @@ namespace Legion {
             // Once we get the remote rectangles we can build the kd-trees
             if (!sparse_shard_rects->empty())
               kd_remote = new KDNode<DIM,T,AddressSpaceID>(
-                  parent_space.bounds, 0/*dim*/, *sparse_shard_rects);
+                  parent_space.bounds, *sparse_shard_rects);
             // Add any local sparse paces into the dense remote rects
             // All the local dense spaces are already included
             for (unsigned idx = 0; idx < current_children.size(); idx++)
@@ -6306,7 +6346,7 @@ namespace Legion {
                 dense_shard_rects->push_back(std::make_pair(*it, child->color));
             }
             KDNode<DIM,T,LegionColor> *root = new KDNode<DIM,T,LegionColor>(
-                          parent_space.bounds, 0/*dim*/, *dense_shard_rects);
+                                    parent_space.bounds, *dense_shard_rects);
             AutoLock n_lock(node_lock);
             kd_root = root;
             Runtime::trigger_event(kd_remote_ready);

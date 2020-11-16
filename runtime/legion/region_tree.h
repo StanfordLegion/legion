@@ -3104,8 +3104,9 @@ namespace Legion {
     template<int DIM, typename T, typename RT>
     class KDNode {
     public:
-      KDNode(const Rect<DIM,T> &bounds, const int start_dim, 
-             std::vector<std::pair<Rect<DIM,T>,RT> > &subrects);
+      KDNode(const Rect<DIM,T> &bounds,
+             std::vector<std::pair<Rect<DIM,T>,RT> > &subrects,
+             const int consecutive_bad = 0);
       KDNode(const KDNode &rhs);
       ~KDNode(void);
     public:
