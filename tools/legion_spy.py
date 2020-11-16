@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 # Copyright 2020 Stanford University, NVIDIA Corporation
 #
@@ -217,7 +218,7 @@ def check_preconditions(preconditions, op):
     return None
 
 # Borrowed from stack overflow 3173320
-def print_progress_bar(iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '-'):
+def print_progress_bar(iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█'):
     """
     Call in a loop to create terminal progress bar
     @params:
@@ -8448,14 +8449,17 @@ class Task(object):
                     op.print_phase_barrier_edges(printer)
             index_map = dict()
             reachable = dict()
+            count = 0
             total_nodes = len(all_ops)
             # Now traverse the list in reverse order
-            for src_index in xrange(total_nodes-1,-1,-1):
+            for src_index in xrange(total_nodes-1,-1,-1): 
                 src = all_ops[src_index]
+                count += 1 
                 index_map[src] = src_index
                 our_reachable = NodeSet(total_nodes)
                 reachable[src] = our_reachable
                 if src.logical_outgoing is None or len(src.logical_outgoing) == 0:
+                    print_progress_bar(count, total_nodes, length=50)
                     continue
                 # Otherwise iterate through our outgoing edges and get the set of 
                 # nodes reachable from all of them
@@ -8494,6 +8498,7 @@ class Task(object):
                         continue
                     printer.println(src.node_name+' -> '+dst.node_name+
                                     ' [style=solid,color=black,penwidth=2];')
+                print_progress_bar(count, total_nodes, length=50)
             print("Done")
         else:
             previous_pairs = set()
@@ -12045,7 +12050,8 @@ class State(object):
                 print('Simplifying node %s %d of %d' % (str(src), count, total_nodes)) 
             index_map[src] = count
             count += 1
-            print_progress_bar(count, total_nodes, length=50)
+            if not self.verbose:
+                print_progress_bar(count, total_nodes, length=50)
             # Create our reachability set and store it
             our_reachable = NodeSet(total_nodes)
             reachable[src] = our_reachable
@@ -12167,22 +12173,40 @@ class State(object):
                     assert len(dst.physical_incoming) == 1
                     ready_nodes.append(dst)
         # Seed the incoming sets with the roots
+        count = 0
+        total_nodes = len(self.unique_ops) + len(self.copies) + \
+                        len(self.fills) + len(self.depparts)
         for op in self.unique_ops:
             if not op.physical_incoming:
                 process_node(op)
+                if not self.verbose:
+                    count += 1
+                    print_progress_bar(count, total_nodes, length=50)
         for copy in itervalues(self.copies):
             if not copy.physical_incoming:
                 process_node(copy)
+                if not self.verbose:
+                    count += 1
+                    print_progress_bar(count, total_nodes, length=50)
         for fill in itervalues(self.fills):
             if not fill.physical_incoming:
                 process_node(fill)
+                if not self.verbose:
+                    count += 1
+                    print_progress_bar(count, total_nodes, length=50)
         for deppart in itervalues(self.depparts):
             if not deppart.physical_incoming:
                 process_node(deppart)
+                if not self.verbose:
+                    count += 1
+                    print_progress_bar(count, total_nodes, length=50)
         # Iterate until we've walked the whole graph O(V + E)
         while ready_nodes:
             node = ready_nodes.popleft()
             process_node(node)
+            if not self.verbose:
+                count += 1
+                print_progress_bar(count, total_nodes, length=50)
         # The pending nodes should be empty by the time we are done with this
         print('Done')
         print('Simplifying equivalence event graphs...')
@@ -12225,7 +12249,8 @@ class State(object):
                         (str(src), count, total_nodes)) 
             index_map[src] = count
             count += 1
-            print_progress_bar(count, total_nodes, length=50)
+            if not self.verbose:
+                print_progress_bar(count, total_nodes, length=50)
             # Create our reachability dict
             our_reachable = dict()
             reachable[src] = our_reachable
