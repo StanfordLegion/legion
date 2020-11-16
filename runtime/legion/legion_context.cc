@@ -2202,9 +2202,8 @@ namespace Legion {
         // Now check that the types are subset of the fields
         // Note we can use the parent since all the regions/partitions
         // in the same region tree have the same field space
-        for (std::set<FieldID>::const_iterator fit = 
-              privilege_fields.begin(); fit != 
-              privilege_fields.end(); )
+        for (std::set<FieldID>::iterator fit = privilege_fields.begin();
+              fit != privilege_fields.end(); /*nothing*/)
         {
           if (our_req.privilege_fields.find(*fit) != 
               our_req.privilege_fields.end())
@@ -2218,10 +2217,11 @@ namespace Legion {
               else
                 return ERROR_BAD_PARTITION_PRIVILEGES;
             }
-            privilege_fields.erase(fit++);
+            std::set<FieldID>::iterator to_delete = fit++;
+            privilege_fields.erase(to_delete);
           }
           else
-            ++fit;
+            fit++;
         }
       }
 
