@@ -7473,7 +7473,7 @@ namespace Legion {
       {
         result = Future(new FutureImpl(runtime, true/*register*/,
               runtime->get_available_distributed_id(),
-              runtime->address_space, completion_event));
+              runtime->address_space, completion_event, this));
         // We can set the future result right now because we know that it
         // will not be complete until we are complete ourselves
         result.impl->set_result(NULL, 0, true/*own*/); 
