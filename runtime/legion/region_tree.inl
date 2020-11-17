@@ -6402,17 +6402,38 @@ namespace Legion {
       for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
             color_map.begin(); it != color_map.end(); it++)
       {
+        // Only handle children that we made so that we don't duplicate
+        if (!it->second->is_owner())
+          continue;
         DomainT<DIM,T> child_space;
         const ApEvent child_ready = 
           it->second->get_expr_index_space(&child_space,type_tag,true/*tight*/);
         if (child_ready.exists() && !child_ready.has_triggered())
           child_ready.wait();
-        if (child_space.dense())
+        if (!child_space.dense())
+        {
+          // Scan through all the previous rectangles to make sure we
+          // don't insert any duplicate bounding boxes
+          bool found = false;
+          for (typename std::vector<std::pair<Rect<DIM,T>,AddressSpaceID> >::
+                const_iterator sit = sparse_shard_rects->begin(); sit !=
+                sparse_shard_rects->end(); sit++)
+          {
+            if (sit->first != child_space.bounds)
+              continue;
+#ifdef DEBUG_LEGION
+            assert(sit->second == local_space);
+#endif
+            found = true;
+            break;
+          }
+          if (!found)
+            sparse_shard_rects->push_back(
+                std::make_pair(child_space.bounds, local_space));
+        }
+        else
           dense_shard_rects->push_back(
               std::make_pair(child_space.bounds, it->first));
-        else
-          sparse_shard_rects->push_back(
-              std::make_pair(child_space.bounds, local_space));
       }
     }
 
