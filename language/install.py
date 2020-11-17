@@ -240,32 +240,34 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, 
     # CUDA 9.2 and 10.0 have thrust bugs that break complex support
     if cuda:
         try:
-            nvcc_version = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')
-            pattern = re.compile(' V(?P<major>[0-9]+)\.(?P<minor>[0-9]+)')
-            major_version = None
-            minor_version = None
-            for line in nvcc_version.splitlines():
-                match = pattern.search(line)
-                if match is None:
-                    continue
-                major_version = int(match.group('major'))
-                minor_version = int(match.group('minor'))
-                break
-            if major_version is None:
+            nvcc_version = subprocess.check_output([os.environ['CUDA']+'/bin/nvcc', '--version']).decode('utf-8')
+        except (KeyError,FileNotFoundError,subprocess.CalledProcessError):
+            try:
+                nvcc_version = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')
+            except (FileNotFoundError,subprocess.CalledProcessError):
                 print('Error: Unabled to verify CUDA version is not blacklisted for Regent')
                 sys.exit(1)
-            elif (major_version == 9 and minor_version == 2) or \
-                    (major_version == 10 and minor_version == 0):
-                print('Error: CUDA version '+str(major_version)+'.'+
-                        str(minor_version)+' is blacklisted for Regent due '+
-                        'to a Thrust bug that breaks complex number support. '+
-                        'Please either upgrade or downgrade your version '+
-                        'of CUDA to a version that is not 9.2 or 10.0')
-                sys.exit(1)
-        except subprocess.CalledProcessError:
+        pattern = re.compile(' V(?P<major>[0-9]+)\.(?P<minor>[0-9]+)')
+        major_version = None
+        minor_version = None
+        for line in nvcc_version.splitlines():
+            match = pattern.search(line)
+            if match is None:
+                continue
+            major_version = int(match.group('major'))
+            minor_version = int(match.group('minor'))
+            break
+        if major_version is None:
             print('Error: Unabled to verify CUDA version is not blacklisted for Regent')
             sys.exit(1)
-
+        elif (major_version == 9 and minor_version == 2) or \
+                (major_version == 10 and minor_version == 0):
+            print('Error: CUDA version '+str(major_version)+'.'+
+                    str(minor_version)+' is blacklisted for Regent due '+
+                    'to a Thrust bug that breaks complex number support. '+
+                    'Please either upgrade or downgrade your version '+
+                    'of CUDA to a version that is not 9.2 or 10.0')
+            sys.exit(1)
     if cmake:
         regent_build_dir = os.path.join(regent_dir, 'build')
         if build_dir is None:
