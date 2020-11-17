@@ -2744,6 +2744,7 @@ namespace Legion {
           *const restricted_updates;
         LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
           *const released_updates;
+        FieldMaskSet<CopyFillGuard> *const guard_updates;
         TraceViewSet *precondition_updates;
         TraceViewSet *anticondition_updates;
         TraceViewSet *postcondition_updates;
@@ -3048,7 +3049,8 @@ namespace Legion {
          const FieldMask &mask, const bool first, const bool need_lock = false);
     protected:
       void pack_state(Serializer &rez, const AddressSpaceID target,
-       IndexSpaceExpression *expr,const bool expr_covers,const FieldMask &mask);
+            IndexSpaceExpression *expr, const bool expr_covers,
+            const FieldMask &mask, const bool pack_guards);
       void unpack_state_and_apply(Deserializer &derez, 
           const AddressSpaceID source, const bool forward_to_owner,
           std::set<RtEvent> &ready_events);
@@ -3073,6 +3075,7 @@ namespace Legion {
                 FieldMaskSet<InstanceView> >::aligned &restricted_updates,
             LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> >::aligned &released_updates,
+            FieldMaskSet<CopyFillGuard> *guard_updates,
             TraceViewSet *&precondition_updates,
             TraceViewSet *&anticondition_updates,
             TraceViewSet *&postcondition_updates) const;
@@ -3088,6 +3091,7 @@ namespace Legion {
             TraceViewSet *precondition_updates,
             TraceViewSet *anticondition_updates,
             TraceViewSet *postcondition_updates,
+            FieldMaskSet<CopyFillGuard> *guard_updates,
             std::set<RtEvent> &applied_events, 
             const bool needs_lock, const bool forward_to_owner); 
       static void pack_updates(Serializer &rez, const AddressSpaceID target,
@@ -3100,6 +3104,7 @@ namespace Legion {
                 FieldMaskSet<InstanceView> >::aligned &restricted_updates,
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> >::aligned &released_updates,
+            const FieldMaskSet<CopyFillGuard> *guards,
             const TraceViewSet *precondition_updates,
             const TraceViewSet *anticondition_updates,
             const TraceViewSet *postcondition_updates);

@@ -16471,7 +16471,7 @@ namespace Legion {
             // on this equivalence set. This heuristic should avoid 
             // the ping-pong case even when our sampling rate does not
             // naturally align with the number of nodes participating
-            if ((max_count - unsigned(logical_owner_count)) > 
+            if ((max_count - unsigned(logical_owner_count)) >
                 next_samples.size()) 
               new_logical_owner = max_user;
           }
@@ -16522,7 +16522,8 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(done_migration);
-        pack_state(rez, logical_owner_space, set_expr, true/*covers*/,all_ones);
+        pack_state(rez, logical_owner_space, set_expr, true/*covers*/,
+                    all_ones, true/*pack guards*/);
       }
       runtime->send_equivalence_set_migration(logical_owner_space, rez);
       invalidate_state(set_expr, true/*covers*/, all_ones, done_migration);
@@ -17103,7 +17104,8 @@ namespace Legion {
         if (!!update_mask)
         {
           rez.serialize(local_space);
-          pack_state(rez, source, set_expr, true/*covers*/, mask); 
+          pack_state(rez, source, set_expr, true/*covers*/, mask, 
+                      true/*pack guards*/); 
         }
       }
       runtime->send_equivalence_set_replication_response(source, rez);
@@ -21751,7 +21753,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::pack_state(Serializer &rez,const AddressSpaceID target,
-      IndexSpaceExpression *expr, const bool expr_covers, const FieldMask &mask)
+                             IndexSpaceExpression *expr, const bool expr_covers, 
+                             const FieldMask &mask, const bool pack_guards)
     //--------------------------------------------------------------------------
     {
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::aligned
@@ -21763,16 +21766,17 @@ namespace Legion {
         restricted_updates;
       LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
         released_updates;
+      FieldMaskSet<CopyFillGuard> guards;
       TraceViewSet *precondition_updates = NULL;
       TraceViewSet *anticondition_updates = NULL;
       TraceViewSet *postcondition_updates = NULL;
       find_overlap_updates(expr, expr_covers, mask, valid_updates,
                            initialized_updates, reduction_updates, 
                            restricted_updates, released_updates,
-                           precondition_updates, anticondition_updates,
-                           postcondition_updates);
+                           pack_guards ? &guards : NULL, precondition_updates,
+                           anticondition_updates, postcondition_updates);
       pack_updates(rez, target, valid_updates, initialized_updates,
-           reduction_updates, restricted_updates, released_updates,
+           reduction_updates, restricted_updates, released_updates, &guards,
            precondition_updates, anticondition_updates, postcondition_updates);
     }
 
@@ -21788,6 +21792,7 @@ namespace Legion {
                   FieldMaskSet<InstanceView> >::aligned &restricted_updates,
               const LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> >::aligned &released_updates,
+              const FieldMaskSet<CopyFillGuard> *guard_updates,
               const TraceViewSet *precondition_updates,
               const TraceViewSet *anticondition_updates,
               const TraceViewSet *postcondition_updates)
@@ -21858,6 +21863,18 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
+      if (guard_updates !=NULL)
+      {
+        rez.serialize<size_t>(guard_updates->size());
+        for (FieldMaskSet<CopyFillGuard>::const_iterator it =
+              guard_updates->begin(); it != guard_updates->end(); it++)
+        {
+          it->first->pack_guard(rez);
+          rez.serialize(it->second);
+        }
+      }
+      else
+        rez.serialize<size_t>(0);
       if (precondition_updates != NULL)
         precondition_updates->pack(rez, target); 
       else
@@ -21887,6 +21904,7 @@ namespace Legion {
         restricted_updates;
       LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
         released_updates;
+      FieldMaskSet<CopyFillGuard> guard_updates;
       std::set<RtEvent> ready_events;
       size_t num_valid;
       derez.deserialize(num_valid);
@@ -21989,6 +22007,26 @@ namespace Legion {
           releases.insert(static_cast<InstanceView*>(view), mask);
         }
       }
+      size_t num_guards;
+      derez.deserialize(num_guards);
+      if (num_guards)
+      {
+        // Need to hold the lock here to prevent copy fill guard
+        // deletions from removing this before we've registered it
+        AutoLock eq(eq_lock);
+        for (unsigned idx = 0; idx < num_guards; idx++)
+        {
+          CopyFillGuard *guard = 
+            CopyFillGuard::unpack_guard(derez, runtime, this);
+          FieldMask guard_mask;
+          derez.deserialize(guard_mask);
+          if (guard != NULL)
+          {
+            update_guards.insert(guard, guard_mask);
+            guard_updates.insert(guard, guard_mask);
+          }
+        }
+      }
       size_t num_preconditions;
       derez.deserialize(num_preconditions);
       TraceViewSet *precondition_updates = NULL;
@@ -22032,6 +22070,7 @@ namespace Legion {
           args.reduction_updates->swap(reduction_updates);
           args.restricted_updates->swap(restricted_updates);
           args.released_updates->swap(released_updates);
+          args.guard_updates->swap(guard_updates);
           args.precondition_updates = precondition_updates;
           args.anticondition_updates = anticondition_updates;
           args.postcondition_updates = postcondition_updates;
@@ -22044,7 +22083,7 @@ namespace Legion {
       // All the views are ready so we can add them now
       apply_state(valid_updates, initialized_updates, reduction_updates, 
                   restricted_updates, released_updates, precondition_updates,
-                  anticondition_updates, postcondition_updates, 
+                  anticondition_updates, postcondition_updates, &guard_updates,
                   applied_events, true/*need lock*/, forward_to_owner);
     }
 
@@ -22060,8 +22099,9 @@ namespace Legion {
         restricted_updates(new LegionMap<IndexSpaceExpression*,
             FieldMaskSet<InstanceView> >::aligned()),
         released_updates(new LegionMap<IndexSpaceExpression*,
-            FieldMaskSet<InstanceView> >::aligned()), done_event(done),
-        forward_to_owner(forward)
+            FieldMaskSet<InstanceView> >::aligned()), 
+        guard_updates(new FieldMaskSet<CopyFillGuard>()),
+        done_event(done), forward_to_owner(forward)
     //--------------------------------------------------------------------------
     {
     }
@@ -22076,8 +22116,8 @@ namespace Legion {
           *(dargs->initialized_updates), *(dargs->reduction_updates),
           *(dargs->restricted_updates), *(dargs->released_updates),
           dargs->precondition_updates, dargs->anticondition_updates,
-          dargs->postcondition_updates, applied_events, true/*needs lock*/,
-          dargs->forward_to_owner);
+          dargs->postcondition_updates, dargs->guard_updates,
+          applied_events, true/*needs lock*/, dargs->forward_to_owner);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->done_event, 
             Runtime::merge_events(applied_events));
@@ -22088,6 +22128,7 @@ namespace Legion {
       delete dargs->reduction_updates;
       delete dargs->restricted_updates;
       delete dargs->released_updates;
+      delete dargs->guard_updates;
     }
 
     //--------------------------------------------------------------------------
@@ -22307,19 +22348,19 @@ namespace Legion {
         find_overlap_updates(overlap, overlap_covers, mask, valid_updates,
                              initialized_updates, reduction_updates, 
                              restricted_updates, released_updates,
-                             precondition_updates, anticondition_updates,
-                             postcondition_updates);
+                             NULL/*guards*/, precondition_updates, 
+                             anticondition_updates, postcondition_updates);
       }
       else if (dst->set_expr->is_empty())
         find_overlap_updates(set_expr, true/*covers*/, mask, valid_updates,
                              initialized_updates, reduction_updates, 
                              restricted_updates, released_updates,
-                             precondition_updates, anticondition_updates,
-                             postcondition_updates);
+                             NULL/*guards*/, precondition_updates, 
+                             anticondition_updates, postcondition_updates);
       // We hold the lock so calling back into the destination is safe
       dst->apply_state(valid_updates, initialized_updates, reduction_updates,
                    restricted_updates, released_updates, precondition_updates,
-                   anticondition_updates, postcondition_updates, 
+                   anticondition_updates, postcondition_updates, NULL/*guards*/,
                    applied_events, false/*no lock*/, forward_to_owner);
       if (invalidate_overlap)
       {
@@ -22403,7 +22444,7 @@ namespace Legion {
         rez.serialize(local_space);
         rez.serialize(done_event);
         rez.serialize<bool>(forward_to_owner);
-        pack_state(rez, target_space, overlap, overlap_covers, mask);
+        pack_state(rez, target_space, overlap, overlap_covers, mask, false);
       }
       runtime->send_equivalence_set_clone_response(target_space, rez);
       if (invalidate_overlap)
@@ -22427,6 +22468,7 @@ namespace Legion {
                   FieldMaskSet<InstanceView> >::aligned &restricted_updates,
               LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> >::aligned &released_updates,
+              FieldMaskSet<CopyFillGuard> *guard_updates,
               TraceViewSet *&precondition_updates,
               TraceViewSet *&anticondition_updates,
               TraceViewSet *&postcondition_updates) const
@@ -22680,6 +22722,20 @@ namespace Legion {
           }
         }
       }
+      if (!update_guards.empty() && !(mask * update_guards.get_valid_mask()))
+      {
+#ifdef DEBUG_LEGION
+        assert(guard_updates != NULL);
+#endif
+        for (FieldMaskSet<CopyFillGuard>::const_iterator it =
+              update_guards.begin(); it != update_guards.end(); it++)
+        {
+          const FieldMask overlap = mask & it->second;
+          if (!overlap)
+            continue;
+          guard_updates->insert(it->first, overlap);
+        }
+      }
       if (tracing_preconditions != NULL)
       {
         if (precondition_updates == NULL)
@@ -22749,6 +22805,7 @@ namespace Legion {
                   TraceViewSet *precondition_updates, 
                   TraceViewSet *anticondition_updates,
                   TraceViewSet *postcondition_updates,
+                  FieldMaskSet<CopyFillGuard> *guard_updates,
                   std::set<RtEvent> &applied_events, 
                   const bool needs_lock, const bool forward_to_owner)
     //--------------------------------------------------------------------------
@@ -22758,13 +22815,30 @@ namespace Legion {
         AutoLock eq(eq_lock);
         apply_state(valid_updates, initialized_updates, reduction_updates,
                     restricted_updates, released_updates, precondition_updates,
-                    anticondition_updates, postcondition_updates,
+                    anticondition_updates, postcondition_updates, guard_updates,
                     applied_events, false/*needs lock*/, forward_to_owner);
         return;
       }
       if (forward_to_owner && !is_logical_owner())
       {
         const RtUserEvent done_event = Runtime::create_rt_user_event();
+        // Filter out any guard updates that have been pruned out
+        // while we were not holding the lock. We know they've been
+        // pruned because they will no longer be in the update_guards 
+        if (guard_updates != NULL)
+        {
+          std::vector<CopyFillGuard*> to_delete;
+          for (FieldMaskSet<CopyFillGuard>::const_iterator it =
+                guard_updates->begin(); it != guard_updates->end(); it++)
+            if (update_guards.find(it->first) == update_guards.end())
+              to_delete.push_back(it->first);
+          if (!to_delete.empty())
+          {
+            for (std::vector<CopyFillGuard*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+              guard_updates->erase(*it);
+          }
+        }
         // Forward this on to the logical owner
         Serializer rez;
         {
@@ -22774,8 +22848,8 @@ namespace Legion {
           rez.serialize(done_event);
           rez.serialize<bool>(true); // forward to owner
           pack_updates(rez, logical_owner_space, valid_updates, 
-                     initialized_updates, reduction_updates,
-                     restricted_updates, released_updates, precondition_updates,
+                     initialized_updates, reduction_updates, restricted_updates,
+                     released_updates, guard_updates, precondition_updates,
                      anticondition_updates, postcondition_updates);
         }
         runtime->send_equivalence_set_clone_response(logical_owner_space, rez);
