@@ -661,22 +661,15 @@ namespace Legion {
                  ProjectionFunction *proj, IndexSpaceNode *proj_space, 
                  bool dis, bool dirty_reduction = false);
       FieldState(const FieldState &rhs);
+      FieldState(FieldState &&rhs) noexcept;
       FieldState& operator=(const FieldState &rhs);
+      FieldState& operator=(FieldState &&rhs) noexcept;
       ~FieldState(void);
     public:
       inline bool is_projection_state(void) const 
         { return (open_state >= OPEN_READ_ONLY_PROJ); } 
       inline const FieldMask& valid_fields(void) const 
         { return open_children.get_valid_mask(); }
-      inline void move_to(FieldState &lhs)
-        {
-          open_children.swap(lhs.open_children);
-          lhs.open_state = open_state;
-          lhs.redop = redop;
-          lhs.projection = projection;
-          lhs.projection_space = projection_space;
-          lhs.rebuild_timeout = rebuild_timeout;
-        }
     public:
       bool overlaps(const FieldState &rhs) const;
       void merge(FieldState &rhs, RegionTreeNode *node);
@@ -701,16 +694,6 @@ namespace Legion {
       IndexSpaceNode *projection_space;
       unsigned rebuild_timeout;
     };  
-
-    // A helper class for containing field states
-    class FieldStateDeque : public LegionDeque<FieldState>::aligned {
-    public:
-      inline void emplace(FieldState &rhs)
-      {
-        this->resize(this->size() + 1);
-        rhs.move_to(this->back());
-      }
-    };
 
     /**
      * \class ProjectionEpoch

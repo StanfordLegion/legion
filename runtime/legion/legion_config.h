@@ -838,7 +838,7 @@
 #define LEGION_DEPRECATED_ENUM(x)
 #define LEGION_DEPRECATED_ENUM_FROM(x,y)
 #elif defined(LEGION_WARN_DEPRECATED_ENUMS)
-#if defined(__cplusplus) && __cplusplus > 201103L
+#if defined(__cplusplus) && __cplusplus >= 201402L
 // c++14 and higher has nice deprecated warnings
 #define LEGION_DEPRECATED_ENUM(x)   \
   x [[deprecated("use LEGION_" #x " instead")]] = LEGION_##x,

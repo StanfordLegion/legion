@@ -2536,6 +2536,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldState::FieldState(FieldState &&rhs) noexcept
+    //--------------------------------------------------------------------------
+    {
+      open_children.swap(rhs.open_children);
+      open_state = rhs.open_state;
+      redop = rhs.redop;
+      projection = rhs.projection;
+      projection_space = rhs.projection_space;
+      rebuild_timeout = rhs.rebuild_timeout;
+    }
+
+    //--------------------------------------------------------------------------
     FieldState::~FieldState(void)
     //--------------------------------------------------------------------------
     {
@@ -2553,6 +2565,19 @@ namespace Legion {
       assert(open_children.empty());
       assert(rhs.open_children.empty());
 #endif
+      open_state = rhs.open_state;
+      redop = rhs.redop;
+      projection = rhs.projection;
+      projection_space = rhs.projection_space;
+      rebuild_timeout = rhs.rebuild_timeout;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldState& FieldState::operator=(FieldState &&rhs) noexcept
+    //--------------------------------------------------------------------------
+    {
+      open_children.swap(rhs.open_children);
       open_state = rhs.open_state;
       redop = rhs.redop;
       projection = rhs.projection;
