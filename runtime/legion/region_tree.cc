@@ -1768,9 +1768,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::perform_deletion_analysis(DeletionOp *op,
+    bool RegionTreeForest::perform_deletion_analysis(DeletionOp *op,
                                                  unsigned idx,
-                                                 const RegionRequirement &req,
+                                                 RegionRequirement &req,
                                                  const RegionTreePath &path,
                                                  std::set<RtEvent> &applied,
                                                  bool invalidate_tree)
@@ -1783,7 +1783,10 @@ namespace Legion {
       assert(ctx.exists());
 #endif
       RegionNode *parent_node = get_node(req.parent);
-      
+#ifdef DEBUG_LEGION
+      // We should always be deleting the root of the region tree
+      assert(parent_node->parent == NULL);
+#endif
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
@@ -1797,6 +1800,9 @@ namespace Legion {
                                      false/*closing*/, true/*logical*/,
                        FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
+      // Filter any unversioned fields first
+      const bool result = parent_node->filter_unversioned_fields(ctx.get_id(),
+                                                      context, user_mask, req);
       // Do the traversal
       FieldMask already_closed_mask;
       parent_node->register_logical_deletion(ctx.get_id(), user, user_mask,
@@ -1811,6 +1817,7 @@ namespace Legion {
                                      false/*closing*/, true/*logical*/,
                        FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
+      return result; 
     }
 
     //--------------------------------------------------------------------------
@@ -17249,7 +17256,7 @@ namespace Legion {
           register_local_user(state, user, trace_info);
         }
       }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::siphon_logical_deletion(LogicalCloser &closer,
@@ -18351,6 +18358,32 @@ namespace Legion {
       assert(state.disjoint_complete_children.empty());
 #endif
       state.disjoint_complete_tree |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionNode::filter_unversioned_fields(ContextID ctx, 
+     TaskContext *context, const FieldMask &filter_mask, RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(parent == NULL);
+#endif
+      LogicalState &state = get_logical_state(ctx);
+      const FieldMask unversioned = filter_mask - state.disjoint_complete_tree;
+      if (!unversioned)
+        return false;
+      std::vector<FieldID> to_remove;
+      column_source->get_field_set(unversioned, context, to_remove);
+      for (std::vector<FieldID>::const_iterator it =
+            to_remove.begin(); it != to_remove.end(); it++)
+      {
+        std::set<FieldID>::iterator finder = req.privilege_fields.find(*it);
+#ifdef DEBUG_LEGION
+        assert(finder != req.privilege_fields.end());
+#endif
+        req.privilege_fields.erase(finder);
+      }
+      return true;
     }
 
     //--------------------------------------------------------------------------

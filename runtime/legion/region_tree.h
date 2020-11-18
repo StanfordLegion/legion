@@ -464,8 +464,8 @@ namespace Legion {
                                        const ProjectionInfo &projection_info,
                                        const RegionTreePath &path,
                                        std::set<RtEvent> &applied_events);
-      void perform_deletion_analysis(DeletionOp *op, unsigned idx,
-                                     const RegionRequirement &req,
+      bool perform_deletion_analysis(DeletionOp *op, unsigned idx,
+                                     RegionRequirement &req,
                                      const RegionTreePath &path,
                                      std::set<RtEvent> &applied_events,
                                      bool invalidate_tree);
@@ -3710,7 +3710,7 @@ namespace Legion {
                                      const LogicalTraceInfo &trace_info,
                                      FieldMask &already_closed_mask,
                                      std::set<RtEvent> &applied_events,
-                                     bool invalidate_tree);
+                                     bool invalidate_tree); 
       void siphon_logical_deletion(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &current_mask,
@@ -3919,6 +3919,9 @@ namespace Legion {
       void remove_child(const LegionColor p);
       void add_tracker(PartitionTracker *tracker);
       void initialize_disjoint_complete_tree(ContextID ctx, const FieldMask &m);
+      bool filter_unversioned_fields(ContextID ctx, TaskContext *context,
+                                     const FieldMask &filter_mask,
+                                     RegionRequirement &req);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;

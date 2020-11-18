@@ -8802,15 +8802,22 @@ namespace Legion {
       // region tree to serve as mapping dependences on things that might
       // use these data structures in the case of recycling, e.g. in the
       // case that we recycle a field index
-      for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+      unsigned index = 0;
+      for (std::vector<RegionRequirement>::iterator it =
+            deletion_requirements.begin(); it != 
+            deletion_requirements.end(); index++)
       {
-        RegionRequirement &req = deletion_requirements[idx];
         // Perform the normal region requirement analysis
         RegionTreePath privilege_path;
-        initialize_privilege_path(privilege_path, req);
-        runtime->forest->perform_deletion_analysis(this, idx, req, 
-                           privilege_path, map_applied_conditions,
-                           (kind == LOGICAL_REGION_DELETION));
+        initialize_privilege_path(privilege_path, *it);
+        // Check to see if we can remove these requirements because
+        // they were never actually initialized in the first place
+        if (runtime->forest->perform_deletion_analysis(this, index, *it,
+            privilege_path, map_applied_conditions,
+            (kind == LOGICAL_REGION_DELETION)) && it->privilege_fields.empty())
+          it = deletion_requirements.erase(it);
+        else
+          it++;
       }
       // Now pretend like this is going to be a mapping fence on everyone
       // who came before, although we will never actually record ourselves
