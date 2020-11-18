@@ -16138,7 +16138,7 @@ namespace Legion {
             continue;
           new_instances.insert(analysis.target_views[idx], overlap);
         }
-        LegionVector<std::pair<CopyFillAggregator*,FieldMask> >::aligned to_add;
+        FieldMaskSet<CopyFillAggregator> to_add;
         for (FieldMaskSet<CopyFillGuard>::iterator it = 
               update_guards.begin(); it != update_guards.end(); it++)
         {
@@ -16184,13 +16184,10 @@ namespace Legion {
 #endif
             if (finder == analysis.input_aggregators.end())
               analysis.input_aggregators[guard_event] = input_aggregator;
-            // Record this as a guard for later operations
-            to_add.resize(to_add.size() + 1);
-            std::pair<CopyFillAggregator*,FieldMask> &back = to_add.back();
             const FieldMask &update_mask = 
               input_aggregator->get_update_fields();
-            back.first = input_aggregator;
-            back.second = update_mask;
+            // Record this as a guard for later operations
+            to_add.insert(input_aggregator, update_mask);
 #ifdef DEBUG_LEGION
             if (!input_aggregator->record_guard_set(this))
               assert(false);
@@ -16206,9 +16203,8 @@ namespace Legion {
         }
         if (!to_add.empty())
         {
-          for (LegionVector<std::pair<CopyFillAggregator*,FieldMask> >::
-                aligned::const_iterator it = to_add.begin(); 
-                it != to_add.end(); it++)
+          for (FieldMaskSet<CopyFillAggregator>::const_iterator it =
+                to_add.begin(); it != to_add.end(); it++)
             update_guards.insert(it->first, it->second);
         }
         // If we have unguarded fields we can easily do thos
