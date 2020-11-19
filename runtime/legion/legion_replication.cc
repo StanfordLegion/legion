@@ -1053,6 +1053,9 @@ namespace Legion {
           // the right size for each subregion.
           coord_t sum = 0;
           typedef std::map<DomainPoint,size_t> SizeMap;
+#ifdef DEBUG_LEGION
+          assert(all_output_sizes.find(idx) != all_output_sizes.end());
+#endif
           const SizeMap &output_sizes = all_output_sizes[idx];
           const SizeMap &local_sizes = local_output_sizes[idx];
           IndexPartNode *part = runtime->forest->get_node(
@@ -1072,6 +1075,9 @@ namespace Legion {
             }
             sum += size;
           }
+          log_index.debug(
+              "[Task %s (UID: %lld)] setting [0, %lld) to index space %x",
+              get_task_name(), get_unique_op_id(), sum, parent->handle.get_id());
           if (parent->set_domain(Rect<1>(0, sum - 1), runtime->address_space,
                                  shard_mapping))
             delete parent;
@@ -12031,6 +12037,7 @@ namespace Legion {
     void OutputSizeExchange::pack_collective_stage(Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
+      rez.serialize(all_output_sizes.size());
       for (std::map<unsigned,SizeMap>::iterator it = all_output_sizes.begin();
            it != all_output_sizes.end(); ++it)
       {
@@ -12049,23 +12056,26 @@ namespace Legion {
                                                  Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
-      for (std::map<unsigned,SizeMap>::iterator it = all_output_sizes.begin();
-           it != all_output_sizes.end(); ++it)
+      size_t num_sizes;
+      derez.deserialize(num_sizes);
+      if (num_sizes == 0) return;
+      for (unsigned idx = 0; idx < num_sizes; ++idx)
       {
+        SizeMap &sizes = all_output_sizes[idx];
         size_t num_entries;
         derez.deserialize(num_entries);
-        for (unsigned idx = 0; idx < num_entries; idx++)
+        for (unsigned eidx = 0; eidx < num_entries; eidx++)
         {
           DomainPoint point;
           derez.deserialize(point);
 #ifdef DEBUG_LEGION
           size_t size;
           derez.deserialize(size);
-          assert(it->second.find(point) == it->second.end() ||
-                 it->second.find(point)->second == size);
-          it->second[point] = size;
+          assert(sizes.find(point) == sizes.end() ||
+                 sizes.find(point)->second == size);
+          sizes[point] = size;
 #else
-          derez.deserialize(it->second[point]);
+          derez.deserialize(sizes[point]);
 #endif
         }
       }
