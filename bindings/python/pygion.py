@@ -2485,7 +2485,6 @@ class _TaskLauncher(object):
                 elif isinstance(arg, SymbolicExpr):
 
                     def arg_check():
-                        # print("THIS IS PROJ FUNCTOR CACHE : ", _proj_functor_cache)
                         # P[...]
                         if not isinstance(arg, SymbolicIndexAccess):
                             return False, None
@@ -3049,15 +3048,9 @@ class ProjectionFunctor(object):
             raise Exception(
                 "ProjectionFunctor requires a symbolic expression as an argument"
             )
-
-        # print("THIS IS PROJ FUNCTOR CACHE : ", _proj_functor_cache)
-
         if expr in _proj_functor_cache:
-            # print("USED ONE IN CACHE")
             return _proj_functor_cache[expr]
         assert not force
-        # curr_val = super(ProjectionFunctor, cls).__new__(cls)
-        # print("CREATED NEW ONE AND ADDED TO CACHE")
         curr_val = ProjectionFunctor(expr, force)
         _proj_functor_cache[expr] = curr_val
         return curr_val
@@ -3069,12 +3062,7 @@ class ProjectionFunctor(object):
                 "ProjectionFunctor requires a symbolic expression as an argument"
             )
         self.expr = expr
-        # print("RUNNING INIT")
         self.compile_and_register()
-
-    # def __reduce__(self):
-
-    #     return (ProjectionFunctor.__new__, (ProjectionFunctor, self.expr, True))
 
     def __call__(self, *args, **kwargs):
         return SymbolicCall(self, *args, **kwargs)
