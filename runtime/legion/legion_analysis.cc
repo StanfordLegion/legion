@@ -3929,7 +3929,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyFillGuard::CopyFillGuard(RtUserEvent post, RtUserEvent applied)
       : guard_postcondition(post), effects_applied(applied),
-        releasing_guards(false)
+        releasing_guards(false), read_only_guard(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3946,7 +3946,7 @@ namespace Legion {
 #else
     //--------------------------------------------------------------------------
     CopyFillGuard::CopyFillGuard(RtUserEvent applied)
-      : effects_applied(applied), releasing_guards(false)
+      : effects_applied(applied), releasing_guards(false),read_only_guard(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3993,6 +3993,7 @@ namespace Legion {
         return;
       }
 #ifdef DEBUG_LEGION
+      assert(!guarded_sets.empty());
       assert(effects_applied.exists());
 #endif
       // We only ever pack the effects applied event here because once a
@@ -4000,6 +4001,7 @@ namespace Legion {
       // useful since all remote copy fill operations will need to key off
       // the effects applied event to be correct
       rez.serialize(effects_applied);
+      rez.serialize<bool>(read_only_guard);
       // Make an event for recording when all the remote events are applied
       RtUserEvent remote_release = Runtime::create_rt_user_event();
       rez.serialize(remote_release);
@@ -4024,11 +4026,13 @@ namespace Legion {
 #else
       CopyFillGuard *result = new CopyFillGuard(effects_applied);
 #endif
+      bool read_only_guard;
+      derez.deserialize(read_only_guard);
 #ifdef DEBUG_LEGION
-      if (!result->record_guard_set(set))
+      if (!result->record_guard_set(set, read_only_guard))
         assert(false);
 #else
-      result->record_guard_set(set);
+      result->record_guard_set(set, read_only_guard);
 #endif
       RtUserEvent remote_release;
       derez.deserialize(remote_release);
@@ -4043,7 +4047,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool CopyFillGuard::record_guard_set(EquivalenceSet *set)
+    bool CopyFillGuard::record_guard_set(EquivalenceSet *set, bool read_only)
     //--------------------------------------------------------------------------
     {
       if (releasing_guards)
@@ -4052,7 +4056,11 @@ namespace Legion {
       // Check again after getting the lock to avoid the race
       if (releasing_guards)
         return false;
+#ifdef DEBUG_LEGION
+      assert(guarded_sets.empty() || (read_only_guard == read_only));
+#endif
       guarded_sets.insert(set);
+      read_only_guard = read_only;
       return true;
     }
 
@@ -4112,9 +4120,18 @@ namespace Legion {
       }
       if (!to_remove.empty())
       {
-        for (std::set<EquivalenceSet*>::const_iterator it = 
-              to_remove.begin(); it != to_remove.end(); it++)
-          (*it)->remove_update_guard(this);
+        if (read_only_guard)
+        {
+          for (std::set<EquivalenceSet*>::const_iterator it = 
+                to_remove.begin(); it != to_remove.end(); it++)
+            (*it)->remove_read_only_guard(this);
+        }
+        else
+        {
+          for (std::set<EquivalenceSet*>::const_iterator it = 
+                to_remove.begin(); it != to_remove.end(); it++)
+            (*it)->remove_reduction_fill_guard(this);
+        }
       }
     }
 
@@ -7255,6 +7272,9 @@ namespace Legion {
       {
         const bool needs_deferral = !already_deferred || 
           (input_aggregators.size() > 1);
+#ifndef NON_AGGRESSIVE_AGGREGATORS
+        const bool is_local = (original_source == runtime->address_space);
+#endif
         for (std::map<RtEvent,CopyFillAggregator*>::const_iterator it = 
               input_aggregators.begin(); it != input_aggregators.end(); it++)
         {
@@ -7264,8 +7284,17 @@ namespace Legion {
           if (!it->second->effects_applied.has_triggered())
             guard_events.insert(it->second->effects_applied);
 #else
-          if (!it->second->guard_postcondition.has_triggered())
-            guard_events.insert(it->second->guard_postcondition);
+          if (!it->second->effects_applied.has_triggered())
+          {
+            if (is_local)
+            {
+              if (!it->second->guard_postcondition.has_triggered())
+                guard_events.insert(it->second->guard_postcondition);
+              applied_events.insert(it->second->effects_applied);
+            }
+            else
+              guard_events.insert(it->second->effects_applied);
+          }
 #endif
           if (it->second->release_guards(op->runtime, applied_events))
             delete it->second;
@@ -7316,6 +7345,8 @@ namespace Legion {
 #else
         if (!output_aggregator->guard_postcondition.has_triggered())
           output_aggregator->guard_postcondition.wait();
+        if (!output_aggregator->effects_applied.has_triggered())
+          applied_events.insert(output_aggregator->effects_applied);
 #endif
         result = output_aggregator->summarize(trace_info);
         if (output_aggregator->release_guards(op->runtime, applied_events))
@@ -7885,8 +7916,17 @@ namespace Legion {
         if (release_aggregator->effects_applied.has_triggered())
           guard_events.insert(release_aggregator->effects_applied);
 #else
-        if (!release_aggregator->guard_postcondition.has_triggered())
-          guard_events.insert(release_aggregator->guard_postcondition);
+        if (release_aggregator->effects_applied.has_triggered())
+        {
+          if (original_source == runtime->address_space)
+          {
+            if (!release_aggregator->guard_postcondition.has_triggered())
+              guard_events.insert(release_aggregator->guard_postcondition);
+            applied_events.insert(release_aggregator->effects_applied);
+          }
+          else
+            guard_events.insert(release_aggregator->effects_applied);
+        }
 #endif
         if (release_aggregator->release_guards(op->runtime, applied_events))
           delete release_aggregator;
@@ -8325,13 +8365,21 @@ namespace Legion {
         }
         across_aggregator->issue_updates(trace_info, precondition,
             false/*has src preconditions*/, true/*has dst preconditions*/);
-        // Need to wait before we can get the summary
 #ifdef NON_AGGRESSIVE_AGGREGATORS
         if (!across_aggregator->effects_applied.has_triggered())
           return across_aggregator->effects_applied;
 #else
-        if (!across_aggregator->guard_postcondition.has_triggered())
-          return across_aggregator->guard_postcondition;
+        if (across_aggregator->effects_applied.has_triggered())
+        {
+          if (original_source == runtime->address_space)
+          {
+            applied_events.insert(across_aggregator->effects_applied);
+            if (!across_aggregator->guard_postcondition.has_triggered())
+              return across_aggregator->guard_postcondition;
+          }
+          else
+            return across_aggregator->effects_applied;
+        }
 #endif
       }
       return RtEvent::NO_RT_EVENT;
@@ -8755,8 +8803,17 @@ namespace Legion {
         if (!output_aggregator->effects_applied.has_triggered())
           return output_aggregator->effects_applied;
 #else
-        if (!output_aggregator->guard_postcondition.has_triggered())
-          return output_aggregator->guard_postcondition;
+        if (output_aggregator->effects_applied.has_triggered())
+        {
+          if (original_source == runtime->address_space)
+          {
+            applied_events.insert(output_aggregator->effects_applied);
+            if (!output_aggregator->guard_postcondition.has_triggered())
+              return output_aggregator->guard_postcondition;
+          }
+          else
+            return output_aggregator->effects_applied;
+        }
 #endif
       }
       return RtEvent::NO_RT_EVENT;
@@ -15973,12 +16030,13 @@ namespace Legion {
                                   analysis.trace_info.recording ? this : NULL,
                                   applied_events);
               // Record this as a guard for later operations
-              update_guards.insert(fill_aggregator,fill_exprs.get_valid_mask());
+              reduction_fill_guards.insert(fill_aggregator,
+                                           fill_exprs.get_valid_mask());
 #ifdef DEBUG_LEGION
-              if (!fill_aggregator->record_guard_set(this))
+              if (!fill_aggregator->record_guard_set(this, false/*read only*/))
                 assert(false);
 #else
-              fill_aggregator->record_guard_set(this);
+              fill_aggregator->record_guard_set(this, false/*read only*/);
 #endif
             }
           }
@@ -15988,11 +16046,12 @@ namespace Legion {
           // we really only need to wait for fills to instances that we
           // care about it, but it should be minimal overhead and the
           // resulting event graph will still be precise
-          if (!update_guards.empty() && !!guard_fill_mask &&
-              !(update_guards.get_valid_mask() * guard_fill_mask))
+          if (!reduction_fill_guards.empty() && !!guard_fill_mask &&
+              !(reduction_fill_guards.get_valid_mask() * guard_fill_mask))
           {
             for (FieldMaskSet<CopyFillGuard>::iterator it = 
-                  update_guards.begin(); it != update_guards.end(); it++)
+                  reduction_fill_guards.begin(); it != 
+                  reduction_fill_guards.end(); it++)
             {
               if (it->first == fill_aggregator)
                 continue;
@@ -16002,13 +16061,14 @@ namespace Legion {
               // No matter what record our dependences on the prior guards
 #ifdef NON_AGGRESSIVE_AGGREGATORS
               const RtEvent guard_event = it->first->effects_applied;
-#else
-              const RtEvent guard_event = 
-                (analysis.original_source == local_space) ?
-                it->first->guard_postcondition :
-                it->first->effects_applied;
-#endif
               analysis.guard_events.insert(guard_event);
+#else
+              const RtEvent guard_event = it->first->guard_postcondition;
+              if (analysis.original_source == local_space)
+                analysis.guard_events.insert(guard_event);
+              else
+                analysis.guard_events.insert(it->first->effects_applied);
+#endif
             }
           }
           // Flush any reductions for restricted fields and expressions
@@ -16121,8 +16181,8 @@ namespace Legion {
           }
         }
       }
-      else if (IS_READ_ONLY(analysis.usage) && !update_guards.empty() && 
-                !(user_mask * update_guards.get_valid_mask()))
+      else if (IS_READ_ONLY(analysis.usage) && !read_only_guards.empty() && 
+                !(user_mask * read_only_guards.get_valid_mask()))
       {
         // If we're doing read-only mode, get the set of events that
         // we need to wait for before we can do our registration, this 
@@ -16140,7 +16200,7 @@ namespace Legion {
         }
         FieldMaskSet<CopyFillAggregator> to_add;
         for (FieldMaskSet<CopyFillGuard>::iterator it = 
-              update_guards.begin(); it != update_guards.end(); it++)
+              read_only_guards.begin(); it != read_only_guards.end(); it++)
         {
           const FieldMask guard_mask = user_mask & it->second;
           if (!guard_mask)
@@ -16148,13 +16208,14 @@ namespace Legion {
           // No matter what record our dependences on the prior guards
 #ifdef NON_AGGRESSIVE_AGGREGATORS
           const RtEvent guard_event = it->first->effects_applied;
-#else
-          const RtEvent guard_event = 
-            (analysis.original_source == local_space) ?
-            it->first->guard_postcondition :
-            it->first->effects_applied;
-#endif
           analysis.guard_events.insert(guard_event);
+#else
+          const RtEvent guard_event = it->first->guard_postcondition;
+          if (analysis.original_source == local_space)
+            analysis.guard_events.insert(guard_event);
+          else
+            analysis.guard_events.insert(it->first->effects_applied);
+#endif
           CopyFillAggregator *input_aggregator = NULL;
           // See if we have an input aggregator that we can use now
           std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
@@ -16177,11 +16238,6 @@ namespace Legion {
               ((finder == analysis.input_aggregators.end()) ||
                input_aggregator->has_update_fields()))
           {
-#ifndef NON_AGGRESSIVE_AGGREGATORS
-            // We also have to chain effects in this case 
-            input_aggregator->record_reference_mutation_effect(
-                                it->first->effects_applied);
-#endif
             if (finder == analysis.input_aggregators.end())
               analysis.input_aggregators[guard_event] = input_aggregator;
             const FieldMask &update_mask = 
@@ -16189,10 +16245,10 @@ namespace Legion {
             // Record this as a guard for later operations
             to_add.insert(input_aggregator, update_mask);
 #ifdef DEBUG_LEGION
-            if (!input_aggregator->record_guard_set(this))
+            if (!input_aggregator->record_guard_set(this, true/*read only*/))
               assert(false);
 #else
-            input_aggregator->record_guard_set(this);
+            input_aggregator->record_guard_set(this, true/*read only*/);
 #endif
             // Remove the current guard since it doesn't matter anymore
             it.filter(update_mask);
@@ -16205,7 +16261,7 @@ namespace Legion {
         {
           for (FieldMaskSet<CopyFillAggregator>::const_iterator it =
                 to_add.begin(); it != to_add.end(); it++)
-            update_guards.insert(it->first, it->second);
+            read_only_guards.insert(it->first, it->second);
         }
         // If we have unguarded fields we can easily do thos
         if (!!user_mask)
@@ -16227,19 +16283,19 @@ namespace Legion {
                               analysis.trace_info, applied_events, 
                               analysis.record_valid);
           // If we made the input aggregator then store it
-          if ((input_aggregator != NULL) && 
+          if ((input_aggregator != NULL) &&
               ((finder == analysis.input_aggregators.end()) ||
                input_aggregator->has_update_fields()))
           {
             analysis.input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
             // Record this as a guard for later operations
-            update_guards.insert(input_aggregator, 
+            read_only_guards.insert(input_aggregator, 
                 input_aggregator->get_update_fields());
 #ifdef DEBUG_LEGION
-            if (!input_aggregator->record_guard_set(this))
+            if (!input_aggregator->record_guard_set(this, true/*read only*/))
               assert(false);
 #else
-            input_aggregator->record_guard_set(this);
+            input_aggregator->record_guard_set(this, true/*read only*/);
 #endif
           }
         }
@@ -16286,33 +16342,21 @@ namespace Legion {
           }
         }
         // If we made the input aggregator then store it
-        if ((input_aggregator != NULL) && 
+        if ((input_aggregator != NULL) && IS_READ_ONLY(analysis.usage) && 
             ((finder == analysis.input_aggregators.end()) ||
              input_aggregator->has_update_fields()))
         {
           analysis.input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
-          // Record this as a guard for later operations
-          update_guards.insert(input_aggregator, 
+          // Record this as a guard for later read-only operations
+          read_only_guards.insert(input_aggregator, 
               input_aggregator->get_update_fields());
 #ifdef DEBUG_LEGION
-          if (!input_aggregator->record_guard_set(this))
+          if (!input_aggregator->record_guard_set(this, true/*read only*/))
             assert(false);
 #else
-          input_aggregator->record_guard_set(this);
+          input_aggregator->record_guard_set(this, true/*read only*/);
 #endif
         }
-      }
-      if ((analysis.output_aggregator != NULL) && 
-           analysis.output_aggregator->has_update_fields())
-      {
-        update_guards.insert(analysis.output_aggregator, 
-            analysis.output_aggregator->get_update_fields());
-#ifdef DEBUG_LEGION
-        if (!analysis.output_aggregator->record_guard_set(this))
-          assert(false);
-#else
-        analysis.output_aggregator->record_guard_set(this);
-#endif
       }
       // Update the post conditions for these views if we're recording 
       if (analysis.trace_info.recording)
@@ -19409,18 +19453,6 @@ namespace Legion {
                             it->second.get_valid_mask(), it->second,
                             analysis.source_views, analysis.trace_info,
                             applied_events, true/*record valid*/); 
-      if ((analysis.release_aggregator != NULL) && 
-           analysis.release_aggregator->has_update_fields())
-      {
-        update_guards.insert(analysis.release_aggregator, 
-            analysis.release_aggregator->get_update_fields());
-#ifdef DEBUG_LEGION
-        if (!analysis.release_aggregator->record_guard_set(this))
-          assert(false);
-#else
-        analysis.release_aggregator->record_guard_set(this);
-#endif
-      }
       check_for_migration(analysis, applied_events);
     }
 
@@ -20392,24 +20424,25 @@ namespace Legion {
         assert(false);
       // See if there are any other predicate guard fields that we need
       // to have as preconditions before applying our owner updates
-      if (!update_guards.empty() && 
-          !(src_mask * update_guards.get_valid_mask()))
+      if (!read_only_guards.empty() && 
+          !(src_mask * read_only_guards.get_valid_mask()))
       {
         for (FieldMaskSet<CopyFillGuard>::iterator it = 
-              update_guards.begin(); it != update_guards.end(); it++)
+              read_only_guards.begin(); it != read_only_guards.end(); it++)
         {
           if (src_mask * it->second)
             continue;
           // No matter what record our dependences on the prior guards
 #ifdef NON_AGGRESSIVE_AGGREGATORS
           const RtEvent guard_event = it->first->effects_applied;
-#else
-          const RtEvent guard_event = 
-            (analysis.original_source == local_space) ?
-            it->first->guard_postcondition :
-            it->first->effects_applied;
-#endif
           analysis.guard_events.insert(guard_event);
+#else
+          const RtEvent guard_event = it->first->guard_postcondition; 
+          if (analysis.original_source == local_space)
+            analysis.guard_events.insert(guard_event);
+          else
+            analysis.guard_events.insert(it->first->effects_applied);
+#endif
         }
       }
       // At this point we know we're going to need an aggregator since
@@ -20627,18 +20660,6 @@ namespace Legion {
       }
       // Record that there is initialized data for this equivalence set
       update_initialized_data(expr, expr_covers, overwrite_mask); 
-      if ((analysis.output_aggregator != NULL) &&
-           analysis.output_aggregator->has_update_fields())
-      {
-        update_guards.insert(analysis.output_aggregator, 
-            analysis.output_aggregator->get_update_fields());
-#ifdef DEBUG_LEGION
-        if (!analysis.output_aggregator->record_guard_set(this))
-          assert(false);
-#else
-        analysis.output_aggregator->record_guard_set(this);
-#endif
-      }
       if (analysis.trace_info.recording)
       {
         if (tracing_postconditions == NULL)
@@ -21130,27 +21151,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::remove_update_guard(CopyFillGuard *guard)
+    void EquivalenceSet::remove_read_only_guard(CopyFillGuard *guard)
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
       // If we're no longer the logical owner then it's because we were
       // migrated and there should be no guards so we're done
-      if (update_guards.empty())
+      if (read_only_guards.empty())
         return;
       // We could get here when we're not the logical owner if we've unpacked
       // ourselves but haven't become the owner yet, in which case we still
       // need to prune ourselves out of the list
-      FieldMaskSet<CopyFillGuard>::iterator finder = update_guards.find(guard);
+      FieldMaskSet<CopyFillGuard>::iterator finder = 
+        read_only_guards.find(guard);
       // It's also possible that the equivalence set is migrated away and
       // then migrated back before this guard is removed in which case we
       // won't find it in the update guards and can safely ignore it
-      if (finder == update_guards.end())
+      if (finder == read_only_guards.end())
         return;
       const bool should_tighten = !!finder->second;
-      update_guards.erase(finder);
+      read_only_guards.erase(finder);
       if (should_tighten)
-        update_guards.tighten_valid_mask();
+        read_only_guards.tighten_valid_mask();
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::remove_reduction_fill_guard(CopyFillGuard *guard)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      // If we're no longer the logical owner then it's because we were
+      // migrated and there should be no guards so we're done
+      if (reduction_fill_guards.empty())
+        return;
+      // We could get here when we're not the logical owner if we've unpacked
+      // ourselves but haven't become the owner yet, in which case we still
+      // need to prune ourselves out of the list
+      FieldMaskSet<CopyFillGuard>::iterator finder = 
+        reduction_fill_guards.find(guard);
+      // It's also possible that the equivalence set is migrated away and
+      // then migrated back before this guard is removed in which case we
+      // won't find it in the update guards and can safely ignore it
+      if (finder == reduction_fill_guards.end())
+        return;
+      const bool should_tighten = !!finder->second;
+      reduction_fill_guards.erase(finder);
+      if (should_tighten)
+        reduction_fill_guards.tighten_valid_mask();
     }
 
     //--------------------------------------------------------------------------
@@ -21762,18 +21809,21 @@ namespace Legion {
         restricted_updates;
       LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
         released_updates;
-      FieldMaskSet<CopyFillGuard> guards;
+      FieldMaskSet<CopyFillGuard> read_only_guards, reduction_fill_guards;
       TraceViewSet *precondition_updates = NULL;
       TraceViewSet *anticondition_updates = NULL;
       TraceViewSet *postcondition_updates = NULL;
       find_overlap_updates(expr, expr_covers, mask, valid_updates,
                            initialized_updates, reduction_updates, 
                            restricted_updates, released_updates,
-                           pack_guards ? &guards : NULL, precondition_updates,
-                           anticondition_updates, postcondition_updates);
+                           pack_guards ? &read_only_guards : NULL, 
+                           pack_guards ? &reduction_fill_guards : NULL, 
+                           precondition_updates, anticondition_updates, 
+                           postcondition_updates);
       pack_updates(rez, target, valid_updates, initialized_updates,
-           reduction_updates, restricted_updates, released_updates, &guards,
-           precondition_updates, anticondition_updates, postcondition_updates);
+           reduction_updates, restricted_updates, released_updates, 
+           &read_only_guards, &reduction_fill_guards, precondition_updates, 
+           anticondition_updates, postcondition_updates);
     }
 
     //--------------------------------------------------------------------------
@@ -21788,7 +21838,8 @@ namespace Legion {
                   FieldMaskSet<InstanceView> >::aligned &restricted_updates,
               const LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> >::aligned &released_updates,
-              const FieldMaskSet<CopyFillGuard> *guard_updates,
+              const FieldMaskSet<CopyFillGuard> *read_only_updates,
+              const FieldMaskSet<CopyFillGuard> *reduction_fill_updates,
               const TraceViewSet *precondition_updates,
               const TraceViewSet *anticondition_updates,
               const TraceViewSet *postcondition_updates)
@@ -21859,11 +21910,24 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
-      if (guard_updates !=NULL)
+      if ((read_only_updates != NULL) && !read_only_updates->empty())
       {
-        rez.serialize<size_t>(guard_updates->size());
+        rez.serialize<size_t>(read_only_updates->size());
         for (FieldMaskSet<CopyFillGuard>::const_iterator it =
-              guard_updates->begin(); it != guard_updates->end(); it++)
+              read_only_updates->begin(); it != read_only_updates->end(); it++)
+        {
+          it->first->pack_guard(rez);
+          rez.serialize(it->second);
+        }
+      }
+      else
+        rez.serialize<size_t>(0);
+      if ((reduction_fill_updates != NULL) && !reduction_fill_updates->empty())
+      {
+        rez.serialize<size_t>(reduction_fill_updates->size());
+        for (FieldMaskSet<CopyFillGuard>::const_iterator it =
+              reduction_fill_updates->begin(); it != 
+              reduction_fill_updates->end(); it++)
         {
           it->first->pack_guard(rez);
           rez.serialize(it->second);
@@ -21900,7 +21964,7 @@ namespace Legion {
         restricted_updates;
       LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
         released_updates;
-      FieldMaskSet<CopyFillGuard> guard_updates;
+      FieldMaskSet<CopyFillGuard> read_only_updates, reduction_fill_updates;
       std::set<RtEvent> ready_events;
       size_t num_valid;
       derez.deserialize(num_valid);
@@ -22003,14 +22067,14 @@ namespace Legion {
           releases.insert(static_cast<InstanceView*>(view), mask);
         }
       }
-      size_t num_guards;
-      derez.deserialize(num_guards);
-      if (num_guards)
+      size_t num_read_only_guards;
+      derez.deserialize(num_read_only_guards);
+      if (num_read_only_guards)
       {
         // Need to hold the lock here to prevent copy fill guard
         // deletions from removing this before we've registered it
         AutoLock eq(eq_lock);
-        for (unsigned idx = 0; idx < num_guards; idx++)
+        for (unsigned idx = 0; idx < num_read_only_guards; idx++)
         {
           CopyFillGuard *guard = 
             CopyFillGuard::unpack_guard(derez, runtime, this);
@@ -22018,8 +22082,28 @@ namespace Legion {
           derez.deserialize(guard_mask);
           if (guard != NULL)
           {
-            update_guards.insert(guard, guard_mask);
-            guard_updates.insert(guard, guard_mask);
+            read_only_guards.insert(guard, guard_mask);
+            read_only_updates.insert(guard, guard_mask);
+          }
+        }
+      }
+      size_t num_reduction_fill_guards;
+      derez.deserialize(num_reduction_fill_guards);
+      if (num_reduction_fill_guards)
+      {
+        // Need to hold the lock here to prevent copy fill guard
+        // deletions from removing this before we've registered it
+        AutoLock eq(eq_lock);
+        for (unsigned idx = 0; idx < num_reduction_fill_guards; idx++)
+        {
+          CopyFillGuard *guard = 
+            CopyFillGuard::unpack_guard(derez, runtime, this);
+          FieldMask guard_mask;
+          derez.deserialize(guard_mask);
+          if (guard != NULL)
+          {
+            reduction_fill_guards.insert(guard, guard_mask);
+            reduction_fill_updates.insert(guard, guard_mask);
           }
         }
       }
@@ -22066,7 +22150,8 @@ namespace Legion {
           args.reduction_updates->swap(reduction_updates);
           args.restricted_updates->swap(restricted_updates);
           args.released_updates->swap(released_updates);
-          args.guard_updates->swap(guard_updates);
+          args.read_only_updates->swap(read_only_updates);
+          args.reduction_fill_updates->swap(reduction_fill_updates);
           args.precondition_updates = precondition_updates;
           args.anticondition_updates = anticondition_updates;
           args.postcondition_updates = postcondition_updates;
@@ -22079,7 +22164,8 @@ namespace Legion {
       // All the views are ready so we can add them now
       apply_state(valid_updates, initialized_updates, reduction_updates, 
                   restricted_updates, released_updates, precondition_updates,
-                  anticondition_updates, postcondition_updates, &guard_updates,
+                  anticondition_updates, postcondition_updates, 
+                  &read_only_updates, &reduction_fill_updates,
                   applied_events, true/*need lock*/, forward_to_owner);
     }
 
@@ -22096,7 +22182,8 @@ namespace Legion {
             FieldMaskSet<InstanceView> >::aligned()),
         released_updates(new LegionMap<IndexSpaceExpression*,
             FieldMaskSet<InstanceView> >::aligned()), 
-        guard_updates(new FieldMaskSet<CopyFillGuard>()),
+        read_only_updates(new FieldMaskSet<CopyFillGuard>()),
+        reduction_fill_updates(new FieldMaskSet<CopyFillGuard>()),
         done_event(done), forward_to_owner(forward)
     //--------------------------------------------------------------------------
     {
@@ -22112,8 +22199,9 @@ namespace Legion {
           *(dargs->initialized_updates), *(dargs->reduction_updates),
           *(dargs->restricted_updates), *(dargs->released_updates),
           dargs->precondition_updates, dargs->anticondition_updates,
-          dargs->postcondition_updates, dargs->guard_updates,
-          applied_events, true/*needs lock*/, dargs->forward_to_owner);
+          dargs->postcondition_updates, dargs->read_only_updates,
+          dargs->reduction_fill_updates, applied_events, 
+          true/*needs lock*/, dargs->forward_to_owner);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->done_event, 
             Runtime::merge_events(applied_events));
@@ -22124,7 +22212,8 @@ namespace Legion {
       delete dargs->reduction_updates;
       delete dargs->restricted_updates;
       delete dargs->released_updates;
-      delete dargs->guard_updates;
+      delete dargs->read_only_updates;
+      delete dargs->reduction_fill_updates;
     }
 
     //--------------------------------------------------------------------------
@@ -22316,7 +22405,10 @@ namespace Legion {
         }
       }
 #ifdef DEBUG_LEGION
-      assert(update_guards.empty() || (mask * update_guards.get_valid_mask()));
+      assert(read_only_guards.empty() || 
+              (mask * read_only_guards.get_valid_mask()));
+      assert(reduction_fill_guards.empty() ||
+              (mask * reduction_fill_guards.get_valid_mask()));
 #endif
       // If we get here, we're performing the clone locally for these fields
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::aligned
@@ -22344,20 +22436,20 @@ namespace Legion {
         find_overlap_updates(overlap, overlap_covers, mask, valid_updates,
                              initialized_updates, reduction_updates, 
                              restricted_updates, released_updates,
-                             NULL/*guards*/, precondition_updates, 
+                             NULL/*guards*/,NULL/*guards*/,precondition_updates,
                              anticondition_updates, postcondition_updates);
       }
       else if (dst->set_expr->is_empty())
         find_overlap_updates(set_expr, true/*covers*/, mask, valid_updates,
                              initialized_updates, reduction_updates, 
                              restricted_updates, released_updates,
-                             NULL/*guards*/, precondition_updates, 
+                             NULL/*guards*/,NULL/*guards*/,precondition_updates,
                              anticondition_updates, postcondition_updates);
       // We hold the lock so calling back into the destination is safe
       dst->apply_state(valid_updates, initialized_updates, reduction_updates,
-                   restricted_updates, released_updates, precondition_updates,
-                   anticondition_updates, postcondition_updates, NULL/*guards*/,
-                   applied_events, false/*no lock*/, forward_to_owner);
+            restricted_updates, released_updates, precondition_updates,
+            anticondition_updates, postcondition_updates, NULL/*guards*/,
+            NULL/*guards*/, applied_events, false/*no lock*/, forward_to_owner);
       if (invalidate_overlap)
       {
         if (!set_expr->is_empty())
@@ -22464,7 +22556,8 @@ namespace Legion {
                   FieldMaskSet<InstanceView> >::aligned &restricted_updates,
               LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> >::aligned &released_updates,
-              FieldMaskSet<CopyFillGuard> *guard_updates,
+              FieldMaskSet<CopyFillGuard> *read_only_guard_updates,
+              FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
               TraceViewSet *&precondition_updates,
               TraceViewSet *&anticondition_updates,
               TraceViewSet *&postcondition_updates) const
@@ -22718,18 +22811,35 @@ namespace Legion {
           }
         }
       }
-      if (!update_guards.empty() && !(mask * update_guards.get_valid_mask()))
+      if (!read_only_guards.empty() && 
+          !(mask * read_only_guards.get_valid_mask()))
       {
 #ifdef DEBUG_LEGION
-        assert(guard_updates != NULL);
+        assert(read_only_guard_updates != NULL);
 #endif
         for (FieldMaskSet<CopyFillGuard>::const_iterator it =
-              update_guards.begin(); it != update_guards.end(); it++)
+              read_only_guards.begin(); it != read_only_guards.end(); it++)
         {
           const FieldMask overlap = mask & it->second;
           if (!overlap)
             continue;
-          guard_updates->insert(it->first, overlap);
+          read_only_guard_updates->insert(it->first, overlap);
+        }
+      }
+      if (!reduction_fill_guards.empty() &&
+          !(mask * reduction_fill_guards.get_valid_mask()))
+      {
+#ifdef DEBUG_LEGION
+        assert(reduction_fill_guard_updates != NULL);
+#endif
+        for (FieldMaskSet<CopyFillGuard>::const_iterator it =
+              reduction_fill_guards.begin(); it != 
+              reduction_fill_guards.end(); it++)
+        {
+          const FieldMask overlap = mask & it->second;
+          if (!overlap)
+            continue;
+          reduction_fill_guard_updates->insert(it->first, overlap);
         }
       }
       if (tracing_preconditions != NULL)
@@ -22801,7 +22911,8 @@ namespace Legion {
                   TraceViewSet *precondition_updates, 
                   TraceViewSet *anticondition_updates,
                   TraceViewSet *postcondition_updates,
-                  FieldMaskSet<CopyFillGuard> *guard_updates,
+                  FieldMaskSet<CopyFillGuard> *read_only_guard_updates,
+                  FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
                   std::set<RtEvent> &applied_events, 
                   const bool needs_lock, const bool forward_to_owner)
     //--------------------------------------------------------------------------
@@ -22811,7 +22922,8 @@ namespace Legion {
         AutoLock eq(eq_lock);
         apply_state(valid_updates, initialized_updates, reduction_updates,
                     restricted_updates, released_updates, precondition_updates,
-                    anticondition_updates, postcondition_updates, guard_updates,
+                    anticondition_updates, postcondition_updates, 
+                    read_only_guard_updates, reduction_fill_guard_updates,
                     applied_events, false/*needs lock*/, forward_to_owner);
         return;
       }
@@ -22821,18 +22933,35 @@ namespace Legion {
         // Filter out any guard updates that have been pruned out
         // while we were not holding the lock. We know they've been
         // pruned because they will no longer be in the update_guards 
-        if (guard_updates != NULL)
+        if (read_only_guard_updates != NULL)
         {
           std::vector<CopyFillGuard*> to_delete;
           for (FieldMaskSet<CopyFillGuard>::const_iterator it =
-                guard_updates->begin(); it != guard_updates->end(); it++)
-            if (update_guards.find(it->first) == update_guards.end())
+                read_only_guard_updates->begin(); it != 
+                read_only_guard_updates->end(); it++)
+            if (read_only_guards.find(it->first) == read_only_guards.end())
               to_delete.push_back(it->first);
           if (!to_delete.empty())
           {
             for (std::vector<CopyFillGuard*>::const_iterator it =
                   to_delete.begin(); it != to_delete.end(); it++)
-              guard_updates->erase(*it);
+              read_only_guard_updates->erase(*it);
+          }
+        }
+        if (reduction_fill_guard_updates != NULL)
+        {
+          std::vector<CopyFillGuard*> to_delete;
+          for (FieldMaskSet<CopyFillGuard>::const_iterator it =
+                reduction_fill_guard_updates->begin(); it != 
+                reduction_fill_guard_updates->end(); it++)
+            if (reduction_fill_guards.find(it->first) == 
+                reduction_fill_guards.end())
+              to_delete.push_back(it->first);
+          if (!to_delete.empty())
+          {
+            for (std::vector<CopyFillGuard*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+              reduction_fill_guard_updates->erase(*it);
           }
         }
         // Forward this on to the logical owner
@@ -22845,7 +22974,8 @@ namespace Legion {
           rez.serialize<bool>(true); // forward to owner
           pack_updates(rez, logical_owner_space, valid_updates, 
                      initialized_updates, reduction_updates, restricted_updates,
-                     released_updates, guard_updates, precondition_updates,
+                     released_updates, read_only_guard_updates, 
+                     reduction_fill_guard_updates, precondition_updates,
                      anticondition_updates, postcondition_updates);
         }
         runtime->send_equivalence_set_clone_response(logical_owner_space, rez);

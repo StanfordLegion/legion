@@ -1105,9 +1105,9 @@ namespace Legion {
       };
     public:
 #ifndef NON_AGGRESSIVE_AGGREGATORS
-      CopyFillGuard(RtUserEvent post, RtUserEvent applied); 
+      CopyFillGuard(RtUserEvent post, RtUserEvent applied);
 #else
-      CopyFillGuard(RtUserEvent applied); 
+      CopyFillGuard(RtUserEvent applied);
 #endif
       CopyFillGuard(const CopyFillGuard &rhs);
       virtual ~CopyFillGuard(void);
@@ -1118,7 +1118,7 @@ namespace Legion {
       static CopyFillGuard* unpack_guard(Deserializer &derez, Runtime *rt,
                                          EquivalenceSet *set);
     public:
-      bool record_guard_set(EquivalenceSet *set);
+      bool record_guard_set(EquivalenceSet *set, bool read_only_guard);
       bool release_guards(Runtime *runtime, std::set<RtEvent> &applied,
                           bool force_deferral = false);
       static void handle_deletion(const void *args); 
@@ -1137,6 +1137,8 @@ namespace Legion {
       std::vector<RtEvent> remote_release_events;
       // Track whether we are releasing or not
       bool releasing_guards;
+      // Track whether this is a read-only guard or not
+      bool read_only_guard;
     };
 
     /**
@@ -2744,7 +2746,8 @@ namespace Legion {
           *const restricted_updates;
         LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
           *const released_updates;
-        FieldMaskSet<CopyFillGuard> *const guard_updates;
+        FieldMaskSet<CopyFillGuard> *const read_only_updates;
+        FieldMaskSet<CopyFillGuard> *const reduction_fill_updates;
         TraceViewSet *precondition_updates;
         TraceViewSet *anticondition_updates;
         TraceViewSet *postcondition_updates;
@@ -2856,7 +2859,8 @@ namespace Legion {
                       const bool already_deferred = false);
     public:
       void initialize_collective_references(unsigned local_valid_refs);
-      void remove_update_guard(CopyFillGuard *guard);
+      void remove_read_only_guard(CopyFillGuard *guard);
+      void remove_reduction_fill_guard(CopyFillGuard *guard);
       void record_tracker(EqSetTracker *tracker, const FieldMask &mask);
       void remove_tracker(EqSetTracker *tracker, const FieldMask &mask);
       void invalidate_trackers(const FieldMask &mask,
@@ -3075,7 +3079,8 @@ namespace Legion {
                 FieldMaskSet<InstanceView> >::aligned &restricted_updates,
             LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> >::aligned &released_updates,
-            FieldMaskSet<CopyFillGuard> *guard_updates,
+            FieldMaskSet<CopyFillGuard> *read_only_guard_updates,
+            FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
             TraceViewSet *&precondition_updates,
             TraceViewSet *&anticondition_updates,
             TraceViewSet *&postcondition_updates) const;
@@ -3091,9 +3096,10 @@ namespace Legion {
             TraceViewSet *precondition_updates,
             TraceViewSet *anticondition_updates,
             TraceViewSet *postcondition_updates,
-            FieldMaskSet<CopyFillGuard> *guard_updates,
-            std::set<RtEvent> &applied_events, 
-            const bool needs_lock, const bool forward_to_owner); 
+            FieldMaskSet<CopyFillGuard> *read_only_guard_updates,
+            FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
+            std::set<RtEvent> &applied_events,
+            const bool needs_lock, const bool forward_to_owner);
       static void pack_updates(Serializer &rez, const AddressSpaceID target,
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> >::aligned &valid_updates,
@@ -3104,7 +3110,8 @@ namespace Legion {
                 FieldMaskSet<InstanceView> >::aligned &restricted_updates,
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> >::aligned &released_updates,
-            const FieldMaskSet<CopyFillGuard> *guards,
+            const FieldMaskSet<CopyFillGuard> *read_only_updates,
+            const FieldMaskSet<CopyFillGuard> *reduction_fill_updates,
             const TraceViewSet *precondition_updates,
             const TraceViewSet *anticondition_updates,
             const TraceViewSet *postcondition_updates);
@@ -3163,8 +3170,12 @@ namespace Legion {
       TraceViewSet                                      *tracing_anticonditions;
       TraceViewSet                                      *tracing_postconditions;
     protected:
-      // This tracks the most recent copy-fill aggregator for each field
-      FieldMaskSet<CopyFillGuard>                       update_guards;
+      // This tracks the most recent copy-fill aggregator for each field in 
+      // read-only cases so that reads the depend on each other are ordered
+      FieldMaskSet<CopyFillGuard>                       read_only_guards;
+      // This tracks the most recent fill-aggregator for each field in reduction
+      // cases so that reductions that depend on the same fill are ordered
+      FieldMaskSet<CopyFillGuard>                       reduction_fill_guards;
       // An event to order to deferral tasks
       volatile RtEvent                               next_deferral_precondition;
     protected:
