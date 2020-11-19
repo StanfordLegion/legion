@@ -2508,7 +2508,7 @@ class _TaskLauncher(object):
                         # P[i + ...] or P[ID + ...]
                         if isinstance(arg.index, SymbolicExpr):
                             curr_arg = _symbolize(arg)
-                            f = ProjectionFunctor(curr_arg.index)
+                            f = ProjectionFunctor.create(curr_arg.index)
                             _proj_functor_cache[curr_arg.index] = f
                             return True, f.proj_id
                         return False, None
@@ -3043,18 +3043,22 @@ _next_proj_functor_id = 100
 class ProjectionFunctor(object):
     __slots__ = ["expr", "proj_id"]
 
-    def __new__(cls, expr, force=False):
+    @staticmethod
+    def create(expr, force=False):
         if not isinstance(expr, SymbolicExpr):
             raise Exception(
                 "ProjectionFunctor requires a symbolic expression as an argument"
             )
 
-        print("THIS IS PROJ FUNCTOR CACHE : ", _proj_functor_cache)
+        # print("THIS IS PROJ FUNCTOR CACHE : ", _proj_functor_cache)
 
         if expr in _proj_functor_cache:
+            # print("USED ONE IN CACHE")
             return _proj_functor_cache[expr]
         assert not force
-        curr_val = super(ProjectionFunctor, cls).__new__(cls)
+        # curr_val = super(ProjectionFunctor, cls).__new__(cls)
+        # print("CREATED NEW ONE AND ADDED TO CACHE")
+        curr_val = ProjectionFunctor(expr, force)
         _proj_functor_cache[expr] = curr_val
         return curr_val
 
@@ -3065,11 +3069,12 @@ class ProjectionFunctor(object):
                 "ProjectionFunctor requires a symbolic expression as an argument"
             )
         self.expr = expr
+        # print("RUNNING INIT")
         self.compile_and_register()
 
-    def __reduce__(self):
+    # def __reduce__(self):
 
-        return (ProjectionFunctor.__new__, (ProjectionFunctor, self.expr, True))
+    #     return (ProjectionFunctor.__new__, (ProjectionFunctor, self.expr, True))
 
     def __call__(self, *args, **kwargs):
         return SymbolicCall(self, *args, **kwargs)
@@ -3259,7 +3264,6 @@ class ProjectionFunctor(object):
         engine = program.compile()
 
         proj_functor = engine.get_function_address(proj_name)
-        print("PROJ FUNCTOR: ", proj_functor)
 
         c.legion_runtime_register_projection_functor(
             _my.ctx.runtime,

@@ -18,7 +18,7 @@ from typing import cast, Callable
 import subprocess
 import petra as pt
 
-f = ProjectionFunctor(1 + ID)
+f = ProjectionFunctor.create(1 + ID)
 
 
 @task(privileges=[R])
@@ -45,13 +45,16 @@ def main():
     for i in IndexLaunch([3]):
         hello(P[f(i)], i)
 
-    # for i in IndexLaunch([3]):
-    #     hello(P[i], i)
-
     for i in IndexLaunch([3]):
-        hello(P[i + 1], i)
+        hello(P[i], i)
 
-    # index_launch([3], hello, P[ID], ID)
+    for i in IndexLaunch([2]):
+        hello(P[i + 2], i)
+
+    for i in IndexLaunch([2]):
+        hello(P[i + 2], i)
+
+    index_launch([3], hello, P[ID], ID)
 
 
 if __name__ == "__main__":
