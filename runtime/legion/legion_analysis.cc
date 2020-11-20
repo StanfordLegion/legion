@@ -16342,20 +16342,23 @@ namespace Legion {
           }
         }
         // If we made the input aggregator then store it
-        if ((input_aggregator != NULL) && IS_READ_ONLY(analysis.usage) && 
+        if ((input_aggregator != NULL) &&
             ((finder == analysis.input_aggregators.end()) ||
              input_aggregator->has_update_fields()))
         {
           analysis.input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
           // Record this as a guard for later read-only operations
-          read_only_guards.insert(input_aggregator, 
-              input_aggregator->get_update_fields());
+          if (IS_READ_ONLY(analysis.usage))
+          {
+            read_only_guards.insert(input_aggregator, 
+                input_aggregator->get_update_fields());
 #ifdef DEBUG_LEGION
-          if (!input_aggregator->record_guard_set(this, true/*read only*/))
-            assert(false);
+            if (!input_aggregator->record_guard_set(this, true/*read only*/))
+              assert(false);
 #else
-          input_aggregator->record_guard_set(this, true/*read only*/);
+            input_aggregator->record_guard_set(this, true/*read only*/);
 #endif
+          }
         }
       }
       // Update the post conditions for these views if we're recording 
