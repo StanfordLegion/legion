@@ -8369,7 +8369,7 @@ namespace Legion {
         if (!across_aggregator->effects_applied.has_triggered())
           return across_aggregator->effects_applied;
 #else
-        if (across_aggregator->effects_applied.has_triggered())
+        if (!across_aggregator->effects_applied.has_triggered())
         {
           if (original_source == runtime->address_space)
           {
