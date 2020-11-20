@@ -373,6 +373,8 @@ before_script:
   KOKKOS_CUDA_ARCH: "PASCAL60"
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
+  # cuda 9.2 has bugs in thrust that break complex reduction ops
+  USE_COMPLEX: "0"
 
 ###
 ### Docker Image
