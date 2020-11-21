@@ -703,6 +703,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DLegion_SPY=%s' % ('ON' if env['USE_SPY'] == '1' else 'OFF'))
     cmdline.append('-DLegion_BOUNDS_CHECKS=%s' % ('ON' if env['BOUNDS_CHECKS'] == '1' else 'OFF'))
     cmdline.append('-DLegion_PRIVILEGE_CHECKS=%s' % ('ON' if env['PRIVILEGE_CHECKS'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_REDOP_COMPLEX=%s' % ('ON' if env['USE_COMPLEX'] == '1' else 'OFF'))
     if 'LEGION_WARNINGS_FATAL' in env:
         cmdline.append('-DLegion_WARNINGS_FATAL=%s' % ('ON' if env['LEGION_WARNINGS_FATAL'] == '1' else 'OFF'))
     if test_ctest:
@@ -711,8 +712,14 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
             cmdline.append('-DLegion_TEST_LAUNCHER=%s' % env['LAUNCHER'])
     else:
         cmdline.append('-DLegion_ENABLE_TESTING=OFF')
-    if test_regent or test_legion_cxx or test_external or test_perf or test_ctest:
-        cmdline.append('-DLegion_BUILD_ALL=ON')
+    if test_regent or (test_legion_cxx and (env['USE_PYTHON'] == '1')):
+        cmdline.append('-DLegion_BUILD_BINDINGS=ON')
+    if test_legion_cxx or test_ctest:
+        cmdline.extend(['-DLegion_BUILD_APPS=ON',
+                        '-DLegion_BUILD_EXAMPLES=ON',
+                        '-DLegion_BUILD_TUTORIAL=ON',
+                        '-DLegion_BUILD_TESTS=ON',
+                        ])
     # several different conditions force the use of shared libraries
     if test_regent or test_external or (env['USE_PYTHON'] == '1') or (env['SHARED_OBJECTS'] == '1'):
         cmdline.append('-DBUILD_SHARED_LIBS=ON')
@@ -783,7 +790,8 @@ def report_mode(debug, max_dim, launcher,
                 test_external, test_private, test_perf, test_ctest, networks,
                 use_cuda, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
-                use_bounds_checks, use_privilege_checks, use_shared_objects,
+                use_bounds_checks, use_privilege_checks, use_complex,
+                use_shared_objects,
                 use_gcov, use_cmake, use_rdir):
     print()
     print('#'*60)
@@ -818,6 +826,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Prof:       %s' % use_prof)
     print('###   * Bounds:     %s' % use_bounds_checks)
     print('###   * Privilege:  %s' % use_privilege_checks)
+    print('###   * Cplx Redop: %s' % use_complex)
     print('###   * Shared Obj: %s' % use_shared_objects)
     print('###   * Gcov:       %s' % use_gcov)
     print('###   * CMake:      %s' % use_cmake)
@@ -879,6 +888,7 @@ def run_tests(test_modules=None,
                                         envname='BOUNDS_CHECKS')
     use_privilege_checks = feature_enabled('privilege', False,
                                            envname='PRIVILEGE_CHECKS')
+    use_complex = feature_enabled('complex', True)
     use_gcov = feature_enabled('gcov', False)
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
@@ -919,7 +929,8 @@ def run_tests(test_modules=None,
                 networks,
                 use_cuda, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
-                use_bounds_checks, use_privilege_checks, use_shared_objects,
+                use_bounds_checks, use_privilege_checks, use_complex,
+                use_shared_objects,
                 use_gcov, use_cmake, use_rdir)
 
     tmp_dir = tempfile.mkdtemp(dir=root_dir)
@@ -951,6 +962,7 @@ def run_tests(test_modules=None,
         ('TEST_PROF', '1' if use_prof else '0'),
         ('BOUNDS_CHECKS', '1' if use_bounds_checks else '0'),
         ('PRIVILEGE_CHECKS', '1' if use_privilege_checks else '0'),
+        ('USE_COMPLEX', '1' if use_complex else '0'),
         ('SHARED_OBJECTS', '1' if use_shared_objects else '0'),
         ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
@@ -1094,7 +1106,7 @@ def driver():
         '--use', dest='use_features', action=ExtendAction,
         choices=MultipleChoiceList('gasnet', 'cuda', 'openmp', 'kokkos',
                                    'python', 'llvm', 'hdf', 'fortran', 'spy', 'prof',
-                                   'bounds', 'privilege',
+                                   'bounds', 'privilege', 'complex',
                                    'gcov', 'cmake', 'rdir'),
         type=lambda s: s.split(','),
         default=None,
