@@ -373,6 +373,8 @@ before_script:
   KOKKOS_CUDA_ARCH: "PASCAL60"
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
+  # cuda 9.2 has bugs in thrust that break complex reduction ops
+  USE_COMPLEX: "0"
 
 ###
 ### Docker Image
@@ -1020,18 +1022,19 @@ p100_gcc7_cxx11_debug_checks_cuda_legion:
   <<: [*p100, *tests]
   variables:
     <<: [*gcc7, *debug, *cxx11_normal, *checks, *cuda_p100, *legion, *short]
-p100_clang7_cxx11_release_cuda_regent:
-  <<: [*p100, *tests]
-  variables:
-    <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *regent, *short]
 p100_gcc7_cxx11_release_cmake_cuda_legion:
   <<: [*p100, *tests]
   variables:
     <<: [*gcc7, *release, *cxx11_normal, *cuda_p100, *cmake, *legion, *ctest]
-p100_clang7_cxx11_release_cmake_cuda_regent:
-  <<: [*p100, *tests]
-  variables:
-    <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *cmake, *regent]
+# TODO: no Regent+CUDA coverage because p100 uses cuda 9.2 !
+#p100_clang7_cxx11_release_cuda_regent:
+#  <<: [*p100, *tests]
+#  variables:
+#    <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *regent, *short]
+#p100_clang7_cxx11_release_cmake_cuda_regent:
+#  <<: [*p100, *tests]
+#  variables:
+#    <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *cmake, *regent]
 
 # Kokkos tests:
 clang8_cxx14_debug_kokkos_legion:
