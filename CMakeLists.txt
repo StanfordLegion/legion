@@ -287,7 +287,7 @@ endif()
 #------------------------------------------------------------------------------#
 # GASNet configuration
 #------------------------------------------------------------------------------#
-if("${Legion_NETWORKS}" MATCHES .*gasnet1.*)
+if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
   set(GASNet_THREADING par)
   set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
   find_package(GASNet REQUIRED)
@@ -299,7 +299,11 @@ if("${Legion_NETWORKS}" MATCHES .*gasnet1.*)
   )
 
   # define variable for realm_defines.h
-  set(REALM_USE_GASNET1 ON)
+  if("${Legion_NETWORKS}" MATCHES .*gasnetex.*)
+    set(REALM_USE_GASNETEX ON)
+  else()
+    set(REALM_USE_GASNET1 ON)
+  endif()
   string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
   set(GASNET_CONDUIT_${CONDUIT} ON)
   # conduits other than udp support MPI interop

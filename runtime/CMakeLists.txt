@@ -131,6 +131,17 @@ if(REALM_USE_GASNET1)
   )
 endif()
 
+if(REALM_USE_GASNETEX)
+  list(APPEND REALM_SRC
+    realm/gasnetex/gasnetex_module.h
+    realm/gasnetex/gasnetex_module.cc
+    realm/gasnetex/gasnetex_internal.h
+    realm/gasnetex/gasnetex_internal.cc
+    realm/gasnetex/gasnetex_handlers.h
+    realm/gasnetex/gasnetex_handlers.cc
+  )
+endif()
+
 if(REALM_USE_MPI)
   list(APPEND REALM_SRC
     realm/mpi/mpi_module.h
@@ -238,7 +249,7 @@ if(Legion_USE_HWLOC)
   target_link_libraries(RealmRuntime PRIVATE HWLOC::HWLOC)
 endif()
 
-if(REALM_USE_GASNET1)
+if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
   target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
 endif()
 
