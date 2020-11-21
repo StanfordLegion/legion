@@ -1134,7 +1134,7 @@ namespace Realm {
               it2 != local_mems.end();
               ++it2) {
             Memory::Kind kind = (*it2)->get_kind();
-            if((kind != Memory::SYSTEM_MEM) && (kind != Memory::REGDMA_MEM))
+            if((kind != Memory::SYSTEM_MEM) && (kind != Memory::REGDMA_MEM) && (kind != Memory::Z_COPY_MEM))
               continue;
 
             Machine::ProcessorMemoryAffinity pma;
@@ -1143,7 +1143,7 @@ namespace Realm {
 
             // use the same made-up numbers as in
             //  runtime_impl.cc
-            if(kind == Memory::SYSTEM_MEM) {
+            if(kind == Memory::SYSTEM_MEM || kind == Memory::Z_COPY_MEM) {
               pma.bandwidth = 100;  // "large"
               pma.latency = 5;      // "small"
             } else {
