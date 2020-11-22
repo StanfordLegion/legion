@@ -52,7 +52,7 @@ namespace Realm {
 
   class ActiveMessageImpl;
  
-  template <typename T>
+  template <typename T, size_t INLINE_STORAGE = 256>
     class ActiveMessage {
   public:
     // constructs an INACTIVE message object - call init(...) as needed
@@ -142,7 +142,6 @@ namespace Realm {
     ActiveMessageImpl *impl;
     T *header;
     Realm::Serialization::FixedBufferSerializer fbs;
-    static const size_t INLINE_STORAGE = 256;
     uint64_t inline_capacity[INLINE_STORAGE / sizeof(uint64_t)];
   };
 

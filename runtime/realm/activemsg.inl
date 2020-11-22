@@ -27,26 +27,26 @@ namespace Realm {
   
   ////////////////////////////////////////////////////////////////////////
   //
-  // class ActiveMessage<T>
+  // class ActiveMessage<T, INLINE_STORAGE>
   //
 
-  template <typename T>
-  ActiveMessage<T>::ActiveMessage()
+  template <typename T, size_t INLINE_STORAGE>
+  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage()
     : impl(0)
     , header(0)
   {}
 
-  template <typename T>
-  ActiveMessage<T>::ActiveMessage(NodeID _target,
-				  size_t _max_payload_size /*= 0*/)
+  template <typename T, size_t INLINE_STORAGE>
+  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(NodeID _target,
+						  size_t _max_payload_size /*= 0*/)
     : impl(0)
   {
     init(_target, _max_payload_size);
   }
       
-  template <typename T>
-  void ActiveMessage<T>::init(NodeID _target,
-			      size_t _max_payload_size /*= 0*/)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init(NodeID _target,
+					      size_t _max_payload_size /*= 0*/)
   {
     assert(impl == 0);
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
@@ -56,24 +56,24 @@ namespace Realm {
 					       _max_payload_size,
 					       0, 0, 0,
 					       &inline_capacity,
-					       INLINE_STORAGE);
+					       sizeof(inline_capacity));
     header = new(impl->header_base) T;
     fbs.reset(impl->payload_base, impl->payload_size);
   }
     
-  template <typename T>
-  ActiveMessage<T>::ActiveMessage(NodeID _target,
-				  size_t _max_payload_size,
-				  const RemoteAddress& _dest_payload_addr)
+  template <typename T, size_t INLINE_STORAGE>
+  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(NodeID _target,
+						  size_t _max_payload_size,
+						  const RemoteAddress& _dest_payload_addr)
     : impl(0)
   {
     init(_target, _max_payload_size, _dest_payload_addr);
   }
       
-  template <typename T>
-  void ActiveMessage<T>::init(NodeID _target,
-			      size_t _max_payload_size,
-			      const RemoteAddress& _dest_payload_addr)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init(NodeID _target,
+					      size_t _max_payload_size,
+					      const RemoteAddress& _dest_payload_addr)
   {
     assert(impl == 0);
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
@@ -84,22 +84,22 @@ namespace Realm {
 					       0, 0, 0,
 					       _dest_payload_addr,
 					       &inline_capacity,
-					       INLINE_STORAGE);
+					       sizeof(inline_capacity));
     header = new(impl->header_base) T;
     fbs.reset(impl->payload_base, impl->payload_size);
   }
     
-  template <typename T>
-  ActiveMessage<T>::ActiveMessage(const Realm::NodeSet &_targets,
-				  size_t _max_payload_size /*= 0*/)
+  template <typename T, size_t INLINE_STORAGE>
+  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(const Realm::NodeSet &_targets,
+						  size_t _max_payload_size /*= 0*/)
     : impl(0)
   {
     init(_targets, _max_payload_size);
   }
 
-  template <typename T>
-  void ActiveMessage<T>::init(const Realm::NodeSet &_targets,
-			      size_t _max_payload_size /*= 0*/)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init(const Realm::NodeSet &_targets,
+					      size_t _max_payload_size /*= 0*/)
   {
     assert(impl == 0);
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
@@ -109,22 +109,22 @@ namespace Realm {
 					       _max_payload_size,
 					       0, 0, 0,
 					       &inline_capacity,
-					       INLINE_STORAGE);
+					       sizeof(inline_capacity));
     header = new(impl->header_base) T;
     fbs.reset(impl->payload_base, impl->payload_size);
   }
 
-  template <typename T>
-  ActiveMessage<T>::ActiveMessage(NodeID _target, const void *_data,
-				  size_t _datalen)
+  template <typename T, size_t INLINE_STORAGE>
+  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(NodeID _target, const void *_data,
+						  size_t _datalen)
     : impl(0)
   {
     init(_target, _data, _datalen);
   }
     
-  template <typename T>
-  void ActiveMessage<T>::init(NodeID _target, const void *_data,
-			      size_t _datalen)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init(NodeID _target, const void *_data,
+					      size_t _datalen)
   {
     assert(impl == 0);
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
@@ -134,23 +134,23 @@ namespace Realm {
 					       _datalen,
 					       _data, 0, 0,
 					       &inline_capacity,
-					       INLINE_STORAGE);
+					       sizeof(inline_capacity));
     header = new(impl->header_base) T;
   }
     
-  template <typename T>
-  ActiveMessage<T>::ActiveMessage(NodeID _target, const void *_data,
-				  size_t _datalen,
-				  const RemoteAddress& _dest_payload_addr)
+  template <typename T, size_t INLINE_STORAGE>
+  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(NodeID _target, const void *_data,
+						  size_t _datalen,
+						  const RemoteAddress& _dest_payload_addr)
     : impl(0)
   {
     init(_target, _data, _datalen, _dest_payload_addr);
   }
     
-  template <typename T>
-  void ActiveMessage<T>::init(NodeID _target, const void *_data,
-			      size_t _datalen,
-			      const RemoteAddress& _dest_payload_addr)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init(NodeID _target, const void *_data,
+					      size_t _datalen,
+					      const RemoteAddress& _dest_payload_addr)
   {
     assert(impl == 0);
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
@@ -161,21 +161,21 @@ namespace Realm {
 					       _data, 0, 0,
 					       _dest_payload_addr,
 					       &inline_capacity,
-					       INLINE_STORAGE);
+					       sizeof(inline_capacity));
     header = new(impl->header_base) T;
   }
     
-  template <typename T>
-  ActiveMessage<T>::ActiveMessage(const Realm::NodeSet &_targets,
-				  const void *_data, size_t _datalen)
+  template <typename T, size_t INLINE_STORAGE>
+  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(const Realm::NodeSet &_targets,
+						  const void *_data, size_t _datalen)
     : impl(0)
   {
     init(_targets, _data, _datalen);
   }
 
-  template <typename T>
-  void ActiveMessage<T>::init(const Realm::NodeSet &_targets,
-			      const void *_data, size_t _datalen)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init(const Realm::NodeSet &_targets,
+					      const void *_data, size_t _datalen)
   {
     assert(impl == 0);
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
@@ -185,23 +185,23 @@ namespace Realm {
 					       _datalen,
 					       _data, 0, 0,
 					       &inline_capacity,
-					       INLINE_STORAGE);
+					       sizeof(inline_capacity));
     header = new(impl->header_base) T;
   }
 
-  template <typename T>
-  ActiveMessage<T>::ActiveMessage(NodeID _target, const void *_data,
-				  size_t _bytes_per_line, size_t _lines,
-				  size_t _line_stride)
+  template <typename T, size_t INLINE_STORAGE>
+  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(NodeID _target, const void *_data,
+						  size_t _bytes_per_line, size_t _lines,
+						  size_t _line_stride)
     : impl(0)
   {
     init(_target, _data, _bytes_per_line, _lines, _line_stride);
   }
 
-  template <typename T>
-  void ActiveMessage<T>::init(NodeID _target, const void *_data,
-			      size_t _bytes_per_line, size_t _lines,
-			      size_t _line_stride)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init(NodeID _target, const void *_data,
+					      size_t _bytes_per_line, size_t _lines,
+					      size_t _line_stride)
   {
     assert(impl == 0);
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
@@ -211,25 +211,25 @@ namespace Realm {
 					       _bytes_per_line * _lines,
 					       _data, _lines, _line_stride,
 					       &inline_capacity,
-					       INLINE_STORAGE);
+					       sizeof(inline_capacity));
     header = new(impl->header_base) T;
   }
 
-  template <typename T>
-  ActiveMessage<T>::ActiveMessage(NodeID _target, const void *_data,
-				  size_t _bytes_per_line, size_t _lines,
-				  size_t _line_stride,
-				  const RemoteAddress& _dest_payload_addr)
+  template <typename T, size_t INLINE_STORAGE>
+  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(NodeID _target, const void *_data,
+						  size_t _bytes_per_line, size_t _lines,
+						  size_t _line_stride,
+						  const RemoteAddress& _dest_payload_addr)
     : impl(0)
   {
     init(_target, _data, _bytes_per_line, _lines, _line_stride, _dest_payload_addr);
   }
 
-  template <typename T>
-  void ActiveMessage<T>::init(NodeID _target, const void *_data,
-			      size_t _bytes_per_line, size_t _lines,
-			      size_t _line_stride,
-			      const RemoteAddress& _dest_payload_addr)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init(NodeID _target, const void *_data,
+					      size_t _bytes_per_line, size_t _lines,
+					      size_t _line_stride,
+					      const RemoteAddress& _dest_payload_addr)
   {
     assert(impl == 0);
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
@@ -240,23 +240,23 @@ namespace Realm {
 					       _data, _lines, _line_stride,
 					       _dest_payload_addr,
 					       &inline_capacity,
-					       INLINE_STORAGE);
+					       sizeof(inline_capacity));
     header = new(impl->header_base) T;
   }
 
-  template <typename T>
-  ActiveMessage<T>::ActiveMessage(const Realm::NodeSet &_targets,
-				  const void *_data, size_t _bytes_per_line,
-				  size_t _lines, size_t _line_stride)
+  template <typename T, size_t INLINE_STORAGE>
+  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(const Realm::NodeSet &_targets,
+						  const void *_data, size_t _bytes_per_line,
+						  size_t _lines, size_t _line_stride)
     : impl(0)
   {
     init(_targets, _data, _bytes_per_line, _lines, _line_stride);
   }
 
-  template <typename T>
-  void ActiveMessage<T>::init(const Realm::NodeSet &_targets,
-			      const void *_data, size_t _bytes_per_line,
-			      size_t _lines, size_t _line_stride)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init(const Realm::NodeSet &_targets,
+					      const void *_data, size_t _bytes_per_line,
+					      size_t _lines, size_t _line_stride)
   {
     assert(impl == 0);
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
@@ -266,37 +266,37 @@ namespace Realm {
 					       _bytes_per_line * _lines,
 					       _data, _lines, _line_stride,
 					       &inline_capacity,
-					       INLINE_STORAGE);
+					       sizeof(inline_capacity));
     header = new(impl->header_base) T;
   }
 
-  template <typename T>
-  ActiveMessage<T>::~ActiveMessage(void)
+  template <typename T, size_t INLINE_STORAGE>
+  ActiveMessage<T, INLINE_STORAGE>::~ActiveMessage(void)
   {
     assert(impl == 0);
   }
 
   // operator-> gives access to the header structure
-  template <typename T>
-  T *ActiveMessage<T>::operator->(void)
+  template <typename T, size_t INLINE_STORAGE>
+  T *ActiveMessage<T, INLINE_STORAGE>::operator->(void)
   {
     return header;
   }
 
   // variable payload can be written to in three ways:
   //  (a) Realm-style serialization (currently eager)
-  template <typename T>
+  template <typename T, size_t INLINE_STORAGE>
   template <typename T2>
-  bool ActiveMessage<T>::operator<<(const T2& to_append)
+  bool ActiveMessage<T, INLINE_STORAGE>::operator<<(const T2& to_append)
   {
     bool ok = (fbs << to_append);
     return ok;
   }
 
   //  (b) old memcpy-like behavior (using the various payload modes)
-  template <typename T>
-  void ActiveMessage<T>::add_payload(const void *data, size_t datalen,
-				     int payload_mode /*= PAYLOAD_COPY*/)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::add_payload(const void *data, size_t datalen,
+						     int payload_mode /*= PAYLOAD_COPY*/)
   {
     bool ok = fbs.append_bytes(data, datalen);
     assert(ok);
@@ -304,10 +304,10 @@ namespace Realm {
       free(const_cast<void *>(data));
   }
 
-  template <typename T>
-  void ActiveMessage<T>::add_payload(const void *data, size_t bytes_per_line,
-				     size_t lines, size_t line_stride,
-				     int payload_mode /*= PAYLOAD_COPY*/)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::add_payload(const void *data, size_t bytes_per_line,
+						     size_t lines, size_t line_stride,
+						     int payload_mode /*= PAYLOAD_COPY*/)
   {
     // detect case where 2d collapses to 1d
     if(line_stride == bytes_per_line) {
@@ -327,8 +327,8 @@ namespace Realm {
 
   //  (c) request for a pointer to write into (writes must be completed before
   //       call to commit or cancel)
-  template <typename T>
-  void *ActiveMessage<T>::payload_ptr(size_t datalen)
+  template <typename T, size_t INLINE_STORAGE>
+  void *ActiveMessage<T, INLINE_STORAGE>::payload_ptr(size_t datalen)
   {
     char *eob = reinterpret_cast<char *>(impl->payload_base) + impl->payload_size;
     char *curpos = eob - fbs.bytes_left();
@@ -337,9 +337,9 @@ namespace Realm {
     return curpos;
   }
 
-  template <typename T>
+  template <typename T, size_t INLINE_STORAGE>
   template <typename CALLABLE>
-  void ActiveMessage<T>::add_local_completion(const CALLABLE& callable)
+  void ActiveMessage<T, INLINE_STORAGE>::add_local_completion(const CALLABLE& callable)
   {
     assert(impl != 0);
 
@@ -350,9 +350,9 @@ namespace Realm {
     new(ptr) CompletionCallback<CALLABLE>(callable);
   }
 
-  template <typename T>
+  template <typename T, size_t INLINE_STORAGE>
   template <typename CALLABLE>
-  void ActiveMessage<T>::add_remote_completion(const CALLABLE& callable)
+  void ActiveMessage<T, INLINE_STORAGE>::add_remote_completion(const CALLABLE& callable)
   {
     assert(impl != 0);
 
@@ -364,8 +364,8 @@ namespace Realm {
   }
 
   // every active message must eventually be commit()'ed or cancel()'ed
-  template <typename T>
-  void ActiveMessage<T>::commit(void)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::commit(void)
   {
     assert(impl != 0);
 
@@ -383,8 +383,8 @@ namespace Realm {
     impl = 0;
   }
 
-  template <typename T>
-  void ActiveMessage<T>::cancel(void)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::cancel(void)
   {
     assert(impl != 0);
     impl->cancel();
