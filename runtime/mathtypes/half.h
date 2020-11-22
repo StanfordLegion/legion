@@ -303,7 +303,7 @@ struct __half
   }
 
   /// Constructor from float
-  inline __half(float a)
+  inline explicit __half(float a)
   {
     __x = __convert_float_to_halfint(a);
   }
@@ -429,28 +429,21 @@ static inline __half __convert_float_to_half(float a)
   return *reinterpret_cast<__half*>(&result);
 }
 
-namespace std
-{
-
-// put these functions in namespace std so that we can call the
-// std:: versions of them uniformly on arithmetic types
-
-
 static inline __half acos(__half a)
 {
-  return ::acosf(a);
+  return static_cast<__half>(::acosf(static_cast<float>(a)));
 }
 
 
 static inline __half asin(__half a)
 {
-  return ::asinf(a);
+  return static_cast<__half>(::asinf(static_cast<float>(a)));
 }
 
 
 static inline __half atan(__half a)
 {
-  return ::atanf(a);
+  return static_cast<__half>(::atanf(static_cast<float>(a)));
 }
 
 __CUDA_HD__
@@ -463,7 +456,7 @@ static inline __half ceil(__half a)
   return __float2half(ceilf(__half2float(a)));
 #endif
 #else
-  return ::ceilf(a);
+  return static_cast<__half>(::ceilf(static_cast<float>(a)));
 #endif
 }
 
@@ -478,7 +471,7 @@ static inline __half cos(__half a)
   return __float2half(cosf(__half2float(a)));
 #endif
 #else
-  return ::cosf(a);
+  return static_cast<__half>(::cosf(static_cast<float>(a)));
 #endif
 }
 
@@ -492,7 +485,7 @@ static inline __half exp(__half a)
   return __float2half(expf(__half2float(a)));
 #endif
 #else
-  return ::expf(a);
+  return static_cast<__half>(::expf(static_cast<float>(a)));
 #endif
 }
 
@@ -501,12 +494,12 @@ static inline __half fabs(__half a)
 {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 530
-  return __hgt(a, __float2half(0.f)) ? __hneg(a) : a;
+  return __habs(a);
 #else
   return __float2half(fabs(__half2float(a)));
 #endif
 #else
-  return ::fabsf(a);
+  return static_cast<__half>(::fabsf(static_cast<float>(a)));
 #endif
 }
 
@@ -520,7 +513,7 @@ static inline __half floor(__half a)
   return __float2half(floorf(__half2float(a)));
 #endif
 #else
-  return ::floorf(a);
+  return static_cast<__half>(::floorf(static_cast<float>(a)));
 #endif
 }
 
@@ -558,14 +551,14 @@ static inline __half log(__half a)
   return __float2half(logf(__half2float(a)));
 #endif
 #else
-  return ::logf(a);
+  return static_cast<__half>(::logf(static_cast<float>(a)));
 #endif
 }
 
 
 static inline __half pow(__half x, __half exponent)
 {
-  return ::powf(x, exponent);
+  return static_cast<__half>(::powf(static_cast<float>(x), static_cast<float>(exponent)));
 }
 
 __CUDA_HD__
@@ -578,20 +571,20 @@ static inline __half sin(__half a)
   return __float2half(sinf(__half2float(a)));
 #endif
 #else
-  return ::sinf(a);
+  return static_cast<__half>(::sinf(static_cast<float>(a)));
 #endif
 }
 
 
 static inline __half tan(__half a)
 {
-  return ::tanf(a);
+  return static_cast<__half>(::tanf(static_cast<float>(a)));
 }
 
 
 static inline __half tanh(__half a)
 {
-  return ::tanhf(a);
+  return static_cast<__half>(::tanhf(static_cast<float>(a)));
 }
 
 __CUDA_HD__
@@ -604,12 +597,9 @@ static inline __half sqrt(__half a)
   return __float2half(sqrtf(__half2float(a)));
 #endif
 #else
-  return ::sqrtf(a);
+  return static_cast<__half>(::sqrtf(static_cast<float>(a)));
 #endif
 }
-
-
-} // end std
 
 #endif // __HALF_H__
 
