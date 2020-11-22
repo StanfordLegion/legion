@@ -2630,9 +2630,12 @@ class IndexSpace(object):
             if not update.empty():
                 self.shape |= update
 
-    def update_index_sets(self, index_sets):
+    def update_index_sets(self, index_sets, done, total_spaces):
+        done += 1
         if self.shape is None or self.shape.empty():
-            return
+            if not self.state.verbose:
+                print_progress_bar(done, total_spaces, length=50)
+            return done
         if self.state.verbose:
             print('    Reducing index sub-space %s' % self)
         local_points = self.shape.copy()
@@ -2671,10 +2674,13 @@ class IndexSpace(object):
         if not local_points.empty():
             index_set = set()
             index_set.add(self)
-            index_sets[local_points] = index_set   
+            index_sets[local_points] = index_set
+        if not self.state.verbose:
+            print_progress_bar(done, total_spaces, length=50)
         # Traverse the children
         for child in itervalues(self.children):
-            child.update_index_sets(index_sets)                
+            done = child.update_index_sets(index_sets, done, total_spaces)
+        return done
 
     def add_refined_point(self, point):
         if self.point_set is None:
@@ -2699,14 +2705,16 @@ class IndexSpace(object):
         for child in itervalues(self.children):
             child.check_partition_properties()
 
-    def compute_reduced_shapes(self, dim_sets):
+    def compute_reduced_shapes(self, dim_sets, done, total_spaces):
         if self.shape is None or self.shape.empty():
-            return
+            if not self.state.verbose:
+                print_progress_bar(done+1, total_spaces, length=50)
+            return done + 1
         if self.state.verbose:
             print('Reducing %s ...' % self)
         if self.shape.get_dim() not in dim_sets:
             dim_sets[self.shape.get_dim()] = dict()
-        self.update_index_sets(dim_sets[self.shape.get_dim()])
+        return self.update_index_sets(dim_sets[self.shape.get_dim()], done, total_spaces)
 
     def are_all_children_disjoint(self):
         return False
@@ -2902,9 +2910,10 @@ class IndexPartition(object):
                 if self.state.assert_on_warning:
                     assert False
 
-    def update_index_sets(self, index_sets):
+    def update_index_sets(self, index_sets, done, total_spaces):
         for child in itervalues(self.children):
-            child.update_index_sets(index_sets)
+            done = child.update_index_sets(index_sets, done, total_spaces)
+        return done
 
     def are_all_children_disjoint(self):
         return self.disjoint
@@ -11853,9 +11862,13 @@ class State(object):
         # Have to do the same sets across all index spaces
         # with the same dimensions in case of copy across
         dim_sets = dict()
+        done = 0
+        total_spaces = len(self.index_spaces)
         for space in itervalues(self.index_spaces):
             if space.parent is None:
-                space.compute_reduced_shapes(dim_sets)            
+                done = space.compute_reduced_shapes(dim_sets, done, total_spaces)
+        print('Done')
+        print('Computing refinement points...')
         for dim,index_sets in iteritems(dim_sets):
             point_value = 0
             total_sets = len(index_sets)
