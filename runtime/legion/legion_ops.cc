@@ -7443,6 +7443,13 @@ namespace Legion {
     void FenceOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_fence(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void FenceOp::activate_fence(void)
+    //--------------------------------------------------------------------------
+    {
       activate_operation();
       activate_memoizable();
     }
@@ -7451,11 +7458,18 @@ namespace Legion {
     void FenceOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_fence(); 
+      runtime->free_fence_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void FenceOp::deactivate_fence(void)
+    //--------------------------------------------------------------------------
+    {
       deactivate_operation();
       map_applied_conditions.clear();
       execution_preconditions.clear();
       result = Future(); // clear out our future reference
-      runtime->free_fence_op(this);
     }
 
     //--------------------------------------------------------------------------
