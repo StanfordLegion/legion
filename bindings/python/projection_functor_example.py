@@ -58,7 +58,7 @@ def main():
     index_launch([3], hello, P[ID], ID, 0)
 
     # This Seg Fault when running all tests but not when it's the only test:
-    # index_launch([3], hello, P[f(ID)], ID, 1)
+    index_launch([3], hello, P[f(ID)], ID, 1)
 
     index_launch([2], hello, P[ID + 2], ID, 2)
 

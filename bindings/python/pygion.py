@@ -3037,7 +3037,8 @@ class ConcreteLoopIndex(SymbolicExpr):
 
 
 _next_proj_functor_id = 100
-
+engines = []
+programs = []
 
 class ProjectionFunctor(object):
     __slots__ = ["expr", "proj_id"]
@@ -3069,9 +3070,8 @@ class ProjectionFunctor(object):
 
     def compile_and_register(self):
         global _next_proj_functor_id
-        global engine
-        global proj_functor
-        global program
+        global engines
+        global programs
         self.proj_id = _next_proj_functor_id
         _next_proj_functor_id += 1
 
@@ -3092,6 +3092,7 @@ class ProjectionFunctor(object):
         DIM = 1
 
         program = pt.Program("module")
+        programs.append(program)
 
         # Define types:
         legion_region_tree_id_t = pt.Int32_t  # unsigned int
@@ -3250,6 +3251,7 @@ class ProjectionFunctor(object):
         )
 
         engine = program.compile()
+        engines.append(engine)
 
         proj_functor = engine.get_function_address(proj_name)
 
