@@ -4556,6 +4556,7 @@ namespace Legion {
           }
         case EXECUTION_FENCE:
           {
+            const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
             // Do our arrival on our mapping fence, we're mapped when
             // everyone is mapped
             if (!map_applied_conditions.empty())
@@ -4566,8 +4567,11 @@ namespace Legion {
             complete_mapping(mapping_fence_barrier);
             // We arrive on our barrier when all our previous operations
             // have finished executing
-            Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
-                                          execution_precondition);
+            if (!execution_preconditions.empty())
+              Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
+                  Runtime::merge_events(&trace_info, execution_preconditions));
+            else
+              Runtime::phase_barrier_arrive(execution_fence_barrier,1/*count*/);
             // We can always trigger the completion event when these are done
             request_early_complete(execution_fence_barrier);
             if (!execution_fence_barrier.has_triggered())
@@ -5818,8 +5822,7 @@ namespace Legion {
           const RtEvent pending_deletion = 
             current_template->defer_template_deletion();
           if (pending_deletion.exists())
-            execution_precondition = Runtime::merge_events(NULL,
-                execution_precondition, ApEvent(pending_deletion));  
+            execution_preconditions.insert(ApEvent(pending_deletion));
           physical_trace->record_failed_capture(current_template);
         }
         else
@@ -6070,8 +6073,7 @@ namespace Legion {
           const RtEvent pending_deletion = 
             current_template->defer_template_deletion();
           if (pending_deletion.exists())
-            execution_precondition = Runtime::merge_events(NULL,
-                execution_precondition, ApEvent(pending_deletion));  
+            execution_preconditions.insert(ApEvent(pending_deletion));
           physical_trace->record_failed_capture(current_template);
         }
         else
@@ -6341,8 +6343,8 @@ namespace Legion {
         assert(physical_trace->get_current_template() == NULL ||
                !physical_trace->get_current_template()->is_recording());
 #endif
-        execution_precondition =
-          parent_ctx->perform_fence_analysis(this, true, true);
+        parent_ctx->perform_fence_analysis(this, execution_preconditions,
+                                           true/*mapping*/, true/*execution*/);
         physical_trace->set_current_execution_fence_event(
             get_completion_event());
         fence_registered = true;
@@ -6351,8 +6353,8 @@ namespace Legion {
       if (physical_trace->get_current_template() != NULL)
       {
         if (!fence_registered)
-          execution_precondition =
-            parent_ctx->get_current_execution_fence_event();
+          execution_preconditions.insert(
+              parent_ctx->get_current_execution_fence_event());
         ApEvent fence_completion = recurrent ?
           physical_trace->get_previous_template_completion() : 
           get_completion_event();
@@ -6364,8 +6366,8 @@ namespace Legion {
       }
       else if (!fence_registered)
       {
-        execution_precondition =
-          parent_ctx->perform_fence_analysis(this, true, true);
+        parent_ctx->perform_fence_analysis(this, execution_preconditions,
+                                           true/*mapping*/, true/*execution*/);
         physical_trace->set_current_execution_fence_event(
             get_completion_event());
       }

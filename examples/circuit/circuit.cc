@@ -138,13 +138,15 @@ void top_level_task(const Task *task,
   bool simulation_success = true;
   for (int i = 0; i < num_loops; i++)
   {
+    runtime->begin_trace(ctx, 101);
     TaskHelper::dispatch_task<CalcNewCurrentsTask>(cnc_launcher, ctx, runtime, 
                                                    perform_checks, simulation_success);
     TaskHelper::dispatch_task<DistributeChargeTask>(dsc_launcher, ctx, runtime, 
                                                     perform_checks, simulation_success);
+    runtime->issue_execution_fence(ctx);
     TaskHelper::dispatch_task<UpdateVoltagesTask>(upv_launcher, ctx, runtime, 
-                                                  perform_checks, simulation_success,
-                                                  ((i+1)==num_loops));
+                                                  perform_checks, simulation_success);
+    runtime->end_trace(ctx, 101);
   }
   // Execution fence to wait for all prior operations to be done before getting our timing result
   runtime->issue_execution_fence(ctx);

@@ -1235,8 +1235,7 @@ namespace Legion {
           const RtEvent pending_deletion = 
             current_template->defer_template_deletion();
           if (pending_deletion.exists())
-            execution_precondition = Runtime::merge_events(NULL,
-                execution_precondition, ApEvent(pending_deletion));  
+            execution_preconditions.insert(ApEvent(pending_deletion));
           physical_trace->record_failed_capture(current_template);
         }
         else
@@ -1398,8 +1397,7 @@ namespace Legion {
           const RtEvent pending_deletion = 
             current_template->defer_template_deletion();
           if (pending_deletion.exists())
-            execution_precondition = Runtime::merge_events(NULL,
-                execution_precondition, ApEvent(pending_deletion));  
+            execution_preconditions.insert(ApEvent(pending_deletion));
           physical_trace->record_failed_capture(current_template);
         }
         else
@@ -1540,8 +1538,8 @@ namespace Legion {
         assert(physical_trace->get_current_template() == NULL ||
                !physical_trace->get_current_template()->is_recording());
 #endif
-        execution_precondition =
-          parent_ctx->perform_fence_analysis(this, true, true);
+        parent_ctx->perform_fence_analysis(this, execution_preconditions,
+                                           true/*mapping*/, true/*execution*/);
         physical_trace->set_current_execution_fence_event(
             get_completion_event());
         fence_registered = true;
@@ -1550,8 +1548,8 @@ namespace Legion {
       if (physical_trace->get_current_template() != NULL)
       {
         if (!fence_registered)
-          execution_precondition =
-            parent_ctx->get_current_execution_fence_event();
+          execution_preconditions.insert(
+              parent_ctx->get_current_execution_fence_event());
         ApEvent fence_completion =
           recurrent ? physical_trace->get_previous_template_completion()
                     : get_completion_event();
@@ -1563,8 +1561,8 @@ namespace Legion {
       }
       else if (!fence_registered)
       {
-        execution_precondition =
-          parent_ctx->perform_fence_analysis(this, true, true);
+        parent_ctx->perform_fence_analysis(this, execution_preconditions,
+                                           true/*mapping*/, true/*execution*/);
         physical_trace->set_current_execution_fence_event(
             get_completion_event());
       }
