@@ -22,13 +22,14 @@ f = ProjectionFunctor.create(1 + ID)
 
 
 @task(privileges=[R])
-def hello(R, i):
+def hello(R, i, num):
     print("hello from point %s (region %s)" % (i, R.ispace.bounds))
+    assert int(R.ispace.bounds[0, 0]) == int(i + num)
 
 
 @task
 def main():
-    R = Region([10], {"x": pygion.float64})
+    R = Region([4], {"x": pygion.float64})
     P = Partition.equal(R, [4])
     for i in range(4):
         print(
@@ -43,18 +44,23 @@ def main():
     pygion.fill(R, "x", 0)
 
     for i in IndexLaunch([3]):
-        hello(P[f(i)], i)
+        hello(P[f(i)], i, 1)
 
     for i in IndexLaunch([3]):
-        hello(P[i], i)
+        hello(P[i], i, 0)
 
     for i in IndexLaunch([2]):
-        hello(P[i + 2], i)
+        hello(P[i + 2], i, 2)
 
     for i in IndexLaunch([2]):
-        hello(P[i + 2], i)
+        hello(P[i + 2], i, 2)
 
-    index_launch([3], hello, P[ID], ID)
+    index_launch([3], hello, P[ID], ID, 0)
+
+    # This Seg Fault when running all tests but not when it's the only test:
+    # index_launch([3], hello, P[f(ID)], ID, 1)
+
+    index_launch([2], hello, P[ID + 2], ID, 2)
 
 
 if __name__ == "__main__":
