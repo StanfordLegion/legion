@@ -396,8 +396,8 @@ namespace Legion {
       // kinds of operations (like deletions) that want to act like 
       // one-sided fences (e.g. waiting on everything before) but not
       // preventing re-ordering for things afterwards
-      virtual ApEvent perform_fence_analysis(Operation *op, 
-                                        bool mapping, bool execution) = 0;
+      virtual void perform_fence_analysis(Operation *op, 
+          std::set<ApEvent> &preconditions, bool mapping, bool execution) = 0;
       virtual void update_current_fence(FenceOp *op, 
                                         bool mapping, bool execution) = 0;
       virtual void update_current_implicit(Operation *op) = 0;
@@ -1114,8 +1114,8 @@ namespace Legion {
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
       virtual ApEvent get_current_execution_fence_event(void);
-      virtual ApEvent perform_fence_analysis(Operation *op,
-                                             bool mapping, bool execution);
+      virtual void perform_fence_analysis(Operation *op, 
+          std::set<ApEvent> &preconditions, bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
       virtual void update_current_implicit(Operation *op);
@@ -1774,8 +1774,8 @@ namespace Legion {
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
       virtual ApEvent get_current_execution_fence_event(void);
-      virtual ApEvent perform_fence_analysis(Operation *op,
-                                             bool mapping, bool execution);
+      virtual void perform_fence_analysis(Operation *op,
+          std::set<ApEvent> &preconditions, bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
       virtual void update_current_implicit(Operation *op);
@@ -2147,8 +2147,8 @@ namespace Legion {
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
       virtual ApEvent get_current_execution_fence_event(void);
-      virtual ApEvent perform_fence_analysis(Operation *op,
-                                             bool mapping, bool execution);
+      virtual void perform_fence_analysis(Operation *op,
+          std::set<ApEvent> &preconditions, bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
       virtual void update_current_implicit(Operation *op);

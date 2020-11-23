@@ -7464,8 +7464,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InnerContext::perform_fence_analysis(Operation *op, 
-                                                 bool mapping, bool execution)
+    void InnerContext::perform_fence_analysis(Operation *op, 
+               std::set<ApEvent> &previous_events, bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7486,7 +7486,6 @@ namespace Legion {
       }
 #endif
       std::map<Operation*,GenerationID> previous_operations;
-      std::set<ApEvent> previous_events;
       // Take the lock and iterate through our current pending
       // operations and find all the ones with a context index
       // that is less than the index for the fence operation
@@ -7669,9 +7668,6 @@ namespace Legion {
       // before we update the current fence
       if (execution && current_execution_fence_event.exists())
         previous_events.insert(current_execution_fence_event);
-      if (!previous_events.empty())
-        return Runtime::merge_events(NULL, previous_events);
-      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -11517,12 +11513,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent LeafContext::perform_fence_analysis(Operation *op, 
-                                                bool mapping, bool execution)
+    void LeafContext::perform_fence_analysis(Operation *op,
+                 std::set<ApEvent> &preconditions, bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -12902,11 +12897,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InlineContext::perform_fence_analysis(Operation *op, 
-                                                  bool mapping, bool execution)
+    void InlineContext::perform_fence_analysis(Operation *op, 
+                 std::set<ApEvent> &preconditions, bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
-      return enclosing->perform_fence_analysis(op, mapping, execution);
+      enclosing->perform_fence_analysis(op, preconditions, mapping, execution);
     }
 
     //--------------------------------------------------------------------------
