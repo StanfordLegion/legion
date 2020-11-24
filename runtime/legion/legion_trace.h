@@ -623,6 +623,7 @@ namespace Legion {
                       bool recurrent);
       ApEvent get_completion(void) const;
       ApEvent get_completion_for_deletion(void) const;
+      void find_execution_fence_preconditions(std::set<ApEvent> &preconditions);
     public:
       void finalize(Operation *op, bool has_blocking_call);
       void generate_conditions(void);
@@ -844,6 +845,7 @@ namespace Legion {
       std::vector<Memoizable*> remote_memos;
     private:
       CachedMappings cached_mappings;
+      size_t previous_execution_fence;
       bool has_virtual_mapping;
     private:
       ApEvent                         fence_completion;

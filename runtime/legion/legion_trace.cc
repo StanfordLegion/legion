@@ -2252,7 +2252,7 @@ namespace Legion {
       : trace(t), recording(true), replayable(false, "uninitialized"),
         fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
-        has_virtual_mapping(false),
+        previous_execution_fence(0), has_virtual_mapping(false),
         recording_done(Runtime::create_rt_user_event()),
         pre(t->runtime->forest), post(t->runtime->forest),
         pre_reductions(t->runtime->forest), post_reductions(t->runtime->forest),
@@ -2387,6 +2387,30 @@ namespace Legion {
            it != event_map.end(); ++it)
         all_events.insert(it->first);
       return Runtime::merge_events(NULL, all_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::find_execution_fence_preconditions(
+                                               std::set<ApEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // No need for a lock here, the mapping fence protects us
+#ifdef DEBUG_LEGION
+      assert(!events.empty());
+      assert(events.size() == instructions.size());
+#endif
+      // Scan backwards until we find the previous execution fence (if any)
+      for (unsigned idx = events.size() - 1; idx > 0; idx--)
+      {
+        preconditions.insert(events[idx]);
+        if (idx == previous_execution_fence)
+        {
+          previous_execution_fence = instructions.size();
+          return;
+        }
+      }
+      preconditions.insert(events.front());
+      previous_execution_fence = instructions.size();
     }
 
     //--------------------------------------------------------------------------
