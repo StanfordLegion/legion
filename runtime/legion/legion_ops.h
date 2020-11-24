@@ -1523,9 +1523,9 @@ namespace Legion {
       virtual void replay_analysis(void);
       virtual void complete_replay(ApEvent complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
-    public:
-      void deactivate_fence(void);
     protected:
+      void activate_fence(void);
+      void deactivate_fence(void);
       void perform_fence_analysis(bool update_fence = false);
       void update_current_fence(void);
     protected:

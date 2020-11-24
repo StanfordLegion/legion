@@ -1739,6 +1739,7 @@ namespace Legion {
     class SetOpSyncEvent;
     class SetEffects;
     class CompleteReplay;
+    class AcquireRelease;
     class BarrierArrival;
     class BarrierAdvance;
 #ifdef LEGION_GPU_REDUCTIONS

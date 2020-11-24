@@ -824,6 +824,9 @@ namespace Legion {
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
+      virtual void record_reservations(Memoizable *memo, ApEvent &lhs,
+                              const std::map<Reservation,bool> &locks, 
+                              ApEvent precondition, ApEvent postcondition);
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
@@ -1223,6 +1226,7 @@ namespace Legion {
       SET_EFFECTS,
       ASSIGN_FENCE_COMPLETION,
       COMPLETE_REPLAY,
+      ACQUIRE_RELEASE,
       BARRIER_ARRIVAL,
       BARRIER_ADVANCE,
 #ifdef LEGION_GPU_REDUCTIONS
@@ -1253,6 +1257,7 @@ namespace Legion {
       virtual SetOpSyncEvent* as_set_op_sync_event(void) { return NULL; }
       virtual SetEffects* as_set_effects(void) { return NULL; }
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
+      virtual AcquireRelease* as_acquire_release(void) { return NULL; }
       virtual BarrierArrival* as_barrier_arrival(void) { return NULL; }
       virtual BarrierAdvance* as_barrier_advance(void) { return NULL; }
 #ifdef LEGION_GPU_REDUCTIONS
@@ -1560,6 +1565,32 @@ namespace Legion {
     private:
       friend class PhysicalTemplate;
       unsigned rhs;
+    };
+
+    /**
+     * \class AcquireRelease
+     * This instruction has the following semantics:
+     *   events[lhs] = acquire_reservations(events[pre])
+     *   release_reservations(events[post])
+     */
+    class AcquireRelease : public Instruction {
+    public:
+      AcquireRelease(PhysicalTemplate &tpl, unsigned lhs,
+          unsigned pre, unsigned post, const TraceLocalID &tld,
+          const std::map<Reservation,bool> &reservations);
+      virtual void execute(void);
+      virtual std::string to_string(void);
+
+      virtual InstructionKind get_kind(void)
+          { return ACQUIRE_RELEASE; }
+      virtual AcquireRelease* as_acquire_release(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      const std::map<Reservation,bool> reservations;
+      const unsigned lhs;
+      const unsigned pre;
+      const unsigned post;
     };
 
     /**
