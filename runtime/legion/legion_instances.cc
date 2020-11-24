@@ -1791,7 +1791,9 @@ namespace Legion {
       if (!instance_ready.has_triggered())
       {
         DeferDeleteIndividualManager args(this);
-        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, instance_ready);
+        runtime->issue_runtime_meta_task(
+            args, LG_LOW_PRIORITY,
+            Runtime::merge_events(deferred_event, instance_ready));
         return;
       }
 

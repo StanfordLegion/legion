@@ -7871,8 +7871,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InnerContext::perform_fence_analysis(Operation *op, 
-                                                 bool mapping, bool execution)
+    void InnerContext::perform_fence_analysis(Operation *op, 
+               std::set<ApEvent> &previous_events, bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7893,7 +7893,6 @@ namespace Legion {
       }
 #endif
       std::map<Operation*,GenerationID> previous_operations;
-      std::set<ApEvent> previous_events;
       // Take the lock and iterate through our current pending
       // operations and find all the ones with a context index
       // that is less than the index for the fence operation
@@ -8076,9 +8075,6 @@ namespace Legion {
       // before we update the current fence
       if (execution && current_execution_fence_event.exists())
         previous_events.insert(current_execution_fence_event);
-      if (!previous_events.empty())
-        return Runtime::merge_events(NULL, previous_events);
-      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -10059,6 +10055,7 @@ namespace Legion {
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
       trace_recording_barrier = manager->get_trace_recording_barrier();
       summary_fence_barrier = manager->get_summary_fence_barrier();
+      replay_fence_barrier = manager->get_replay_fence_barrier();
       execution_fence_barrier = manager->get_execution_fence_barrier();
       attach_broadcast_barrier = manager->get_attach_broadcast_barrier();
       attach_reduce_barrier = manager->get_attach_reduce_barrier();
@@ -18336,6 +18333,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApBarrier ReplicateContext::get_next_replay_fence_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      const ApBarrier result = replay_fence_barrier;
+      // screw this for now, if we overflow then go to neweq where this is fixed
+      assert(result.exists()); 
+      Runtime::advance_barrier(replay_fence_barrier);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     RtBarrier ReplicateContext::get_next_trace_recording_barrier(void)
     //--------------------------------------------------------------------------
     {
@@ -20592,12 +20600,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent LeafContext::perform_fence_analysis(Operation *op, 
-                                                bool mapping, bool execution)
+    void LeafContext::perform_fence_analysis(Operation *op,
+                 std::set<ApEvent> &preconditions, bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -22078,11 +22085,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InlineContext::perform_fence_analysis(Operation *op, 
-                                                  bool mapping, bool execution)
+    void InlineContext::perform_fence_analysis(Operation *op, 
+                 std::set<ApEvent> &preconditions, bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
-      return enclosing->perform_fence_analysis(op, mapping, execution);
+      enclosing->perform_fence_analysis(op, preconditions, mapping, execution);
     }
 
     //--------------------------------------------------------------------------

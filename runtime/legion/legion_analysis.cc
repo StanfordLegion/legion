@@ -972,6 +972,52 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_reservations(Memoizable *memo,
+                  ApEvent &lhs, const std::map<Reservation,bool> &reservations,
+                  ApEvent precondition, ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        RtUserEvent done = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_ACQUIRE_RELEASE);
+          rez.serialize(done);
+          rez.serialize(&lhs);
+          rez.serialize(lhs);
+          rez.serialize(precondition);
+          rez.serialize(postcondition);
+          rez.serialize<size_t>(reservations.size());
+          for (std::map<Reservation,bool>::const_iterator it =
+                reservations.begin(); it != reservations.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize<bool>(it->second);
+          }
+          memo->pack_remote_memoizable(rez, origin_space);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        // Wait to see if lhs changes
+        done.wait();
+      }
+      else
+        remote_tpl->record_reservations(memo, lhs, reservations, 
+                                        precondition, postcondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_barrier(Memoizable *memo,
+                                             ApBarrier lhs, ApEvent rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called on remote nodes
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ RemoteTraceRecorder* RemoteTraceRecorder::unpack_remote_recorder(
                         Deserializer &derez, Runtime *runtime, Memoizable *memo)
     //--------------------------------------------------------------------------
@@ -1069,15 +1115,15 @@ namespace Legion {
           {
             RtUserEvent done;
             derez.deserialize(done);
-            ApUserEvent *event_ptr;
+            ApEvent *event_ptr;
             derez.deserialize(event_ptr);
-            ApUserEvent lhs;
+            ApEvent lhs;
             derez.deserialize(lhs);
             Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
                                                            NULL/*op*/, runtime);
             size_t num_rhs;
             derez.deserialize(num_rhs);
-            const ApUserEvent lhs_copy = lhs;
+            const ApEvent lhs_copy = lhs;
             if (num_rhs == 2)
             {
               ApEvent e1, e2;
@@ -1574,6 +1620,47 @@ namespace Legion {
               delete memo;
             break;
           }
+        case REMOTE_TRACE_ACQUIRE_RELEASE:
+          {
+            RtUserEvent done;
+            derez.deserialize(done);
+            ApEvent *event_ptr;
+            derez.deserialize(event_ptr);
+            ApEvent lhs, precondition, postcondition;
+            derez.deserialize(lhs);
+            derez.deserialize(precondition);
+            derez.deserialize(postcondition);
+            size_t num_reservations;
+            derez.deserialize(num_reservations);
+            std::map<Reservation,bool> reservations;
+            for (unsigned idx = 0; idx < num_reservations; idx++)
+            {
+              Reservation reservation;
+              derez.deserialize(reservation);
+              derez.deserialize<bool>(reservations[reservation]);
+            }
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            const ApEvent lhs_copy = lhs;
+            tpl->record_reservations(memo, lhs, reservations,
+                                     precondition, postcondition);
+            if (lhs != lhs_copy)
+            {
+              Serializer rez;
+              {
+                RezCheck z2(rez);
+                rez.serialize(event_ptr);
+                rez.serialize(lhs);
+                rez.serialize(done);
+              }
+              runtime->send_remote_trace_response(source, rez);
+            }
+            else // didn't change so just trigger
+              Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
+            break;
+          }
         default:
           assert(false);
       }
@@ -1598,7 +1685,7 @@ namespace Legion {
         case REMOTE_TRACE_GPU_REDUCTION:
 #endif
           {
-            ApUserEvent *event_ptr;
+            ApEvent *event_ptr;
             derez.deserialize(event_ptr);
             derez.deserialize(*event_ptr);
             RtUserEvent done;

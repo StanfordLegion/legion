@@ -1489,7 +1489,8 @@ namespace Legion {
      * Fences all support the optional ability to be an 
      * execution fence.
      */
-    class FenceOp : public Operation, public LegionHeapify<FenceOp> {
+    class FenceOp : public MemoizableOp<Operation>, 
+                    public LegionHeapify<FenceOp> {
     public:
       enum FenceKind {
         MAPPING_FENCE,
@@ -1519,15 +1520,18 @@ namespace Legion {
 #ifdef LEGION_SPY
       virtual void trigger_complete(void);
 #endif
-    public:
-      void deactivate_fence(void);
+      virtual void replay_analysis(void);
+      virtual void complete_replay(ApEvent complete_event);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
     protected:
+      void activate_fence(void);
+      void deactivate_fence(void);
       void perform_fence_analysis(bool update_fence = false);
       void update_current_fence(void);
     protected:
       FenceKind fence_kind;
       std::set<RtEvent> map_applied_conditions;
-      ApEvent execution_precondition;
+      std::set<ApEvent> execution_preconditions;
       Future result;
     };
 

@@ -512,6 +512,7 @@ namespace Legion {
         "Defer Physical Analysis Update Stage",                   \
         "Defer Physical Analysis Output Stage",                   \
         "Defer Instance Manager Registration",                    \
+        "Defer Instance Manager Deletion",                        \
         "Defer Reduction Manager Registration",                   \
         "Defer Verify Partition",                                 \
         "Defer Release Acquired Instances",                       \
@@ -1739,6 +1740,9 @@ namespace Legion {
     class SetOpSyncEvent;
     class SetEffects;
     class CompleteReplay;
+    class AcquireReplay;
+    class ReleaseReplay;
+    class BarrierReplay;
     class BarrierArrival;
     class BarrierAdvance;
 #ifdef LEGION_GPU_REDUCTIONS
