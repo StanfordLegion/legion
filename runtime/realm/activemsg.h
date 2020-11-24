@@ -338,7 +338,7 @@ namespace Realm {
     ~IncomingMessageManager(void);
 
     typedef uintptr_t CallbackData;
-    typedef void (*CallbackFnptr)(NodeID, CallbackData);
+    typedef void (*CallbackFnptr)(NodeID, CallbackData, CallbackData);
 
     // adds an incoming message to the queue
     // returns true if the call was handled immediately (in which case the
@@ -351,7 +351,8 @@ namespace Realm {
 			      const void *payload, size_t payload_size,
 			      int payload_mode,
 			      CallbackFnptr callback_fnptr,
-			      CallbackData callback_data,
+			      CallbackData callback_data1,
+			      CallbackData callback_data2,
 			      TimeLimit work_until);
 
     void start_handler_threads(size_t stack_size);
@@ -380,7 +381,7 @@ namespace Realm {
       size_t payload_size;
       bool payload_needs_free;
       CallbackFnptr callback_fnptr;
-      CallbackData callback_data;
+      CallbackData callback_data1, callback_data2;
     };
 
     struct MessageBlock {

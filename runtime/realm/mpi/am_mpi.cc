@@ -101,14 +101,16 @@ void AM_init_long_messages(MPI_Win win, void *am_base,
     g_message_manager = message_manager;
 }
 
-static void incoming_message_handled(NodeID sender, uintptr_t data)
+static void incoming_message_handled(NodeID sender,
+				     uintptr_t comp_ptr,
+				     uintptr_t /*unused*/)
 {
     struct AM_msg msg;
     msg.type = 3; // completion reply
     msg.msgid = 0x7fff; // no hander needed
     msg.header_size = 0;
     msg.payload_size = 0;
-    msg.comp_ptr = data;
+    msg.comp_ptr = comp_ptr;
 
     CHECK_MPI( MPI_Send(&msg, AM_MSG_HEADER_SIZE, MPI_CHAR,
 			sender, 0x1, MPI_COMM_WORLD) );
@@ -171,6 +173,7 @@ void AMPoll()
 								      incoming_message_handled :
 								      0),
 								   msg->comp_ptr,
+								   0,
 								   TimeLimit());
 	    if (handled)
 	        completion = msg->comp_ptr;
@@ -181,7 +184,7 @@ void AMPoll()
         buf_recv = buf_recv_list[i_recv_list];
 
 	if (completion)
-            incoming_message_handled(tn_src, completion);
+	  incoming_message_handled(tn_src, completion, 0);
     }
 
 }
