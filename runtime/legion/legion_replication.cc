@@ -5204,6 +5204,9 @@ namespace Legion {
           }
         case EXECUTION_FENCE:
           {
+            // If we're recording find all the prior event dependences
+            if (is_recording())
+              tpl->find_execution_fence_preconditions(execution_preconditions);
             const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
             // Do our arrival on our mapping fence, we're mapped when
             // everyone is mapped
@@ -6407,7 +6410,7 @@ namespace Legion {
     void ReplTraceCaptureOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      ReplTraceOp::activate();
       current_template = NULL;
       replayable_collective_id = 0;
       has_blocking_call = false;
@@ -6418,7 +6421,7 @@ namespace Legion {
     void ReplTraceCaptureOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_fence();
       runtime->free_repl_capture_op(this);
     }
 
@@ -6617,7 +6620,7 @@ namespace Legion {
     void ReplTraceCompleteOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      ReplTraceOp::activate();
       current_template = NULL;
       template_completion = ApEvent::NO_AP_EVENT;
       replayable_collective_id = 0;
@@ -6629,7 +6632,7 @@ namespace Legion {
     void ReplTraceCompleteOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_fence();
       runtime->free_repl_trace_op(this);
     }
 
@@ -6877,14 +6880,14 @@ namespace Legion {
     void ReplTraceReplayOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      ReplTraceOp::activate();
     }
 
     //--------------------------------------------------------------------------
     void ReplTraceReplayOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_fence();
       runtime->free_repl_replay_op(this);
     }
 
@@ -7102,14 +7105,14 @@ namespace Legion {
     void ReplTraceBeginOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      ReplTraceOp::activate();
     }
 
     //--------------------------------------------------------------------------
     void ReplTraceBeginOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_fence();
       runtime->free_repl_begin_op(this);
     }
 
@@ -7173,7 +7176,6 @@ namespace Legion {
       // analysis stage of the pipeline and we need to get our mapping
       // fence from a different location to avoid racing with the application
       initialize(ctx, MAPPING_FENCE, false/*need future*/, false/*track*/);
-      mapping_fence_barrier = ctx->get_next_summary_fence_barrier();
       context_index = invalidator->get_ctx_index();
       current_template = tpl;
       // The summary could have been marked as being traced,
@@ -7186,7 +7188,7 @@ namespace Legion {
     void ReplTraceSummaryOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      ReplTraceOp::activate();
       current_template = NULL;
     }
 
