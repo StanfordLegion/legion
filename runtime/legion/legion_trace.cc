@@ -2905,11 +2905,16 @@ namespace Legion {
               used[gen[complete->rhs]] = true;
               break;
             }
-          case ACQUIRE_RELEASE:
+          case ACQUIRE_REPLAY:
             {
-              AcquireRelease *acquire_release = inst->as_acquire_release();
-              used[gen[acquire_release->pre]] = true;
-              used[gen[acquire_release->post]] = true;
+              AcquireReplay *acquire = inst->as_acquire_replay();
+              used[gen[acquire->rhs]] = true;
+              break;
+            }
+          case RELEASE_REPLAY:
+            {
+              ReleaseReplay *release = inst->as_release_replay();
+              used[gen[release->rhs]] = true;
               break;
             }
           case GET_TERM_EVENT:
@@ -3116,7 +3121,7 @@ namespace Legion {
           unsigned *event_to_check = NULL;
           switch (inst->get_kind())
           {
-            case TRIGGER_EVENT :
+            case TRIGGER_EVENT:
               {
                 event_to_check = &inst->as_trigger_event()->rhs;
                 break;
@@ -3126,12 +3131,12 @@ namespace Legion {
                 event_to_check = &inst->as_barrier_arrival()->rhs;
                 break;
               }
-            case ISSUE_COPY :
+            case ISSUE_COPY:
               {
                 event_to_check = &inst->as_issue_copy()->precondition_idx;
                 break;
               }
-            case ISSUE_FILL :
+            case ISSUE_FILL:
               {
                 event_to_check = &inst->as_issue_fill()->precondition_idx;
                 break;
@@ -3143,14 +3148,24 @@ namespace Legion {
                 break;
               }
 #endif
-            case SET_EFFECTS :
+            case SET_EFFECTS:
               {
                 event_to_check = &inst->as_set_effects()->rhs;
                 break;
               }
-            case COMPLETE_REPLAY :
+            case COMPLETE_REPLAY:
               {
                 event_to_check = &inst->as_complete_replay()->rhs;
+                break;
+              }
+            case ACQUIRE_REPLAY:
+              {
+                event_to_check = &inst->as_acquire_replay()->rhs;
+                break;
+              }
+            case RELEASE_REPLAY:
+              {
+                event_to_check = &inst->as_release_replay()->rhs;
                 break;
               }
             default:
@@ -3326,6 +3341,17 @@ namespace Legion {
               outgoing[replay->rhs].push_back(lhs);
               break;
             }
+          case ACQUIRE_REPLAY:
+            {
+              AcquireReplay *acquire = inst->as_acquire_replay();
+              incoming[acquire->lhs].push_back(acquire->rhs);
+              outgoing[acquire->rhs].push_back(acquire->lhs);
+              break;
+            }
+          case RELEASE_REPLAY:
+            {
+              break;
+            }
           default:
             {
               assert(false);
@@ -3495,19 +3521,19 @@ namespace Legion {
         int lhs = -1;
         switch (inst->get_kind())
         {
-          case GET_TERM_EVENT :
+          case GET_TERM_EVENT:
             {
               GetTermEvent *term = inst->as_get_term_event();
               lhs = term->lhs;
               break;
             }
-          case CREATE_AP_USER_EVENT :
+          case CREATE_AP_USER_EVENT:
             {
               CreateApUserEvent *create = inst->as_create_ap_user_event();
               lhs = create->lhs;
               break;
             }
-          case TRIGGER_EVENT :
+          case TRIGGER_EVENT:
             {
               TriggerEvent *trigger = inst->as_trigger_event();
               int subst = substs[trigger->rhs];
@@ -3521,7 +3547,7 @@ namespace Legion {
               if (subst >= 0) arrival->rhs = (unsigned)subst;
               break;
             }
-          case MERGE_EVENT :
+          case MERGE_EVENT:
             {
               MergeEvent *merge = inst->as_merge_event();
               std::set<unsigned> new_rhs;
@@ -3536,7 +3562,7 @@ namespace Legion {
               lhs = merge->lhs;
               break;
             }
-          case ISSUE_COPY :
+          case ISSUE_COPY:
             {
               IssueCopy *copy = inst->as_issue_copy();
               int subst = substs[copy->precondition_idx];
@@ -3544,7 +3570,7 @@ namespace Legion {
               lhs = copy->lhs;
               break;
             }
-          case ISSUE_FILL :
+          case ISSUE_FILL:
             {
               IssueFill *fill = inst->as_issue_fill();
               int subst = substs[fill->precondition_idx];
@@ -3562,14 +3588,14 @@ namespace Legion {
               break;
             }
 #endif
-          case SET_EFFECTS :
+          case SET_EFFECTS:
             {
               SetEffects *effects = inst->as_set_effects();
               int subst = substs[effects->rhs];
               if (subst >= 0) effects->rhs = (unsigned)subst;
               break;
             }
-          case SET_OP_SYNC_EVENT :
+          case SET_OP_SYNC_EVENT:
             {
               SetOpSyncEvent *sync = inst->as_set_op_sync_event();
               lhs = sync->lhs;
@@ -3581,16 +3607,31 @@ namespace Legion {
               lhs = advance->lhs;
               break;
             }
-          case ASSIGN_FENCE_COMPLETION :
+          case ASSIGN_FENCE_COMPLETION:
             {
               lhs = fence_completion_id;
               break;
             }
-          case COMPLETE_REPLAY :
+          case COMPLETE_REPLAY:
             {
               CompleteReplay *replay = inst->as_complete_replay();
               int subst = substs[replay->rhs];
               if (subst >= 0) replay->rhs = (unsigned)subst;
+              break;
+            }
+          case ACQUIRE_REPLAY:
+            {
+              AcquireReplay *acquire = inst->as_acquire_replay();
+              int subst = substs[acquire->rhs];
+              if (subst >= 0) acquire->rhs = (unsigned)subst;
+              lhs = acquire->lhs;
+              break;
+            }
+          case RELEASE_REPLAY:
+            {
+              ReleaseReplay *release = inst->as_release_replay();
+              int subst = substs[release->rhs];
+              if (subst >= 0) release->rhs = (unsigned)subst;
               break;
             }
           default:
@@ -3687,6 +3728,24 @@ namespace Legion {
               used[gen[complete->rhs]] = true;
               break;
             }
+          case ACQUIRE_REPLAY:
+            {
+              AcquireReplay *acquire = inst->as_acquire_replay();
+ #ifdef DEBUG_LEGION
+              assert(gen[acquire->rhs] != -1U);
+#endif
+              used[gen[acquire->rhs]] = true;             
+              break;
+            }
+          case RELEASE_REPLAY:
+            {
+              ReleaseReplay *release = inst->as_release_replay();
+ #ifdef DEBUG_LEGION
+              assert(gen[release->rhs] != -1U);
+#endif
+              used[gen[release->rhs]] = true;             
+              break;
+            }
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
@@ -3694,7 +3753,6 @@ namespace Legion {
               assert(gen[arrival->rhs] != -1U);
 #endif
               used[gen[arrival->rhs]] = true;
-              break;
             }
           case GET_TERM_EVENT:
           case CREATE_AP_USER_EVENT:
@@ -4562,8 +4620,9 @@ namespace Legion {
       }
 #endif
       const unsigned lhs_ = find_or_convert_event(lhs);
-      insert_instruction(
-          new AcquireRelease(*this, lhs_, pre, post, tld, reservations));
+      insert_instruction(new AcquireReplay(*this, lhs_, pre, tld,reservations));
+      events.push_back(ApEvent());
+      insert_instruction(new ReleaseReplay(*this, post, tld, reservations));
     }
 
     //--------------------------------------------------------------------------
@@ -7587,49 +7646,82 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // AcquireRelease
+    // AcquireReplay
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    AcquireRelease::AcquireRelease(PhysicalTemplate &tpl, unsigned lhs_,
-                         unsigned pre_, unsigned post_, const TraceLocalID &tld,
+    AcquireReplay::AcquireReplay(PhysicalTemplate &tpl, unsigned lhs_,
+                         unsigned rhs_, const TraceLocalID &tld,
                          const std::map<Reservation,bool> &reservations_)
       : Instruction(tpl, tld), reservations(reservations_), 
-        lhs(lhs_), pre(pre_), post(post_)
+        lhs(lhs_), rhs(rhs_)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(operations.find(owner) != operations.end());
       assert(lhs < events.size());
-      assert(pre < events.size());
-      assert(post < events.size());
+      assert(rhs < events.size());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void AcquireRelease::execute(void)
+    void AcquireReplay::execute(void)
     //--------------------------------------------------------------------------
     {
-      ApEvent precondition = events[pre];
-      const ApEvent postcondition = events[post];
+      ApEvent precondition = events[rhs];
       for (std::map<Reservation,bool>::const_iterator it = 
             reservations.begin(); it != reservations.end(); it++)
-      {
         precondition = 
           Runtime::acquire_ap_reservation(it->first, it->second, precondition);
-        Runtime::release_reservation(it->first, postcondition);
-      }
       events[lhs] = precondition;
     }
 
     //--------------------------------------------------------------------------
-    std::string AcquireRelease::to_string(void)
+    std::string AcquireReplay::to_string(void)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
-      ss << "events[" << lhs << "] = acquire_reservations(events[" << pre 
-         << "])   (owner: " << owner << ")   release_reservations(events[" 
-         << post << "])";
+      ss << "events[" << lhs << "] = acquire_reservations(events[" << rhs
+         << "])   (owner: " << owner << ")"; 
+      return ss.str();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ReleaseReplay
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReleaseReplay::ReleaseReplay(PhysicalTemplate &tpl,
+                         unsigned rhs_, const TraceLocalID &tld,
+                         const std::map<Reservation,bool> &reservations_)
+      : Instruction(tpl, tld), reservations(reservations_), rhs(rhs_)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(owner) != operations.end());
+      assert(rhs < events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseReplay::execute(void)
+    //--------------------------------------------------------------------------
+    {
+      const ApEvent precondition = events[rhs];
+      for (std::map<Reservation,bool>::const_iterator it = 
+            reservations.begin(); it != reservations.end(); it++)
+        Runtime::release_reservation(it->first, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    std::string ReleaseReplay::to_string(void)
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "operations[" << owner << "].release_reservations(events["
+         << rhs << "])   (op kind: "
+         << Operation::op_names[operations[owner]->get_memoizable_kind()] 
+         << ")";
       return ss.str();
     }
 

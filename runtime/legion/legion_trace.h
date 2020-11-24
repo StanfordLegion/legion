@@ -1226,7 +1226,8 @@ namespace Legion {
       SET_EFFECTS,
       ASSIGN_FENCE_COMPLETION,
       COMPLETE_REPLAY,
-      ACQUIRE_RELEASE,
+      ACQUIRE_REPLAY,
+      RELEASE_REPLAY,
       BARRIER_ARRIVAL,
       BARRIER_ADVANCE,
 #ifdef LEGION_GPU_REDUCTIONS
@@ -1257,7 +1258,8 @@ namespace Legion {
       virtual SetOpSyncEvent* as_set_op_sync_event(void) { return NULL; }
       virtual SetEffects* as_set_effects(void) { return NULL; }
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
-      virtual AcquireRelease* as_acquire_release(void) { return NULL; }
+      virtual AcquireReplay* as_acquire_replay(void) { return NULL; }
+      virtual ReleaseReplay* as_release_replay(void) { return NULL; }
       virtual BarrierArrival* as_barrier_arrival(void) { return NULL; }
       virtual BarrierAdvance* as_barrier_advance(void) { return NULL; }
 #ifdef LEGION_GPU_REDUCTIONS
@@ -1568,29 +1570,50 @@ namespace Legion {
     };
 
     /**
-     * \class AcquireRelease
+     * \class AcquireReplay
      * This instruction has the following semantics:
      *   events[lhs] = acquire_reservations(events[pre])
-     *   release_reservations(events[post])
      */
-    class AcquireRelease : public Instruction {
+    class AcquireReplay : public Instruction {
     public:
-      AcquireRelease(PhysicalTemplate &tpl, unsigned lhs,
-          unsigned pre, unsigned post, const TraceLocalID &tld,
+      AcquireReplay(PhysicalTemplate &tpl, unsigned lhs,
+          unsigned rhs, const TraceLocalID &tld,
           const std::map<Reservation,bool> &reservations);
       virtual void execute(void);
       virtual std::string to_string(void);
 
       virtual InstructionKind get_kind(void)
-          { return ACQUIRE_RELEASE; }
-      virtual AcquireRelease* as_acquire_release(void)
+        { return ACQUIRE_REPLAY; }
+      virtual AcquireReplay * as_acquire_replay(void)
         { return this; }
     private:
       friend class PhysicalTemplate;
       const std::map<Reservation,bool> reservations;
-      const unsigned lhs;
-      const unsigned pre;
-      const unsigned post;
+      unsigned lhs;
+      unsigned rhs;
+    };
+
+    /**
+     * \class ReleaseReplay
+     * This instruction has the following semantics:
+     *   release_reservations(events[pre])
+     */
+    class ReleaseReplay : public Instruction {
+    public:
+      ReleaseReplay(PhysicalTemplate &tpl, 
+          unsigned rhs, const TraceLocalID &tld,
+          const std::map<Reservation,bool> &reservations);
+      virtual void execute(void);
+      virtual std::string to_string(void);
+
+      virtual InstructionKind get_kind(void)
+        { return RELEASE_REPLAY; }
+      virtual ReleaseReplay * as_release_replay(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      const std::map<Reservation,bool> reservations;
+      unsigned rhs;
     };
 
     /**
