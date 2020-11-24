@@ -6529,7 +6529,11 @@ namespace Legion {
 #endif
       // Do this first in case it gets pre-empted
       const unsigned pre = find_event(rhs, tpl_lock);
+#ifdef DEBUG_LEGION
       const unsigned post = convert_event(lhs, false/*check*/);
+#else
+      const unsigned post = convert_event(lhs);
+#endif
 
       insert_instruction(
         new BarrierReplay(*this, tld, post, pre, replay_barrier_generations++));
