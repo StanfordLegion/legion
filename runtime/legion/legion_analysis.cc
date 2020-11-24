@@ -15255,8 +15255,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(local_valid > 0);
 #endif
-        // Add a base GC ref from our parent
-        add_base_gc_ref(REMOTE_DID_REF);
         add_base_valid_ref(CONTEXT_REF, NULL, local_valid);
       }
       init_collective_refs = false;
