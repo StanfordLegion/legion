@@ -395,6 +395,36 @@ bishop_slice_cache_add_entry(bishop_slice_cache_t cache_,
   (*cache)[CObjectWrapper::unwrap(domain_)] = output->slices;
 }
 
+coord_t
+bishop_domain_point_linearize(legion_domain_point_t point_,
+                              legion_domain_t domain_,
+                              legion_task_t task_)
+{
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  Task *task = CObjectWrapper::unwrap(task_);
+
+  if (!task->is_index_space || point.get_dim() == 0) return 0;
+
+#ifdef DEBUG_LEGION
+  assert(domain.dense());
+  assert(point.get_dim() == domain.get_dim());
+#endif
+
+  int dim = domain.get_dim();
+  coord_t linearized = 0;
+  std::vector<coord_t> sizes(dim);
+  DomainPoint lo = domain.lo();
+  DomainPoint hi = domain.hi();
+
+  for (int i = 0; i < dim; ++i)
+    sizes[i] = hi[i] - lo[i] + 1;
+  linearized = point[dim - 1];
+  for (int i = dim - 2; i >= 0; --i)
+    linearized = linearized * sizes[i] + point[i];
+  return linearized;
+}
+
 void
 bishop_logger_info(const char* msg, ...)
 {
