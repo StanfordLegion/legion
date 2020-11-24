@@ -1741,6 +1741,7 @@ namespace Legion {
     class CompleteReplay;
     class AcquireReplay;
     class ReleaseReplay;
+    class BarrierReplay;
     class BarrierArrival;
     class BarrierAdvance;
 #ifdef LEGION_GPU_REDUCTIONS
