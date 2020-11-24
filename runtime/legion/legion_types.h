@@ -510,6 +510,7 @@ namespace Legion {
         "Defer Physical Analysis Update Stage",                   \
         "Defer Physical Analysis Output Stage",                   \
         "Defer Instance Manager Registration",                    \
+        "Defer Instance Manager Deletion",                        \
         "Defer Reduction Manager Registration",                   \
         "Defer Verify Partition",                                 \
         "Defer Remove Remote Region Tree Flow Back References",   \
