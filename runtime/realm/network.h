@@ -113,7 +113,32 @@ namespace Realm {
 						  size_t src_payload_line_stride,
 						  void *storage_base,
 						  size_t storage_size);
-    
+
+    size_t recommended_max_payload(NodeID target, bool with_congestion,
+				   size_t header_size);
+    size_t recommended_max_payload(const NodeSet& targets,
+				   bool with_congestion,
+				   size_t header_size);
+    size_t recommended_max_payload(NodeID target,
+				   const RemoteAddress& dest_payload_addr,
+				   bool with_congestion,
+				   size_t header_size);
+    size_t recommended_max_payload(NodeID target,
+				   const void *data, size_t bytes_per_line,
+				   size_t lines, size_t line_stride,
+				   bool with_congestion,
+				   size_t header_size);
+    size_t recommended_max_payload(const NodeSet& targets,
+				   const void *data, size_t bytes_per_line,
+				   size_t lines, size_t line_stride,
+				   bool with_congestion,
+				   size_t header_size);
+    size_t recommended_max_payload(NodeID target,
+				   const void *data, size_t bytes_per_line,
+				   size_t lines, size_t line_stride,
+				   const RemoteAddress& dest_payload_addr,
+				   bool with_congestion,
+				   size_t header_size);
   };
 
   class NetworkSegment;
@@ -192,6 +217,33 @@ namespace Realm {
 							  size_t src_payload_line_stride,
 							  void *storage_base,
 							  size_t storage_size) = 0;
+
+    virtual size_t recommended_max_payload(NodeID target,
+					   bool with_congestion,
+					   size_t header_size) = 0;
+    virtual size_t recommended_max_payload(const NodeSet& targets,
+					   bool with_congestion,
+					   size_t header_size) = 0;
+    virtual size_t recommended_max_payload(NodeID target,
+					   const RemoteAddress& dest_payload_addr,
+					   bool with_congestion,
+					   size_t header_size) = 0;
+    virtual size_t recommended_max_payload(NodeID target,
+					   const void *data, size_t bytes_per_line,
+					   size_t lines, size_t line_stride,
+					   bool with_congestion,
+					   size_t header_size) = 0;
+    virtual size_t recommended_max_payload(const NodeSet& targets,
+					   const void *data, size_t bytes_per_line,
+					   size_t lines, size_t line_stride,
+					   bool with_congestion,
+					   size_t header_size) = 0;
+    virtual size_t recommended_max_payload(NodeID target,
+					   const void *data, size_t bytes_per_line,
+					   size_t lines, size_t line_stride,
+					   const RemoteAddress& dest_payload_addr,
+					   bool with_congestion,
+					   size_t header_size) = 0;
   };
 
   class NetworkSegment {

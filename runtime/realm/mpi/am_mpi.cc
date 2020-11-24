@@ -15,6 +15,9 @@
 
 #include "am_mpi.h"
 
+#define AM_MSG_HEADER_SIZE (4 * sizeof(int) + sizeof(uintptr_t))
+#define AM_BUF_SIZE_W_HEADER  (AM_BUF_SIZE + AM_MSG_HEADER_SIZE)
+
 
 static MPI_Win g_am_win = MPI_WIN_NULL;
 static void *g_am_base = NULL;
@@ -22,7 +25,7 @@ static Realm::IncomingMessageManager *g_message_manager = NULL;
 static REALM_THREAD_LOCAL int thread_id = 0;
 static REALM_THREAD_LOCAL int am_seq = 0;
 static Realm::atomic<unsigned int> num_threads(0);
-static unsigned char buf_recv_list[AM_BUF_COUNT][1024];
+static unsigned char buf_recv_list[AM_BUF_COUNT][AM_BUF_SIZE_W_HEADER];
 static unsigned char *buf_recv = buf_recv_list[0];
 static MPI_Request req_recv_list[AM_BUF_COUNT];
 static int n_am_mult_recv = 5;
@@ -36,8 +39,6 @@ namespace Realm {
 namespace MPI {
 
   atomic<size_t> messages_sent(0);
-
-#define AM_MSG_HEADER_SIZE (4 * sizeof(int) + sizeof(uintptr_t))
 
 
 void AM_Init(int *p_node_this, int *p_node_size)
@@ -64,7 +65,7 @@ void AM_Init(int *p_node_this, int *p_node_size)
         n_am_mult_recv = atoi(s);
     }
     for (int  i = 0; i<n_am_mult_recv; i++) {
-        CHECK_MPI( MPI_Irecv(buf_recv_list[i], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i]) );
+        CHECK_MPI( MPI_Irecv(buf_recv_list[i], AM_BUF_SIZE_W_HEADER, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i]) );
     }
     MPI_Comm_dup(MPI_COMM_WORLD, &comm_medium);
 }
@@ -175,7 +176,7 @@ void AMPoll()
 	        completion = msg->comp_ptr;
         }
 
-        CHECK_MPI( MPI_Irecv(buf_recv_list[i_recv_list], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_recv_list]) );
+        CHECK_MPI( MPI_Irecv(buf_recv_list[i_recv_list], AM_BUF_SIZE_W_HEADER, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_recv_list]) );
         i_recv_list = (i_recv_list + 1) % n_am_mult_recv;
         buf_recv = buf_recv_list[i_recv_list];
 
@@ -194,7 +195,7 @@ void AMPoll_cancel()
 
 void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int payload_lines, int payload_line_stride, int has_dest, MPI_Aint dest, void *remote_comp)
 {
-    char buf_send[1024];
+    char buf_send[AM_BUF_SIZE_W_HEADER];
 
     struct AM_msg *msg = (struct AM_msg *)(buf_send);
     msg->msgid = msgid;
@@ -220,7 +221,7 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         int n = AM_MSG_HEADER_SIZE + 4 + header_size;
         assert(tgt != node_this);
         CHECK_MPI( MPI_Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD) );
-    } else if (AM_MSG_HEADER_SIZE + header_size + payload_size < 1024) {
+    } else if (header_size + payload_size <= AM_BUF_SIZE) {
         msg->type = 0;
         if (header_size > 0) {
             memcpy(msg_header, header, header_size);

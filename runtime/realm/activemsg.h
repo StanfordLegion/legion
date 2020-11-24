@@ -105,6 +105,34 @@ namespace Realm {
 	      const void *_data, size_t _bytes_per_line,
 	      size_t _lines, size_t _line_stride);
 
+    // large messages may need to be fragmented, so use cases that can
+    //  handle the fragmentation at a higher level may want to know the
+    //  largest size that is fragmentation-free - the answer can depend
+    //  on whether the data is to be delivered to a known RemoteAddress
+    //  and/or whether the source data location is known
+    // a call that sets `with_congestion` may get a smaller value (maybe
+    //  even 0) if the path to the named target(s) is getting full
+    static size_t recommended_max_payload(NodeID target,
+					  bool with_congestion);
+    static size_t recommended_max_payload(const NodeSet& targets,
+					  bool with_congestion);
+    static size_t recommended_max_payload(NodeID target,
+					  const RemoteAddress &dest_payload_addr,
+					  bool with_congestion);
+    static size_t recommended_max_payload(NodeID target,
+					  const void *data, size_t bytes_per_line,
+					  size_t lines, size_t line_stride,
+					  bool with_congestion);
+    static size_t recommended_max_payload(const NodeSet& targets,
+					  const void *data, size_t bytes_per_line,
+					  size_t lines, size_t line_stride,
+					  bool with_congestion);
+    static size_t recommended_max_payload(NodeID target,
+					  const void *data, size_t bytes_per_line,
+					  size_t lines, size_t line_stride,
+					  const RemoteAddress &dest_payload_addr,
+					  bool with_congestion);
+
     // operator-> gives access to the header structure
     T *operator->(void);
 

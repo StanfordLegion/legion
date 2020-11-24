@@ -101,6 +101,33 @@ namespace Realm {
 							  void *storage_base,
 							  size_t storage_size);
 
+    virtual size_t recommended_max_payload(NodeID target,
+					   bool with_congestion,
+					   size_t header_size);
+    virtual size_t recommended_max_payload(const NodeSet& targets,
+					   bool with_congestion,
+					   size_t header_size);
+    virtual size_t recommended_max_payload(NodeID target,
+					   const RemoteAddress& dest_payload_addr,
+					   bool with_congestion,
+					   size_t header_size);
+    virtual size_t recommended_max_payload(NodeID target,
+					   const void *data, size_t bytes_per_line,
+					   size_t lines, size_t line_stride,
+					   bool with_congestion,
+					   size_t header_size);
+    virtual size_t recommended_max_payload(const NodeSet& targets,
+					   const void *data, size_t bytes_per_line,
+					   size_t lines, size_t line_stride,
+					   bool with_congestion,
+					   size_t header_size);
+    virtual size_t recommended_max_payload(NodeID target,
+					   const void *data, size_t bytes_per_line,
+					   size_t lines, size_t line_stride,
+					   const RemoteAddress& dest_payload_addr,
+					   bool with_congestion,
+					   size_t header_size);
+
   protected:
     bool active_msg_worker_bgwork;
     int active_msg_worker_threads;

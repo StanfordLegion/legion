@@ -136,6 +136,33 @@ namespace Realm {
 							  size_t src_payload_line_stride,
 							  void *storage_base,
 							  size_t storage_size);
+
+    virtual size_t recommended_max_payload(NodeID target,
+					   bool with_congestion,
+					   size_t header_size);
+    virtual size_t recommended_max_payload(const NodeSet& targets,
+					   bool with_congestion,
+					   size_t header_size);
+    virtual size_t recommended_max_payload(NodeID target,
+					   const RemoteAddress& dest_payload_addr,
+					   bool with_congestion,
+					   size_t header_size);
+    virtual size_t recommended_max_payload(NodeID target,
+					   const void *data, size_t bytes_per_line,
+					   size_t lines, size_t line_stride,
+					   bool with_congestion,
+					   size_t header_size);
+    virtual size_t recommended_max_payload(const NodeSet& targets,
+					   const void *data, size_t bytes_per_line,
+					   size_t lines, size_t line_stride,
+					   bool with_congestion,
+					   size_t header_size);
+    virtual size_t recommended_max_payload(NodeID target,
+					   const void *data, size_t bytes_per_line,
+					   size_t lines, size_t line_stride,
+					   const RemoteAddress& dest_payload_addr,
+					   bool with_congestion,
+					   size_t header_size);
   };
 
   LoopbackNetworkModule::LoopbackNetworkModule()
@@ -282,7 +309,69 @@ namespace Realm {
     abort();
   }
   
+  size_t LoopbackNetworkModule::recommended_max_payload(NodeID target,
+							bool with_congestion,
+							size_t header_size)
+  {
+    // should never be called
+    abort();
+    return 0;
+  }
+
+  size_t LoopbackNetworkModule::recommended_max_payload(const NodeSet& targets,
+							bool with_congestion,
+							size_t header_size)
+  {
+    // should never be called
+    abort();
+    return 0;
+  }
+
+  size_t LoopbackNetworkModule::recommended_max_payload(NodeID target,
+							const RemoteAddress& dest_payload_addr,
+							bool with_congestion,
+							size_t header_size)
+  {
+    // should never be called
+    abort();
+    return 0;
+  }
   
+  size_t LoopbackNetworkModule::recommended_max_payload(NodeID target,
+							const void *data, size_t bytes_per_line,
+							size_t lines, size_t line_stride,
+							bool with_congestion,
+							size_t header_size)
+  {
+    // should never be called
+    abort();
+    return 0;
+  }
+
+  size_t LoopbackNetworkModule::recommended_max_payload(const NodeSet& targets,
+							const void *data, size_t bytes_per_line,
+							size_t lines, size_t line_stride,
+							bool with_congestion,
+							size_t header_size)
+  {
+    // should never be called
+    abort();
+    return 0;
+  }
+
+  size_t LoopbackNetworkModule::recommended_max_payload(NodeID target,
+							const void *data, size_t bytes_per_line,
+							size_t lines, size_t line_stride,
+							const RemoteAddress& dest_payload_addr,
+							bool with_congestion,
+							size_t header_size)
+  {
+    // should never be called
+    abort();
+    return 0;
+  }
+  
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class NetworkSegment

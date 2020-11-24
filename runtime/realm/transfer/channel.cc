@@ -2939,30 +2939,47 @@ namespace Realm {
 		  assert(ok);
 
 		  // now look at the input
-		  size_t src_1d_maxbytes = ((in_dim > 0) ?
-					      std::min(dst_1d_maxbytes, icount) :
-					      0);
-		  // TODO: remove MAX_ASSEMBLY_SIZE limit if we can get an
-		  //  actual "2d source" limit from the network code
-		  size_t src_2d_maxbytes = (((in_dim > 1) &&
-					     ((icount * 2) <= dst_1d_maxbytes)) ?
-					      (icount * std::min(std::min(dst_1d_maxbytes,
-									  MAX_ASSEMBLY_SIZE) / icount,
-								 in_alc.remaining(1))) :
-					      0);
-		  size_t src_ga_maxbytes = std::min(dst_1d_maxbytes,
-						    MAX_ASSEMBLY_SIZE);
+		  const void *src_buf = in_port->mem->get_direct_ptr(in_alc.get_offset(), icount);
+		  size_t src_1d_maxbytes = 0;
+		  if(in_dim > 0) {
+		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
+											      src_buf, icount, 1, 0,
+											      dst_buf,
+											      true /*w/ congestion*/);
+		    src_1d_maxbytes = std::min({ dst_1d_maxbytes,
+					         icount,
+					         rec_bytes });
+		  }
+
+		  size_t src_2d_maxbytes = 0;
+		  if(in_dim > 1) {
+		    size_t lines = in_alc.remaining(1);
+		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
+											      src_buf, icount,
+											      lines,
+											      in_alc.get_stride(1),
+											      dst_buf,
+											      true /*w/ congestion*/);
+		    src_2d_maxbytes = std::min({ dst_1d_maxbytes,
+			                         icount * lines,
+			                         rec_bytes });
+		  }
+		  size_t src_ga_maxbytes = 0;
+		  {
+		    // a gather will assemble into a buffer provided by the network
+		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
+											      dst_buf,
+											      true /*w/ congestion*/);
+		    src_ga_maxbytes = std::min({ dst_1d_maxbytes,
+					         bytes_left,
+					         rec_bytes });
+		  }
 
 		  // source also favors 1d >> 2d >> gather
 		  if((src_1d_maxbytes >= src_2d_maxbytes) &&
 		     (src_1d_maxbytes >= src_ga_maxbytes)) {
 		    // 1D source
 		    bytes = src_1d_maxbytes;
-		    // TODO: get soft/hard limits from network code and unroll
-		    //  here
-		    bytes = std::min(size_t(1 << 20),
-				     bytes);
-		    const void *src_buf = in_port->mem->get_direct_ptr(in_alc.get_offset(), bytes);
 		    //log_xd.info() << "remote write 1d: guid=" << guid
 		    //              << " src=" << src_buf << " dst=" << dst_buf
 		    //              << " bytes=" << bytes;
@@ -3002,7 +3019,6 @@ namespace Realm {
 		    size_t lines = src_2d_maxbytes / icount;
 		    bytes = bytes_per_line * lines;
 		    assert(bytes == src_2d_maxbytes);
-		    const void *src_buf = in_port->mem->get_direct_ptr(in_alc.get_offset(), bytes);
 		    size_t src_stride = in_alc.get_stride(1);
 		    //log_xd.info() << "remote write 2d: guid=" << guid
 		    //              << " src=" << src_buf << " dst=" << dst_buf

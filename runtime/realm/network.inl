@@ -170,6 +170,100 @@ namespace Realm {
 							  storage_size);
     }
     
+    inline size_t recommended_max_payload(NodeID target,
+					  bool with_congestion,
+					  size_t header_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->recommended_max_payload(target,
+						       with_congestion,
+						       header_size);
+    }
+
+    inline size_t recommended_max_payload(const NodeSet& targets,
+					  bool with_congestion,
+					  size_t header_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->recommended_max_payload(targets,
+						       with_congestion,
+						       header_size);
+    }
+
+    inline size_t recommended_max_payload(NodeID target,
+					  const RemoteAddress& dest_payload_addr,
+					  bool with_congestion,
+					  size_t header_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->recommended_max_payload(target,
+						       dest_payload_addr,
+						       with_congestion,
+						       header_size);
+    }
+
+    inline size_t recommended_max_payload(NodeID target,
+					  const void *data, size_t bytes_per_line,
+					  size_t lines, size_t line_stride,
+					  bool with_congestion,
+					  size_t header_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->recommended_max_payload(target,
+						       data, bytes_per_line,
+						       lines, line_stride,
+						       with_congestion,
+						       header_size);
+    }
+
+    inline size_t recommended_max_payload(const NodeSet& targets,
+					  const void *data, size_t bytes_per_line,
+					  size_t lines, size_t line_stride,
+					  bool with_congestion,
+					  size_t header_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->recommended_max_payload(targets,
+						       data, bytes_per_line,
+						       lines, line_stride,
+						       with_congestion,
+						       header_size);
+    }
+
+    inline size_t recommended_max_payload(NodeID target,
+					  const void *data, size_t bytes_per_line,
+					  size_t lines, size_t line_stride,
+					  const RemoteAddress& dest_payload_addr,
+					  bool with_congestion,
+					  size_t header_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->recommended_max_payload(target,
+						       data, bytes_per_line,
+						       lines, line_stride,
+						       dest_payload_addr,
+						       with_congestion,
+						       header_size);
+    }
+
   };
 
   ////////////////////////////////////////////////////////////////////////

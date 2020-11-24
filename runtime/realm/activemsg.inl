@@ -276,6 +276,76 @@ namespace Realm {
     assert(impl == 0);
   }
 
+  template <typename T, size_t INLINE_STORAGE>
+  /*static*/ size_t ActiveMessage<T, INLINE_STORAGE>::recommended_max_payload(NodeID target,
+									      bool with_congestion)
+  {
+    return Network::recommended_max_payload(target,
+					    with_congestion,
+					    sizeof(T));
+  }
+
+  template <typename T, size_t INLINE_STORAGE>
+  /*static*/ size_t ActiveMessage<T, INLINE_STORAGE>::recommended_max_payload(const NodeSet& targets,
+									      bool with_congestion)
+  {
+    return Network::recommended_max_payload(targets,
+					    with_congestion,
+					    sizeof(T));
+  }
+
+  template <typename T, size_t INLINE_STORAGE>
+  /*static*/ size_t ActiveMessage<T, INLINE_STORAGE>::recommended_max_payload(NodeID target,
+									      const RemoteAddress &dest_payload_addr,
+									      bool with_congestion)
+  {
+    return Network::recommended_max_payload(target,
+					    dest_payload_addr,
+					    with_congestion,
+					    sizeof(T));
+  }
+
+  template <typename T, size_t INLINE_STORAGE>
+  /*static*/ size_t ActiveMessage<T, INLINE_STORAGE>::recommended_max_payload(NodeID target,
+									      const void *data, size_t bytes_per_line,
+									      size_t lines, size_t line_stride,
+									      bool with_congestion)
+  {
+    return Network::recommended_max_payload(target,
+					    data, bytes_per_line,
+					    lines, line_stride,
+					    with_congestion,
+					    sizeof(T));
+  }
+
+  template <typename T, size_t INLINE_STORAGE>
+  /*static*/ size_t ActiveMessage<T, INLINE_STORAGE>::recommended_max_payload(const NodeSet& targets,
+									      const void *data, size_t bytes_per_line,
+									      size_t lines, size_t line_stride,
+									      bool with_congestion)
+  {
+    return Network::recommended_max_payload(targets,
+					    data, bytes_per_line,
+					    lines, line_stride,
+					    with_congestion,
+					    sizeof(T));
+  }
+
+  template <typename T, size_t INLINE_STORAGE>
+  /*static*/ size_t ActiveMessage<T, INLINE_STORAGE>::recommended_max_payload(NodeID target,
+									      const void *data, size_t bytes_per_line,
+									      size_t lines, size_t line_stride,
+									      const RemoteAddress &dest_payload_addr,
+									      bool with_congestion)
+  {
+    return Network::recommended_max_payload(target,
+					    data, bytes_per_line,
+					    lines, line_stride,
+					    dest_payload_addr,
+					    with_congestion,
+					    sizeof(T));
+  }
+
   // operator-> gives access to the header structure
   template <typename T, size_t INLINE_STORAGE>
   T *ActiveMessage<T, INLINE_STORAGE>::operator->(void)

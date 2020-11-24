@@ -851,4 +851,62 @@ namespace Realm {
     return impl;
   }
 
+  size_t MPIModule::recommended_max_payload(NodeID target,
+					    bool with_congestion,
+					    size_t header_size)
+  {
+    return (AM_BUF_SIZE - header_size);
+  }
+
+  size_t MPIModule::recommended_max_payload(const NodeSet& targets,
+					    bool with_congestion,
+					    size_t header_size)
+  {
+    return (AM_BUF_SIZE - header_size);
+  }
+
+  size_t MPIModule::recommended_max_payload(NodeID target,
+					    const RemoteAddress& dest_payload_addr,
+					    bool with_congestion,
+					    size_t header_size)
+  {
+    // mostly arbitrary since we're using MPI_Put, but try to keep
+    //   individual blocks from monopolizing the network interface for
+    //   too long
+    return 1 << 20; // 1 MB
+  }
+  
+  size_t MPIModule::recommended_max_payload(NodeID target,
+					    const void *data, size_t bytes_per_line,
+					    size_t lines, size_t line_stride,
+					    bool with_congestion,
+					    size_t header_size)
+  {
+    // we don't care about source data location
+    return recommended_max_payload(target, with_congestion, header_size);
+  }
+
+  size_t MPIModule::recommended_max_payload(const NodeSet& targets,
+						const void *data, size_t bytes_per_line,
+						size_t lines, size_t line_stride,
+					    bool with_congestion,
+					    size_t header_size)
+  {
+    // we don't care about source data location
+    return recommended_max_payload(targets, with_congestion, header_size);
+  }
+
+  size_t MPIModule::recommended_max_payload(NodeID target,
+					    const void *data, size_t bytes_per_line,
+					    size_t lines, size_t line_stride,
+					    const RemoteAddress& dest_payload_addr,
+					    bool with_congestion,
+					    size_t header_size)
+  {
+    // we don't care about source data location
+    return recommended_max_payload(target, dest_payload_addr,
+				   with_congestion, header_size);
+  }
+
+
 }; // namespace Realm

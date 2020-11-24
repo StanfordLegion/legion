@@ -858,5 +858,61 @@ namespace Realm {
     return impl;
   }
 
+  size_t GASNet1Module::recommended_max_payload(NodeID target,
+						bool with_congestion,
+						size_t header_size)
+  {
+    return gasnet_AMMaxMedium();
+  }
+
+  size_t GASNet1Module::recommended_max_payload(const NodeSet& targets,
+						bool with_congestion,
+						size_t header_size)
+  {
+    return gasnet_AMMaxMedium();
+  }
+
+  size_t GASNet1Module::recommended_max_payload(NodeID target,
+						const RemoteAddress& dest_payload_addr,
+						bool with_congestion,
+						size_t header_size)
+  {
+    // RDMA uses long, but don't go above 4MB per packet for responsiveness
+    size_t maxlong = gasnet_AMMaxLongRequest();
+    return std::min(maxlong, size_t(4 << 20));
+  }
+
+  size_t GASNet1Module::recommended_max_payload(NodeID target,
+						const void *data, size_t bytes_per_line,
+						size_t lines, size_t line_stride,
+						bool with_congestion,
+						size_t header_size)
+  {
+    return gasnet_AMMaxMedium();
+  }
+
+  size_t GASNet1Module::recommended_max_payload(const NodeSet& targets,
+							const void *data, size_t bytes_per_line,
+							size_t lines, size_t line_stride,
+						bool with_congestion,
+						size_t header_size)
+  {
+    return gasnet_AMMaxMedium();
+  }
+
+  size_t GASNet1Module::recommended_max_payload(NodeID target,
+						const void *data, size_t bytes_per_line,
+						size_t lines, size_t line_stride,
+						const RemoteAddress& dest_payload_addr,
+						bool with_congestion,
+						size_t header_size)
+  {
+    // RDMA uses long, but don't go above 4MB per packet for responsiveness
+    // we also need the source to be contiguous, so clamp at a single
+    //  line of the source data
+    size_t maxlong = gasnet_AMMaxLongRequest();
+    return std::min(maxlong, std::min(bytes_per_line, size_t(4 << 20)));
+  }
   
+
 }; // namespace Realm
