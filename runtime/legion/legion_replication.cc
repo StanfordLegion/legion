@@ -4556,6 +4556,9 @@ namespace Legion {
           }
         case EXECUTION_FENCE:
           {
+            // If we're recording find all the prior event dependences
+            if (is_recording())
+              tpl->find_execution_fence_preconditions(execution_preconditions);
             const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
             // Do our arrival on our mapping fence, we're mapped when
             // everyone is mapped
