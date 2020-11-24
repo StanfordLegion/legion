@@ -2809,6 +2809,13 @@ namespace Legion {
               used[gen[complete->rhs]] = true;
               break;
             }
+          case ACQUIRE_RELEASE:
+            {
+              AcquireRelease *acquire_release = inst->as_acquire_release();
+              used[gen[acquire_release->pre]] = true;
+              used[gen[acquire_release->post]] = true;
+              break;
+            }
           case GET_TERM_EVENT:
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
@@ -4347,6 +4354,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_reservations(Memoizable *memo, ApEvent &lhs,
+                                const std::map<Reservation,bool> &reservations,
+                                ApEvent precondition, ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      const TraceLocalID tld = find_trace_local_id(memo);
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      unsigned pre;
+      std::map<ApEvent,unsigned>::const_iterator finder = 
+        event_map.find(precondition);
+      if (finder == event_map.end())
+        pre = fence_completion_id;
+      else
+        pre = finder->second;
+
+      const unsigned post = find_event(postcondition);
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+      if (!lhs.exists() || (lhs == precondition))
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        if (lhs == precondition)
+          rename.trigger(lhs);
+        else
+          rename.trigger();
+        lhs = ApEvent(rename);
+      }
+#endif
+      const unsigned lhs_ = find_or_convert_event(lhs);
+      insert_instruction(
+          new AcquireRelease(*this, lhs_, pre, post, tld, reservations));
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent PhysicalTemplate::defer_template_deletion(void)
     //--------------------------------------------------------------------------
     {
@@ -5154,6 +5197,53 @@ namespace Legion {
          << "].complete_replay(events[" << rhs << "])    (op kind: "
          << Operation::op_names[operations[owner]->get_memoizable_kind()] 
          << ")";
+      return ss.str();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // AcquireRelease
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AcquireRelease::AcquireRelease(PhysicalTemplate &tpl, unsigned lhs_,
+                         unsigned pre_, unsigned post_, const TraceLocalID &tld,
+                         const std::map<Reservation,bool> &reservations_)
+      : Instruction(tpl, tld), reservations(reservations_), 
+        lhs(lhs_), pre(pre_), post(post_)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(owner) != operations.end());
+      assert(lhs < events.size());
+      assert(pre < events.size());
+      assert(post < events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireRelease::execute(void)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent precondition = events[pre];
+      const ApEvent postcondition = events[post];
+      for (std::map<Reservation,bool>::const_iterator it = 
+            reservations.begin(); it != reservations.end(); it++)
+      {
+        precondition = 
+          Runtime::acquire_ap_reservation(it->first, it->second, precondition);
+        Runtime::release_reservation(it->first, postcondition);
+      }
+      events[lhs] = precondition;
+    }
+
+    //--------------------------------------------------------------------------
+    std::string AcquireRelease::to_string(void)
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "events[" << lhs << "] = acquire_reservations(events[" << pre 
+         << "])   (owner: " << owner << ")   release_reservations(events[" 
+         << post << "])";
       return ss.str();
     }
 

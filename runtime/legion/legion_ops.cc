@@ -4718,7 +4718,7 @@ namespace Legion {
         int src_composite = -1;
         // Make a user event for when this copy across is done
         // and add it to the set of copy complete events
-        ApUserEvent local_completion = 
+        const ApUserEvent local_completion = 
           Runtime::create_ap_user_event(&trace_info);
         std::set<RtEvent> local_applied_events;
         copy_complete_events.insert(local_completion);
@@ -4736,6 +4736,10 @@ namespace Legion {
         // See if we have any atomic locks we have to acquire
         if ((idx < atomic_locks.size()) && !atomic_locks[idx].empty())
         {
+          // Save a copy of the local init precondition for tracing if needed
+          ApEvent reservation_precondition;
+          if (is_recording())
+            reservation_precondition = local_init_precondition;
           // Issue the acquires and releases for the reservations
           // necessary for performing this across operation
           const std::map<Reservation,bool> &local_locks = atomic_locks[idx];
@@ -4745,8 +4749,11 @@ namespace Legion {
             local_init_precondition = 
               Runtime::acquire_ap_reservation(it->first, it->second,
                                               local_init_precondition);
-            Runtime::release_reservation(it->first, completion_event);
+            Runtime::release_reservation(it->first, local_completion);
           }
+          if (is_recording())
+            trace_info.record_reservations(this, local_init_precondition,
+                local_locks, reservation_precondition, local_completion);
         }
         if (src_composite < 0)
         {

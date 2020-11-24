@@ -211,6 +211,9 @@ namespace Legion {
                          std::set<RtEvent> &applied_events) = 0;
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs) = 0;
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs) = 0;
+      virtual void record_reservations(Memoizable *memo, ApEvent &lhs,
+                              const std::map<Reservation,bool> &locks, 
+                              ApEvent precondition, ApEvent postcondition) = 0;
     };
 
     /**
@@ -235,6 +238,7 @@ namespace Legion {
         REMOTE_TRACE_SET_EFFECTS,
         REMOTE_TRACE_RECORD_MAPPER_OUTPUT,
         REMOTE_TRACE_COMPLETE_REPLAY,
+        REMOTE_TRACE_ACQUIRE_RELEASE,
 #ifdef LEGION_GPU_REDUCTIONS
         REMOTE_TRACE_GPU_REDUCTION,
 #endif
@@ -332,6 +336,9 @@ namespace Legion {
                           std::set<RtEvent> &applied_events);
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
+      virtual void record_reservations(Memoizable *memo, ApEvent &lhs,
+                              const std::map<Reservation,bool> &locks,
+                              ApEvent precondition, ApEvent postcondition);
     public:
       static RemoteTraceRecorder* unpack_remote_recorder(Deserializer &derez,
                                           Runtime *runtime, Memoizable *memo);
@@ -427,6 +434,14 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_complete_replay(local, ready_event);
+        }
+      inline void record_reservations(Memoizable *memo, ApEvent &lhs,
+                      const std::map<Reservation,bool> &reservations,
+                      ApEvent precondition, ApEvent postcondition) const
+        {
+          base_sanity_check();
+          rec->record_reservations(memo, lhs, reservations, 
+                                   precondition, postcondition);
         }
     public:
       inline RtEvent get_collect_event(void) const 
