@@ -12041,6 +12041,7 @@ namespace Legion {
       for (std::map<unsigned,SizeMap>::iterator it = all_output_sizes.begin();
            it != all_output_sizes.end(); ++it)
       {
+        rez.serialize(it->first);
         rez.serialize(it->second.size());
         for (SizeMap::iterator sit = it->second.begin();
              sit != it->second.end(); ++sit)
@@ -12061,7 +12062,10 @@ namespace Legion {
       if (num_sizes == 0) return;
       for (unsigned idx = 0; idx < num_sizes; ++idx)
       {
-        SizeMap &sizes = all_output_sizes[idx];
+        unsigned out_idx;
+        derez.deserialize(out_idx);
+        SizeMap &sizes = all_output_sizes[out_idx];
+
         size_t num_entries;
         derez.deserialize(num_entries);
         for (unsigned eidx = 0; eidx < num_entries; eidx++)
