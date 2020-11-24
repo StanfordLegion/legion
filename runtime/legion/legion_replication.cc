@@ -5156,15 +5156,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplFenceOp::initialize_repl_fence(ReplicateContext *ctx, 
-                                      FenceKind k, bool need_future, bool track)
+    void ReplFenceOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      Future f = initialize(ctx, k, need_future, track);
-      mapping_fence_barrier = ctx->get_next_mapping_fence_barrier();
+      initialize_fence_barriers();
+      FenceOp::trigger_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFenceOp::initialize_fence_barriers(ReplicateContext *repl_ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!mapping_fence_barrier.exists());
+      assert(!execution_fence_barrier.exists());
+      if (repl_ctx == NULL)
+        repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      if (repl_ctx == NULL)
+        repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // If we get here that means we weren't replayed so make our fences
+      mapping_fence_barrier = repl_ctx->get_next_mapping_fence_barrier();
       if (fence_kind == EXECUTION_FENCE)
-        execution_fence_barrier = ctx->get_next_execution_fence_barrier();
-      return f;
+        execution_fence_barrier = repl_ctx->get_next_execution_fence_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -5188,6 +5204,7 @@ namespace Legion {
           }
         case EXECUTION_FENCE:
           {
+            const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
             // Do our arrival on our mapping fence, we're mapped when
             // everyone is mapped
             if (!map_applied_conditions.empty())
@@ -5198,8 +5215,18 @@ namespace Legion {
             complete_mapping(mapping_fence_barrier);
             // We arrive on our barrier when all our previous operations
             // have finished executing
-            Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
-                                          execution_precondition);
+            ApEvent execution_fence_precondition;
+            if (!execution_preconditions.empty())
+              execution_fence_precondition = 
+                  Runtime::merge_events(&trace_info, execution_preconditions);
+            Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/, 
+                                          execution_fence_precondition);
+            if (is_recording())
+            {
+              trace_info.record_barrier(this, execution_fence_barrier, 
+                                        execution_fence_precondition);
+              trace_info.record_complete_replay(this, execution_fence_barrier);
+            }
             // We can always trigger the completion event when these are done
             request_early_complete(execution_fence_barrier);
             if (!execution_fence_barrier.has_triggered())
@@ -6354,7 +6381,7 @@ namespace Legion {
                                           bool has_block, bool remove_trace_ref)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -6456,8 +6483,7 @@ namespace Legion {
           const RtEvent pending_deletion = 
             current_template->defer_template_deletion();
           if (pending_deletion.exists())
-            execution_precondition = Runtime::merge_events(NULL,
-                execution_precondition, ApEvent(pending_deletion));  
+            execution_preconditions.insert(ApEvent(pending_deletion));
           physical_trace->record_failed_capture(current_template);
         }
         else
@@ -6564,7 +6590,7 @@ namespace Legion {
                                                   bool has_block)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -6652,6 +6678,8 @@ namespace Legion {
 #endif
         current_template->execute_all();
         template_completion = current_template->get_completion();
+        // Get our fence barriers
+        initialize_fence_barriers();
         // Trigger the execution fence barrier with this event
         Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
                                       template_completion);
@@ -6707,8 +6735,7 @@ namespace Legion {
           const RtEvent pending_deletion = 
             current_template->defer_template_deletion();
           if (pending_deletion.exists())
-            execution_precondition = Runtime::merge_events(NULL,
-                execution_precondition, ApEvent(pending_deletion));  
+            execution_preconditions.insert(ApEvent(pending_deletion));
           physical_trace->record_failed_capture(current_template);
         }
         else
@@ -6836,7 +6863,7 @@ namespace Legion {
                                               LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -6883,9 +6910,10 @@ namespace Legion {
       assert(trace == NULL);
       assert(local_trace != NULL);
 #endif
+      initialize_fence_barriers();
       PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
-      assert(physical_trace != NULL);
+      assert(physical_trace != NULL); 
 #endif
       bool recurrent = true;
       bool fence_registered = false;
@@ -6979,8 +7007,8 @@ namespace Legion {
         assert(physical_trace->get_current_template() == NULL ||
                !physical_trace->get_current_template()->is_recording());
 #endif
-        execution_precondition =
-          parent_ctx->perform_fence_analysis(this, true, true);
+        parent_ctx->perform_fence_analysis(this, execution_preconditions,
+                                           true/*mapping*/, true/*execution*/);
         physical_trace->set_current_execution_fence_event(
             get_completion_event());
         fence_registered = true;
@@ -6989,8 +7017,8 @@ namespace Legion {
       if (physical_trace->get_current_template() != NULL)
       {
         if (!fence_registered)
-          execution_precondition =
-            parent_ctx->get_current_execution_fence_event();
+          execution_preconditions.insert(
+              parent_ctx->get_current_execution_fence_event());
         ApEvent fence_completion = recurrent ?
           physical_trace->get_previous_template_completion() : 
           get_completion_event();
@@ -7002,8 +7030,8 @@ namespace Legion {
       }
       else if (!fence_registered)
       {
-        execution_precondition =
-          parent_ctx->perform_fence_analysis(this, true, true);
+        parent_ctx->perform_fence_analysis(this, execution_preconditions,
+                                           true/*mapping*/, true/*execution*/);
         physical_trace->set_current_execution_fence_event(
             get_completion_event());
       }
@@ -7061,7 +7089,7 @@ namespace Legion {
                                             LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, MAPPING_FENCE, false/*need future*/);
+      initialize(ctx, MAPPING_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -7141,7 +7169,7 @@ namespace Legion {
                                                 Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      // Do NOT call initialize_repl_fence here, we're in the dependence
+      // Do NOT call 'initialize' here, we're in the dependence
       // analysis stage of the pipeline and we need to get our mapping
       // fence from a different location to avoid racing with the application
       initialize(ctx, MAPPING_FENCE, false/*need future*/, false/*track*/);
@@ -7188,6 +7216,7 @@ namespace Legion {
     void ReplTraceSummaryOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      initialize_fence_barriers();
       perform_fence_analysis(true/*register fence also*/);
     }
 
@@ -7537,6 +7566,8 @@ namespace Legion {
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         summary_fence_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        replay_fence_barrier =
+          ApBarrier(Realm::Barrier::create_barrier(total_shards));
         execution_fence_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
         attach_broadcast_barrier = 
@@ -7620,6 +7651,7 @@ namespace Legion {
           resource_return_barrier.destroy_barrier();
           trace_recording_barrier.destroy_barrier();
           summary_fence_barrier.destroy_barrier();
+          replay_fence_barrier.destroy_barrier();
           execution_fence_barrier.destroy_barrier();
           attach_broadcast_barrier.destroy_barrier();
           attach_reduce_barrier.destroy_barrier();
@@ -7855,6 +7887,7 @@ namespace Legion {
           assert(resource_return_barrier.exists());
           assert(trace_recording_barrier.exists());
           assert(summary_fence_barrier.exists());
+          assert(replay_fence_barrier.exists());
           assert(execution_fence_barrier.exists());
           assert(attach_broadcast_barrier.exists());
           assert(attach_reduce_barrier.exists());
@@ -7874,6 +7907,7 @@ namespace Legion {
           rez.serialize(resource_return_barrier);
           rez.serialize(trace_recording_barrier);
           rez.serialize(summary_fence_barrier);
+          rez.serialize(replay_fence_barrier);
           rez.serialize(execution_fence_barrier);
           rez.serialize(attach_broadcast_barrier);
           rez.serialize(attach_reduce_barrier);
@@ -7963,6 +7997,7 @@ namespace Legion {
         derez.deserialize(resource_return_barrier);
         derez.deserialize(trace_recording_barrier);
         derez.deserialize(summary_fence_barrier);
+        derez.deserialize(replay_fence_barrier);
         derez.deserialize(execution_fence_barrier);
         derez.deserialize(attach_broadcast_barrier);
         derez.deserialize(attach_reduce_barrier);

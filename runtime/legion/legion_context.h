@@ -443,8 +443,8 @@ namespace Legion {
       // kinds of operations (like deletions) that want to act like 
       // one-sided fences (e.g. waiting on everything before) but not
       // preventing re-ordering for things afterwards
-      virtual ApEvent perform_fence_analysis(Operation *op, 
-                                        bool mapping, bool execution) = 0;
+      virtual void perform_fence_analysis(Operation *op, 
+          std::set<ApEvent> &preconditions, bool mapping, bool execution) = 0;
       virtual void update_current_fence(FenceOp *op, 
                                         bool mapping, bool execution) = 0;
       virtual void update_current_implicit(Operation *op) = 0;
@@ -1259,8 +1259,8 @@ namespace Legion {
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
       virtual ApEvent get_current_execution_fence_event(void);
-      virtual ApEvent perform_fence_analysis(Operation *op,
-                                             bool mapping, bool execution);
+      virtual void perform_fence_analysis(Operation *op, 
+          std::set<ApEvent> &preconditions, bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
       virtual void update_current_implicit(Operation *op);
@@ -2204,6 +2204,7 @@ namespace Legion {
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
       ApBarrier get_next_execution_fence_barrier(void);
+      ApBarrier get_next_replay_fence_barrier(void);
       RtBarrier get_next_resource_return_barrier(void);
       RtBarrier get_next_refinement_barrier(void);
       RtBarrier get_next_trace_recording_barrier(void);
@@ -2226,6 +2227,12 @@ namespace Legion {
           if (!bar.exists())
             create_new_logical_barrier(bar, arrivals);
         }
+      inline void advance_logical_barrier(ApBarrier &bar, size_t arrivals)
+        {
+          Runtime::advance_barrier(bar);
+          if (!bar.exists())
+            create_new_logical_barrier(bar, arrivals);
+        }
     protected:
       // These can only be called inside the task for this context
       // since they assume that all the shards are aligned and doing
@@ -2234,6 +2241,7 @@ namespace Legion {
       void create_new_replicate_barrier(ApBarrier &bar, size_t arrivals);
       // This one can only be called inside the logical dependence analysis
       void create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
+      void create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
     public:
       static void hash_future(Murmur3Hasher &hasher, 
                               const unsigned safe_level, const Future &future);
@@ -2306,6 +2314,7 @@ namespace Legion {
       RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
       RtBarrier summary_fence_barrier;
+      ApBarrier replay_fence_barrier;
       ApBarrier execution_fence_barrier;
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;
@@ -2846,8 +2855,8 @@ namespace Legion {
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
       virtual ApEvent get_current_execution_fence_event(void);
-      virtual ApEvent perform_fence_analysis(Operation *op,
-                                             bool mapping, bool execution);
+      virtual void perform_fence_analysis(Operation *op,
+          std::set<ApEvent> &preconditions, bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
       virtual void update_current_implicit(Operation *op);
@@ -3271,8 +3280,8 @@ namespace Legion {
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
       virtual ApEvent get_current_execution_fence_event(void);
-      virtual ApEvent perform_fence_analysis(Operation *op,
-                                             bool mapping, bool execution);
+      virtual void perform_fence_analysis(Operation *op,
+          std::set<ApEvent> &preconditions, bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
       virtual void update_current_implicit(Operation *op);

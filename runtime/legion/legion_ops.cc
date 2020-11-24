@@ -5191,7 +5191,7 @@ namespace Legion {
         int src_composite = -1;
         // Make a user event for when this copy across is done
         // and add it to the set of copy complete events
-        ApUserEvent local_completion = 
+        const ApUserEvent local_completion = 
           Runtime::create_ap_user_event(&trace_info);
         std::set<RtEvent> local_applied_events;
         copy_complete_events.insert(local_completion);
@@ -5209,6 +5209,10 @@ namespace Legion {
         // See if we have any atomic locks we have to acquire
         if ((idx < atomic_locks.size()) && !atomic_locks[idx].empty())
         {
+          // Save a copy of the local init precondition for tracing if needed
+          ApEvent reservation_precondition;
+          if (is_recording())
+            reservation_precondition = local_init_precondition;
           // Issue the acquires and releases for the reservations
           // necessary for performing this across operation
           const std::map<Reservation,bool> &local_locks = atomic_locks[idx];
@@ -5218,8 +5222,11 @@ namespace Legion {
             local_init_precondition = 
               Runtime::acquire_ap_reservation(it->first, it->second,
                                               local_init_precondition);
-            Runtime::release_reservation(it->first, completion_event);
+            Runtime::release_reservation(it->first, local_completion);
           }
+          if (is_recording())
+            trace_info.record_reservations(this, local_init_precondition,
+                local_locks, reservation_precondition, local_completion);
         }
         if (src_composite < 0)
         {
@@ -7915,14 +7922,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FenceOp::FenceOp(Runtime *rt)
-      : Operation(rt)
+      : MemoizableOp<Operation>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     FenceOp::FenceOp(const FenceOp &rhs)
-      : Operation(NULL)
+      : MemoizableOp<Operation>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7950,6 +7957,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, track);
+      initialize_memoizable();
       fence_kind = kind;
       if (need_future)
       {
@@ -7970,7 +7978,15 @@ namespace Legion {
     void FenceOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_fence(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void FenceOp::activate_fence(void)
+    //--------------------------------------------------------------------------
+    {
       activate_operation();
+      activate_memoizable();
     }
 
     //--------------------------------------------------------------------------
@@ -7979,6 +7995,7 @@ namespace Legion {
     {
       deactivate_operation();
       map_applied_conditions.clear();
+      execution_preconditions.clear();
       result = Future(); // clear out our future reference
     }
 
@@ -8031,12 +8048,19 @@ namespace Legion {
           }
         case EXECUTION_FENCE:
           {
+            const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
             // Mark that we finished our mapping now
             if (!map_applied_conditions.empty())
               complete_mapping(Runtime::merge_events(map_applied_conditions));
             else
               complete_mapping();
             // We can always trigger the completion event when these are done
+            ApEvent execution_precondition;
+            if (!execution_preconditions.empty())
+              execution_precondition = 
+                Runtime::merge_events(&trace_info, execution_preconditions);
+            if (is_recording())
+              tpl->record_complete_replay(this, execution_precondition);
             request_early_complete(execution_precondition);
             if (!execution_precondition.has_triggered())
             {
@@ -8060,17 +8084,21 @@ namespace Legion {
       {
         case MAPPING_FENCE:
           {
-            parent_ctx->perform_fence_analysis(this, true, false);
+            parent_ctx->perform_fence_analysis(this, execution_preconditions,
+                            true/*mapping fence*/, false/*execution fence*/);
+#ifdef DEBUG_LEGION
+            assert(execution_preconditions.empty());
+#endif
             if (update_fence)
               parent_ctx->update_current_fence(this, true, false);
             break;
           }
         case EXECUTION_FENCE:
           {
-            execution_precondition =
-              parent_ctx->perform_fence_analysis(this, true, true);
+            parent_ctx->perform_fence_analysis(this, execution_preconditions,
+                true/*mapping fence*/, !is_replaying()/*execution fence*/);
             if (update_fence)
-              parent_ctx->update_current_fence(this, true, true);
+              parent_ctx->update_current_fence(this, true, !is_replaying());
             break;
           }
         default:
@@ -8111,6 +8139,35 @@ namespace Legion {
     }
 #endif
 
+    //--------------------------------------------------------------------------
+    void FenceOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
+      tpl->register_operation(this);
+      complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    void FenceOp::complete_replay(ApEvent fence_complete_event)
+    //--------------------------------------------------------------------------
+    {
+      // Handle the case for marking when the copy completes
+      Runtime::trigger_event(NULL, completion_event, fence_complete_event);
+      need_completion_trigger = false;
+      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    const VersionInfo& FenceOp::get_version_info(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return *new VersionInfo();
+    }
+    
     /////////////////////////////////////////////////////////////
     // Frame Operation 
     /////////////////////////////////////////////////////////////
@@ -8825,8 +8882,12 @@ namespace Legion {
       // be re-ordered up above us. We need this upward facing fence though
       // to ensure that all tasks are done above us before we do delete
       // any internal data structures associated with these resources
-      execution_precondition = parent_ctx->perform_fence_analysis(this, 
+      std::set<ApEvent> execution_preconditions;
+      parent_ctx->perform_fence_analysis(this, execution_preconditions, 
                                     true/*mapping*/, true/*execution*/);
+      if (!execution_preconditions.empty())
+        execution_precondition = 
+          Runtime::merge_events(NULL, execution_preconditions);
       if (runtime->legion_spy_enabled)
         log_deletion_requirements();
     }

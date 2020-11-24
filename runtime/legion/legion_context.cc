@@ -7806,8 +7806,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InnerContext::perform_fence_analysis(Operation *op, 
-                                                 bool mapping, bool execution)
+    void InnerContext::perform_fence_analysis(Operation *op, 
+               std::set<ApEvent> &previous_events, bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7828,7 +7828,6 @@ namespace Legion {
       }
 #endif
       std::map<Operation*,GenerationID> previous_operations;
-      std::set<ApEvent> previous_events;
       // Take the lock and iterate through our current pending
       // operations and find all the ones with a context index
       // that is less than the index for the fence operation
@@ -8011,9 +8010,6 @@ namespace Legion {
       // before we update the current fence
       if (execution && current_execution_fence_event.exists())
         previous_events.insert(current_execution_fence_event);
-      if (!previous_events.empty())
-        return Runtime::merge_events(NULL, previous_events);
-      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -10234,6 +10230,7 @@ namespace Legion {
       resource_return_barrier = manager->get_resource_return_barrier();
       trace_recording_barrier = manager->get_trace_recording_barrier();
       summary_fence_barrier = manager->get_summary_fence_barrier();
+      replay_fence_barrier = manager->get_replay_fence_barrier();
       execution_fence_barrier = manager->get_execution_fence_barrier();
       attach_broadcast_barrier = manager->get_attach_broadcast_barrier();
       attach_reduce_barrier = manager->get_attach_reduce_barrier();
@@ -10450,7 +10447,7 @@ namespace Legion {
       // no downstream operations attempt to do anything on remote nodes
       // which could need the results of the registration
       ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      fence_op->initialize_repl_fence(this, FenceOp::MAPPING_FENCE, false);
+      fence_op->initialize(this, FenceOp::MAPPING_FENCE, false);
       fence_op->add_mapping_applied_condition(effects);
       add_to_dependence_queue(fence_op);
     }
@@ -16486,8 +16483,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      Future result = 
-        fence_op->initialize_repl_fence(this, FenceOp::MAPPING_FENCE, true);
+      Future result = fence_op->initialize(this, FenceOp::MAPPING_FENCE, true);
       add_to_dependence_queue(fence_op);
       return result;
     }
@@ -16509,8 +16505,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      Future result = 
-        fence_op->initialize_repl_fence(this, FenceOp::EXECUTION_FENCE, true);
+      Future result = fence_op->initialize(this, FenceOp::EXECUTION_FENCE,true);
       add_to_dependence_queue(fence_op);
       return result;
     }
@@ -18706,7 +18701,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtBarrier result = mapping_fence_barrier;
-      advance_replicate_barrier(mapping_fence_barrier, total_shards);
+      advance_logical_barrier(mapping_fence_barrier, total_shards);
       return result;
     }
 
@@ -18715,7 +18710,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ApBarrier result = execution_fence_barrier;
-      advance_replicate_barrier(execution_fence_barrier, total_shards);
+      advance_logical_barrier(execution_fence_barrier, total_shards);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ApBarrier ReplicateContext::get_next_replay_fence_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      const ApBarrier result = replay_fence_barrier;
+      advance_logical_barrier(replay_fence_barrier, total_shards);
       return result;
     }
 
@@ -18752,7 +18756,7 @@ namespace Legion {
       const RtBarrier result = refinement_bar;
       advance_logical_barrier(refinement_bar, total_shards);
       return result;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     RtBarrier ReplicateContext::get_next_trace_recording_barrier(void)
@@ -18833,6 +18837,30 @@ namespace Legion {
       if (owner_shard->shard_id == next_logical_bar_index++)
       {
         bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
+        collective.broadcast(bar);
+      }
+      else
+        bar = collective.get_value();
+      // Check to see if we need to reset the next_replicate_bar_index
+      if (next_logical_bar_index == total_shards)
+        next_logical_bar_index = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::create_new_logical_barrier(ApBarrier &bar, 
+                                                      size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!bar.exists());
+      assert(next_logical_bar_index < total_shards);
+#endif
+      const CollectiveID cid =
+        get_next_collective_index(COLLECTIVE_LOC_24, true/*logical*/);
+      ValueBroadcast<ApBarrier> collective(cid, this, next_logical_bar_index);
+      if (owner_shard->shard_id == next_logical_bar_index++)
+      {
+        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
         collective.broadcast(bar);
       }
       else
@@ -21035,12 +21063,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent LeafContext::perform_fence_analysis(Operation *op, 
-                                                bool mapping, bool execution)
+    void LeafContext::perform_fence_analysis(Operation *op,
+                 std::set<ApEvent> &preconditions, bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -22532,11 +22559,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InlineContext::perform_fence_analysis(Operation *op, 
-                                                  bool mapping, bool execution)
+    void InlineContext::perform_fence_analysis(Operation *op, 
+                 std::set<ApEvent> &preconditions, bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
-      return enclosing->perform_fence_analysis(op, mapping, execution);
+      enclosing->perform_fence_analysis(op, preconditions, mapping, execution);
     }
 
     //--------------------------------------------------------------------------

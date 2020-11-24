@@ -3893,6 +3893,16 @@ namespace Legion {
             physical_instances[idx].update_wait_on_events(ready_events);
         }
         ApEvent ready_event = Runtime::merge_events(&trace_info, ready_events);
+        if (!atomic_locks.empty())
+        {
+          const ApEvent done = get_memo_completion();
+          if (tpl != NULL)
+            tpl->record_reservations(this, ready_event, atomic_locks, 
+                                     ready_event, done);
+          else
+            remote_trace_info->record_reservations(this, ready_event, 
+                                     atomic_locks, ready_event, done);
+        }
         if (tpl != NULL)
           tpl->record_complete_replay(this, ready_event);
         else

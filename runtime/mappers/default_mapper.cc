@@ -2474,7 +2474,8 @@ namespace Legion {
 
       // If the application requested that we use the exact region requested,
       // honor that
-      if ((req.tag & DefaultMapper::EXACT_REGION) != 0)
+      if (layout_constraints.specialized_constraint.is_exact() ||
+          (req.tag & DefaultMapper::EXACT_REGION) != 0)
         return result;
 
       // Heuristically use the exact region if the target memory is either a GPU

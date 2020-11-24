@@ -927,6 +927,10 @@ namespace Legion {
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
+      virtual void record_reservations(Memoizable *memo, ApEvent &lhs,
+                              const std::map<Reservation,bool> &locks, 
+                              ApEvent precondition, ApEvent postcondition);
+      virtual void record_barrier(Memoizable *memo, ApBarrier lhs, ApEvent rhs);
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
@@ -946,7 +950,7 @@ namespace Legion {
         { return recording_done; }
       virtual void trigger_recording_done(void);
       virtual RtEvent get_collect_event(void) const { return recording_done; }
-    private:
+    protected:
       TraceLocalID find_trace_local_id(Memoizable *memo);
       unsigned find_memo_entry(Memoizable *memo);
       TraceLocalID record_memo_entry(Memoizable *memo, unsigned entry);
@@ -1167,6 +1171,7 @@ namespace Legion {
 #endif
                              ApEvent precondition, PredEvent guard_event);
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
+      virtual void record_barrier(Memoizable *memo, ApBarrier lhs, ApEvent rhs);
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
@@ -1180,7 +1185,8 @@ namespace Legion {
       virtual ShardingFunction* find_sharding_function(unsigned trace_local_id);
     public:
       virtual void trigger_recording_done(void);
-    public: 
+    public:
+      ApBarrier find_replay_barrier(unsigned generation) const;
       ApBarrier find_trace_shard_event(ApEvent event, ShardID remote_shard);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
@@ -1283,6 +1289,10 @@ namespace Legion {
       // Pending refreshes from remote nodes
       std::map<ApBarrier,ApBarrier> pending_refresh_frontiers;
       std::map<ApEvent,ApBarrier> pending_refresh_barriers;
+    protected:
+      // Data structures for execution fence barrier replay
+      unsigned replay_barrier_generations;
+      std::vector<ApBarrier> replay_barriers;
     };
 
     enum InstructionKind
@@ -1297,6 +1307,9 @@ namespace Legion {
       SET_EFFECTS,
       ASSIGN_FENCE_COMPLETION,
       COMPLETE_REPLAY,
+      ACQUIRE_REPLAY,
+      RELEASE_REPLAY,
+      BARRIER_REPLAY,
       BARRIER_ARRIVAL,
       BARRIER_ADVANCE,
 #ifdef LEGION_GPU_REDUCTIONS
@@ -1327,6 +1340,9 @@ namespace Legion {
       virtual SetOpSyncEvent* as_set_op_sync_event(void) { return NULL; }
       virtual SetEffects* as_set_effects(void) { return NULL; }
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
+      virtual AcquireReplay* as_acquire_replay(void) { return NULL; }
+      virtual ReleaseReplay* as_release_replay(void) { return NULL; }
+      virtual BarrierReplay* as_barrier_replay(void) { return NULL; }
       virtual BarrierArrival* as_barrier_arrival(void) { return NULL; }
       virtual BarrierAdvance* as_barrier_advance(void) { return NULL; }
 #ifdef LEGION_GPU_REDUCTIONS
@@ -1634,6 +1650,78 @@ namespace Legion {
     private:
       friend class PhysicalTemplate;
       unsigned rhs;
+    };
+
+    /**
+     * \class AcquireReplay
+     * This instruction has the following semantics:
+     *   events[lhs] = acquire_reservations(events[pre])
+     */
+    class AcquireReplay : public Instruction {
+    public:
+      AcquireReplay(PhysicalTemplate &tpl, unsigned lhs,
+          unsigned rhs, const TraceLocalID &tld,
+          const std::map<Reservation,bool> &reservations);
+      virtual void execute(void);
+      virtual std::string to_string(void);
+
+      virtual InstructionKind get_kind(void)
+        { return ACQUIRE_REPLAY; }
+      virtual AcquireReplay* as_acquire_replay(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      const std::map<Reservation,bool> reservations;
+      unsigned lhs;
+      unsigned rhs;
+    };
+
+    /**
+     * \class ReleaseReplay
+     * This instruction has the following semantics:
+     *   release_reservations(events[pre])
+     */
+    class ReleaseReplay : public Instruction {
+    public:
+      ReleaseReplay(PhysicalTemplate &tpl, 
+          unsigned rhs, const TraceLocalID &tld,
+          const std::map<Reservation,bool> &reservations);
+      virtual void execute(void);
+      virtual std::string to_string(void);
+
+      virtual InstructionKind get_kind(void)
+        { return RELEASE_REPLAY; }
+      virtual ReleaseReplay* as_release_replay(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      const std::map<Reservation,bool> reservations;
+      unsigned rhs;
+    };
+
+    /**
+     * \class BarrierReplay
+     * This instruction has the following semantics:
+     * events[lhs] = barriers[gen].arrive(events[rhs])
+     */
+    class BarrierReplay : public Instruction {
+    public:
+      BarrierReplay(ShardedPhysicalTemplate &tpl, 
+                    const TraceLocalID &tld,
+                    unsigned lhs, unsigned rhs, unsigned gen);
+      virtual void execute(void);
+      virtual std::string to_string(void);
+
+      virtual InstructionKind get_kind(void)
+        { return BARRIER_REPLAY; }
+      virtual BarrierReplay* as_barrier_replay(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      const ShardedPhysicalTemplate &sharded_template;
+      unsigned lhs;
+      unsigned rhs;
+      unsigned gen;
     };
 
     /**

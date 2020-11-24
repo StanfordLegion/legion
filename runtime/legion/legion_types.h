@@ -1481,7 +1481,7 @@ namespace Legion {
       COLLECTIVE_LOC_21 = 21, 
       COLLECTIVE_LOC_22 = 22, 
       COLLECTIVE_LOC_23 = 23,
-      //COLLECTIVE_LOC_24 = 24,
+      COLLECTIVE_LOC_24 = 24,
       //COLLECTIVE_LOC_25 = 25,
       //COLLECTIVE_LOC_26 = 26,
       //COLLECTIVE_LOC_27 = 27, 
@@ -1754,6 +1754,9 @@ namespace Legion {
     class SetOpSyncEvent;
     class SetEffects;
     class CompleteReplay;
+    class AcquireReplay;
+    class ReleaseReplay;
+    class BarrierReplay;
     class BarrierArrival;
     class BarrierAdvance;
 #ifdef LEGION_GPU_REDUCTIONS
