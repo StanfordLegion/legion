@@ -2551,6 +2551,11 @@ namespace Realm {
       : LocalManagedMemory(_me, _size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM, 0)
       , gpu(_gpu), base(_base)
     {
+      // advertise for potential gpudirect support
+      local_segment.assign(NetworkSegmentInfo::CudaDeviceMem,
+			   reinterpret_cast<void *>(base), size,
+			   reinterpret_cast<uintptr_t>(gpu));
+      segment = &local_segment;
     }
 
     GPUFBMemory::~GPUFBMemory(void) {}
@@ -2587,6 +2592,9 @@ namespace Realm {
       : LocalManagedMemory(_me, _size, MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM, 0)
       , gpu_base(_gpu_base), cpu_base((char *)_cpu_base)
     {
+      // advertise ourselves as a host memory
+      local_segment.assign(NetworkSegmentInfo::HostMem, cpu_base, size);
+      segment = &local_segment;
     }
 
     GPUZCMemory::~GPUZCMemory(void) {}

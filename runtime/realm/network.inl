@@ -266,39 +266,5 @@ namespace Realm {
 
   };
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class NetworkSegment
-  //
-
-  inline NetworkSegment::NetworkSegment()
-    : base(0), bytes(0), alignment(0)
-    , single_network(0), single_network_data(0)
-  {}
-    
-  // normally a request will just be for a particular size
-  inline NetworkSegment::NetworkSegment(size_t _bytes, size_t _alignment)
-    : base(0), bytes(_bytes), alignment(_alignment)
-    , single_network(0), single_network_data(0)
-  {}
-
-  // but it can also be for a pre-allocated chunk of memory with a fixed address
-  inline NetworkSegment::NetworkSegment(void *_base, size_t _bytes)
-    : base(_base), bytes(_bytes), alignment(0)
-    , single_network(0), single_network_data(0)
-  {}
-  
-  inline void NetworkSegment::request(size_t _bytes, size_t _alignment)
-  {
-    bytes = _bytes;
-    alignment = _alignment;
-  }
-
-  inline void NetworkSegment::assign(void *_base, size_t _bytes)
-  {
-    base = _base;
-    bytes = _bytes;
-  }
-
 
 };

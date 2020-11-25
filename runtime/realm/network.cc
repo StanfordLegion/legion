@@ -64,6 +64,53 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class NetworkSegment
+  //
+
+  NetworkSegment::NetworkSegment()
+    : base(0), bytes(0), alignment(0)
+    , memtype(NetworkSegmentInfo::Unknown)
+    , memextra(0)
+    , single_network(0), single_network_data(0)
+  {}
+
+#if 0
+  // normally a request will just be for a particular size
+  inline NetworkSegment::NetworkSegment(size_t _bytes, size_t _alignment)
+    : base(0), bytes(_bytes), alignment(_alignment)
+    , single_network(0), single_network_data(0)
+  {}
+
+  // but it can also be for a pre-allocated chunk of memory with a fixed address
+  inline NetworkSegment::NetworkSegment(void *_base, size_t _bytes)
+    : base(_base), bytes(_bytes), alignment(0)
+    , single_network(0), single_network_data(0)
+  {}
+#endif
+
+  void NetworkSegment::request(NetworkSegmentInfo::MemoryType _memtype,
+			       size_t _bytes, size_t _alignment,
+			       NetworkSegmentInfo::MemoryTypeExtraData _memextra /*= 0*/)
+  {
+    memtype = _memtype;
+    bytes = _bytes;
+    alignment = _alignment;
+    memextra = _memextra;
+  }
+
+  void NetworkSegment::assign(NetworkSegmentInfo::MemoryType _memtype,
+			      void *_base, size_t _bytes,
+			      NetworkSegmentInfo::MemoryTypeExtraData _memextra /*= 0*/)
+  {
+    memtype = _memtype;
+    base = _base;
+    bytes = _bytes;
+    memextra = _memextra;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class LoopbackNetworkModule
   //
 

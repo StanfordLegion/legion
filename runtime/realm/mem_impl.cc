@@ -82,7 +82,7 @@ namespace Realm {
 
     MemoryImpl::MemoryImpl(Memory _me, size_t _size,
 			   MemoryKind _kind, Memory::Kind _lowlevel_kind,
-			   const NetworkSegment *_segment)
+			   NetworkSegment *_segment)
       : me(_me), size(_size), kind(_kind), lowlevel_kind(_lowlevel_kind)
       , segment(_segment)
     {}
@@ -441,6 +441,11 @@ namespace Realm {
       return false;
     }
 
+    NetworkSegment *MemoryImpl::get_network_segment()
+    {
+      return segment;
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -449,7 +454,7 @@ namespace Realm {
 
     IBMemory::IBMemory(Memory _me, size_t _size,
 		       MemoryKind _kind, Memory::Kind _lowlevel_kind,
-		       void *prealloc_base, const NetworkSegment *_segment)
+		       void *prealloc_base, NetworkSegment *_segment)
       : MemoryImpl(_me, _size, _kind, _lowlevel_kind, _segment)
       , base(static_cast<char *>(prealloc_base))
     {
@@ -644,7 +649,7 @@ namespace Realm {
     LocalManagedMemory::LocalManagedMemory(Memory _me, size_t _size,
 					   MemoryKind _kind, size_t _alignment,
 					   Memory::Kind _lowlevel_kind,
-					   const NetworkSegment *_segment)
+					   NetworkSegment *_segment)
       : MemoryImpl(_me, _size, _kind, _lowlevel_kind, _segment)
       , alignment(_alignment)
       , cur_release_seqid(0)
@@ -1376,7 +1381,7 @@ namespace Realm {
   LocalCPUMemory::LocalCPUMemory(Memory _me, size_t _size, 
                                  int _numa_node, Memory::Kind _lowlevel_kind,
 				 void *prealloc_base /*= 0*/,
-				 const NetworkSegment *_segment /*= 0*/)
+				 NetworkSegment *_segment /*= 0*/)
     : LocalManagedMemory(_me, _size, MKIND_SYSMEM, ALIGNMENT,
 			 _lowlevel_kind, _segment),
       numa_node(_numa_node)
@@ -1400,6 +1405,13 @@ namespace Realm {
 	base = base_orig;
       }
       prealloced = false;
+
+      // we should not have been given a NetworkSegment by our caller
+      assert(!segment);
+      // advertise our allocation in case the network can register it
+      local_segment.assign(NetworkSegmentInfo::HostMem,
+			   base, _size);
+      segment = &local_segment;
     }
     log_malloc.debug("CPU memory at %p, size = %zd%s%s", base, _size, 
 		     prealloced ? " (prealloced)" : "",
@@ -1435,9 +1447,8 @@ namespace Realm {
   //
 
     RemoteMemory::RemoteMemory(Memory _me, size_t _size, Memory::Kind k,
-			       MemoryKind mk /*= MKIND_REMOTE */,
-			       const NetworkSegment *_segment)
-      : MemoryImpl(_me, _size, mk, k, _segment)
+			       MemoryKind mk /*= MKIND_REMOTE */)
+      : MemoryImpl(_me, _size, mk, k, nullptr /*no segment*/)
     {}
 
     RemoteMemory::~RemoteMemory(void)

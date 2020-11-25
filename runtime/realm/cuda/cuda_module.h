@@ -66,6 +66,13 @@
 #endif
 
 namespace Realm {
+
+  namespace NetworkSegmentInfo {
+    // CUDA device memory - extra is a uintptr_t'd pointer to the GPU
+    //  object
+    static const MemoryType CudaDeviceMem = 2;
+  };
+
   namespace Cuda {
 
     class GPU;
@@ -789,6 +796,7 @@ namespace Realm {
     public:
       GPU *gpu;
       CUdeviceptr base;
+      NetworkSegment local_segment;
     };
 
     class GPUZCMemory : public LocalManagedMemory {
@@ -806,6 +814,7 @@ namespace Realm {
     public:
       CUdeviceptr gpu_base;
       char *cpu_base;
+      NetworkSegment local_segment;
     };
 
   }; // namespace Cuda

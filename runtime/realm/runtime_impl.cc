@@ -1145,11 +1145,13 @@ namespace Realm {
 
       // form requests for network-registered memory
       if(reg_ib_mem_size > 0) {
-	reg_ib_mem_segment.request(reg_ib_mem_size, 64);
+	reg_ib_mem_segment.request(NetworkSegmentInfo::HostMem,
+				   reg_ib_mem_size, 64);
 	network_segments.push_back(&reg_ib_mem_segment);
       }
       if(reg_mem_size > 0) {
-	reg_mem_segment.request(reg_mem_size, 64);
+	reg_mem_segment.request(NetworkSegmentInfo::HostMem,
+				reg_mem_size, 64);
 	network_segments.push_back(&reg_mem_segment);
       }
 
@@ -1164,6 +1166,31 @@ namespace Realm {
 	message_manager->add_to_manager(&bgwork);
       else
 	assert(active_msg_handler_threads > 0);
+
+      // initialize modules and create memories before we do network attach
+      //  so that we have a chance to register these other memories for
+      //  RDMA transfers
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->initialize(this);
+
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->create_memories(this);
+
+      Node *n = &nodes[Network::my_node_id];
+      for(MemoryImpl *mem : n->memories) {
+	NetworkSegment *seg = mem->get_network_segment();
+	if(seg)
+	  network_segments.push_back(seg);
+      }
+      for(IBMemory *ibm : n->ib_memories) {
+	NetworkSegment *seg = ibm->get_network_segment();
+	if(seg)
+	  network_segments.push_back(seg);
+      }
 
       // attach to the network
       for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
@@ -1247,23 +1274,12 @@ namespace Realm {
                                         lock_trace_exp_arrv_rate);
 #endif
 	
-      for(std::vector<Module *>::const_iterator it = modules.begin();
-	  it != modules.end();
-	  it++)
-	(*it)->initialize(this);
-
       //gasnet_seginfo_t seginfos = new gasnet_seginfo_t[num_nodes];
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
-      Node *n = &nodes[Network::my_node_id];
-
-      // create memories and processors for all loaded modules
+      // network-specific memories are created after attachment
       for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
 	  it != network_modules.end();
-	  it++)
-	(*it)->create_memories(this);
-      for(std::vector<Module *>::const_iterator it = modules.begin();
-	  it != modules.end();
 	  it++)
 	(*it)->create_memories(this);
 

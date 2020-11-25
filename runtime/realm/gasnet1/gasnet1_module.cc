@@ -665,6 +665,8 @@ namespace Realm {
       if((*it)->bytes == 0) continue;
       // must not already be assigned an address
       if((*it)->base != 0) continue;
+      // must be host memory
+      if((*it)->memtype != NetworkSegmentInfo::HostMem) continue;
       // TODO: consider alignment
       inseg_bytes += (*it)->bytes;
     }
@@ -699,6 +701,8 @@ namespace Realm {
       if((*it)->bytes == 0) continue;
       // must not already be assigned an address
       if((*it)->base != 0) continue;
+      // must be host memory
+      if((*it)->memtype != NetworkSegmentInfo::HostMem) continue;
       // TODO: consider alignment
       (*it)->base = seg_base;
       // RDMA info for GASNet is just the local base pointer

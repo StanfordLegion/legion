@@ -246,22 +246,39 @@ namespace Realm {
 					   size_t header_size) = 0;
   };
 
+  namespace NetworkSegmentInfo {
+    // "enum" (using a namespace so that they can be extended in other
+    //  headers) describing the different kind of memories that a network
+    //  segment can live in
+    typedef unsigned MemoryType;
+
+    // each memory type gets to define what the extra data means for itself
+    typedef uintptr_t MemoryTypeExtraData;
+
+    static const MemoryType Unknown = 0;
+
+    // generic memory that is read/write-able by the host CPUs
+    static const MemoryType HostMem = 1;
+  };
+
   class NetworkSegment {
   public:
     NetworkSegment();
     
     // normally a request will just be for a particular size
-    NetworkSegment(size_t _bytes, size_t _alignment);
+    void request(NetworkSegmentInfo::MemoryType _memtype,
+		 size_t _bytes, size_t _alignment,
+		 NetworkSegmentInfo::MemoryTypeExtraData _memextra = 0);
 
     // but it can also be for a pre-allocated chunk of memory with a fixed address
-    NetworkSegment(void *_base, size_t _bytes);
-
-    void request(size_t _bytes, size_t _alignment);
-
-    void assign(void *_base, size_t _bytes);
+    void assign(NetworkSegmentInfo::MemoryType _memtype,
+		void *_base, size_t _bytes,
+		NetworkSegmentInfo::MemoryTypeExtraData _memextra = 0);
 
     void *base;  // once this is non-null, it cannot be changed
     size_t bytes, alignment;
+    NetworkSegmentInfo::MemoryType memtype;
+    NetworkSegmentInfo::MemoryTypeExtraData memextra;
 
     // again, a single network puts itself here in addition to adding to the map
     NetworkModule *single_network;

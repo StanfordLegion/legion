@@ -65,7 +65,7 @@ namespace Realm {
 
     MemoryImpl(Memory _me, size_t _size,
 	       MemoryKind _kind, Memory::Kind _lowlevel_kind,
-	       const NetworkSegment *_segment);
+	       NetworkSegment *_segment);
 
     virtual ~MemoryImpl(void);
 
@@ -128,6 +128,9 @@ namespace Realm {
     
     virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
 
+    // gets the network segment info for potential registration
+    NetworkSegment *get_network_segment();
+
     Memory::Kind get_kind(void) const;
 
     struct InstanceList {
@@ -141,7 +144,7 @@ namespace Realm {
     size_t size;
     MemoryKind kind;
     Memory::Kind lowlevel_kind;
-    const NetworkSegment *segment;
+    NetworkSegment *segment;
 
     // we keep a dedicated instance list for locally created
     //  instances, but we use a map indexed by creator node for others,
@@ -156,7 +159,7 @@ namespace Realm {
   public:
     IBMemory(Memory _me, size_t _size,
 	     MemoryKind _kind, Memory::Kind _lowlevel_kind,
-	     void *prealloc_base, const NetworkSegment *_segment);
+	     void *prealloc_base, NetworkSegment *_segment);
 
     virtual ~IBMemory();
 
@@ -238,7 +241,7 @@ namespace Realm {
     public:
       LocalManagedMemory(Memory _me, size_t _size, MemoryKind _kind,
 			 size_t _alignment, Memory::Kind _lowlevel_kind,
-			 const NetworkSegment *_segment);
+			 NetworkSegment *_segment);
 
       virtual ~LocalManagedMemory(void);
 
@@ -312,7 +315,7 @@ namespace Realm {
 
       LocalCPUMemory(Memory _me, size_t _size, int numa_node, Memory::Kind _lowlevel_kind,
 		     void *prealloc_base = 0,
-		     const NetworkSegment *_segment = 0);
+		     NetworkSegment *_segment = 0);
 
       virtual ~LocalCPUMemory(void);
 
@@ -325,6 +328,7 @@ namespace Realm {
     public: //protected:
       char *base, *base_orig;
       bool prealloced;
+      NetworkSegment local_segment;
     };
 
     class DiskMemory : public LocalManagedMemory {
@@ -378,8 +382,7 @@ namespace Realm {
     class RemoteMemory : public MemoryImpl {
     public:
       RemoteMemory(Memory _me, size_t _size, Memory::Kind k,
-		   MemoryKind mk = MKIND_REMOTE,
-		   const NetworkSegment *_segment = 0);
+		   MemoryKind mk = MKIND_REMOTE);
       virtual ~RemoteMemory(void);
 
       virtual AllocationResult allocate_storage_deferrable(RegionInstanceImpl *inst,

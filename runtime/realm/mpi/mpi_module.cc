@@ -665,6 +665,7 @@ namespace Realm {
     for(std::vector<NetworkSegment *>::iterator it = segments.begin(); it != segments.end(); ++it) {
         if((*it)->bytes == 0) continue;
         if((*it)->base != 0) continue;
+	if((*it)->memtype != NetworkSegmentInfo::HostMem) continue;
         attach_size += (*it)->bytes;
     }
 
@@ -685,6 +686,7 @@ namespace Realm {
     for(std::vector<NetworkSegment *>::iterator it = segments.begin(); it != segments.end(); ++it) {
         if((*it)->bytes == 0) continue;
         if((*it)->base != 0) continue;
+	if((*it)->memtype != NetworkSegmentInfo::HostMem) continue;
         (*it)->base = seg_base;
         (*it)->add_rdma_info(this, &seg_base, sizeof(void *));
         seg_base += (*it)->bytes;
