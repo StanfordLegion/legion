@@ -6584,7 +6584,7 @@ class Operation(object):
         return True
 
     def perform_logical_analysis(self, perform_checks):
-        if self.replayed:
+        if self.replayed and perform_checks:
             return True
         # We need a context to do this
         assert self.context is not None
@@ -6621,6 +6621,12 @@ class Operation(object):
                 if not self.analyze_logical_deletion(idx, perform_checks):
                     return False
             return True
+        # Do any internal refinement operations before doing ourself
+        if self.internal_ops is not None:
+            for internal in self.internal_ops:
+                if internal.is_close():
+                    continue
+                internal.perform_logical_analysis(perform_checks)
         for idx in xrange(0,len(self.reqs)):
             if not self.analyze_logical_requirement(idx, perform_checks):
                 return False
