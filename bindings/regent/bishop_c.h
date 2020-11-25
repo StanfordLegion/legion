@@ -171,6 +171,11 @@ bishop_slice_cache_add_entry(bishop_slice_cache_t,
                              legion_domain_t,
                              legion_slice_task_output_t);
 
+coord_t
+bishop_domain_point_linearize(legion_domain_point_t point,
+                              legion_domain_t domain,
+                              legion_task_t task);
+
 void
 bishop_logger_info(const char* msg, ...)
   __attribute__((format (printf, 1, 2)));
