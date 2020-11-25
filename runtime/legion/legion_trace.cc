@@ -5708,18 +5708,13 @@ namespace Legion {
       const unsigned pre = find_event(precondition, tpl_lock);
       const unsigned post = find_event(postcondition, tpl_lock);
 
-#ifndef LEGION_DISABLE_EVENT_PRUNING
-      if (!lhs.exists() || (lhs == precondition))
+      // Always produce a fresh output event here
       {
-        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        if (lhs == precondition)
-          rename.trigger(lhs);
-        else
-          rename.trigger();
-        lhs = ApEvent(rename);
+        const ApUserEvent rename = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, rename, lhs);
+        lhs = rename;
       }
-#endif
-      const unsigned lhs_ = find_or_convert_event(lhs);
+      const unsigned lhs_ = convert_event(lhs);
       insert_instruction(new AcquireReplay(*this, lhs_, pre, tld,reservations));
       events.push_back(ApEvent());
       insert_instruction(new ReleaseReplay(*this, post, tld, reservations));

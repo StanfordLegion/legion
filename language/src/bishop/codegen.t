@@ -30,6 +30,32 @@ local c = terralib.includecstring [[
 #include <string.h>
 ]]
 
+local context = {}
+
+function context:__index(field)
+  local value = context[field]
+  if value ~= nil then
+    return value
+  end
+  error("context has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function context:__newindex(field, value)
+  error("context has no field '" .. field .. "' (in assignment)", 2)
+end
+
+function context.new_mapper_call(task_var)
+  local domain_var = terralib.newsymbol(c.legion_domain_t)
+  local domain_actions = quote
+    var [domain_var] = c.legion_task_get_index_domain([task_var])
+  end
+  return setmetatable({
+    task = task_var,
+    domain = domain_var,
+    domain_actions = domain_actions,
+  }, context)
+end
+
 local codegen = {}
 
 local processor_isa = {
@@ -90,7 +116,7 @@ function codegen.type(ty)
   end
 end
 
-function codegen.expr(binders, state_var, node)
+function codegen.expr(cx, binders, state_var, node)
   local value = terralib.newsymbol(codegen.type(node.expr_type))
   local actions = quote
     var [value]
@@ -130,7 +156,7 @@ function codegen.expr(binders, state_var, node)
     end
 
   elseif node:is(ast.typed.expr.Unary) then
-    local rhs = codegen.expr(binders, state_var, node.rhs)
+    local rhs = codegen.expr(cx, binders, state_var, node.rhs)
     actions = quote
       [rhs.actions]
       [actions]
@@ -138,8 +164,8 @@ function codegen.expr(binders, state_var, node)
     end
 
   elseif node:is(ast.typed.expr.Binary) then
-    local lhs = codegen.expr(binders, state_var, node.lhs)
-    local rhs = codegen.expr(binders, state_var, node.rhs)
+    local lhs = codegen.expr(cx, binders, state_var, node.lhs)
+    local rhs = codegen.expr(cx, binders, state_var, node.rhs)
     actions = quote
       [lhs.actions]
       [rhs.actions]
@@ -148,9 +174,9 @@ function codegen.expr(binders, state_var, node)
     end
 
   elseif node:is(ast.typed.expr.Ternary) then
-    local cond = codegen.expr(binders, state_var, node.cond)
-    local true_expr = codegen.expr(binders, state_var, node.true_expr)
-    local false_expr = codegen.expr(binders, state_var, node.false_expr)
+    local cond = codegen.expr(cx, binders, state_var, node.cond)
+    local true_expr = codegen.expr(cx, binders, state_var, node.true_expr)
+    local false_expr = codegen.expr(cx, binders, state_var, node.false_expr)
     actions = quote
       [actions]
       [cond.actions]
@@ -164,7 +190,7 @@ function codegen.expr(binders, state_var, node)
     end
 
   elseif node:is(ast.typed.expr.Filter) then
-    local base = codegen.expr(binders, state_var, node.value)
+    local base = codegen.expr(cx, binders, state_var, node.value)
     actions = quote
       [actions]
       [base.actions]
@@ -172,7 +198,7 @@ function codegen.expr(binders, state_var, node)
     end
     node.constraints:map(function(constraint)
       assert(constraint:is(ast.typed.FilterConstraint))
-      local v = codegen.expr(binders, state_var, constraint.value)
+      local v = codegen.expr(cx, binders, state_var, constraint.value)
       if constraint.field == "isa" then
         assert(std.is_processor_list_type(node.value.expr_type))
         assert(std.is_isa_type(constraint.value.expr_type))
@@ -222,8 +248,8 @@ function codegen.expr(binders, state_var, node)
     end)
 
   elseif node:is(ast.typed.expr.Index) then
-    local base = codegen.expr(binders, state_var, node.value)
-    local index = codegen.expr(binders, state_var, node.index)
+    local base = codegen.expr(cx, binders, state_var, node.value)
+    local index = codegen.expr(cx, binders, state_var, node.index)
     if std.is_point_type(node.value.expr_type) then
       actions = quote
         [actions]
@@ -253,7 +279,7 @@ function codegen.expr(binders, state_var, node)
     end
   elseif node:is(ast.typed.expr.Field) then
     if node.field == "memories" then
-      local base = codegen.expr(binders, state_var, node.value)
+      local base = codegen.expr(cx, binders, state_var, node.value)
       actions = quote
         [actions]
         [base.actions]
@@ -266,7 +292,7 @@ function codegen.expr(binders, state_var, node)
         end
       end
     elseif node.field == "size" then
-      local base = codegen.expr(binders, state_var, node.value)
+      local base = codegen.expr(cx, binders, state_var, node.value)
       actions = quote
         [actions]
         [base.actions]
@@ -295,11 +321,11 @@ function codegen.expr(binders, state_var, node)
     end
   elseif node:is(ast.typed.expr.Coerce) then
     if node.expr_type == int and std.is_point_type(node.value.expr_type) then
-      local base = codegen.expr(binders, state_var, node.value)
+      local base = codegen.expr(cx, binders, state_var, node.value)
       actions = quote
         [actions]
         [base.actions]
-        [value] = [ base.value ].point_data[0]
+        [value] = c.bishop_domain_point_linearize([base.value], [cx.domain], [cx.task])
       end
     else
       assert(false, "unknown coercion from type " ..
@@ -493,10 +519,16 @@ function codegen.select_task_options(rules, automata, signature,
     [last_elems:map(std.curry2(codegen.elem_pattern_match, binders, task_var))]
   end
 
+  local cx = context.new_mapper_call(task_var)
+  body = quote
+    [body]
+    [cx.domain_actions]
+  end
+
   local properties = merge_task_properties(task_rules)
   for key, value_ast in pairs(properties) do
     if key == "target" then
-      local value = codegen.expr(binders, state_var, value_ast)
+      local value = codegen.expr(cx, binders, state_var, value_ast)
       if std.is_processor_list_type(value_ast.expr_type) then
         local result = terralib.newsymbol(c.legion_processor_t)
         value.actions = quote
@@ -516,7 +548,7 @@ function codegen.select_task_options(rules, automata, signature,
         [options_var].initial_proc = [value.value]
       end
     elseif key == "memoize" or key == "map_locally" then
-      local value = codegen.expr(binders, state_var, value_ast)
+      local value = codegen.expr(cx, binders, state_var, value_ast)
       body = quote
         [body]
         [value.actions]
@@ -574,9 +606,11 @@ function codegen.slice_task(rules, automata, state_id, signature, mapper_state_t
     end)
   end)
 
+  local cx = context.new_mapper_call(task_var)
+
   local task_properties = merge_task_properties(task_rules)
   local target = task_properties.target
-  local value = codegen.expr(binders, state_var, target)
+  local value = codegen.expr(cx, binders, state_var, target)
   -- TODO: distribute across slices processors in the list,
   --       instead of assigning all to the first processor
   if std.is_processor_list_type(target.expr_type) then
@@ -595,6 +629,7 @@ function codegen.slice_task(rules, automata, state_id, signature, mapper_state_t
 
   body = quote
     [body]
+    [cx.domain_actions]
     [value.actions]
     var singleton : c.legion_domain_t
     var dim = [point_var].dim
@@ -668,18 +703,22 @@ function codegen.map_task(rules, automata, state_id, signature, mapper_state_typ
         assert(false, "unreachable")
       end
     end)
+
+  local cx = context.new_mapper_call(task_var)
+
   -- TODO: handle binder naming collision
   -- TODO: handle pattern match on tasks differently than that on regions
   local body = quote
     [default_region_pattern_matches:map(std.curry2(codegen.pattern_match,
                                                    binders, task_var))]
     [last_elems:map(std.curry2(codegen.elem_pattern_match, binders, task_var))]
+    [cx.domain_actions]
   end
 
   -- generate task mapping code
   local task_properties = merge_task_properties(task_rules)
   for key, value_ast in pairs(task_properties) do
-    local value = codegen.expr(binders, state_var, value_ast)
+    local value = codegen.expr(cx, binders, state_var, value_ast)
     if key == "target" then
       if std.is_processor_list_type(value_ast.expr_type) then
         local result = terralib.newsymbol(c.legion_processor_t)
@@ -737,7 +776,7 @@ function codegen.map_task(rules, automata, state_id, signature, mapper_state_typ
       local region_var = terralib.newsymbol(c.legion_logical_region_t)
 
       local target =
-        codegen.expr(binders, state_var, rule_properties[idx].target)
+        codegen.expr(cx, binders, state_var, rule_properties[idx].target)
       if std.is_memory_list_type(rule_properties[idx].target.expr_type) then
         local result = terralib.newsymbol(c.legion_memory_t)
         target.actions = quote
@@ -978,7 +1017,7 @@ function codegen.mapper_init(assignments, automata, signatures)
     @ptr = c.malloc([sizeof(mapper_state_type)])
     var [mapper_state_var] = [&mapper_state_type](@ptr)
     [assignments:map(function(assignment)
-      local value = codegen.expr(binders, mapper_state_var, assignment.value)
+      local value = codegen.expr(cx, binders, mapper_state_var, assignment.value)
       local mark_persistent = quote end
       if std.is_list_type(assignment.value.expr_type) then
         mark_persistent = quote [value.value].persistent = 1 end
@@ -1062,11 +1101,13 @@ function codegen.automata(automata)
       elseif symbol:is(regex.symbol.Constraint) then
         -- TODO: handle constraints from unification
         local binders = {}
-        local value = codegen.expr(binders, nil, symbol.constraint.value)
+        local cx = context.new_mapper_call(task_var)
+        local value = codegen.expr(cx, binders, nil, symbol.constraint.value)
         if symbol.constraint.field == "isa" then
           body = quote
             [body]
             do
+              [cx.domain_actions]
               [value.actions]
               var proc = c.legion_task_get_target_proc([task_var])
               if proc.id ~= c.NO_PROC.id and
