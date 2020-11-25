@@ -10795,7 +10795,6 @@ namespace Legion {
         assert(shard_rects_ready.exists());
         assert(collective_mapping != NULL);
 #endif
-        Runtime::trigger_event(shard_rects_ready);
         std::vector<AddressSpaceID> children;
         collective_mapping->get_children(owner_space, local_space, children);
         if (!children.empty())
@@ -10812,6 +10811,9 @@ namespace Legion {
             context->runtime->send_index_partition_shard_rects_response(*it, 
                                                                         rez);
         }
+        // Only trigger this after we've packed the shard rects since the
+        // local node is going to mutate it with its own values after this
+        Runtime::trigger_event(shard_rects_ready);
         return remove_base_resource_ref(RUNTIME_REF);
       }
       return false;

@@ -6462,6 +6462,11 @@ namespace Legion {
         rez.serialize(it->first);
         rez.serialize(it->second);
       }
+      if (clear)
+      {
+        dense_shard_rects->clear();
+        sparse_shard_rects->clear();
+      }
     }
 
     //--------------------------------------------------------------------------
