@@ -3201,7 +3201,7 @@ class LogicalRegion(object):
         path.append(self)
 
     def perform_logical_analysis(self, depth, path, op, req, field, open_local, 
-                                 unopened, advance, closed, prev, aliased, checks):
+                         unopened, advance, closed, prev, aliased, init, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
@@ -3209,19 +3209,24 @@ class LogicalRegion(object):
         next_child = path[depth+1] if not arrived else None
         result,next_open,next_unopened,next_advance,next_closed = \
             self.logical_state[field].perform_logical_analysis(op, req, next_child, 
-                            open_local, unopened, advance, closed, prev, aliased, checks)
+                open_local, unopened, advance, closed, prev, aliased, init, checks)
         if not result:
             return False
         if not arrived:
             return path[depth+1].perform_logical_analysis(depth+1, path, op, req, 
                         field, next_open, next_unopened, next_advance, next_closed, 
-                        prev, aliased, checks)
+                        prev, aliased, init, checks)
         return True
 
     def register_logical_user(self, op, req, field):
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
         self.logical_state[field].register_logical_user(op, req)
+
+    def register_refinement_user(self, op, field):
+        if field not in self.logical_state:
+            self.logical_state[field] = LogicalState(self, field)
+        self.logical_state[field].register_refinement_user(op)
 
     def perform_logical_deletion(self, depth, path, op, req, field, closed, prev, checks):
         assert self is path[depth]
@@ -3623,7 +3628,7 @@ class LogicalPartition(object):
         path.append(self)
 
     def perform_logical_analysis(self, depth, path, op, req, field, open_local, 
-                                  unopened, advance, closed, prev, aliased, checks):
+                          unopened, advance, closed, prev, aliased, init, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
@@ -3631,19 +3636,24 @@ class LogicalPartition(object):
         next_child = path[depth+1] if not arrived else None
         result,next_open,next_unopened,next_advance,next_closed = \
           self.logical_state[field].perform_logical_analysis(op, req, next_child, 
-                          open_local, unopened, advance, closed, prev, aliased, checks)
+              open_local, unopened, advance, closed, prev, aliased, init, checks)
         if not result:
             return False
         if not arrived:
             return path[depth+1].perform_logical_analysis(depth+1, path, op, req, 
                                     field, next_open, next_unopened, next_advance, 
-                                    next_closed, prev, aliased, checks)
+                                    next_closed, prev, aliased, init, checks)
         return True
 
     def register_logical_user(self, op, req, field):
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
         self.logical_state[field].register_logical_user(op, req)
+
+    def register_refinement_user(self, op, field):
+        if field not in self.logical_state:
+            self.logical_state[field] = LogicalState(self, field)
+        self.logical_state[field].register_refinement_user(op)
 
     def perform_logical_deletion(self, depth, path, op, req, field, closed, prev, checks):
         assert self is path[depth]
@@ -3846,7 +3856,7 @@ class LogicalState(object):
         self.projection_epoch = list()
 
     def perform_logical_analysis(self, op, req, next_child, open_local, unopened, advance, 
-                                 closed, previous_deps, aliased_children, perform_checks):
+                     closed, previous_deps, aliased_children, init_fields, perform_checks):
         # At most one of these should be true, they can both be false
         assert not open_local or not unopened
         arrived = next_child is None
@@ -3885,6 +3895,7 @@ class LogicalState(object):
             return (False,None,None,None,closed)
         if arrived: 
             # Check to see if we have a refinement operation to handle
+            tree_field = (self.node.tree_id,self.field.fid)
             refinement = op.has_refinement_operation(req, self.node, self.field)
             if refinement is not None:
                 # Check to see that the refinement has dependences on
@@ -3892,6 +3903,19 @@ class LogicalState(object):
                 if not self.analyze_refinement(refinement, previous_deps, 
                                                op, req, perform_checks):
                     return False
+                init_fields.add(tree_field)
+                # Register the refinement user
+                refinement.reqs[0].logical_node.register_refinement_user(refinement,self.field)
+            elif tree_field not in init_fields:
+                # Verify that we have an initial close operation that
+                # would initialize the version information for this field
+                close = op.get_close_operation(req, req.parent, self.field, False)
+                if not self.analyze_initial_close(close, op, req, perform_checks):
+                    return False
+                init_fields.add(tree_field)
+                # Register the refinement user
+                if close is not None:
+                    close.reqs[0].logical_node.register_refinement_user(close, self.field)
             # Add ourselves as the current user
             self.register_logical_user(op, req)
             # Record if we have outstanding reductions
@@ -3904,6 +3928,10 @@ class LogicalState(object):
 
     def register_logical_user(self, op, req):
         self.current_epoch_users.append((op,req))
+
+    def register_refinement_user(self, op):
+        assert op.is_internal()
+        self.previous_epoch_users.append((op,op.reqs[0]))
 
     def perform_logical_deletion(self, op, req, next_child, already_closed, 
                                  previous_deps, perform_checks, force_close):
@@ -4507,6 +4535,39 @@ class LogicalState(object):
             dep = MappingDependence(refinement, op, refinement_req.index,
                                     req.index, dep_type)
             refinement.add_outgoing(dep)
+            op.add_incoming(dep)
+        return True
+
+    def analyze_initial_close(self, close, op, req, perform_checks):
+        if close is None:
+            # Check for the case where this is an output region
+            if op.mappings[req.index][self.field.fid].is_virtual():
+                return True
+            if perform_checks:
+                print(("ERROR: %s (UID %s) failed to generate an initial close "+
+                       "operation for field %s of region requirement %s") %
+                       (op, str(op.uid), self.field, req.index))
+            else:
+                print(("ERROR: %s (UID %s) failed to generate an initial close "+
+                       "operation that we normally would have expected for field "+
+                       "%s of region requirement %s. Re-run with detailed Legion "+
+                       "Spy logs to confirm.") % (op, str(op.uid), self.field, req.index))
+            if self.node.state.assert_on_error:
+                assert False
+            return False
+        close_req = close.reqs[0]
+        dep_type = compute_dependence_type(close_req, req)
+        if perform_checks:
+            if not op.has_mapping_dependence(req, close, close_req, dep_type, self.field):
+                print(("ERROR: region requirement %s of operation %s is missing a "+
+                       "mapping dependence on initial close op %s for field %s") %
+                       (req.index, op, close, self.field))
+                if self.node.state.assert_on_error:
+                    assert False
+                return False
+        else:
+            dep = MappingDependence(close, op, close_req.index, req.index, dep_type)
+            close.add_outgoing(dep)
             op.add_incoming(dep)
         return True
 
@@ -6507,15 +6568,15 @@ class Operation(object):
         self.points = new_points
         return False
 
-    def analyze_logical_requirement(self, index, perform_checks):
+    def analyze_logical_requirement(self, index, init_fields, perform_checks):
         assert index in self.reqs
         req = self.reqs[index]
         # Special out for no access
-        if req.priv is NO_ACCESS:
+        if req.priv == NO_ACCESS:
             return True
         # Destination requirements for copies are a little weird because
         # they actually need to behave like READ_WRITE privileges
-        if self.kind == COPY_OP_KIND and len(self.reqs)/2 <= index:
+        if self.kind == COPY_OP_KIND and len(self.reqs) // 2 <= index:
             if req.priv == REDUCE:
                 copy_reduce = True
                 req.priv = READ_WRITE
@@ -6566,7 +6627,7 @@ class Operation(object):
             previous_deps = list()
             if not req.parent.perform_logical_analysis(0, path, self, req, field,
                                         False, True, False, False, previous_deps,
-                                        aliased_children, perform_checks):
+                                        aliased_children, init_fields, perform_checks):
                 return False
         # Restore the privileges if necessary
         if copy_reduce:
@@ -6582,7 +6643,7 @@ class Operation(object):
         assert index in logical_op.reqs
         # Destination requirements for copies are a little weird because
         # they actually need to behave like READ_WRITE privileges
-        if self.kind == COPY_OP_KIND and len(self.reqs)/2 <= index:
+        if self.kind == COPY_OP_KIND and len(self.reqs) // 2 <= index:
             if req.priv == REDUCE:
                 copy_reduce = True
                 req.priv = READ_WRITE
@@ -6652,7 +6713,7 @@ class Operation(object):
                 return False
         return True
 
-    def perform_logical_analysis(self, perform_checks):
+    def perform_logical_analysis(self, init_fields, perform_checks):
         if self.replayed and perform_checks:
             return True
         # We need a context to do this
@@ -6691,7 +6752,7 @@ class Operation(object):
                     return False
             return True
         for idx in xrange(0,len(self.reqs)):
-            if not self.analyze_logical_requirement(idx, perform_checks):
+            if not self.analyze_logical_requirement(idx, init_fields, perform_checks):
                 return False
         return True
 
@@ -7974,7 +8035,7 @@ class Operation(object):
         assert self.kind == COPY_OP_KIND
         replay_file.write(struct.pack('Q',self.uid))
         assert len(self.reqs) % 2 == 0
-        half = len(self.reqs) / 2
+        half = len(self.reqs) // 2
         replay_file.write(struct.pack('I',half))
         
     def pack_close_replay_info(self, replay_file):
@@ -8316,19 +8377,28 @@ class Task(object):
         print('Performing logical dependence analysis for %s...' % str(self))
         if self.op.state.verbose:
             print('  Analyzing %d operations...' % len(self.operations))
+        # Record which fields are already initialized
+        init_fields = set()
+        if self.op.reqs:
+            for req in itervalues(self.op.reqs):
+                if req.priv == NO_ACCESS:
+                    continue
+                tid = req.logical_node.tree_id
+                for field in req.fields:
+                    init_fields.add((tid,field.fid))
         # Iterate over all the operations in order and
         # have them perform their analysis
         success = True
         for op in self.operations:
             if op.inlined:
                 continue
-            if not op.fully_logged:
+            if not op.fully_logged and perform_checks:
                 print(('Warning: skipping logical analysis of %s because it '+
                         'was not fully logged...') % str(op))
                 if op.state.assert_on_warning:
                     assert False
                 continue
-            if not op.perform_logical_analysis(perform_checks):
+            if not op.perform_logical_analysis(init_fields, perform_checks):
                 success = False
                 break
         # Reset the logical state when we are done
@@ -8451,7 +8521,7 @@ class Task(object):
             for op in self.operations:
                 if op.inlined:
                     continue
-                if not op.fully_logged:
+                if not op.fully_logged and perform_checks:
                     print(('Warning: skipping physical verification of %s '+
                             'because it was not fully logged...') % str(op))
                     if op.state.assert_on_warning:
