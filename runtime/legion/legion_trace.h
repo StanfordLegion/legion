@@ -828,7 +828,6 @@ namespace Legion {
       virtual void record_reservations(Memoizable *memo, ApEvent &lhs,
                               const std::map<Reservation,bool> &locks, 
                               ApEvent precondition, ApEvent postcondition);
-      virtual void record_barrier(Memoizable *memo, ApBarrier lhs, ApEvent rhs);
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
@@ -1082,7 +1081,6 @@ namespace Legion {
 #endif
                              ApEvent precondition, PredEvent guard_event);
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
-      virtual void record_barrier(Memoizable *memo, ApBarrier lhs, ApEvent rhs);
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
@@ -1097,7 +1095,6 @@ namespace Legion {
     public:
       virtual void trigger_recording_done(void);
     public:
-      ApBarrier find_replay_barrier(unsigned generation) const;
       ApBarrier find_trace_shard_event(ApEvent event, ShardID remote_shard);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
@@ -1220,10 +1217,6 @@ namespace Legion {
       // Pending refreshes from remote nodes
       std::map<ApBarrier,ApBarrier> pending_refresh_frontiers;
       std::map<ApEvent,ApBarrier> pending_refresh_barriers;
-    protected:
-      // Data structures for execution fence barrier replay
-      unsigned replay_barrier_generations;
-      std::vector<ApBarrier> replay_barriers;
     };
 
     enum InstructionKind
@@ -1240,7 +1233,6 @@ namespace Legion {
       COMPLETE_REPLAY,
       ACQUIRE_REPLAY,
       RELEASE_REPLAY,
-      BARRIER_REPLAY,
       BARRIER_ARRIVAL,
       BARRIER_ADVANCE,
 #ifdef LEGION_GPU_REDUCTIONS
@@ -1273,7 +1265,6 @@ namespace Legion {
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
       virtual AcquireReplay* as_acquire_replay(void) { return NULL; }
       virtual ReleaseReplay* as_release_replay(void) { return NULL; }
-      virtual BarrierReplay* as_barrier_replay(void) { return NULL; }
       virtual BarrierArrival* as_barrier_arrival(void) { return NULL; }
       virtual BarrierAdvance* as_barrier_advance(void) { return NULL; }
 #ifdef LEGION_GPU_REDUCTIONS
@@ -1628,31 +1619,6 @@ namespace Legion {
       friend class PhysicalTemplate;
       const std::map<Reservation,bool> reservations;
       unsigned rhs;
-    };
-
-    /**
-     * \class BarrierReplay
-     * This instruction has the following semantics:
-     * events[lhs] = barriers[gen].arrive(events[rhs])
-     */
-    class BarrierReplay : public Instruction {
-    public:
-      BarrierReplay(ShardedPhysicalTemplate &tpl, 
-                    const TraceLocalID &tld,
-                    unsigned lhs, unsigned rhs, unsigned gen);
-      virtual void execute(void);
-      virtual std::string to_string(void);
-
-      virtual InstructionKind get_kind(void)
-        { return BARRIER_REPLAY; }
-      virtual BarrierReplay* as_barrier_replay(void)
-        { return this; }
-    private:
-      friend class PhysicalTemplate;
-      const ShardedPhysicalTemplate &sharded_template;
-      unsigned lhs;
-      unsigned rhs;
-      unsigned gen;
     };
 
     /**
