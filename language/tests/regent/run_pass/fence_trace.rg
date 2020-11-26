@@ -14,7 +14,7 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "4"]
+--   ["-ll:cpu", "4", "-dm:memoize"]
 -- ]
 
 import "regent"
