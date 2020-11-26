@@ -38,6 +38,7 @@ task g(x : int)
   c.usleep(500000)
 end
 
+__demand(__replicable)
 task main()
   __demand(__trace)
   for i = 0, 3 do
