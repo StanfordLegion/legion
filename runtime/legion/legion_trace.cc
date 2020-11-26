@@ -3428,7 +3428,7 @@ namespace Legion {
       : trace(t), recording(true), replayable(false, "uninitialized"),
         fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
-        has_virtual_mapping(false),
+        has_virtual_mapping(false), last_fence(NULL),
         recording_done(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
