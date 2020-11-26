@@ -3667,6 +3667,8 @@ namespace Legion {
                ((remote_trace_info != NULL) && remote_trace_info->recording));
 #endif
         std::set<ApEvent> ready_events;
+        if (execution_fence_event.exists())
+          ready_events.insert(execution_fence_event);
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           if (!virtual_mapped[idx] && !no_access_regions[idx])
@@ -5952,6 +5954,7 @@ namespace Legion {
              it != physical_instances.end(); ++it)
           for (unsigned idx = 0; idx < it->size(); ++idx)
             (*it)[idx].set_ready_event(instance_ready_event);
+        execution_fence_event = instance_ready_event;
         update_no_access_regions();
         launch_task();
       }

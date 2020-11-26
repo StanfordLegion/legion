@@ -2252,7 +2252,7 @@ namespace Legion {
       : trace(t), recording(true), replayable(false, "uninitialized"),
         fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
-        previous_execution_fence(0), has_virtual_mapping(false),
+        has_virtual_mapping(false), last_fence(NULL),
         recording_done(Runtime::create_rt_user_event()),
         pre(t->runtime->forest), post(t->runtime->forest),
         pre_reductions(t->runtime->forest), post_reductions(t->runtime->forest),
@@ -2375,6 +2375,8 @@ namespace Legion {
         for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
              uit != it->second.end(); ++uit)
           to_merge.insert(events[uit->first->user]);
+      if (last_fence != NULL)
+        to_merge.insert(events[last_fence->lhs]);
       return Runtime::merge_events(NULL, to_merge);
     }
 
@@ -2403,14 +2405,10 @@ namespace Legion {
       for (unsigned idx = events.size() - 1; idx > 0; idx--)
       {
         preconditions.insert(events[idx]);
-        if (idx == previous_execution_fence)
-        {
-          previous_execution_fence = instructions.size();
+        if (instructions[idx] == last_fence)
           return;
-        }
       }
       preconditions.insert(events.front());
-      previous_execution_fence = instructions.size();
     }
 
     //--------------------------------------------------------------------------
@@ -3827,13 +3825,15 @@ namespace Legion {
       assert(memo != NULL);
 #endif
       const ApEvent lhs = memo->get_memo_completion();
+      const bool fence = 
+        (memo->get_memoizable_kind() == Operation::FENCE_OP_KIND);
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
       unsigned lhs_ = convert_event(lhs);
       TraceLocalID key = record_memo_entry(memo, lhs_);
-      insert_instruction(new GetTermEvent(*this, lhs_, key));
+      insert_instruction(new GetTermEvent(*this, lhs_, key, fence));
     }
 
     //--------------------------------------------------------------------------
@@ -4681,7 +4681,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     GetTermEvent::GetTermEvent(PhysicalTemplate& tpl, unsigned l,
-                               const TraceLocalID& r)
+                               const TraceLocalID& r, bool fence)
       : Instruction(tpl, r), lhs(l)
     //--------------------------------------------------------------------------
     {
@@ -4689,6 +4689,8 @@ namespace Legion {
       assert(lhs < events.size());
       assert(operations.find(owner) != operations.end());
 #endif
+      if (fence)
+        tpl.update_last_fence(this);
     }
 
     //--------------------------------------------------------------------------

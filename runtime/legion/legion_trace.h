@@ -828,6 +828,8 @@ namespace Legion {
                            const FieldMask &mask,
                            std::set<unsigned> &users);
     public:
+      inline void update_last_fence(GetTermEvent *fence)
+        { last_fence = fence; }
       inline ApEvent get_fence_completion(void) { return fence_completion; }
       void record_remote_memoizable(Memoizable *memo);
       void release_remote_memos(void);
@@ -845,8 +847,9 @@ namespace Legion {
       std::vector<Memoizable*> remote_memos;
     private:
       CachedMappings cached_mappings;
-      size_t previous_execution_fence;
       bool has_virtual_mapping;
+    private:
+      GetTermEvent                    *last_fence;
     private:
       ApEvent                         fence_completion;
       std::vector<ApEvent>            events;
@@ -965,7 +968,7 @@ namespace Legion {
     class GetTermEvent : public Instruction {
     public:
       GetTermEvent(PhysicalTemplate& tpl, unsigned lhs,
-                   const TraceLocalID& rhs);
+                   const TraceLocalID& rhs, bool fence);
       virtual void execute(void);
       virtual std::string to_string(void);
 
