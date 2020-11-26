@@ -2204,7 +2204,6 @@ namespace Legion {
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
       ApBarrier get_next_execution_fence_barrier(void);
-      ApBarrier get_next_replay_fence_barrier(void);
       RtBarrier get_next_resource_return_barrier(void);
       RtBarrier get_next_refinement_barrier(void);
       RtBarrier get_next_trace_recording_barrier(void);
@@ -2314,7 +2313,6 @@ namespace Legion {
       RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
       RtBarrier summary_fence_barrier;
-      ApBarrier replay_fence_barrier;
       ApBarrier execution_fence_barrier;
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;

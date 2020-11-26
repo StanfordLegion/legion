@@ -10230,7 +10230,6 @@ namespace Legion {
       resource_return_barrier = manager->get_resource_return_barrier();
       trace_recording_barrier = manager->get_trace_recording_barrier();
       summary_fence_barrier = manager->get_summary_fence_barrier();
-      replay_fence_barrier = manager->get_replay_fence_barrier();
       execution_fence_barrier = manager->get_execution_fence_barrier();
       attach_broadcast_barrier = manager->get_attach_broadcast_barrier();
       attach_reduce_barrier = manager->get_attach_reduce_barrier();
@@ -18711,15 +18710,6 @@ namespace Legion {
     {
       ApBarrier result = execution_fence_barrier;
       advance_logical_barrier(execution_fence_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    ApBarrier ReplicateContext::get_next_replay_fence_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      const ApBarrier result = replay_fence_barrier;
-      advance_logical_barrier(replay_fence_barrier, total_shards);
       return result;
     }
 

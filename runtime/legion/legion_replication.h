@@ -1767,6 +1767,8 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+      virtual void replay_analysis(void);
+      virtual void complete_replay(ApEvent complete_event);
     protected:
       void initialize_fence_barriers(ReplicateContext *repl_ctx = NULL);
     protected:
@@ -2181,8 +2183,6 @@ namespace Legion {
         { return trace_recording_barrier; }
       inline RtBarrier get_summary_fence_barrier(void) const
         { return summary_fence_barrier; }
-      inline ApBarrier get_replay_fence_barrier(void) const
-        { return replay_fence_barrier; }
       inline ApBarrier get_execution_fence_barrier(void) const
         { return execution_fence_barrier; }
       inline ApBarrier get_attach_broadcast_barrier(void) const
@@ -2361,7 +2361,6 @@ namespace Legion {
       RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
       RtBarrier summary_fence_barrier;
-      ApBarrier replay_fence_barrier;
       ApBarrier execution_fence_barrier;
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;

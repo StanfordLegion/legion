@@ -3428,7 +3428,7 @@ namespace Legion {
       : trace(t), recording(true), replayable(false, "uninitialized"),
         fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
-        previous_execution_fence(0), has_virtual_mapping(false),
+        has_virtual_mapping(false),
         recording_done(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
@@ -3553,6 +3553,8 @@ namespace Legion {
         for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
              uit != it->second.end(); ++uit)
           to_merge.insert(events[uit->first->user]);
+      if (last_fence != NULL)
+        to_merge.insert(events[last_fence->lhs]);
       return Runtime::merge_events(NULL, to_merge);
     }
 
@@ -3585,14 +3587,10 @@ namespace Legion {
         const InstructionKind kind = instructions[idx]->get_kind(); 
         if ((kind != BARRIER_ADVANCE) && (kind != BARRIER_ARRIVAL))
           preconditions.insert(events[idx]);
-        if (idx == previous_execution_fence)
-        {
-          previous_execution_fence = instructions.size();
+        if (instructions[idx] == last_fence)
           return;
-        }
       }
       preconditions.insert(events.front());
-      previous_execution_fence = instructions.size();
     }
 
     //--------------------------------------------------------------------------
@@ -4107,12 +4105,6 @@ namespace Legion {
               used[gen[trigger->rhs]] = true;
               break;
             }
-          case BARRIER_REPLAY:
-            {
-              BarrierReplay *replay = inst->as_barrier_replay();
-              used[gen[replay->rhs]] = true;
-              break;
-            }
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
@@ -4372,11 +4364,6 @@ namespace Legion {
                 event_to_check = &inst->as_trigger_event()->rhs;
                 break;
               }
-            case BARRIER_REPLAY:
-              {
-                event_to_check = &inst->as_barrier_replay()->rhs;
-                break;
-              }
             case BARRIER_ARRIVAL:
               {
                 event_to_check = &inst->as_barrier_arrival()->rhs;
@@ -4510,13 +4497,6 @@ namespace Legion {
               TriggerEvent *trigger = inst->as_trigger_event();
               incoming[trigger->lhs].push_back(trigger->rhs);
               outgoing[trigger->rhs].push_back(trigger->lhs);
-              break;
-            }
-          case BARRIER_REPLAY:
-            {
-              BarrierReplay *replay = inst->as_barrier_replay();
-              incoming[replay->lhs].push_back(replay->rhs);
-              outgoing[replay->rhs].push_back(replay->lhs);
               break;
             }
           case BARRIER_ARRIVAL:
@@ -4798,14 +4778,6 @@ namespace Legion {
               if (subst >= 0) trigger->rhs = (unsigned)subst;
               break;
             }
-          case BARRIER_REPLAY:
-            {
-              BarrierReplay *replay = inst->as_barrier_replay();
-              int subst = substs[replay->rhs];
-              if (subst >= 0) replay->rhs = (unsigned)subst;
-              lhs = replay->lhs;
-              break;
-            }
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
@@ -5010,15 +4982,6 @@ namespace Legion {
               assert(gen[release->rhs] != -1U);
 #endif
               used[gen[release->rhs]] = true;             
-              break;
-            }
-          case BARRIER_REPLAY:
-            {
-              BarrierReplay *replay = inst->as_barrier_replay();
- #ifdef DEBUG_LEGION
-              assert(gen[replay->rhs] != -1U);
-#endif
-              used[gen[replay->rhs]] = true;             
               break;
             }
           case BARRIER_ARRIVAL:
@@ -5232,13 +5195,15 @@ namespace Legion {
       assert(memo != NULL);
 #endif
       const ApEvent lhs = memo->get_memo_completion();
+      const bool fence = 
+        (memo->get_memoizable_kind() == Operation::FENCE_OP_KIND);
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
       unsigned lhs_ = convert_event(lhs);
       TraceLocalID key = record_memo_entry(memo, lhs_);
-      insert_instruction(new GetTermEvent(*this, lhs_, key));
+      insert_instruction(new GetTermEvent(*this, lhs_, key, fence));
     }
 
     //--------------------------------------------------------------------------
@@ -5721,15 +5686,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_barrier(Memoizable *memo, 
-                                          ApBarrier lhs, ApEvent rhs)
-    //--------------------------------------------------------------------------
-    {
-      // This should only be called for sharded templates
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_owner_shard(unsigned tid, ShardID owner)
     //--------------------------------------------------------------------------
     {
@@ -6003,7 +5959,7 @@ namespace Legion {
         template_index(repl_ctx->register_trace_template(this)),
         total_replays(0), updated_advances(0), 
         recording_barrier(repl_ctx->get_next_trace_recording_barrier()),
-        recurrent_replays(0), updated_frontiers(0),replay_barrier_generations(0)
+        recurrent_replays(0), updated_frontiers(0)
     //--------------------------------------------------------------------------
     {
       repl_ctx->add_reference();
@@ -6238,13 +6194,6 @@ namespace Legion {
           wait_on.wait();
         // Reset it back to one after updating our barriers
         total_replays = 1;
-      }
-      // We always need to make sure that we have any replay barriers
-      if (replay_barrier_generations > 0)
-      {
-        replay_barriers.resize(replay_barrier_generations);
-        for (unsigned idx = 0; idx < replay_barrier_generations; idx++)
-          replay_barriers[idx] = repl_ctx->get_next_replay_fence_barrier();
       }
     }
 
@@ -6511,38 +6460,6 @@ namespace Legion {
       // Then do the base call
       PhysicalTemplate::record_set_op_sync_event(lhs, memo);
     } 
-
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::record_barrier(Memoizable *memo,
-                                                 ApBarrier lhs, ApEvent rhs)
-    //--------------------------------------------------------------------------
-    {
-      const TraceLocalID tld = find_trace_local_id(memo);
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      // Do this first in case it gets pre-empted
-      const unsigned pre = find_event(rhs, tpl_lock);
-#ifdef DEBUG_LEGION
-      const unsigned post = convert_event(lhs, false/*check*/);
-#else
-      const unsigned post = convert_event(lhs);
-#endif
-
-      insert_instruction(
-        new BarrierReplay(*this, tld, post, pre, replay_barrier_generations++));
-    }
-    
-    //--------------------------------------------------------------------------
-    ApBarrier ShardedPhysicalTemplate::find_replay_barrier(unsigned gen) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(gen < replay_barriers.size());
-#endif
-      return replay_barriers[gen];
-    }
 
     //--------------------------------------------------------------------------
     ApBarrier ShardedPhysicalTemplate::find_trace_shard_event(ApEvent event,
@@ -7870,7 +7787,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     GetTermEvent::GetTermEvent(PhysicalTemplate& tpl, unsigned l,
-                               const TraceLocalID& r)
+                               const TraceLocalID& r, bool fence)
       : Instruction(tpl, r), lhs(l)
     //--------------------------------------------------------------------------
     {
@@ -7878,6 +7795,8 @@ namespace Legion {
       assert(lhs < events.size());
       assert(operations.find(owner) != operations.end());
 #endif
+      if (fence)
+        tpl.update_last_fence(this);
     }
 
     //--------------------------------------------------------------------------
@@ -8538,47 +8457,6 @@ namespace Legion {
          << rhs << "])   (op kind: "
          << Operation::op_names[operations[owner]->get_memoizable_kind()] 
          << ")";
-      return ss.str();
-    }
-
-    /////////////////////////////////////////////////////////////
-    // BarrierReplay
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    BarrierReplay::BarrierReplay(ShardedPhysicalTemplate &tpl,
-                                 const TraceLocalID &tld,
-                                 unsigned lhs_, unsigned rhs_, unsigned gen_)
-      : Instruction(tpl, tld), sharded_template(tpl), 
-        lhs(lhs_), rhs(rhs_), gen(gen_)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(lhs < events.size());
-      assert(rhs < events.size());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void BarrierReplay::execute(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(rhs < events.size());
-      assert(lhs < events.size());
-#endif
-      const ApBarrier barrier = sharded_template.find_replay_barrier(gen);
-      Runtime::phase_barrier_arrive(barrier, 1/*count*/, events[rhs]);
-      events[lhs] = barrier; 
-    }
-
-    //--------------------------------------------------------------------------
-    std::string BarrierReplay::to_string(void)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-      ss << "events[" << lhs << "] = Runtime::phase_barrier_arrive("
-         << "replay_barriers[" << gen << "], events[" << rhs << "])";
       return ss.str();
     }
 

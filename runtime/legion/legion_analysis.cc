@@ -1017,15 +1017,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_barrier(Memoizable *memo,
-                                             ApBarrier lhs, ApEvent rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called on remote nodes
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ RemoteTraceRecorder* RemoteTraceRecorder::unpack_remote_recorder(
                         Deserializer &derez, Runtime *runtime, Memoizable *memo)
     //--------------------------------------------------------------------------

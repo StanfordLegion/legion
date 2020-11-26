@@ -5171,7 +5171,7 @@ namespace Legion {
       assert(!mapping_fence_barrier.exists());
       assert(!execution_fence_barrier.exists());
       if (repl_ctx == NULL)
-        repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+        repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       if (repl_ctx == NULL)
@@ -5222,14 +5222,11 @@ namespace Legion {
             if (!execution_preconditions.empty())
               execution_fence_precondition = 
                   Runtime::merge_events(&trace_info, execution_preconditions);
+            if (is_recording())
+              trace_info.record_complete_replay(this, 
+                        execution_fence_precondition);
             Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/, 
                                           execution_fence_precondition);
-            if (is_recording())
-            {
-              trace_info.record_barrier(this, execution_fence_barrier, 
-                                        execution_fence_precondition);
-              trace_info.record_complete_replay(this, execution_fence_barrier);
-            }
             // We can always trigger the completion event when these are done
             request_early_complete(execution_fence_barrier);
             if (!execution_fence_barrier.has_triggered())
@@ -5244,6 +5241,33 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFenceOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!mapping_fence_barrier.exists());
+      assert(!execution_fence_barrier.exists());
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Get ourselves an execution fence barrier
+      // No need for a mapping fence since we're just replaying
+      execution_fence_barrier = repl_ctx->get_next_execution_fence_barrier();
+      FenceOp::replay_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFenceOp::complete_replay(ApEvent complete_event)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::phase_barrier_arrive(execution_fence_barrier, 
+                                    1/*count*/, complete_event);
+      FenceOp::complete_replay(execution_fence_barrier);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7568,8 +7592,6 @@ namespace Legion {
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         summary_fence_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        replay_fence_barrier =
-          ApBarrier(Realm::Barrier::create_barrier(total_shards));
         execution_fence_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
         attach_broadcast_barrier = 
@@ -7653,7 +7675,6 @@ namespace Legion {
           resource_return_barrier.destroy_barrier();
           trace_recording_barrier.destroy_barrier();
           summary_fence_barrier.destroy_barrier();
-          replay_fence_barrier.destroy_barrier();
           execution_fence_barrier.destroy_barrier();
           attach_broadcast_barrier.destroy_barrier();
           attach_reduce_barrier.destroy_barrier();
@@ -7889,7 +7910,6 @@ namespace Legion {
           assert(resource_return_barrier.exists());
           assert(trace_recording_barrier.exists());
           assert(summary_fence_barrier.exists());
-          assert(replay_fence_barrier.exists());
           assert(execution_fence_barrier.exists());
           assert(attach_broadcast_barrier.exists());
           assert(attach_reduce_barrier.exists());
@@ -7909,7 +7929,6 @@ namespace Legion {
           rez.serialize(resource_return_barrier);
           rez.serialize(trace_recording_barrier);
           rez.serialize(summary_fence_barrier);
-          rez.serialize(replay_fence_barrier);
           rez.serialize(execution_fence_barrier);
           rez.serialize(attach_broadcast_barrier);
           rez.serialize(attach_reduce_barrier);
@@ -7999,7 +8018,6 @@ namespace Legion {
         derez.deserialize(resource_return_barrier);
         derez.deserialize(trace_recording_barrier);
         derez.deserialize(summary_fence_barrier);
-        derez.deserialize(replay_fence_barrier);
         derez.deserialize(execution_fence_barrier);
         derez.deserialize(attach_broadcast_barrier);
         derez.deserialize(attach_reduce_barrier);

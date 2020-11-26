@@ -8052,11 +8052,6 @@ namespace Legion {
             if (is_recording())
               tpl->find_execution_fence_preconditions(execution_preconditions);
             const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
-            // Mark that we finished our mapping now
-            if (!map_applied_conditions.empty())
-              complete_mapping(Runtime::merge_events(map_applied_conditions));
-            else
-              complete_mapping();
             // We can always trigger the completion event when these are done
             ApEvent execution_precondition;
             if (!execution_preconditions.empty())
@@ -8064,6 +8059,11 @@ namespace Legion {
                 Runtime::merge_events(&trace_info, execution_preconditions);
             if (is_recording())
               tpl->record_complete_replay(this, execution_precondition);
+            // Mark that we finished our mapping now
+            if (!map_applied_conditions.empty())
+              complete_mapping(Runtime::merge_events(map_applied_conditions));
+            else
+              complete_mapping();
             request_early_complete(execution_precondition);
             if (!execution_precondition.has_triggered())
             {
