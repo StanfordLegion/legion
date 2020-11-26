@@ -704,8 +704,8 @@ extern "C" {
     return cudaSuccess;
   }
    
-  REALM_PUBLIC_API
-  cudaError_t cudaDeviceEnablePeerAccess (int peerDevice, unsigned int flags) { return cudaSuccess; }
+  //REALM_PUBLIC_API
+  //cudaError_t cudaDeviceEnablePeerAccess (int peerDevice, unsigned int flags) { return cudaSuccess; }
    
   REALM_PUBLIC_API
   cudaError_t cudaDeviceSetSharedMemConfig(cudaSharedMemConfig config)
