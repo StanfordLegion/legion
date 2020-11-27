@@ -22890,12 +22890,19 @@ namespace Legion {
           }
         }
       }
+      // There is something really scary here so be very careful
+      // It might look like we have read-only guards even though
+      // read_only_guard_updates is NULL. You might think that this
+      // is very bad because we should be capturing those guards.
+      // This should not be necessary though because the guards are
+      // very conservative with these equivalence sets and they span
+      // the whole equivalence set, even when the updates we care
+      // about here might only be for a subset of the equivalence
+      // set. Therefore it should be safe to ignore them in this case.
       if (!read_only_guards.empty() && 
+          (read_only_guard_updates != NULL) &&
           !(mask * read_only_guards.get_valid_mask()))
       {
-#ifdef DEBUG_LEGION
-        assert(read_only_guard_updates != NULL);
-#endif
         for (FieldMaskSet<CopyFillGuard>::const_iterator it =
               read_only_guards.begin(); it != read_only_guards.end(); it++)
         {
@@ -22905,12 +22912,11 @@ namespace Legion {
           read_only_guard_updates->insert(it->first, overlap);
         }
       }
+      // See same "scary" comment above because it applies here too
       if (!reduction_fill_guards.empty() &&
+          (reduction_fill_guard_updates != NULL) &&
           !(mask * reduction_fill_guards.get_valid_mask()))
       {
-#ifdef DEBUG_LEGION
-        assert(reduction_fill_guard_updates != NULL);
-#endif
         for (FieldMaskSet<CopyFillGuard>::const_iterator it =
               reduction_fill_guards.begin(); it != 
               reduction_fill_guards.end(); it++)
