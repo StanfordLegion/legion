@@ -9584,7 +9584,8 @@ namespace Legion {
             // Save the remaining messages onto the receiving
             // buffer, then handle them and reset the state.
             char *final_buffer = NULL;
-            unsigned final_messages = 0, final_index = 0, final_total = 0;
+            size_t final_index = 0;
+            unsigned final_messages = 0, final_total = 0;
             bool free_buffer = false;
             if (!ordered_channel)
             {
@@ -10823,7 +10824,7 @@ namespace Legion {
                                          const void *args, size_t arglen,
                                          char *&receiving_buffer,
                                          size_t &receiving_buffer_size,
-                                         unsigned &receiving_index,
+                                         size_t &receiving_index,
                                          unsigned &received_messages,
                                          unsigned &partial_messages)
     //--------------------------------------------------------------------------
