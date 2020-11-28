@@ -423,8 +423,11 @@ namespace Realm {
   //
 
   template <void (XferDes::*UPDATE)(int port_idx, size_t offset, size_t size)>
-  XferDes::SequenceCache<UPDATE>::SequenceCache(XferDes *_xd)
+  XferDes::SequenceCache<UPDATE>::SequenceCache(XferDes *_xd,
+						size_t _flush_bytes /*= 0*/)
     : xd(_xd)
+    , total_bytes(0)
+    , flush_bytes(_flush_bytes)
   {
     for(size_t i = 0; i < MAX_ENTRIES; i++)
       ports[i] = -1;
@@ -446,9 +449,13 @@ namespace Realm {
 	} else {
 	  // not contiguous - push old span out and start a new one
 	  (xd->*UPDATE)(port_idx, offsets[i], sizes[i]);
+	  total_bytes -= sizes[i];
 	  offsets[i] = offset;
 	  sizes[i] = size;
 	}
+	total_bytes += size;
+	if((flush_bytes > 0) && (total_bytes >= flush_bytes))
+	  flush();
 	return;
       }
 
@@ -460,6 +467,9 @@ namespace Realm {
 	ports[i] = port_idx;
 	offsets[i] = offset;
 	sizes[i] = size;
+	total_bytes += size;
+	if((flush_bytes > 0) && (total_bytes >= flush_bytes))
+	  flush();
 	return;
       }
 
@@ -475,10 +485,14 @@ namespace Realm {
     } else {
       // kick out an old entry and use its slot
       (xd->*UPDATE)(ports[biggest_idx], offsets[biggest_idx], biggest_size);
+      total_bytes -= biggest_size;
 
       ports[biggest_idx] = port_idx;
       offsets[biggest_idx] = offset;
       sizes[biggest_idx] = size;
+      total_bytes += size;
+      if((flush_bytes > 0) && (total_bytes >= flush_bytes))
+	flush();
     }	
   }
 
@@ -490,6 +504,7 @@ namespace Realm {
 	(xd->*UPDATE)(ports[i], offsets[i], sizes[i]);
 	ports[i] = -1;
       }
+    total_bytes = 0;
   }
 
 

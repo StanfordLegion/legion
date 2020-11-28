@@ -536,7 +536,7 @@ namespace Realm {
       template <void (XferDes::*UPDATE)(int port_idx, size_t offset, size_t size)>
       class SequenceCache {
       public:
-	SequenceCache(XferDes *_xd);
+	SequenceCache(XferDes *_xd, size_t _flush_bytes = 0);
 
 	void add_span(int port_idx, size_t offset, size_t size);
 	void flush();
@@ -548,6 +548,7 @@ namespace Realm {
 	int ports[MAX_ENTRIES];
 	size_t offsets[MAX_ENTRIES];
 	size_t sizes[MAX_ENTRIES];
+	size_t total_bytes, flush_bytes;
       };
       typedef SequenceCache<&XferDes::update_bytes_read> ReadSequenceCache;
       typedef SequenceCache<&XferDes::update_bytes_write> WriteSequenceCache;

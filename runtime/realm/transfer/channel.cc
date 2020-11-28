@@ -2443,8 +2443,8 @@ namespace Realm {
 
 	// fast path - assumes no serdez
 	bool did_work = false;
-	ReadSequenceCache rseqcache(this);
-	WriteSequenceCache wseqcache(this);
+	ReadSequenceCache rseqcache(this, 2 << 20);  // flush after 2MB
+	WriteSequenceCache wseqcache(this, 2 << 20);
 
 	while(true) {
 	  size_t min_xfer_size = 4096;  // TODO: make controllable
@@ -2487,6 +2487,10 @@ namespace Realm {
 
 		size_t bytes = 0;
 		size_t bytes_left = max_bytes - total_bytes;
+		// memcpys don't need to be particularly big to achieve
+		//  peak efficiency, so trim to something that takes
+		//  10's of us to be responsive to the time limit
+		bytes_left = std::min(bytes_left, size_t(256 << 10));
 
 		if(in_dim > 0) {
 		  if(out_dim > 0) {
@@ -2504,7 +2508,7 @@ namespace Realm {
 		      bytes = contig_bytes;
 		      memcpy_1d(out_base + out_offset,
 				in_base + in_offset,
-				contig_bytes);
+				bytes);
 		      in_alc.advance(0, bytes);
 		      out_alc.advance(0, bytes);
 		    } else {
