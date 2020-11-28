@@ -1035,7 +1035,7 @@ namespace Legion {
       public:
         char *buffer;
         size_t size;
-        unsigned index;
+        size_t index;
         unsigned messages;
         unsigned total;
       };
@@ -1063,7 +1063,7 @@ namespace Legion {
                                   const void *args, size_t arglen,
                                   char *&receiving_buffer,
                                   size_t &receiving_buffer_size,
-                                  unsigned &receiving_index,
+                                  size_t &receiving_index,
                                   unsigned &received_messages,
                                   unsigned &partial_messages);
       void filter_unordered_events(void);
@@ -1094,7 +1094,7 @@ namespace Legion {
       // we know that we do need the lock
       char *receiving_buffer;
       size_t receiving_buffer_size;
-      unsigned receiving_index;
+      size_t receiving_index;
       unsigned received_messages;
       unsigned partial_messages;
       std::map<unsigned/*message id*/,PartialMessage> *partial_assembly;
