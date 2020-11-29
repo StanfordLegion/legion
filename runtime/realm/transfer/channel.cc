@@ -3279,6 +3279,16 @@ namespace Realm {
 	} else
 	  dst_gpu = 0;
 
+	// if we're doing a multi-hop copy, we'll dial down the request
+	//  sizes to improve pipelining
+	bool multihop_copy = false;
+	for(size_t i = 1; i < input_ports.size(); i++)
+	  if(input_ports[i].peer_guid != XFERDES_NO_GUID)
+	    multihop_copy = true;
+	for(size_t i = 1; i < output_ports.size(); i++)
+	  if(output_ports[i].peer_guid != XFERDES_NO_GUID)
+	    multihop_copy = true;
+
 	if(src_gpu != 0) {
 	  if(dst_gpu != 0) {
 	    if(src_gpu == dst_gpu) {
@@ -3295,11 +3305,15 @@ namespace Realm {
 	  } else {
 	    kind = XFER_GPU_FROM_FB;
 	    channel = channel_manager->get_gpu_from_fb_channel(src_gpu);
+	    if(multihop_copy)
+	      max_req_size = 4 << 20;
 	  }
 	} else {
 	  if(dst_gpu != 0) {
 	    kind = XFER_GPU_TO_FB;
 	    channel = channel_manager->get_gpu_to_fb_channel(dst_gpu);
+	    if(multihop_copy)
+	      max_req_size = 4 << 20;
 	  } else {
 	    assert(0);
 	  }
