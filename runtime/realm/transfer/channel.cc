@@ -3705,6 +3705,10 @@ namespace Realm {
 	  { os << "src=" << p.src_kind << "(lcl)"; break; }
 	case Channel::SupportedPath::GLOBAL_KIND:
 	  { os << "src=" << p.src_kind << "(gbl)"; break; }
+	case Channel::SupportedPath::LOCAL_RDMA:
+	  { os << "src=rdma(lcl)"; break; }
+	case Channel::SupportedPath::REMOTE_RDMA:
+	  { os << "src=rdma(rem)"; break; }
 	default:
 	  assert(0);
 	}
@@ -3715,6 +3719,10 @@ namespace Realm {
 	  { os << " dst=" << p.dst_kind << "(lcl)"; break; }
 	case Channel::SupportedPath::GLOBAL_KIND:
 	  { os << " dst=" << p.dst_kind << "(gbl)"; break; }
+	case Channel::SupportedPath::LOCAL_RDMA:
+	  { os << " dst=rdma(lcl)"; break; }
+	case Channel::SupportedPath::REMOTE_RDMA:
+	  { os << " dst=rdma(rem)"; break; }
 	default:
 	  assert(0);
 	}
@@ -3761,28 +3769,100 @@ namespace Realm {
 	  if(!it->redops_allowed && (redop_id != 0))
 	    continue;
 
-	  if(it->src_type == SupportedPath::SPECIFIC_MEMORY) {
-	    if(src_mem != it->src_mem)
-	      continue;
-	  } else {
-	    if(src_mem.kind() != it->src_kind)
-	      continue;
-	    if((it->src_type == SupportedPath::LOCAL_KIND) &&
-	       (NodeID(ID(src_mem).memory_owner_node()) != node))
-	      continue;
+	  bool src_ok = false;
+	  switch(it->src_type) {
+	    case SupportedPath::SPECIFIC_MEMORY: {
+	      src_ok = (src_mem == it->src_mem);
+	      break;
+	    }
+	    case SupportedPath::LOCAL_KIND: {
+	      src_ok = ((src_mem.kind() == it->src_kind) &&
+			(NodeID(ID(src_mem).memory_owner_node()) == node));
+	      break;
+	    }
+	    case SupportedPath::GLOBAL_KIND: {
+	      src_ok = (src_mem.kind() == it->src_kind) ;
+	      break;
+	    }
+	    case SupportedPath::LOCAL_RDMA: {
+	      if(NodeID(ID(src_mem).memory_owner_node()) == node) {
+		MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+		// detection of rdma-ness depends on whether memory is
+		//  local/remote to us, not the channel
+		if(NodeID(ID(src_mem).memory_owner_node()) == Network::my_node_id) {
+		  src_ok = (src_impl->get_rdma_info(Network::single_network) != nullptr);
+		} else {
+		  RemoteAddress dummy;
+		  src_ok = src_impl->get_remote_addr(0, dummy);
+		}
+	      }
+	      break;
+	    }
+	    case SupportedPath::REMOTE_RDMA: {
+	      if(NodeID(ID(src_mem).memory_owner_node()) != node) {
+		MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+		// detection of rdma-ness depends on whether memory is
+		//  local/remote to us, not the channel
+		if(NodeID(ID(src_mem).memory_owner_node()) == Network::my_node_id) {
+		  src_ok = (src_impl->get_rdma_info(Network::single_network) != nullptr);
+		} else {
+		  RemoteAddress dummy;
+		  src_ok = src_impl->get_remote_addr(0, dummy);
+		}
+	      }
+	      break;
+	    }
 	  }
+	  if(!src_ok)
+	    continue;
 
-	  if(it->dst_type == SupportedPath::SPECIFIC_MEMORY) {
-	    if(dst_mem != it->dst_mem)
-	      continue;
-	  } else {
-	    if(dst_mem.kind() != it->dst_kind)
-	      continue;
-	    if((it->dst_type == SupportedPath::LOCAL_KIND) &&
-	       (NodeID(ID(dst_mem).memory_owner_node()) != node))
-	      continue;
+	  bool dst_ok = false;
+	  switch(it->dst_type) {
+	    case SupportedPath::SPECIFIC_MEMORY: {
+	      dst_ok = (dst_mem == it->dst_mem);
+	      break;
+	    }
+	    case SupportedPath::LOCAL_KIND: {
+	      dst_ok = ((dst_mem.kind() == it->dst_kind) &&
+			(NodeID(ID(dst_mem).memory_owner_node()) == node));
+	      break;
+	    }
+	    case SupportedPath::GLOBAL_KIND: {
+	      dst_ok = (dst_mem.kind() == it->dst_kind) ;
+	      break;
+	    }
+	    case SupportedPath::LOCAL_RDMA: {
+	      if(NodeID(ID(dst_mem).memory_owner_node()) == node) {
+		MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+		// detection of rdma-ness depends on whether memory is
+		//  local/remote to us, not the channel
+		if(NodeID(ID(dst_mem).memory_owner_node()) == Network::my_node_id) {
+		  dst_ok = (dst_impl->get_rdma_info(Network::single_network) != nullptr);
+		} else {
+		  RemoteAddress dummy;
+		  dst_ok = dst_impl->get_remote_addr(0, dummy);
+		}
+	      }
+	      break;
+	    }
+	    case SupportedPath::REMOTE_RDMA: {
+	      if(NodeID(ID(dst_mem).memory_owner_node()) != node) {
+		MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+		// detection of rdma-ness depends on whether memory is
+		//  local/remote to us, not the channel
+		if(NodeID(ID(dst_mem).memory_owner_node()) == Network::my_node_id) {
+		  dst_ok = (dst_impl->get_rdma_info(Network::single_network) != nullptr);
+		} else {
+		  RemoteAddress dummy;
+		  dst_ok = dst_impl->get_remote_addr(0, dummy);
+		}
+	      }
+	      break;
+	    }
 	  }
-	  
+	  if(!dst_ok)
+	    continue;
+
 	  // match
 	  if(kind_ret) *kind_ret = it->xd_kind;
 	  if(bw_ret) *bw_ret = it->bandwidth;
@@ -3847,6 +3927,25 @@ namespace Realm {
 	p.dst_type = (dst_global ? SupportedPath::GLOBAL_KIND :
 		                   SupportedPath::LOCAL_KIND);
 	p.dst_kind = dst_kind;
+	p.bandwidth = bandwidth;
+	p.latency = latency;
+	p.redops_allowed = redops_allowed;
+	p.serdez_allowed = serdez_allowed;
+	p.xd_kind = xd_kind;
+      }
+
+      // TODO: allow rdma path to limit by kind?
+      void Channel::add_path(bool local_loopback,
+			     unsigned bandwidth, unsigned latency,
+			     bool redops_allowed, bool serdez_allowed,
+			     XferDesKind xd_kind)
+      {
+	size_t idx = paths.size();
+	paths.resize(idx + 1);
+	SupportedPath &p = paths[idx];
+	p.src_type = SupportedPath::LOCAL_RDMA;
+	p.dst_type = (local_loopback ? SupportedPath::LOCAL_RDMA :
+		                       SupportedPath::REMOTE_RDMA);
 	p.bandwidth = bandwidth;
 	p.latency = latency;
 	p.redops_allowed = redops_allowed;
@@ -4480,10 +4579,14 @@ namespace Realm {
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
 	// any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
-	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
-	  add_path(cpu_mem_kinds[i], false,
-		   Memory::REGDMA_MEM, true,
-		   bw, latency, false, false, XFER_REMOTE_WRITE);
+	// for(size_t i = 0; i < num_cpu_mem_kinds; i++)
+	//   add_path(cpu_mem_kinds[i], false,
+	// 	   Memory::REGDMA_MEM, true,
+	// 	   bw, latency, false, false, XFER_REMOTE_WRITE);
+	add_path(false /*!local_loopback*/,
+		 bw, latency,
+		 false /*!redops*/, false /*!serdez*/,
+		 XFER_REMOTE_WRITE);
       }
 
       RemoteWriteChannel::~RemoteWriteChannel() {}

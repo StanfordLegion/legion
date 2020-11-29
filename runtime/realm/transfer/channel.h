@@ -699,7 +699,9 @@ namespace Realm {
 	enum SrcDstType {
 	  SPECIFIC_MEMORY,
 	  LOCAL_KIND,
-	  GLOBAL_KIND
+	  GLOBAL_KIND,
+	  LOCAL_RDMA,
+	  REMOTE_RDMA,
 	};
 	SrcDstType src_type, dst_type;
 	union {
@@ -746,6 +748,11 @@ namespace Realm {
 		    XferDesKind xd_kind);
       void add_path(Memory::Kind src_kind, bool src_global,
 		    Memory::Kind dst_kind, bool dst_global,
+		    unsigned bandwidth, unsigned latency,
+		    bool redops_allowed, bool serdez_allowed,
+		    XferDesKind xd_kind);
+      // TODO: allow rdma path to limit by kind?
+      void add_path(bool local_loopback,
 		    unsigned bandwidth, unsigned latency,
 		    bool redops_allowed, bool serdez_allowed,
 		    XferDesKind xd_kind);

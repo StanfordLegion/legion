@@ -1843,6 +1843,8 @@ namespace Realm {
 	}
       }
 
+      //define CHECK_DMA_PATHS
+#ifdef CHECK_DMA_PATHS
       // check against old version
       // exceptions:
       //  1) old code didn't allow nodes other than 0 to
@@ -1858,6 +1860,7 @@ namespace Realm {
 	  assert(0);
 	}
       }
+#endif
       return kind;
     }
 
