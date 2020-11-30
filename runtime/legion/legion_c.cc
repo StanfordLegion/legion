@@ -2422,6 +2422,13 @@ legion_region_requirement_destroy(legion_region_requirement_t handle_)
   delete CObjectWrapper::unwrap(handle_);
 }
 
+void
+legion_region_requirement_add_flags(legion_region_requirement_t req_,
+                                    legion_region_flags_t flags)
+{
+  CObjectWrapper::unwrap(req_)->add_flags(flags);
+}
+
 legion_logical_region_t
 legion_region_requirement_get_region(legion_region_requirement_t req_)
 {

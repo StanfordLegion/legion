@@ -3512,10 +3512,12 @@ namespace Legion {
                                        const RegionRequirement &r,
                                        InstanceSet is,
                                        TaskContext *ctx,
-                                       Runtime *rt, const bool global)
+                                       Runtime *rt, const bool global,
+                                       const bool valid)
       : Collectable(), runtime(rt), context(ctx),
         req(r), instance_set(is), num_elements(-1LU), index(i), 
-        created_region(req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG),
+        created_region(
+          (req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG) && !valid),
         global_indexing(global)
     //--------------------------------------------------------------------------
     {

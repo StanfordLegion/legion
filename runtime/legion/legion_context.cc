@@ -759,13 +759,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::add_output_region(
-               const RegionRequirement &req, InstanceSet instances, bool global)
+    void TaskContext::add_output_region(const OutputRequirement &req,
+                                        InstanceSet instances,
+                                        bool global,
+                                        bool valid)
     //--------------------------------------------------------------------------
     {
       size_t index = output_regions.size();
-      OutputRegionImpl *impl =
-        new OutputRegionImpl(index, req, instances, this, runtime, global);
+      OutputRegionImpl *impl = new OutputRegionImpl(index,
+                                                    req,
+                                                    instances,
+                                                    this,
+                                                    runtime,
+                                                    global,
+                                                    valid);
       output_regions.push_back(OutputRegion(impl));
     }
 
