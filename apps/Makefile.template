@@ -23,9 +23,23 @@ DEBUG           ?= 1		# Include debugging symbols
 MAX_DIM         ?= 3		# Maximum number of dimensions
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
+USE_OPENMP	?= 0		# Include OpenMP processor support
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
+USE_ZLIB	?= 1		# Use ZLib for compression of log files
+USE_LIBDL	?= 1		# Use LibDL for finding function pointer names
+USE_LLVM	?= 0		# Include support for LLVM task variants
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
-ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
+USE_HALF	?= 0		# Include support for half-precision reductions
+USE_COMPLEX	?= 0		# Include support for complex type reductions
+SHARED_OBJECTS	?= 0		# Generate shared objects for Legion and Realm
+BOUNDS_CHECKS	?= 0		# Enable runtime bounds checks
+PRIVILEGE_CHECKS ?= 0		# Enable runtime privilege checks
+MARCH		?= native	# Set the name of the target CPU archiecture
+GPU_ARCH	?= ibv		# Set the name of the target GPU architecture
+CONDUIT		?= ampere	# Set the name of the GASNet conduit to use
+GASNET		?=		# Location of GASNet installation
+CUDA		?=		# Location of CUDA installation
+HDF_ROOT	?=		# Location of HDF5 installation
 
 # Put the binary file name here
 OUTFILE		?=
@@ -34,11 +48,19 @@ GEN_SRC		?= 		# .cc files
 GEN_GPU_SRC	?=		# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
-INC_FLAGS	?=
-CC_FLAGS	?=
-NVCC_FLAGS	?=
-GASNET_FLAGS	?=
-LD_FLAGS	?=
+INC_FLAGS	?=		# Include flags for all compilers
+CC_FLAGS	?=		# Flags for all C++ compilers
+FC_FLAGS	?=		# Flags for all Fortran compilers
+OMP_FLAGS	?=		# Flags for all OpenMP files
+NVCC_FLAGS	?=		# Flags for all NVCC files
+SO_FLAGS	?=		# Flags for building shared objects
+LD_FLAGS	?=		# Flags for linking binaries
+# Canonical GNU flags you can modify as well
+CXXFLAGS ?=
+CPPFLAGS ?=
+FFLAGS ?=
+LDLIBS ?=
+LDFLAGS ?=
 
 ###########################################################################
 #
