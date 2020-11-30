@@ -611,6 +611,11 @@ namespace Legion {
                                            bool tight_bounds) const
     //--------------------------------------------------------------------------
     {
+      // Early exit case where the given expression is identical to
+      // the instance domain
+      if (instance_domain == space_expr)
+        return true;
+
       const size_t expr_volume = space_expr->get_volume();
       // If the space we need is empty then we're done for any instance
       if (expr_volume == 0)
