@@ -400,6 +400,8 @@ namespace Legion {
                 const AccessorRefHelper<FT,P2> &rhs)
           { helper = rhs.helper; return *this; }
       protected:
+        template<typename T, PrivilegeMode P2>
+        friend class AccessorRefHelper;
         Realm::AccessorRefHelper<FT> helper;
       };
 
@@ -415,6 +417,8 @@ namespace Legion {
                 const AccessorRefHelper<FT,LEGION_READ_ONLY> &rhs)
           { helper = rhs.helper; return *this; }
       protected:
+        template<typename T, PrivilegeMode P2>
+        friend class AccessorRefHelper;
         Realm::AccessorRefHelper<FT> helper;
       };
 
@@ -452,6 +456,8 @@ namespace Legion {
             return *this; 
           }
       protected:
+        template<typename T, PrivilegeMode P2>
+        friend class AccessorRefHelper;
         Realm::AccessorRefHelper<FT> helper;
         DomainPoint point;
         FieldID field;
