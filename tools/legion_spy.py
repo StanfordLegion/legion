@@ -12708,18 +12708,18 @@ class State(object):
                 found = True
                 break
             if found:
-                if op.inter_close_ops:
-                    for inter in op.inter_close_ops:
-                        if not inter.reqs:
+                if op.internal_ops:
+                    for internal in op.internal_ops:
+                        if not internal.reqs:
                             continue
-                        assert len(inter.reqs) == 1
-                        req = inter.reqs[0]
+                        assert len(internal.reqs) == 1
+                        req = internal.reqs[0]
                         if req.logical_node.tree_id != tree_id:
                             continue
                         if field not in req.fields:
                             continue
-                        nodes.append(inter)
-                        inter.print_base_node(printer, True)
+                        nodes.append(internal)
+                        internal.print_base_node(printer, True)
                 nodes.append(op)
                 op.print_base_node(printer, True)
         # Now we need to compute the edges for this graph
