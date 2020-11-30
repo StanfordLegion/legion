@@ -6824,6 +6824,8 @@ class Operation(object):
               "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
               str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
               str(self)+" (UID "+str(self.uid)+")")
+        if self.state.bad_graph_on_error:
+            self.state.dump_bad_graph(prev_op.context, req.logical_node.tree_id, field)
         if self.state.assert_on_error:
             assert False
         return False
@@ -11916,10 +11918,10 @@ class State(object):
                  'copies', 'fills', 'depparts', 'indirections', 'no_event', 'slice_index', 
                  'slice_slice', 'point_slice', 'point_point', 'futures', 'next_generation', 
                  'next_realm_num', 'next_indirections_num', 'detailed_graphs',  
-                 'assert_on_error', 'assert_on_warning', 'eq_graph_on_error', 'config', 
-                 'detailed_logging', 'replicants']
+                 'assert_on_error', 'assert_on_warning', 'bad_graph_on_error', 
+                 'eq_graph_on_error', 'config', 'detailed_logging', 'replicants']
     def __init__(self, temp_dir, verbose, details, assert_on_error, 
-                 assert_on_warning, eq_graph_on_error):
+                 assert_on_warning, bad_graph_on_error, eq_graph_on_error):
         self.temp_dir = temp_dir
         self.config = False
         self.detailed_logging = True
@@ -11927,6 +11929,7 @@ class State(object):
         self.detailed_graphs = details
         self.assert_on_error = assert_on_error
         self.assert_on_warning = assert_on_warning
+        self.bad_graph_on_error = bad_graph_on_error
         self.eq_graph_on_error = eq_graph_on_error
         self.top_level_uid = None
         self.top_level_ctx_uid = None
@@ -12666,6 +12669,94 @@ class State(object):
             node.print_incoming_event_edges(printer) 
         printer.print_pdf_after_close(False, zoom_graphs)
 
+    def dump_bad_graph(self, context, tree_id, field):
+        print('Dumping bad graph for field '+str(field)+' of region tree '+
+                str(tree_id)+' in context '+str(context))
+        nodes = list()
+        file_name = 'bad_dataflow_graph'
+        printer = GraphPrinter(self.temp_dir, file_name)
+        for op in context.operations:
+            if not op.reqs:
+                continue
+            found = False
+            for req in itervalues(op.reqs):
+                if req.logical_node.tree_id != tree_id:
+                    continue
+                if field not in req.fields:
+                    continue
+                found = True
+                break
+            if found:
+                nodes.append(op)
+                op.print_dataflow_node(printer)
+        # Now we need to compute the edges for this graph
+        incoming = dict()
+        outgoing = dict()
+        for idx in xrange(len(nodes)):
+            op = nodes[idx]
+            incoming[op] = set()
+            outgoing[op] = set()
+            warning = op.transitive_warning_issued
+            op.transitive_warning_issued = True
+            for pidx in xrange(idx):
+                prev_op = nodes[pidx]
+                if op.has_transitive_mapping_dependence(prev_op):
+                    incoming[op].add(prev_op)
+                    outgoing[prev_op].add(op)
+            op.transitive_warning_issued = warning
+        # Now do the transitive reduction to reduce these edges down
+        count = 0
+        index_map = dict()
+        reachable = dict()
+        total_nodes = len(nodes)
+        # Now traverse the list in reverse order
+        for src_index in xrange(total_nodes-1,-1,-1):
+            src = nodes[src_index]
+            count += 1 
+            index_map[src] = src_index
+            our_reachable = NodeSet(total_nodes)
+            reachable[src] = our_reachable
+            if len(outgoing[src]) == 0:
+                continue
+            # Otherwise iterate through our outgoing edges and get the set of 
+            # nodes reachable from all of them
+            for dst in outgoing[src]:
+                # Some nodes won't appear in the list of all operations
+                # such as must epoch operations which we can safely skip
+                if dst not in reachable:
+                    assert dst not in nodes 
+                    continue
+                our_reachable.union(reachable[dst])
+            # Now see which of our nodes can be reached indirectly
+            to_remove = None
+            for dst in outgoing[src]:
+                # See comment above for why we can skip some edges
+                if dst not in index_map:
+                    assert dst not in nodes 
+                    continue
+                dst_index = index_map[dst]
+                if our_reachable.contains(dst_index):
+                    if to_remove is None:
+                        to_remove = list()
+                    to_remove.append(dst)
+                else:
+                    # We need to add it to our reachable set
+                    our_reachable.add(dst_index)
+            if to_remove:
+                for dst in to_remove:
+                    outgoing[src].remove(dst)
+                    incoming[dst].remove(src)
+            # We should never remove everything
+            assert len(outgoing[src]) > 0
+            for dst in outgoing[src]:
+                # Skip any edges to nodes not in the reachable list
+                # (e.g. must epoch operations)
+                if dst not in reachable:
+                    continue
+                printer.println(src.node_name+' -> '+dst.node_name+
+                                ' [style=solid,color=black,penwidth=2];')
+        printer.print_pdf_after_close(False)
+
     def dump_eq_graph(self, eq_key):
         print('Dumping equivalence set graph for eq set (point='+str(eq_key[0])+
                 ', field='+str(eq_key[1])+', tree='+str(eq_key[2])+')')
@@ -13192,6 +13283,9 @@ def main(temp_dir):
         '--zoom', dest='zoom_graphs', action='store_true',
         help='enable generation of "zoom" graphs for all emitted graphs')
     parser.add_argument(
+        '-b', '--bad_graph', dest='bad_graph_on_error', action='store_true',
+        help='dump bad dataflow graph on failure')
+    parser.add_argument(
         '-q', '--eq_graph', dest='eq_graph_on_error', action='store_true',
         help='dump equivalence set graph on failure')
     parser.add_argument(
@@ -13223,13 +13317,14 @@ def main(temp_dir):
     assert_on_warning = args.assert_on_warning
     test_geometry = args.test_geometry
     zoom_graphs = args.zoom_graphs
+    bad_graph_on_error = args.bad_graph_on_error
     eq_graph_on_error = args.eq_graph_on_error
 
     if test_geometry:
         run_geometry_tests()
 
     state = State(temp_dir, verbose, detailed_graphs, assert_on_error, 
-                  assert_on_warning, eq_graph_on_error)
+                  assert_on_warning, bad_graph_on_error, eq_graph_on_error)
     total_matches = 0 
     for file_name in file_names:
         total_matches += state.parse_log_file(file_name)
