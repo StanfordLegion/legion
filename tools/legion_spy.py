@@ -6590,7 +6590,8 @@ class Operation(object):
         # See if there is a fence in place for this context
         if self.context.current_fence is not None:
             if perform_checks:
-                if self.context.current_fence not in self.logical_incoming: 
+                if self.logical_incoming is None or \
+                        self.context.current_fence not in self.logical_incoming: 
                     print("ERROR: missing logical fence dependence between "+
                           str(self.context.current_fence)+" and "+str(self))
                     if self.state.assert_on_error:
