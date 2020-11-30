@@ -22483,12 +22483,6 @@ namespace Legion {
             return;
         }
       }
-#ifdef DEBUG_LEGION
-      assert(read_only_guards.empty() || 
-              (mask * read_only_guards.get_valid_mask()));
-      assert(reduction_fill_guards.empty() ||
-              (mask * reduction_fill_guards.get_valid_mask()));
-#endif
       // If we get here, we're performing the clone locally for these fields
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::aligned
         valid_updates;
