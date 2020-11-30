@@ -4521,7 +4521,8 @@ namespace Legion {
         // Initialize output regions
         for (unsigned idx = 0; idx < output_regions.size(); ++idx)
           execution_context->add_output_region(output_regions[idx],
-              physical_instances[regions.size() + idx], is_output_global(idx));
+              physical_instances[regions.size() + idx],
+              is_output_global(idx), is_output_valid(idx));
 
         // Initialize any region tree contexts
         execution_context->initialize_region_tree_contexts(clone_requirements,
@@ -5498,6 +5499,7 @@ namespace Legion {
       result = Future();
       predicate_false_future = Future();
       privilege_paths.clear();
+      valid_output_regions.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -5672,10 +5674,11 @@ namespace Legion {
                                         std::vector<OutputRequirement> &outputs)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<OutputRequirement>::iterator it = outputs.begin();
-           it != outputs.end(); ++it)
+      valid_output_regions.resize(outputs.size());
+      for (unsigned idx = 0; idx < outputs.size(); idx++)
       {
-        OutputRequirement &req = *it;
+        OutputRequirement &req = outputs[idx];
+        valid_output_regions[idx] = req.valid_requirement;
 
         if (!req.valid_requirement)
         {
@@ -6066,6 +6069,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool IndividualTask::is_output_valid(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      return valid_output_regions[idx];
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent IndividualTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
@@ -6271,6 +6281,10 @@ namespace Legion {
       // yet been sent remotely, then send the state now
       RezCheck z(rez);
       pack_single_task(rez, target);
+      size_t valid_output_regions_size = valid_output_regions.size();
+      rez.serialize(valid_output_regions_size);
+      for (unsigned idx = 0; idx < valid_output_regions.size(); idx++)
+        rez.serialize<bool>(valid_output_regions[idx]);
       rez.serialize(orig_task);
       rez.serialize(remote_completion_event);
       rez.serialize(remote_unique_id);
@@ -6300,6 +6314,15 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDIVIDUAL_UNPACK_TASK_CALL);
       DerezCheck z(derez);
       unpack_single_task(derez, ready_events);
+      size_t valid_output_regions_size = 0;
+      derez.deserialize(valid_output_regions_size);
+      valid_output_regions.resize(valid_output_regions_size);
+      for (unsigned idx = 0; idx < valid_output_regions_size; idx++)
+      {
+        bool valid_output_region = false;
+        derez.deserialize<bool>(valid_output_region);
+        valid_output_regions[idx] = valid_output_region;
+      }
       derez.deserialize(orig_task);
       derez.deserialize(remote_completion_event);
       derez.deserialize(remote_unique_id);
@@ -6986,6 +7009,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return slice_owner->is_output_global(idx);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointTask::is_output_valid(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->is_output_valid(idx);
     }
 
     //--------------------------------------------------------------------------
@@ -10664,6 +10694,16 @@ namespace Legion {
       assert(idx < output_region_options.size());
 #endif
       return output_region_options[idx].global_indexing();
+    }
+
+    //--------------------------------------------------------------------------
+    bool SliceTask::is_output_valid(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < output_region_options.size());
+#endif
+      return output_region_options[idx].valid_requirement();
     }
 
     //--------------------------------------------------------------------------

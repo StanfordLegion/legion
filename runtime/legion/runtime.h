@@ -666,8 +666,9 @@ namespace Legion {
                        const RegionRequirement &req,
                        InstanceSet instance_set,
                        TaskContext *ctx,
-                       Runtime *rt, 
-                       const bool global_indexing);
+                       Runtime *rt,
+                       const bool global_indexing,
+                       const bool valid);
       OutputRegionImpl(const OutputRegionImpl &rhs);
       ~OutputRegionImpl(void);
     public:

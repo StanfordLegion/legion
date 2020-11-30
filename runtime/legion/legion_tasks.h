@@ -307,6 +307,7 @@ namespace Legion {
       virtual void launch_task(void) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool is_output_global(unsigned idx) const { return false; }
+      virtual bool is_output_valid(unsigned idx) const { return false; }
     public:
       virtual ApEvent get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -811,6 +812,8 @@ namespace Legion {
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
+      virtual bool is_output_valid(unsigned idx) const;
+    public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
@@ -850,6 +853,8 @@ namespace Legion {
     protected: 
       Future result; 
       std::vector<RegionTreePath> privilege_paths;
+    protected:
+      std::vector<bool> valid_output_regions;
     protected:
       // Information for remotely executing task
       IndividualTask *orig_task; // Not a valid pointer when remote
@@ -908,6 +913,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual bool is_output_global(unsigned idx) const; 
+      virtual bool is_output_valid(unsigned idx) const;
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -1302,6 +1308,7 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual void map_and_launch(void);
       virtual bool is_output_global(unsigned idx) const;
+      virtual bool is_output_valid(unsigned idx) const;
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
