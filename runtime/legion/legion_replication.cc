@@ -396,7 +396,12 @@ namespace Legion {
 #endif
       owner_shard = tpl->find_owner_shard(trace_local_id);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
+      {
+#ifdef LEGION_SPY
+        LegionSpy::log_replay_operation(unique_op_id);
+#endif
         shard_off(RtEvent::NO_RT_EVENT);
+      }
       else
         IndividualTask::replay_analysis();
     }
@@ -723,6 +728,7 @@ namespace Legion {
       {
 #ifdef LEGION_SPY
         // Still have to do this for legion spy
+        LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
@@ -1927,6 +1933,7 @@ namespace Legion {
       {
 #ifdef LEGION_SPY
         // Still have to do this for legion spy
+        LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
@@ -2132,6 +2139,7 @@ namespace Legion {
       {
 #ifdef LEGION_SPY
         // Still have to do this for legion spy
+        LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
@@ -2360,6 +2368,7 @@ namespace Legion {
       {
 #ifdef LEGION_SPY
         // Still have to do this for legion spy
+        LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
@@ -2653,6 +2662,7 @@ namespace Legion {
       {
 #ifdef LEGION_SPY
         // Still have to do this for legion spy
+        LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
