@@ -11286,6 +11286,10 @@ class State(object):
         for space in itervalues(self.index_spaces):
             if space.parent is None:
                 done = space.compute_reduced_shapes(dim_sets, done, total_spaces)
+        # Finish the progress bar if it wasn't already, happens when we have
+        # duplicate sub-trees get recorded
+        if done < total_spaces and not self.verbose:
+            print_progress_bar(total_spaces, total_spaces, length=50)
         print('Done')
         print('Computing refinement points...')
         for dim,index_sets in iteritems(dim_sets):
@@ -11388,15 +11392,32 @@ class State(object):
         self.slice_slice = None
         self.point_slice = None
         if self.detailed_logging:
+            print('Computing physical reachable...')
+            total_nodes = len(self.unique_ops) + len(self.copies) + \
+                            len(self.fills) + len(self.depparts)
+            count = 0
             # Compute the physical reachable
             for op in self.unique_ops:
                 op.compute_physical_reachable()
+                if not self.verbose:
+                    count += 1
+                    print_progress_bar(count, total_nodes, length=50)
             for copy in itervalues(self.copies):
                 copy.compute_physical_reachable()
+                if not self.verbose:
+                    count += 1
+                    print_progress_bar(count, total_nodes, length=50)
             for fill in itervalues(self.fills):
                 fill.compute_physical_reachable()
+                if not self.verbose:
+                    count += 1
+                    print_progress_bar(count, total_nodes, length=50)
             for deppart in itervalues(self.depparts):
                 deppart.compute_physical_reachable()
+                if not self.verbose:
+                    count += 1
+                    print_progress_bar(count, total_nodes, length=50)
+            print('Done')
         if self.verbose:
             print("Found %d processors" % len(self.processors))
             print("Found %d memories" % len(self.memories))
@@ -11943,8 +11964,20 @@ class State(object):
                 found = True
                 break
             if found:
+                if op.inter_close_ops:
+                    for inter in op.inter_close_ops:
+                        if not inter.reqs:
+                            continue
+                        assert len(inter.reqs) == 1
+                        req = inter.reqs[0]
+                        if req.logical_node.tree_id != tree_id:
+                            continue
+                        if field not in req.fields:
+                            continue
+                        nodes.append(inter)
+                        inter.print_base_node(printer, True)
                 nodes.append(op)
-                op.print_dataflow_node(printer)
+                op.print_base_node(printer, True)
         # Now we need to compute the edges for this graph
         incoming = dict()
         outgoing = dict()
