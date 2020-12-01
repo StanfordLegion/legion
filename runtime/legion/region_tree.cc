@@ -16980,6 +16980,12 @@ namespace Legion {
           {
             case LEGION_NO_DEPENDENCE:
               {
+                // We need to record any other operations in the same "group"
+                // as this one in case we insert internal operations in later
+                // replays of this trace
+                if (tracing)
+                  user.op->register_no_dependence(user.idx, it->op,
+                                                  it->gen, it->idx, overlap);
                 // No dependence so remove bits from the dominator mask
                 dominator_mask -= it->field_mask;
                 break;

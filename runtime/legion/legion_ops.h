@@ -536,6 +536,13 @@ namespace Legion {
                               GenerationID target_gen, unsigned target_idx,
                               DependenceType dtype, bool validates,
                               const FieldMask &dependent_mask);
+      // This function should only be called when we are tracing.
+      // We record other possible interferences with prior operations
+      // that are only not-interfering for privileges in case we make
+      // an internal operation that we did not have before.
+      void register_no_dependence(unsigned idx, Operation *target,
+                              GenerationID target_gen, unsigned target_idx,
+                              const FieldMask &dependent_mask);
       // This method is invoked by one of the two above to perform
       // the registration.  Returns true if we have not yet commited
       // and should therefore be notified once the dependent operation

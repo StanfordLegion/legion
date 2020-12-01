@@ -163,7 +163,7 @@ LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 
 USE_PGI ?= 0
-# Check to see if this is the PGI compiler 
+# Check to see if this is the PGI compiler
 # in whch case we need to use different flags in some cases
 ifeq ($(strip $(USE_PGI)),0)
 ifeq ($(findstring nvc++,$(shell $(CXX) --version)),nvc++)
@@ -945,8 +945,8 @@ INSTALL_HEADERS += realm/python/python_source.h \
 		   realm/python/python_source.inl
 endif
 ifeq ($(strip $(USE_LLVM)),1)
-INSTALL_HEADERS += realm/llvm/llvmjit.h \
-		   realm/llvm/llvmjit.inl
+INSTALL_HEADERS += realm/llvmjit/llvmjit.h \
+		   realm/llvmjit/llvmjit.inl
 endif
 ifeq ($(strip $(USE_HDF)),1)
 INSTALL_HEADERS += realm/hdf5/hdf5_access.h \
