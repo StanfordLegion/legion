@@ -395,6 +395,8 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       owner_shard = tpl->find_owner_shard(trace_local_id);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
         if (runtime->legion_spy_enabled)
@@ -1940,6 +1942,8 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       const ShardID owner_shard = tpl->find_owner_shard(trace_local_id);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
         // Still have to do this for legion spy
@@ -2379,6 +2383,8 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       const ShardID owner_shard = tpl->find_owner_shard(trace_local_id);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
         // Still have to do this for legion spy
