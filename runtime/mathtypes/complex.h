@@ -24,12 +24,6 @@
 #endif
 #endif
 
-#if __cplusplus >= 201103L
-#define __CEXPR__ constexpr
-#else
-#define __CEXPR__
-#endif
-
 #include <cmath>
 #ifdef LEGION_USE_CUDA
 #if __CUDACC_VER_MAJOR__ == 9 && __CUDACC_VER_MINOR__ == 2
