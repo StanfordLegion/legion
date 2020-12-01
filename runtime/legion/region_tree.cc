@@ -15215,6 +15215,32 @@ namespace Legion {
                     open_below |= finder->second;
                   }
                 }
+                // Check to see if we are tracing, if we are then 
+                // we need to traverse all the children open in read-only
+                // mode and record "no-dependences" on any users we find
+                // down there in case we need to inject an internal operation
+                // later when we go to replay the trace
+                if (closer.user.op->is_tracing() &&
+                    ((next_child == NULL) || !are_all_children_disjoint()))
+                {
+                  for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
+                        it->open_children.begin(); cit != 
+                        it->open_children.end(); cit++)
+                  {
+                    // Can skip the next node since we're going to traverse
+                    // it later anyway
+                    if (cit->first == next_child)
+                      continue;
+                    if (cit->second * current_mask)
+                      continue;
+                    if ((next_child != NULL) && 
+                        are_children_disjoint(cit->first->get_color(),
+                                              next_child->get_color()))
+                      continue;
+                    cit->first->record_close_no_dependences(closer.ctx, 
+                                                            closer.user);
+                  }
+                }
                 it++;
               }
               else
@@ -15289,6 +15315,10 @@ namespace Legion {
                   // Cases 1 and 2
                   bool needs_recompute = false;
                   std::vector<RegionTreeNode*> to_delete;
+                  // If we're tracing we need to record nodep dependences
+                  // here in any aliased sub-trees in case we need to make
+                  // internal operations later when replaying the trace
+                  const bool tracing = closer.user.op->is_tracing();
                   // Go through all the children and see if there is any overlap
                   for (FieldMaskSet<RegionTreeNode>::iterator cit = 
                         it->open_children.begin(); cit !=
@@ -15303,6 +15333,9 @@ namespace Legion {
                     // Case 2
                     if (cit->first != (next_child))
                     {
+                      if (tracing)
+                        cit->first->record_close_no_dependences(closer.ctx,
+                                                                closer.user);
                       // Different child so we need to create a new
                       // FieldState in MULTI_REDUCE mode with two
                       // children open
@@ -15367,6 +15400,28 @@ namespace Legion {
                   }
                 }
               }
+              else if (IS_REDUCE(closer.user.usage) && 
+                    (it->redop == closer.user.usage.redop))
+              {
+                // Same reduction as our children so stay in this mode
+                // Check to see if we are tracing, if we are then 
+                // we need to traverse all the children open in reduce
+                // mode and record "no-dependences" on any users we find
+                // down there in case we need to inject an internal operation
+                // later when we go to replay the trace
+                if (closer.user.op->is_tracing())
+                {
+                  for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
+                        it->open_children.begin(); cit != 
+                        it->open_children.end(); cit++)
+                  {
+                    if (cit->second * current_mask)
+                      continue;
+                    cit->first->record_close_no_dependences(closer.ctx, 
+                                                            closer.user);
+                  }
+                }
+              }
               else
               {
                 // Closing everything up, so just do it
@@ -15404,6 +15459,32 @@ namespace Legion {
                   {
                     // Already open, so add the open fields
                     open_below |= (finder->second & current_mask);
+                  }
+                }
+                // Check to see if we are tracing, if we are then 
+                // we need to traverse all the children open in reduce
+                // mode and record "no-dependences" on any users we find
+                // down there in case we need to inject an internal operation
+                // later when we go to replay the trace
+                if (closer.user.op->is_tracing() &&
+                    ((next_child == NULL) || !are_all_children_disjoint()))
+                {
+                  for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
+                        it->open_children.begin(); cit != 
+                        it->open_children.end(); cit++)
+                  {
+                    // Can skip the next node since we're going to traverse
+                    // it later anyway
+                    if (cit->first == next_child)
+                      continue;
+                    if (cit->second * current_mask)
+                      continue;
+                    if ((next_child != NULL) && 
+                        are_children_disjoint(cit->first->get_color(),
+                                              next_child->get_color()))
+                      continue;
+                    cit->first->record_close_no_dependences(closer.ctx, 
+                                                            closer.user);
                   }
                 }
                 it++;
@@ -16703,6 +16784,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeNode::record_close_no_dependences(ContextID ctx,
+                                                     const LogicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      const LogicalState &state = get_logical_state(ctx);
+      perform_nodep_checks<CURR_LOGICAL_ALLOC>(user, state.curr_epoch_users);
+      perform_nodep_checks<PREV_LOGICAL_ALLOC>(user, state.prev_epoch_users);
+      for (std::list<FieldState>::const_iterator it = 
+            state.field_states.begin(); it != state.field_states.end(); it++)
+      {
+        if (it->open_children.empty())
+          continue;
+        if (it->valid_fields() * user.field_mask)
+          continue;
+        if ((it->open_state == OPEN_READ_ONLY) && IS_READ_ONLY(user.usage))
+        {
+          for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
+                it->open_children.begin(); cit != 
+                it->open_children.end(); cit++)
+          {
+            if (cit->second * user.field_mask)
+              continue;
+            cit->first->record_close_no_dependences(ctx, user);
+          }
+        }
+        else if ((it->redop == user.usage.redop) &&
+                 ((it->open_state == OPEN_SINGLE_REDUCE) ||
+                  (it->open_state == OPEN_MULTI_REDUCE)))
+        {
+          for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
+                it->open_children.begin(); cit != 
+                it->open_children.end(); cit++)
+          {
+            if (cit->second * user.field_mask)
+              continue;
+            cit->first->record_close_no_dependences(ctx, user);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::send_back_logical_state(ContextID ctx, 
                                                  UniqueID context_uid,
                                                  AddressSpaceID target)
@@ -17207,9 +17330,7 @@ namespace Legion {
         // If it's empty, remove it from the list and let
         // the mapping reference go up the tree with it
         // Otherwise add a new mapping reference
-        if (!it->field_mask)
-          it = users.erase(it);
-        else
+        if (!!it->field_mask)
         {
 #ifdef LEGION_SPY
           // Always add the reference for Legion Spy
@@ -17226,6 +17347,30 @@ namespace Legion {
             it++;
 #endif
         }
+        else
+          it = users.erase(it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<AllocationType ALLOC>
+    /*static*/void RegionTreeNode::perform_nodep_checks(const LogicalUser &user,
+            const typename LegionList<LogicalUser, ALLOC>::track_aligned &users)
+    //--------------------------------------------------------------------------
+    {
+      for (typename LegionList<LogicalUser,ALLOC>::track_aligned::const_iterator
+            it = users.begin(); it != users.end(); it++)
+      {
+        if (it->usage != user.usage)
+          continue;
+        const FieldMask overlap = user.field_mask & it->field_mask;
+        if (!overlap)
+          continue;
+        // Skip any users of the same op, we know they won't be dependences
+        if ((it->op == user.op) && (it->gen == user.gen))
+          continue;
+        user.op->register_no_dependence(user.idx, it->op, 
+                                        it->gen, it->idx, overlap);
       }
     }
 
