@@ -707,7 +707,6 @@ namespace Legion {
       ReductionOpID redop;
       ProjectionFunction *projection;
       IndexSpaceNode *projection_space;
-      unsigned rebuild_timeout;
     };  
 
     /**

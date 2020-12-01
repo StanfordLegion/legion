@@ -2546,8 +2546,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(void)
-      : open_state(NOT_OPEN), redop(0), projection(NULL), 
-        projection_space(NULL), rebuild_timeout(1)
+      : open_state(NOT_OPEN), redop(0), projection(NULL), projection_space(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -2555,7 +2554,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
                            RegionTreeNode *child, std::set<RtEvent> &applied)
-      : redop(0), projection(NULL), projection_space(NULL), rebuild_timeout(1)
+      : redop(0), projection(NULL), projection_space(NULL)
     //--------------------------------------------------------------------------
     {
       if (IS_READ_ONLY(user.usage))
@@ -2578,7 +2577,7 @@ namespace Legion {
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
                            ProjectionFunction *proj, IndexSpaceNode *proj_space,
                            bool disjoint, bool dirty_reduction)
-     : redop(0),projection(proj),projection_space(proj_space),rebuild_timeout(1)
+     : redop(0),projection(proj),projection_space(proj_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2604,8 +2603,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const FieldState &rhs)
       : open_state(rhs.open_state), redop(rhs.redop), 
-        projection(rhs.projection), projection_space(rhs.projection_space), 
-        rebuild_timeout(rhs.rebuild_timeout)
+        projection(rhs.projection), projection_space(rhs.projection_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2622,7 +2620,6 @@ namespace Legion {
       redop = rhs.redop;
       projection = rhs.projection;
       projection_space = rhs.projection_space;
-      rebuild_timeout = rhs.rebuild_timeout;
     }
 
     //--------------------------------------------------------------------------
@@ -2647,7 +2644,6 @@ namespace Legion {
       redop = rhs.redop;
       projection = rhs.projection;
       projection_space = rhs.projection_space;
-      rebuild_timeout = rhs.rebuild_timeout;
       return *this;
     }
 
@@ -2660,7 +2656,6 @@ namespace Legion {
       redop = rhs.redop;
       projection = rhs.projection;
       projection_space = rhs.projection_space;
-      rebuild_timeout = rhs.rebuild_timeout;
       return *this;
     }
 

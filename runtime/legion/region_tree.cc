@@ -15124,20 +15124,8 @@ namespace Legion {
         }
       }
       // If we have no children, we can clear our fields
-      if (state.open_children.empty())
+      if (removed_fields || state.open_children.empty())
         state.open_children.tighten_valid_mask();
-      // See if it is time to rebuild the valid mask 
-      else if (removed_fields)
-      {
-        if (state.rebuild_timeout == 0)
-        {
-          state.open_children.tighten_valid_mask();
-          // Reset the timeout to the order of the number of open children
-          state.rebuild_timeout = state.open_children.size();
-        }
-        else
-          state.rebuild_timeout--;
-      }
     }
 
     //--------------------------------------------------------------------------
