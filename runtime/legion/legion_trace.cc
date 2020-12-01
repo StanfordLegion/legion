@@ -162,7 +162,7 @@ namespace Legion {
         {
           LegionSpy::log_mapping_dependence(
               op->get_context()->get_unique_id(), current_uids[target], req_idx,
-              op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+              op->get_unique_op_id(), 0, LEGION_TRUE_DEPENDENCE);
         }
 #endif
         // Remove any mapping references that we hold
@@ -332,11 +332,11 @@ namespace Legion {
             op->register_dependence(target.first, target.second);
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
-                op->get_context()->get_unique_id(),
-                get_current_uid_by_index(it->operation_idx),
-                (it->prev_idx == -1) ? 0 : it->prev_idx,
-                op->get_unique_op_id(), 
-                (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
+               op->get_context()->get_unique_id(),
+               get_current_uid_by_index(it->operation_idx),
+               (it->prev_idx == -1) ? 0 : it->prev_idx,
+               op->get_unique_op_id(), 
+               (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
 #endif
           }
           else
@@ -393,11 +393,11 @@ namespace Legion {
             internal_op->register_dependence(target.first, target.second);
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
-                op->get_context()->get_unique_id(),
-                get_current_uid_by_index(it->operation_idx),
-                (it->prev_idx == -1) ? 0 : it->prev_idx,
-                op->get_unique_op_id(), 
-                (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
+               op->get_context()->get_unique_id(),
+               get_current_uid_by_index(it->operation_idx),
+               (it->prev_idx == -1) ? 0 : it->prev_idx,
+               op->get_unique_op_id(), 
+               (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
 #endif
           }
           else
@@ -432,6 +432,18 @@ namespace Legion {
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
+                                    const FieldMask &dependent_mask)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void StaticTrace::record_no_dependence(
+                                    Operation *target, GenerationID target_gen,
+                                    Operation *source, GenerationID source_gen,
+                                    unsigned target_idx, unsigned source_idx,
                                     const FieldMask &dependent_mask)
     //--------------------------------------------------------------------------
     {
@@ -698,6 +710,9 @@ namespace Legion {
           for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
                 deps.begin(); it != deps.end(); it++)
           {
+            // Skip any no-dependences since they are still no-deps here
+            if (it->dtype == LEGION_NO_DEPENDENCE)
+              continue;
 #ifdef DEBUG_LEGION
             assert((it->operation_idx >= 0) &&
                    ((size_t)it->operation_idx < operations.size()));
@@ -717,11 +732,11 @@ namespace Legion {
               op->register_dependence(target.first, target.second);
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
-                  op->get_context()->get_unique_id(),
-                  get_current_uid_by_index(it->operation_idx),
-                  (it->prev_idx == -1) ? 0 : it->prev_idx,
-                  op->get_unique_op_id(), 
-                  (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
+               op->get_context()->get_unique_id(),
+               get_current_uid_by_index(it->operation_idx),
+               (it->prev_idx == -1) ? 0 : it->prev_idx,
+               op->get_unique_op_id(), 
+               (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
 #endif
             }
             else
@@ -779,18 +794,20 @@ namespace Legion {
               internal_op->register_dependence(target.first, target.second);
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
-                  op->get_context()->get_unique_id(),
-                  get_current_uid_by_index(it->operation_idx),
-                  (it->prev_idx == -1) ? 0 : it->prev_idx,
-                  op->get_unique_op_id(), 
-                  (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
+               op->get_context()->get_unique_id(),
+               get_current_uid_by_index(it->operation_idx),
+               (it->prev_idx == -1) ? 0 : it->prev_idx,
+               op->get_unique_op_id(), 
+               (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
 #endif
             }
             else
             {
+              // Promote no-dependence cases to full dependences here
               internal_op->record_trace_dependence(target.first, target.second,
-                                                 it->prev_idx, it->next_idx,
-                                                 it->dtype, it->dependent_mask);
+                                                   it->prev_idx, it->next_idx,
+                                                   LEGION_TRUE_DEPENDENCE, 
+                                                   it->dependent_mask);
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   internal_op->get_context()->get_unique_id(),
@@ -973,6 +990,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DynamicTrace::record_no_dependence(Operation *target, 
+                                            GenerationID tar_gen,
+                                            Operation *source, 
+                                            GenerationID src_gen,
+                                            unsigned target_idx, 
+                                            unsigned source_idx,
+                                            const FieldMask &dep_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(tracing);
+      assert(!target->is_internal_op());
+      assert(!source->is_internal_op());
+#endif
+      std::pair<Operation*,GenerationID> target_key(target, tar_gen);
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        finder = op_map.find(target_key);
+      // We only need to record it if it falls within our trace
+      if (finder != op_map.end())
+      {
+        insert_dependence(DependenceRecord(finder->second, target_idx, 
+                  source_idx, false, LEGION_NO_DEPENDENCE, dep_mask));
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void DynamicTrace::record_aliased_children(unsigned req_index,
                                           unsigned depth, const FieldMask &mask)
     //--------------------------------------------------------------------------
@@ -998,11 +1041,11 @@ namespace Legion {
           if ((it->prev_idx == -1) || (it->next_idx == -1))
           {
             LegionSpy::log_mapping_dependence(
-                context_uid,
-                operations[it->operation_idx].first->get_unique_op_id(),
-                (it->prev_idx == -1) ? 0 : it->prev_idx,
-                uid,
-                (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
+               context_uid,
+               operations[it->operation_idx].first->get_unique_op_id(),
+               (it->prev_idx == -1) ? 0 : it->prev_idx,
+               uid,
+               (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
           }
           else
           {
@@ -1013,9 +1056,9 @@ namespace Legion {
           }
         }
         LegionSpy::log_mapping_dependence(
-            context_uid, prev_fence_uid, 0, uid, 0, TRUE_DEPENDENCE);
+            context_uid, prev_fence_uid, 0, uid, 0, LEGION_TRUE_DEPENDENCE);
         LegionSpy::log_mapping_dependence(
-            context_uid, uid, 0, curr_fence_uid, 0, TRUE_DEPENDENCE);
+            context_uid, uid, 0, curr_fence_uid, 0, LEGION_TRUE_DEPENDENCE);
       }
     }
 #endif
