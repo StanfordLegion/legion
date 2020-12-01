@@ -98,6 +98,10 @@ namespace Legion {
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
                                     const FieldMask &dependent_mask) = 0;
+      virtual void record_no_dependence(Operation *target, GenerationID target_gen,
+                                    Operation *source, GenerationID source_gen,
+                                    unsigned target_idx, unsigned source_idx,
+                                    const FieldMask &dependent_mask) = 0;
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask) = 0;
       virtual void end_trace_capture(void) = 0;
@@ -186,6 +190,10 @@ namespace Legion {
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
                                     const FieldMask &dependent_mask);
+      virtual void record_no_dependence(Operation *target, GenerationID target_gen,
+                                    Operation *source, GenerationID source_gen,
+                                    unsigned target_idx, unsigned source_idx,
+                                    const FieldMask &dependent_mask);
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask);
       virtual void end_trace_capture(void);
@@ -244,6 +252,10 @@ namespace Legion {
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
+                                    const FieldMask &dependent_mask);
+      virtual void record_no_dependence(Operation *target, GenerationID target_gen,
+                                    Operation *source, GenerationID source_gen,
+                                    unsigned target_idx, unsigned source_idx,
                                     const FieldMask &dependent_mask);
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask);

@@ -1692,6 +1692,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::register_no_dependence(unsigned idx, Operation *target,
+            GenerationID target_gen, unsigned target_idx, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(tracing);
+      assert(trace != NULL);
+      assert(!is_internal_op());
+#endif
+      if (target == this)
+        return;
+      trace->record_no_dependence(target, target_gen, this, gen, 
+                                  target_idx, idx, mask);
+    }
+
+    //--------------------------------------------------------------------------
     bool Operation::perform_registration(GenerationID our_gen, 
                                          Operation *op, GenerationID op_gen,
                                          bool &registered_dependence,
