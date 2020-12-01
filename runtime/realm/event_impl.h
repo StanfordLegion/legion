@@ -61,7 +61,8 @@ namespace Realm {
       virtual Event get_finish_event(void) const = 0;
 
       IntrusiveListLink<EventWaiter> ew_list_link;
-      typedef IntrusiveList<EventWaiter, &EventWaiter::ew_list_link, DummyLock> EventWaiterList;
+      REALM_PMTA_DEFN(EventWaiter,IntrusiveListLink<EventWaiter>,ew_list_link);
+      typedef IntrusiveList<EventWaiter, REALM_PMTA_USE(EventWaiter,ew_list_link), DummyLock> EventWaiterList;
     };
 
     // triggering events can often result in recursive expansion of work -

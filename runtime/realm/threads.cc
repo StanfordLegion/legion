@@ -25,7 +25,11 @@
 #include <stdio.h>
 #endif
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+#define REALM_USE_PTHREADS
+#define REALM_USE_ALTSTACK
 #include <pthread.h>
+#endif
 #ifdef REALM_ON_LINUX
   #define HAVE_CPUSET
 #endif
@@ -42,8 +46,28 @@
 #include <sched.h>
 #endif
 
+#ifdef REALM_ON_WINDOWS
+#include <windows.h>
+#include <processthreadsapi.h>
+#include <process.h>
+
+// Windows API uses DWORD_PTR for affinity masks
+#define HAVE_CPUSET
+typedef DWORD_PTR cpu_set_t;
+static void CPU_ZERO(DWORD_PTR *set)
+{
+  *set = 0;
+}
+static void CPU_SET(int index, DWORD_PTR *set)
+{
+  *set |= DWORD_PTR(1) << index;
+}
+#endif
+
 #ifdef REALM_USE_USER_THREADS
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <ucontext.h>
+
 #ifdef REALM_ON_MACOS
 // MacOS has (loudly) deprecated set/get/make/swapcontext,
 //  despite there being no POSIX replacement for them...
@@ -60,6 +84,7 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 #define makecontext makecontext_wrap
 #endif
 #endif
+#endif
 
 #ifdef REALM_USE_HWLOC
 #include <hwloc.h>
@@ -71,8 +96,10 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 
 #include <string.h>
 #include <stdlib.h>
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <unistd.h>
 #include <signal.h>
+#endif
 #include <string>
 #include <map>
 
@@ -547,6 +574,7 @@ namespace Realm {
   //
   // class Thread
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
   static atomic<bool> handler_registered(false);
   // Valgrind uses SIGUSR2 on Darwin
   static int handler_signal = SIGUSR1;
@@ -580,6 +608,7 @@ namespace Realm {
 
     CHECK_LIBC( sigaction(handler_signal, &act, 0) );
   }
+#endif
 
   void Thread::signal(Signal sig, bool asynchronous)
   {
@@ -677,16 +706,28 @@ namespace Realm {
     static void detect_static_tls_size(void);
 
   protected:
+#ifdef REALM_USE_PTHREADS
     static void *pthread_entry(void *data);
+#endif
+#ifdef REALM_ON_WINDOWS
+    static DWORD WINAPI winthread_entry(LPVOID data);
+#endif
 
     virtual void alert_thread(void);
 
     void *target;
     void (*entry_wrapper)(void *);
+#ifdef REALM_USE_PTHREADS
     pthread_t thread;
+#endif
+#ifdef REALM_ON_WINDOWS
+    HANDLE thread;
+#endif
     bool ok_to_delete;
+#ifdef REALM_USE_ALTSTACK
     void *altstack_base;
     size_t altstack_size;
+#endif
     static size_t static_tls_size;
   };
 
@@ -703,10 +744,12 @@ namespace Realm {
     assert(ok_to_delete);
   }
 
+#ifdef REALM_USE_PTHREADS
   /*static*/ void *KernelThread::pthread_entry(void *data)
   {
     KernelThread *thread = (KernelThread *)data;
 
+#ifdef REALM_USE_ALTSTACK
     // install our alt stack (if it exists) for signal handling
     if(thread->altstack_base != 0) {
       stack_t altstack;
@@ -716,6 +759,7 @@ namespace Realm {
       int ret = sigaltstack(&altstack, 0);
       assert(ret == 0);
     }
+#endif
 
     // set up TLS so people can find us
     ThreadLocal::current_thread = thread;
@@ -733,6 +777,7 @@ namespace Realm {
     log_thread.info() << "thread " << thread << " finished";
     thread->update_state(STATE_FINISHED);
 
+#ifdef REALM_USE_ALTSTACK
     // uninstall and free our alt stack (if it exists)
     if(thread->altstack_base != 0) {
       // so MacOS doesn't seem to want to let you disable a stack, returning
@@ -754,6 +799,7 @@ namespace Realm {
 #endif
       free(thread->altstack_base);
     }
+#endif
 
     // this is last so that the scheduler can delete us if it wants to
     if(thread->scheduler)
@@ -761,32 +807,72 @@ namespace Realm {
     
     return 0;
   }
+#endif
+
+#ifdef REALM_ON_WINDOWS
+  /*static*/ DWORD WINAPI KernelThread::winthread_entry(LPVOID data)
+  {
+    KernelThread *thread = (KernelThread *)data;
+
+    // set up TLS so people can find us
+    ThreadLocal::current_thread = thread;
+
+    log_thread.info() << "thread " << thread << " started";
+    thread->update_state(STATE_RUNNING);
+
+    if (thread->scheduler)
+      thread->scheduler->thread_starting(thread);
+
+    // call the actual thread body
+    (*thread->entry_wrapper)(thread->target);
+
+    // on return, we update our status and terminate
+    log_thread.info() << "thread " << thread << " finished";
+    thread->update_state(STATE_FINISHED);
+
+    // this is last so that the scheduler can delete us if it wants to
+    if (thread->scheduler)
+      thread->scheduler->thread_terminating(thread);
+
+    return 0;
+  }
+#endif
 
   void KernelThread::start_thread(const ThreadLaunchParameters& params,
 				  const CoreReservation& rsrv)
   {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     // before we create any threads, make sure we have our signal handler registered
     register_handler();
+#endif
 
+#ifdef REALM_USE_PTHREADS
     pthread_attr_t attr;
 
     CHECK_PTHREAD( pthread_attr_init(&attr) );
+#endif
 
     // allocation better exist...
     assert(rsrv.allocation);
 
-#ifdef HAVE_CPUSET
+#if defined(HAVE_CPUSET) && !defined(REALM_ON_WINDOWS)
     if(rsrv.allocation->restrict_cpus)
       CHECK_PTHREAD( pthread_attr_setaffinity_np(&attr, 
 						 sizeof(rsrv.allocation->allowed_cpus),
 						 &(rsrv.allocation->allowed_cpus)) );
 #endif
 
+#ifdef REALM_USE_PTHREADS
     // now that we try to detect the static TLS size, we can use the
     //  advertised min stack size from the threading library as is
     const ptrdiff_t MIN_STACK_SIZE = PTHREAD_STACK_MIN;
 
     ptrdiff_t stack_size = 0;  // 0 == "pthread default"
+#endif
+#ifdef REALM_ON_WINDOWS
+    const ptrdiff_t MIN_STACK_SIZE = 0;
+    ptrdiff_t stack_size = 0;   // 0 == "windows default"
+#endif
 
     if(params.stack_size != params.STACK_SIZE_DEFAULT) {
       // make sure it's not too large
@@ -801,15 +887,18 @@ namespace Realm {
 					 MIN_STACK_SIZE);
       }
     }
+#ifdef REALM_USE_PTHREADS
     if(stack_size > 0) {
       // add in our estimate of the static TLS size
       CHECK_PTHREAD( pthread_attr_setstacksize(&attr,
 					       (stack_size +
 						KernelThread::static_tls_size)) );
     }
+#endif
 
     // TODO: actually use heap size
 
+#ifdef REALM_USE_ALTSTACK
     // default altstack size is 64KB
     altstack_size = 64 << 10;
     if(params.alt_stack_size != params.ALTSTACK_SIZE_DEFAULT)
@@ -824,39 +913,78 @@ namespace Realm {
       assert(ret == 0);
     } else
       altstack_base = 0;
+#endif
 
     update_state(STATE_STARTUP);
 
     // time to actually create the thread
+#ifdef REALM_USE_PTHREADS
     CHECK_PTHREAD( pthread_create(&thread, &attr, pthread_entry, this) );
 
     CHECK_PTHREAD( pthread_attr_destroy(&attr) );
 
     log_thread.info() << "thread created:" << this << " (" << rsrv.name << ") - pthread " << std::hex << thread << std::dec;
+#endif
+#ifdef REALM_ON_WINDOWS
+    // TODO: supposed to use _beginthreadex here?
+    thread = CreateThread(NULL,
+			  (stack_size +
+			   KernelThread::static_tls_size),
+			  winthread_entry, this, 0, 0);
+#ifdef HAVE_CPUSET
+    if(rsrv.allocation->restrict_cpus)
+      if(SetThreadAffinityMask(thread, rsrv.allocation->allowed_cpus) == 0)
+        log_thread.warning() << "failed to set affinity: thread=" << thread
+                             << " mask=" << std::hex << rsrv.allocation->allowed_cpus << std::dec
+                             << " error=" << GetLastError();
+#endif
+
+    log_thread.info() << "thread created:" << this << " (" << rsrv.name << ") - handle " << thread;
+#endif
     log_thread.debug() << "thread stack: " << this << " size=" << stack_size;
   }
 
   void KernelThread::join(void)
   {
+#ifdef REALM_USE_PTHREADS
     CHECK_PTHREAD( pthread_join(thread, 0 /* ignore retval */) );
+#endif
+#ifdef REALM_ON_WINDOWS
+    WaitForSingleObject(thread, INFINITE);
+#endif
     ok_to_delete = true;
   }
 
   void KernelThread::detach(void)
   {
+#ifdef REALM_USE_PTHREADS
     CHECK_PTHREAD( pthread_detach(thread) );
+#endif
+#ifdef REALM_ON_WINDOWS
+    CloseHandle(thread);
+#endif
     ok_to_delete = true;
   }
 
   void KernelThread::alert_thread(void)
   {
     // are we alerting ourself?
+#ifdef REALM_USE_PTHREADS
     if(this->thread == pthread_self()) {
       // just process the signals right here and now
       process_signals();
     } else {
       pthread_kill(this->thread, handler_signal);
     }
+#endif
+#ifdef REALM_ON_WINDOWS
+    if(this->thread == GetCurrentThread()) {
+      // just process the signals right here and now
+      process_signals();
+    } else {
+      assert(0);
+    }
+#endif
   }
 
   /*static*/ size_t KernelThread::static_tls_size = 0;
@@ -921,6 +1049,7 @@ namespace Realm {
     } while(0);
 #endif
 
+#ifdef REALM_USE_PTHREADS
     // case 4: empirically determine it by trying to create threads with small
     //  stacks (test up to 16MB)
     {
@@ -971,9 +1100,14 @@ namespace Realm {
       // none of the sizes we tried worked...
       CHECK_PTHREAD( pthread_attr_destroy(&attr) );
     }
+#endif
 
     // if all else fails, guess it's about 32KB
+#ifdef REALM_ON_WINDOWS
+    static_tls_size = 0;  // not on stack in win32?
+#else
     static_tls_size = 32768;
+#endif
     log_thread.debug() << "static tls size = " << static_tls_size << " (uneducated guess)";
   }
 
@@ -1019,6 +1153,8 @@ namespace Realm {
   // class UserThread
 
 #ifdef REALM_USE_USER_THREADS
+
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
   namespace {
     atomic<int> uswitch_test_check_flag(1);
     ucontext_t uswitch_test_ctx1, uswitch_test_ctx2;
@@ -1080,6 +1216,13 @@ namespace Realm {
     free(stack_base);
     return true;
   }
+#endif
+#ifdef REALM_ON_WINDOWS
+  /*static*/ bool Thread::test_user_switch_support(size_t stack_size /*= 1 << 20*/)
+  {
+    return true;
+  }
+#endif
 
   class UserThread : public Thread {
   public:
@@ -1097,7 +1240,12 @@ namespace Realm {
     static void user_switch(UserThread *switch_to);
 
   protected:
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     REALM_ATTR_NORETURN(static void uthread_entry(void));
+#endif
+#ifdef REALM_ON_WINDOWS
+    REALM_ATTR_NORETURN(static void uthread_entry(void *));
+#endif
 
     virtual void alert_thread(void);
 
@@ -1106,22 +1254,31 @@ namespace Realm {
     void *target;
     void (*entry_wrapper)(void *);
     int magic;
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+    pthread_t host_pthread;
     ucontext_t ctx;
 #ifdef REALM_ON_MACOS
     // valgrind says Darwin's getcontext is writing past the end of ctx?
     int padding[512];
 #endif
     void *stack_base;
+#endif
+#ifdef REALM_ON_WINDOWS
+    LPVOID fiber;
+#endif
     size_t stack_size;
     bool ok_to_delete;
     bool running;
-    pthread_t host_pthread;
   };
 
   UserThread::UserThread(void *_target, void (*_entry_wrapper)(void *),
 			 ThreadScheduler *_scheduler)
     : Thread(_scheduler), target(_target), entry_wrapper(_entry_wrapper)
-    , magic(MAGIC_VALUE), stack_base(0), stack_size(0), ok_to_delete(false)
+    , magic(MAGIC_VALUE)
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+    , stack_base(0)
+#endif
+    , stack_size(0), ok_to_delete(false)
     , running(false)
   {
   }
@@ -1131,24 +1288,41 @@ namespace Realm {
     // cannot delete an active thread...
     assert(!running);
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     if(stack_base != 0)
       free(stack_base);
+#endif
+#ifdef REALM_ON_WINDOWS
+    DeleteFiber(fiber);
+#endif
   }
 
   namespace ThreadLocal {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     REALM_THREAD_LOCAL ucontext_t *host_context = 0;
+#endif
+#ifdef REALM_ON_WINDOWS
+    REALM_THREAD_LOCAL LPVOID host_context = 0;
+#endif
     // current_user_thread is redundant with current_thread, but kept for debugging
     //  purposes for now
     REALM_THREAD_LOCAL UserThread *current_user_thread = 0;
     REALM_THREAD_LOCAL Thread *current_host_thread = 0;
   };
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
   /*static*/ void UserThread::uthread_entry(void)
+#endif
+#ifdef REALM_ON_WINDOWS
+  /*static*/ void UserThread::uthread_entry(void *)
+#endif
   {
     UserThread *thread = ThreadLocal::current_user_thread;
     assert(thread != 0);
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     thread->host_pthread = pthread_self();
+#endif
     thread->running = true;
 
     log_thread.info() << "thread " << thread << " started";
@@ -1198,6 +1372,7 @@ namespace Realm {
       }
     }
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     stack_base = malloc(stack_size);
     assert(stack_base != 0);
 
@@ -1211,11 +1386,25 @@ namespace Realm {
     // grr...  entry point takes int's, which might not hold a void *
     // we'll just fish our UserThread * out of TLS
     makecontext(&ctx, uthread_entry, 0);
+#endif
+#ifdef REALM_ON_WINDOWS
+    fiber = CreateFiberEx(stack_size, stack_size,
+                          FIBER_FLAG_FLOAT_SWITCH, uthread_entry, 0);
+    if(fiber == 0) {
+      log_thread.fatal() << "fiber creation failed: error=" << GetLastError();
+      ::abort();
+    }
+#endif
 
     update_state(STATE_STARTUP);    
 
     log_thread.info() << "thread created:" << this << " (" << (rsrv ? rsrv->name : "??") << ") - user thread";
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     log_thread.debug() << "thread stack: " << this << " size=" << stack_size << " base=" << stack_base;
+#endif
+#ifdef REALM_ON_WINDOWS
+    log_thread.debug() << "thread stack: " << this << " size=" << stack_size;
+#endif
   }
 
   void UserThread::join(void)
@@ -1244,18 +1433,38 @@ namespace Realm {
       assert(switch_to->magic == MAGIC_VALUE);
       assert(ThreadLocal::host_context == 0);
 
-      // this holds the host's state
-      ucontext_t host_ctx;
-
-      ThreadLocal::host_context = &host_ctx;
       ThreadLocal::current_user_thread = switch_to;
       ThreadLocal::current_host_thread = ThreadLocal::current_thread;
       ThreadLocal::current_thread = switch_to;
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+      // this holds the host's state
+      ucontext_t host_ctx;
+
+      ThreadLocal::host_context = &host_ctx;
+
       CHECK_LIBC( swapcontext(&host_ctx, &switch_to->ctx) );
+#endif
+#ifdef REALM_ON_WINDOWS
+      LPVOID host_ctx = ConvertThreadToFiberEx(0, 0);
+
+      ThreadLocal::host_context = host_ctx;
+
+      SwitchToFiber(switch_to->fiber);
+#endif
 
       assert(ThreadLocal::current_user_thread == 0);
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
       assert(ThreadLocal::host_context == &host_ctx);
+#endif
+#ifdef REALM_ON_WINDOWS
+      assert(ThreadLocal::host_context == host_ctx);
+      BOOL ok = ConvertFiberToThread();
+      if(!ok) {
+        log_thread.fatal() << "ConvertFiberToThread failed: error=" << GetLastError();
+        ::abort();
+      }
+#endif
       ThreadLocal::host_context = 0;
     } else {
       UserThread *switch_from = ThreadLocal::current_user_thread;
@@ -1271,10 +1480,15 @@ namespace Realm {
 	ThreadLocal::current_thread = switch_to;
 
 	// a switch between two user contexts - nice and simple
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 	CHECK_LIBC( swapcontext(&switch_from->ctx, &switch_to->ctx) );
+	switch_from->host_pthread = pthread_self();
+#endif
+#ifdef REALM_ON_WINDOWS
+  SwitchToFiber(switch_to->fiber);
+#endif
 
 	assert(switch_from->running == false);
-	switch_from->host_pthread = pthread_self();
 	switch_from->running = true;
       } else {
 	// a return of control to the host thread
@@ -1283,11 +1497,16 @@ namespace Realm {
 	ThreadLocal::current_thread = ThreadLocal::current_host_thread;
 	ThreadLocal::current_host_thread = 0;
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 	CHECK_LIBC( swapcontext(&switch_from->ctx, ThreadLocal::host_context) );
+	switch_from->host_pthread = pthread_self();
+#endif
+#ifdef REALM_ON_WINDOWS
+  SwitchToFiber(ThreadLocal::host_context);
+#endif
 
 	// if we get control back
 	assert(switch_from->running == false);
-	switch_from->host_pthread = pthread_self();
 	switch_from->running = true;
       }
     }
@@ -1301,7 +1520,11 @@ namespace Realm {
     } else {
       // TODO: work out the race conditions inherent in this process
       if(running) {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 	pthread_kill(host_pthread, handler_signal);
+#else
+        assert(0);
+#endif
       } else {
         assert(scheduler != 0);
 	if(try_update_state(STATE_BLOCKED, STATE_ALERTED)) {
@@ -1339,10 +1562,15 @@ namespace Realm {
 
   /*static*/ void Thread::yield(void)
   {
+#ifdef REALM_USE_PTHREADS
 #ifdef REALM_ON_MACOS
     sched_yield();
 #else
     pthread_yield();
+#endif
+#endif
+#ifdef REALM_ON_WINDOWS
+    SwitchToThread();
 #endif
   }
 
@@ -1707,6 +1935,101 @@ namespace Realm {
   }
 #endif
 
+#ifdef REALM_ON_WINDOWS
+  static CoreMap *extract_core_map_from_windows_api(bool hyperthread_sharing)
+  {
+    DWORD_PTR process_mask, system_mask;
+    GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask);
+    if(process_mask == 0) {
+      log_thread.warning() << "process affinity mask is empty? (system = " << system_mask << ")";
+      return 0;
+    }
+    log_thread.debug() << "affinity_mask = " << process_mask << " system=" << system_mask;
+
+    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION proc_info = NULL;
+    DWORD proc_info_size = 0;
+    DWORD rc;
+    rc = GetLogicalProcessorInformation(proc_info, &proc_info_size);
+    if((rc == TRUE) || (GetLastError() != ERROR_INSUFFICIENT_BUFFER) || (proc_info_size == 0)) {
+      log_thread.warning() << "unable to query processor info size";
+      return 0;
+    }
+    proc_info = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION)malloc(proc_info_size);
+    assert(proc_info != 0);
+    rc = GetLogicalProcessorInformation(proc_info, &proc_info_size);
+    assert(rc == TRUE);
+
+    // populate all_procs map
+    CoreMap *cm = new CoreMap;
+
+    for(int i = 0; (i < sizeof(DWORD_PTR)*8) && ((DWORD_PTR(1) << i) <= process_mask); i++)
+      if((process_mask & (DWORD_PTR(1) << i)) != 0) {
+        CoreMap::Proc *p = new CoreMap::Proc;
+        p->id = i;
+        p->domain = -1;  // fill in below
+        p->kernel_proc_ids.insert(i);
+        cm->all_procs[i] = p;
+      }
+
+    size_t num_infos = proc_info_size / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
+    for(size_t i = 0; i < num_infos; i++) {
+      DWORD_PTR eff_mask = process_mask & proc_info[i].ProcessorMask;
+      if(eff_mask == 0) continue;
+
+      switch(proc_info[i].Relationship) {
+        case RelationNumaNode:
+        {
+          log_thread.debug() << "info[" << i << "]: eff_mask=" << proc_info[i].ProcessorMask << " numa node=" << proc_info[i].NumaNode.NodeNumber;
+          CoreMap::ProcMap& dm = cm->by_domain[proc_info[i].NumaNode.NodeNumber];
+          for(int i = 0; (i < sizeof(DWORD_PTR)*8) && ((DWORD_PTR(1) << i) <= eff_mask); i++)
+            if((eff_mask & (DWORD_PTR(1) << i)) != 0) {
+              CoreMap::Proc *p = cm->all_procs[i];
+              assert(p != 0);
+              p->domain = proc_info[i].NumaNode.NodeNumber;
+              dm[p->id] = p;
+            }
+          break;
+        }
+
+        case RelationProcessorCore:
+        {
+          log_thread.debug() << "info[" << i << "]: eff_mask=" << proc_info[i].ProcessorMask << " hyperthreads";
+
+          // these are hyperthreads - do we care?
+          if(hyperthread_sharing) {
+            for(int i = 0; (i < sizeof(DWORD_PTR)*8) && ((DWORD_PTR(1) << i) <= eff_mask); i++)
+              if((eff_mask & (DWORD_PTR(1) << i)) != 0) {
+                CoreMap::Proc *p1 = cm->all_procs[i];
+                for(int j = i + 1; (i < sizeof(DWORD_PTR)*8) && ((DWORD_PTR(1) << j) <= eff_mask); j++)
+                  if((eff_mask & (DWORD_PTR(1) << j)) != 0) {
+                    CoreMap::Proc *p2 = cm->all_procs[j];
+                    p1->shares_alu.insert(p2);
+                    p1->shares_fpu.insert(p2);
+                    p1->shares_ldst.insert(p2);
+
+                    p2->shares_alu.insert(p1);
+                    p2->shares_fpu.insert(p1);
+                    p2->shares_ldst.insert(p1);
+                  }
+              }
+          }
+          break;
+        }
+
+        default:
+        {
+          log_thread.debug() << "info[" << i << "]: eff_mask=" << proc_info[i].ProcessorMask << " rel=" << proc_info[i].Relationship;
+          break;
+        }
+      }
+    }
+
+    free(proc_info);
+
+    return cm;
+  }
+#endif
+
   /*static*/ CoreMap *CoreMap::discover_core_map(bool hyperthread_sharing)
   {
     // we'll try a number of different strategies to discover the local cores:
@@ -1760,7 +2083,15 @@ namespace Realm {
     }
 #endif
 
-    // 4) as a final fallback a single-core synthetic map
+    // 4) windows has an API for this
+#ifdef REALM_ON_WINDOWS
+    {
+      CoreMap *cm = extract_core_map_from_windows_api(hyperthread_sharing);
+      if(cm) return cm;
+    }
+#endif
+
+    // 5) as a final fallback a single-core synthetic map
     {
       CoreMap *cm = create_synthetic(1, 1);
       return cm;

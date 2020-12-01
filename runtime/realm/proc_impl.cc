@@ -24,15 +24,6 @@
 #include "realm/activemsg.h"
 
 #include <sys/types.h>
-#include <dirent.h>
-
-#define CHECK_PTHREAD(cmd) do { \
-  int ret = (cmd); \
-  if(ret != 0) { \
-    fprintf(stderr, "PTHREAD: %s = %d (%s)\n", #cmd, ret, strerror(ret)); \
-    exit(1); \
-  } \
-} while(0)
 
 namespace Realm {
 

@@ -34,10 +34,10 @@ list(APPEND REALM_SRC
   realm/transfer/lowlevel_dma.h            realm/transfer/lowlevel_dma.cc
   realm/deppart/byfield.h                  realm/deppart/byfield.cc
   realm/deppart/deppart_config.h
-  realm/deppart/image.h                    realm/deppart/image.cc
+  realm/deppart/image.h
   realm/deppart/inst_helper.h
   realm/deppart/partitions.h               realm/deppart/partitions.cc
-  realm/deppart/preimage.h                 realm/deppart/preimage.cc
+  realm/deppart/preimage.h
   realm/deppart/rectlist.h                 
   realm/deppart/rectlist.inl
   realm/deppart/setops.h                   realm/deppart/setops.cc

@@ -16,6 +16,27 @@
 
 #include "realm/transfer/channel_disk.h"
 
+#ifdef REALM_ON_WINDOWS
+#include <windows.h>
+#include <io.h>
+
+static int open(const char *filename, int flags, int mode)
+{
+  int fd = -1;
+  int ret = _sopen_s(&fd, filename, flags, -SH_DENYNO, mode);
+  return (ret < 0) ? ret : fd;
+}
+
+#define close _close
+
+static int fsync(int fd)
+{
+  // TODO: is there a way to limit to just the specified file descriptor?
+  _flushall();
+  return 0;
+}
+#endif
+
 namespace Realm {
 
     FileXferDes::FileXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,

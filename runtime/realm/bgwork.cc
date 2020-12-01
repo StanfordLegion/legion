@@ -21,6 +21,28 @@
 #include "realm/utils.h"
 #include "realm/numa/numasysif.h"
 
+static unsigned ctz(uint64_t v)
+{
+#ifdef REALM_ON_WINDOWS
+  unsigned long index;
+#ifdef _WIN64
+  if(_BitScanForward64(&index, v))
+    return index;
+#else
+  unsigned v_lo = v;
+  unsigned v_hi = v >> 32;
+  if(_BitScanForward(&index, v_lo))
+    return index;
+  else if(_BitScanForward(&index, v_hi))
+    return index + 32;
+#endif
+  else
+    return 0;
+#else
+  return __builtin_ctzll(v);
+#endif
+}
+
 namespace Realm {
 
   Logger log_bgwork("bgwork");
@@ -518,8 +540,7 @@ namespace Realm {
 	if(prev & target_bit) {
 	  // success!
 	  manager->active_work_items.fetch_sub(1);
-	  unsigned slot = ((elem * BITMASK_BITS) +
-			   __builtin_ffsll(target_bit) - 1);
+	  unsigned slot = ((elem * BITMASK_BITS) + ctz(target_bit));
 	  log_bgwork.info() << "work claimed: manager=" << manager
 			    << " slot=" << slot
 			    << " worker=" << this;

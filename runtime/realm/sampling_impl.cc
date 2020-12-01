@@ -15,17 +15,34 @@
 
 // sampling profiler implementation for Realm
 
+#include "realm/realm_config.h"
 #include "realm/sampling_impl.h"
 #include "realm/cmdline.h"
 #include "realm/timers.h"
 #include "realm/network.h"
 #include "realm/threads.h"
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <unistd.h>
+#endif
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+
+#ifdef REALM_ON_WINDOWS
+#include <io.h>
+#include <synchapi.h>
+
+#define open _open
+#define write _write
+#define close _close
+
+static void usleep(long long microseconds)
+{
+  Sleep(microseconds / 1000);
+}
+#endif
 
 namespace Realm {
 

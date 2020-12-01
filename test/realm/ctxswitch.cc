@@ -4,11 +4,11 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
-#include <csignal>
 #include <cmath>
 
 #include <time.h>
-#include <unistd.h>
+
+#include "osdep.h"
 
 using namespace Realm;
 
@@ -89,7 +89,7 @@ void sleep_task(const void *args, size_t arglen,
 }
 
 struct PriorityTestArgs {
-  int *counter;
+  long *counter;
   int exp_val1, exp_val2;
   int new_priority;
   Event wait_on;
@@ -119,7 +119,7 @@ void priority_child_task(const void *args, size_t arglen,
 void priority_master_task(const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen, Processor p)
 {
-  int counter = 55;
+  long counter = 55;
 
   // We will create 5 workers that each try to increment the count twice.
   //  The first three are created before the master sleeps, and arrive at

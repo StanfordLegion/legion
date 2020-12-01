@@ -20,6 +20,20 @@
 
 #include "realm/atomics.h"
 
+#ifdef REALM_ON_WINDOWS
+#define REALM_PMTA_DECL(structtype,membertype,name) typename name
+#define REALM_PMTA_DEFN(structtype,membertype,name) \
+  struct name ## _pmta { static membertype& deref(structtype *obj) { return obj->name; } \
+                         static const membertype& deref(const structtype *obj) { return obj->name; } }
+#define REALM_PMTA_USE(structtype,name)             name ## _pmta
+#define REALM_PMTA_DEREF(obj,ptrname)               (ptrname::deref(obj))
+#else
+#define REALM_PMTA_DECL(structtype,membertype,name) membertype structtype::*name
+#define REALM_PMTA_DEFN(structtype,membertype,name)
+#define REALM_PMTA_USE(structtype,name)             &structtype::name
+#define REALM_PMTA_DEREF(obj,ptrname)               ((obj)->*(ptrname))
+#endif
+
 namespace Realm {
 
 #ifdef DEBUG_REALM
@@ -39,7 +53,7 @@ namespace Realm {
 #endif
   };
 
-  template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   class IntrusiveList {
   public:
     typedef T ITEMTYPE;
@@ -90,7 +104,7 @@ namespace Realm {
 #endif
   };
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   class IntrusivePriorityList {
   public:
     typedef T ITEMTYPE;
@@ -138,7 +152,7 @@ namespace Realm {
     // TODO: consider indexing if many priorities exists simultaneously?
   };
 
-  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename T, typename PT, REALM_PMTA_DECL(T,IntrusivePriorityListLink<T>,LINK), REALM_PMTA_DECL(T,PT,PRI), typename LT>
   std::ostream& operator<<(std::ostream& os, const IntrusivePriorityList<T, PT, LINK, PRI, LT>& to_print);
 
 }; // namespace Realm

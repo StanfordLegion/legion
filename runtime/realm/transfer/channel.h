@@ -16,17 +16,21 @@
 #ifndef LOWLEVEL_CHANNEL
 #define LOWLEVEL_CHANNEL
 
+#include "realm/realm_config.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#ifndef REALM_ON_WINDOWS
 #include <unistd.h>
+#include <pthread.h>
+#endif
 #include <fcntl.h>
 #include <map>
 #include <vector>
 #include <deque>
 #include <queue>
 #include <assert.h>
-#include <pthread.h>
 #include <string.h>
 #include "realm/transfer/lowlevel_dma.h"
 
@@ -52,110 +56,6 @@ namespace Realm {
     class Channel;
 
     extern Logger log_new_dma;
-
-    class Buffer {
-    public:
-      enum MemoryKind {
-        MKIND_CPUMEM,
-        MKIND_GPUFB,
-        MKIND_DISK
-      };
-
-      enum {
-        MAX_SERIALIZATION_LEN = 5 * sizeof(int64_t) / sizeof(int)
-      };
-
-      Buffer(void)
-            : alloc_offset(0), is_ib(false), block_size(0), elmt_size(0),
-              buf_size(0), memory(Memory::NO_MEMORY) {}
-
-      Buffer(RegionInstanceImpl::Metadata* metadata, Memory _memory)
-            : alloc_offset(metadata->alloc_offset),
-              is_ib(false), block_size(metadata->block_size), elmt_size(metadata->elmt_size),
-              buf_size(metadata->size),
-              memory(_memory){}
-
-      Buffer(off_t _alloc_offset, bool _is_ib,
-             int _block_size, int _elmt_size, size_t _buf_size,
-             Memory _memory)
-            : alloc_offset(_alloc_offset),
-              is_ib(_is_ib), block_size(_block_size), elmt_size(_elmt_size),
-              buf_size(_buf_size),
-              memory(_memory){}
-
-      Buffer& operator=(const Buffer& other)
-      {
-        alloc_offset = other.alloc_offset;
-        is_ib = other.is_ib;
-        block_size = other.block_size;
-        elmt_size = other.elmt_size;
-        buf_size = other.buf_size;
-        memory = other.memory;
-        return *this;
-      }
-
-
-      ~Buffer() {
-      }
-
-      // Note that we don't serialize memory in current implementation
-      // User has to manually set memory after deserialize
-      void serialize(int* data) const
-      {
-        int64_t* data64 = (int64_t*) data;
-        *data64 = alloc_offset; data64++;
-        *data64 = is_ib; data64++;
-        *data64 = block_size; data64++;
-        *data64 = elmt_size; data64++;
-        *data64 = buf_size; data64++;
-      }
-
-      void deserialize(const int* data)
-      {
-        int64_t* cur = (int64_t*) data;
-        alloc_offset = *cur; cur++;
-        is_ib = *cur; cur++;
-        block_size = *cur; cur++;
-        elmt_size = *cur; cur++;
-        buf_size = *cur; cur++;
-      }
-
-      enum DimensionKind {
-        DIM_X, // first logical index space dimension
-        DIM_Y, // second logical index space dimension
-        DIM_Z, // ...
-        DIM_F, // field dimension
-        INNER_DIM_X, // inner dimension for tiling X
-        OUTER_DIM_X, // outer dimension for tiling X
-        INNER_DIM_Y, // ...
-        OUTER_DIM_Y,
-        INNER_DIM_Z,
-        OUTER_DIM_Z,
-        INNER_DIM_F,
-        OUTER_DIM_F,
-      };
-
-      // std::vector<size_t> field_ordering;
-      // std::vector<size_t> field_sizes;
-      // std::vector<DimensionKind> dimension_ordering;
-      // std::vector<size_t> dim_size;
-      off_t alloc_offset;
-      bool is_ib;
-      size_t block_size, elmt_size;
-      //int inner_stride[3], outer_stride[3], inner_dim_size[3];
-
-      //MemoryKind memory_kind;
-
-      // buffer size of this intermediate buffer.
-      // 0 indicates this buffer is large enough to hold
-      // entire data set.
-      // A number smaller than bytes_total means we need
-      // to reuse the buffer.
-      size_t buf_size;
-
-      // The memory instance on which this buffer relies
-      Memory memory;
-    };
 
     class Request {
     public:
@@ -407,7 +307,9 @@ namespace Realm {
 
       // intrusive list for queued XDs in a channel
       IntrusivePriorityListLink<XferDes> xd_link;
-      typedef IntrusivePriorityList<XferDes, int, &XferDes::xd_link, &XferDes::priority, DummyLock> XferDesList;
+      REALM_PMTA_DEFN(XferDes,IntrusivePriorityListLink<XferDes>,xd_link);
+      REALM_PMTA_DEFN(XferDes,int,priority);
+      typedef IntrusivePriorityList<XferDes, int, REALM_PMTA_USE(XferDes,xd_link), REALM_PMTA_USE(XferDes,priority), DummyLock> XferDesList;
     protected:
       // this will be removed soon
       // queue that contains all available free requests
@@ -1234,7 +1136,7 @@ namespace Realm {
 	amsg->next_port_idx = next_port_idx;
 	amsg->span_start = span_start;
 	assert(span_size <= UINT_MAX);
-	amsg->span_size = span_size;
+	amsg->span_size = (unsigned)span_size;
 	amsg->pre_bytes_total = pre_bytes_total;
 	amsg.commit();
       }
@@ -1256,7 +1158,8 @@ namespace Realm {
 	amsg->next_xd_guid = next_xd_guid;
 	amsg->next_port_idx = next_port_idx;
 	amsg->span_start = span_start;
-	amsg->span_size = span_size;
+        assert(span_size <= UINT_MAX);
+        amsg->span_size = (unsigned)span_size;
 	amsg->pre_bytes_total = pre_bytes_total;
 	amsg.commit();
       }

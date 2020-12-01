@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+// this test makes use of lots of deprecated Legion API calls - ignore for now
+#define LEGION_DEPRECATED(x)
 
 #include <cstdio>
 #include <cassert>

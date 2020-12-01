@@ -42,6 +42,10 @@
 //  POSIX AIO for async file I/O
 #ifdef REALM_ON_LINUX
 //define REALM_USE_KERNEL_AIO
+#define REALM_USE_LIBAIO
+#endif
+#if defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+#define REALM_USE_LIBAIO
 #endif
 
 // dynamic loading via dlfcn and a not-completely standard dladdr extension

@@ -10,14 +10,14 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
-#include <csignal>
 #include <cmath>
 #ifdef REALM_USE_LIBDL
 #include <dlfcn.h>
 #endif
 
 #include <time.h>
-#include <unistd.h>
+
+#include "osdep.h"
 
 using namespace Realm;
 
@@ -175,7 +175,13 @@ void top_level_task(const void *args, size_t arglen,
 
     CodeDescriptor child_task_desc(child_task);
 
-    Event e = Processor::register_task_by_kind(Processor::LOC_PROC, true /*global*/,
+    Event e = Processor::register_task_by_kind(Processor::LOC_PROC,
+#ifdef _MSC_VER
+    // no portable task registration for windows yet
+                                               false /*!global*/,
+#else
+                                               true /*global*/,
+#endif
 					       func_id,
 					       child_task_desc,
 					       ProfilingRequestSet());

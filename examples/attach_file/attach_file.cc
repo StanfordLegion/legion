@@ -262,8 +262,9 @@ void top_level_task(const Task *task,
     field_map[FID_CP] = hdf5_dataset_name;
     printf("Checkpointing data to HDF5 file '%s' (dataset='%s')\n",
 	   hdf5_file_name, hdf5_dataset_name);
-    cp_pr = runtime->attach_hdf5(ctx, hdf5_file_name, cp_lr, cp_lr, field_map,
-				 LEGION_FILE_READ_WRITE);
+    AttachLauncher al(LEGION_EXTERNAL_HDF5_FILE, cp_lr, cp_lr);
+    al.attach_hdf5(hdf5_file_name, field_map, LEGION_FILE_READ_WRITE);
+    cp_pr = runtime->attach_external_resource(ctx, al);
   } else
 #endif
   {
@@ -274,8 +275,9 @@ void top_level_task(const Task *task,
     field_vec.push_back(FID_CP);
     printf("Checkpointing data to disk file '%s'\n",
 	   disk_file_name);
-    cp_pr = runtime->attach_file(ctx, disk_file_name, cp_lr, cp_lr, field_vec,
-				 LEGION_FILE_READ_WRITE);
+    AttachLauncher al(LEGION_EXTERNAL_POSIX_FILE, cp_lr, cp_lr);
+    al.attach_file(disk_file_name, field_vec, LEGION_FILE_READ_WRITE);
+    cp_pr = runtime->attach_external_resource(ctx, al);
   }
   //cp_pr.wait_until_valid();
   CopyLauncher copy_launcher;
@@ -288,13 +290,9 @@ void top_level_task(const Task *task,
   
   //clock_gettime(CLOCK_MONOTONIC, &ts_mid);
   ts_mid = Realm::Clock::current_time_in_microseconds();
-#ifdef LEGION_USE_HDF5
-  if(*hdf5_file_name) {
-    runtime->detach_hdf5(ctx, cp_pr);
-  } else
-#endif
   {
-    runtime->detach_file(ctx, cp_pr);
+    Future f = runtime->detach_external_resource(ctx, cp_pr);
+    f.get_void_result(true /*silence warnings*/);
   }
   //clock_gettime(CLOCK_MONOTONIC, &ts_end);
   ts_end = Realm::Clock::current_time_in_microseconds();
