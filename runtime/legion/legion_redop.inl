@@ -555,13 +555,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void SumReduction<__half>::apply<true>(LHS &lhs, RHS rhs)
   {
-#ifdef __CUDA_ARCH__
-    lhs = lhs + rhs;
-#else
-    lhs = __convert_float_to_half(
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&lhs)) + 
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs)));
-#endif
+      lhs = lhs + rhs;
   }
 
   template<> __CUDA_HD__ inline
@@ -596,13 +590,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void SumReduction<__half>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-#ifdef __CUDA_ARCH__
     rhs1 = rhs1 + rhs2;
-#else
-    rhs1= __convert_float_to_half(
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs1)) + 
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs2)));
-#endif
   }
 
   template<> __CUDA_HD__ inline
@@ -1405,13 +1393,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DiffReduction<__half>::apply<true>(LHS &lhs, RHS rhs)
   {
-#ifdef __CUDA_ARCH__
     lhs = lhs - rhs;
-#else
-    lhs = __convert_float_to_half(
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&lhs)) - 
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs)));
-#endif
   }
 
   template<> __CUDA_HD__ inline
@@ -1446,13 +1428,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DiffReduction<__half>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-#ifdef __CUDA_ARCH__
     rhs1 = rhs1 + rhs2;
-#else
-    rhs1= __convert_float_to_half(
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs1)) + 
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs2)));
-#endif
   }
 
   template<> __CUDA_HD__ inline
@@ -2350,13 +2326,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void ProdReduction<__half>::apply<true>(LHS &lhs, RHS rhs)
   {
-#ifdef __CUDA_ARCH__
     lhs = lhs * rhs;
-#else
-    lhs = __convert_float_to_half(
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&lhs)) * 
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs)));
-#endif
   }
 
   template<> __CUDA_HD__ inline
@@ -2391,13 +2361,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void ProdReduction<__half>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-#ifdef __CUDA_ARCH__
     rhs1 = rhs1 * rhs2;
-#else
-    rhs1= __convert_float_to_half(
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs1)) * 
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs2)));
-#endif
   }
 
   template<> __CUDA_HD__ inline
@@ -3234,13 +3198,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<__half>::apply<true>(LHS &lhs, RHS rhs)
   {
-#ifdef __CUDA_ARCH__
     lhs = lhs / rhs;
-#else
-    lhs = __convert_float_to_half(
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&lhs)) / 
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs)));
-#endif
   }
 
   template<> __CUDA_HD__ inline
@@ -3275,13 +3233,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<__half>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-#ifdef __CUDA_ARCH__
     rhs1 = rhs1 * rhs2;
-#else
-    rhs1= __convert_float_to_half(
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs1)) * 
-        __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs2)));
-#endif
   }
 
   template<> __CUDA_HD__ inline

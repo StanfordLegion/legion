@@ -28,7 +28,7 @@
 #endif
 
 // Still need this for doing conversions from floats
-static inline uint16_t __convert_float_to_halfint(float a)
+inline uint16_t __convert_float_to_halfint(float a)
 {
   uint32_t ia = *reinterpret_cast<uint32_t*>(&a);
   uint16_t ir;
@@ -78,7 +78,7 @@ static inline uint16_t __convert_float_to_halfint(float a)
   return ir;
 }
 
-static inline float __convert_halfint_to_float(uint16_t __x)
+inline float __convert_halfint_to_float(uint16_t __x)
 {
   int sign        = ((__x >> 15) & 1);
   int exp         = ((__x >> 10) & 0x1f);
@@ -283,7 +283,205 @@ inline bool operator>=(const __half &one, const __half &two)
   return (float(one) >= float(two));
 #endif
 }
+
+__CUDA_HD__
+inline __half asin(const __half &one)
+{
+#ifdef __CUDA_ARCH__
+  return (__float2half(asinf(__half2float(one))));
 #else
+  return (__float2half(std::asin(__half2float(one))));
+#endif
+}
+
+__CUDA_HD__
+inline __half atan(const __half &one)
+{
+#ifdef __CUDA_ARCH__
+  return (__float2half(atanf(__half2float(one))));
+#else
+  return (__float2half(std::atan(__half2float(one))));
+#endif
+}
+
+__CUDA_HD__
+inline __half ceil(__half a)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return hceil(a);
+#else
+  return __float2half(ceilf(__half2float(a)));
+#endif
+#else
+  return static_cast<__half>(::ceilf(static_cast<float>(a)));
+#endif
+}
+
+__CUDA_HD__
+inline __half cos(__half a)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return hcos(a);
+#else
+  return __float2half(cosf(__half2float(a)));
+#endif
+#else
+  return static_cast<__half>(::cosf(static_cast<float>(a)));
+#endif
+}
+
+__CUDA_HD__
+inline __half exp(__half a)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return hexp(a);
+#else
+  return __float2half(expf(__half2float(a)));
+#endif
+#else
+  return static_cast<__half>(::expf(static_cast<float>(a)));
+#endif
+}
+
+__CUDA_HD__
+inline __half fabs(__half a)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __habs(a);
+#else
+  return __float2half(fabs(__half2float(a)));
+#endif
+#else
+  return static_cast<__half>(::fabsf(static_cast<float>(a)));
+#endif
+}
+
+__CUDA_HD__
+inline __half floor(__half a)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return hfloor(a);
+#else
+  return __float2half(floorf(__half2float(a)));
+#endif
+#else
+  return static_cast<__half>(::floorf(static_cast<float>(a)));
+#endif
+}
+
+__CUDA_HD__
+inline bool isinf(__half a)
+{
+#ifdef __CUDA_ARCH__
+  return __hisinf(a);
+#else
+  return std::isinf(static_cast<float>(a));
+#endif
+}
+
+__CUDA_HD__
+inline bool isnan(__half a)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __hisnan(a);
+#else
+  return ::isnan(__half2float(a));
+#endif
+#else
+  return std::isnan(static_cast<float>(a));
+#endif
+}
+
+__CUDA_HD__
+inline __half log(__half a)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return hlog(a);
+#else
+  return __float2half(logf(__half2float(a)));
+#endif
+#else
+  return static_cast<__half>(::logf(static_cast<float>(a)));
+#endif
+}
+
+__CUDA_HD__
+inline __half sin(__half a)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return hsin(a);
+#else
+  return __float2half(sinf(__half2float(a)));
+#endif
+#else
+  return static_cast<__half>(::sinf(static_cast<float>(a)));
+#endif
+}
+
+__CUDA_HD__
+inline __half sqrt(__half a)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return hsqrt(a);
+#else
+  return __float2half(sqrtf(__half2float(a)));
+#endif
+#else
+  return static_cast<__half>(::sqrtf(static_cast<float>(a)));
+#endif
+}
+
+__CUDA_HD__
+inline __half pow(const __half &one, const __half &two)
+{
+#ifdef __CUDA_ARCH__
+  return (__float2half(powf(__half2float(one), __half2float(two))));
+#else
+  return (__float2half(std::pow(__half2float(one), __half2float(two))));
+#endif
+}
+
+__CUDA_HD__
+inline __half tan(const __half &one)
+{
+#ifdef __CUDA_ARCH__
+  return (__float2half(tanf(__half2float(one))));
+#else
+  return (__float2half(std::tan(__half2float(one))));
+#endif
+}
+
+__CUDA_HD__
+inline __half tanh(const __half &one)
+{
+#ifdef __CUDA_ARCH__
+  return (__float2half(tanhf(__half2float(one))));
+#else
+  return (__float2half(std::tanh(__half2float(one))));
+#endif
+}
+
+__CUDA_HD__
+inline __half acos(const __half &one)
+{
+#ifdef __CUDA_ARCH__
+  return (__float2half(acosf(__half2float(one))));
+#else
+  return (__float2half(std::acos(__half2float(one))));
+#endif
+}
+
+#else // not __CUDACC__
+
 struct __half
 {
   uint16_t __x;
@@ -421,185 +619,83 @@ inline bool operator>=(const __half &one, const __half &two)
 {
   return (float(one) >= float(two));
 }
-#endif // Not nvcc
 
-static inline __half __convert_float_to_half(float a)
+inline __half __convert_float_to_half(const float &a)
 {
   uint16_t result = __convert_float_to_halfint(a);
   return *reinterpret_cast<__half*>(&result);
 }
 
-static inline __half acos(__half a)
+inline __half floor(const __half &a)
 {
-  return static_cast<__half>(::acosf(static_cast<float>(a)));
+  return static_cast<__half>(::floor(static_cast<float>(a)));
 }
 
-
-static inline __half asin(__half a)
+inline __half ceil(const __half &a)
 {
-  return static_cast<__half>(::asinf(static_cast<float>(a)));
+  return static_cast<__half>(::ceil(static_cast<float>(a)));
 }
 
-
-static inline __half atan(__half a)
+inline __half exp(const __half &a)
 {
-  return static_cast<__half>(::atanf(static_cast<float>(a)));
+  return static_cast<__half>(::exp(static_cast<float>(a)));
 }
 
-__CUDA_HD__
-static inline __half ceil(__half a)
+inline __half acos(const __half &a)
 {
-#ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
-  return hceil(a);
-#else
-  return __float2half(ceilf(__half2float(a)));
-#endif
-#else
-  return static_cast<__half>(::ceilf(static_cast<float>(a)));
-#endif
+  return static_cast<__half>(::acos(static_cast<float>(a)));
 }
 
-
-__CUDA_HD__
-static inline __half cos(__half a)
+inline __half cos(const __half &a)
 {
-#ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
-  return hcos(a);
-#else
-  return __float2half(cosf(__half2float(a)));
-#endif
-#else
-  return static_cast<__half>(::cosf(static_cast<float>(a)));
-#endif
+  return static_cast<__half>(::cos(static_cast<float>(a)));
 }
 
-__CUDA_HD__
-static inline __half exp(__half a)
+inline __half asin(const __half &a)
 {
-#ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
-  return hexp(a);
-#else
-  return __float2half(expf(__half2float(a)));
-#endif
-#else
-  return static_cast<__half>(::expf(static_cast<float>(a)));
-#endif
+  return static_cast<__half>(::asin(static_cast<float>(a)));
 }
 
-__CUDA_HD__
-static inline __half fabs(__half a)
+inline __half sin(const __half &a)
 {
-#ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
-  return __habs(a);
-#else
-  return __float2half(fabs(__half2float(a)));
-#endif
-#else
-  return static_cast<__half>(::fabsf(static_cast<float>(a)));
-#endif
+  return static_cast<__half>(::sin(static_cast<float>(a)));
 }
 
-__CUDA_HD__
-static inline __half floor(__half a)
+inline __half atan(const __half &a)
 {
-#ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
-  return hfloor(a);
-#else
-  return __float2half(floorf(__half2float(a)));
-#endif
-#else
-  return static_cast<__half>(::floorf(static_cast<float>(a)));
-#endif
+  return static_cast<__half>(::atan(static_cast<float>(a)));
 }
 
-__CUDA_HD__
-static inline bool isinf(__half a)
+inline __half tan(const __half &a)
 {
-#ifdef __CUDA_ARCH__
-  return __hisinf(a);
-#else
-  return std::isinf(static_cast<float>(a));
-#endif
+  return static_cast<__half>(::tan(static_cast<float>(a)));
 }
 
-__CUDA_HD__
-static inline bool isnan(__half a)
+inline __half tanh(const __half &a)
 {
-#ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
-  return __hisnan(a);
-#else
-  return ::isnan(__half2float(a));
-#endif
-#else
-  return std::isnan(static_cast<float>(a));
-#endif
+  return static_cast<__half>(::tanh(static_cast<float>(a)));
 }
 
-__CUDA_HD__
-static inline __half log(__half a)
+inline __half fabs(const __half &a)
 {
-#ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
-  return hlog(a);
-#else
-  return __float2half(logf(__half2float(a)));
-#endif
-#else
-  return static_cast<__half>(::logf(static_cast<float>(a)));
-#endif
+  return static_cast<__half>(::fabs(static_cast<float>(a)));
 }
 
-
-static inline __half pow(__half x, __half exponent)
+inline __half log(const __half &a)
 {
-  return static_cast<__half>(::powf(static_cast<float>(x), static_cast<float>(exponent)));
+  return static_cast<__half>(::log(static_cast<float>(a)));
 }
 
-__CUDA_HD__
-static inline __half sin(__half a)
+inline __half pow(const __half &x, const __half &exponent)
 {
-#ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
-  return hsin(a);
-#else
-  return __float2half(sinf(__half2float(a)));
-#endif
-#else
-  return static_cast<__half>(::sinf(static_cast<float>(a)));
-#endif
+  return static_cast<__half>(::pow(static_cast<float>(x), static_cast<float>(exponent)));
 }
 
-
-static inline __half tan(__half a)
+inline __half sqrt(const __half &a)
 {
-  return static_cast<__half>(::tanf(static_cast<float>(a)));
+  return static_cast<__half>(::sqrt(static_cast<float>(a)));
 }
 
-
-static inline __half tanh(__half a)
-{
-  return static_cast<__half>(::tanhf(static_cast<float>(a)));
-}
-
-__CUDA_HD__
-static inline __half sqrt(__half a)
-{
-#ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
-  return hsqrt(a);
-#else
-  return __float2half(sqrtf(__half2float(a)));
-#endif
-#else
-  return static_cast<__half>(::sqrtf(static_cast<float>(a)));
-#endif
-}
+#endif // Not nvcc
 
 #endif // __HALF_H__
-
