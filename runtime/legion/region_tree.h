@@ -3718,6 +3718,8 @@ namespace Legion {
                                    FieldMask &open_below,
                                    bool force_close_next,
                                    std::set<RtEvent> &applied_events);
+      void record_close_no_dependences(ContextID ctx,
+                                       const LogicalUser &user);
     public:
       void migrate_logical_state(ContextID src, ContextID dst, bool merge);
       void migrate_version_state(ContextID src, ContextID dst, 
@@ -3801,6 +3803,9 @@ namespace Legion {
       static void perform_closing_checks(LogicalCloser &closer,
           typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
           const FieldMask &check_mask);
+      template<AllocationType ALLOC>
+      static void perform_nodep_checks(const LogicalUser &user,
+          const typename LegionList<LogicalUser, ALLOC>::track_aligned &users);
     public:
       inline FieldSpaceNode* get_column_source(void) const 
         { return column_source; }

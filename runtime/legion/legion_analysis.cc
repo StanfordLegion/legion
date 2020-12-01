@@ -3561,7 +3561,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalCloser::LogicalCloser(const LogicalCloser &rhs)
-      : user(rhs.user), root_node(rhs.root_node), validates(rhs.validates)
+      : ctx(rhs.ctx), user(rhs.user), root_node(rhs.root_node), 
+        validates(rhs.validates)
     //--------------------------------------------------------------------------
     {
       // should never be called
