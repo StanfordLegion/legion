@@ -397,6 +397,11 @@ namespace Legion {
       owner_shard = tpl->find_owner_shard(trace_local_id);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
+        if (runtime->legion_spy_enabled)
+        {
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
 #ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
 #endif
@@ -726,8 +731,14 @@ namespace Legion {
       // If it's empty we're done, otherwise we do the replay
       if (!internal_space.exists())
       {
-#ifdef LEGION_SPY
         // Still have to do this for legion spy
+        if (runtime->legion_spy_enabled)
+        {
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+          runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
+        }
+#ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
@@ -1376,8 +1387,10 @@ namespace Legion {
       const ShardID owner_shard = tpl->find_owner_shard(trace_local_id);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
-#ifdef LEGION_SPY
         // Still have to do this for legion spy
+        if (runtime->legion_spy_enabled && !need_prepipeline_stage)
+          log_fill_requirement();
+#ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
@@ -1582,8 +1595,10 @@ namespace Legion {
       // If it's empty we're done, otherwise we do the replay
       if (!local_space.exists())
       {
-#ifdef LEGION_SPY
         // Still have to do this for legion spy
+        if (runtime->legion_spy_enabled)
+          log_index_fill_requirement();
+#ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
@@ -1811,8 +1826,10 @@ namespace Legion {
       const ShardID owner_shard = tpl->find_owner_shard(trace_local_id);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
-#ifdef LEGION_SPY
         // Still have to do this for legion spy
+        if (runtime->legion_spy_enabled && !need_prepipeline_stage)
+          log_copy_requirements();
+#ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
@@ -2105,8 +2122,10 @@ namespace Legion {
       // If it's empty we're done, otherwise we do the replay
       if (!local_space.exists())
       {
-#ifdef LEGION_SPY
         // Still have to do this for legion spy
+        if (runtime->legion_spy_enabled && !need_prepipeline_stage)
+          log_index_copy_requirements();
+#ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
