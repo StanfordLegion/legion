@@ -762,7 +762,6 @@ namespace Legion {
       OpenState open_state;
       ReductionOpID redop;
       std::set<ProjectionSummary> projections;
-      unsigned rebuild_timeout;
       bool disjoint_shallow;
     };
 
