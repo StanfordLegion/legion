@@ -840,7 +840,7 @@ namespace Legion {
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
     public:
-      ContextID ctx;
+      const ContextID ctx;
       const LogicalUser &user;
       RegionTreeNode *const root_node;
       const bool validates;

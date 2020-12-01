@@ -3313,6 +3313,8 @@ namespace Legion {
                                    FieldMask &open_below,
                                    bool force_close_next,
                                    std::set<RtEvent> &applied_events);
+      void record_close_no_dependences(ContextID ctx,
+                                       const LogicalUser &user);
     public:
       void send_back_logical_state(ContextID ctx, UniqueID context_uid,
                                    AddressSpaceID target);
@@ -3388,6 +3390,9 @@ namespace Legion {
       static void perform_closing_checks(LogicalCloser &closer,
           typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
           const FieldMask &check_mask);
+      template<AllocationType ALLOC>
+      static void perform_nodep_checks(const LogicalUser &user,
+          const typename LegionList<LogicalUser, ALLOC>::track_aligned &users);
     public:
       inline FieldSpaceNode* get_column_source(void) const 
       { return column_source; }
