@@ -73,6 +73,9 @@
  */
 namespace Legion {
 
+    LEGION_STATIC_ASSERT((__cplusplus >= 201103L),
+        "Legion requires C++11 as the minimum version");
+
     //==========================================================================
     //                       Data Description Classes
     //==========================================================================
