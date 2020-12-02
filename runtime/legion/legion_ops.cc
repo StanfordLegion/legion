@@ -8698,19 +8698,9 @@ namespace Legion {
       const std::vector<FieldID> field_vec(1,fid);
       runtime->forest->free_field_indexes(handle, field_vec,
           Runtime::protect_event(completion_event), non_owner_shard);
-      // If we are unordered do this analysis here since we are not going
-      // to go through the normal logical dependence analysis stage
-      if (unordered)
-        parent_ctx->analyze_destroy_fields(field_space, free_fields,
-            deletion_requirements, parent_req_indexes, global_fields, 
-            local_fields, local_field_indexes, deletion_req_indexes);
       if (runtime->legion_spy_enabled)
-      {
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
-        if (unordered)
-          log_deletion_requirements();
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -8742,19 +8732,9 @@ namespace Legion {
       const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
       runtime->forest->free_field_indexes(handle, field_vec,
           Runtime::protect_event(completion_event), non_owner_shard);
-      // If we are unordered do this analysis here since we are not going
-      // to go through the normal logical dependence analysis stage
-      if (unordered)
-        parent_ctx->analyze_destroy_fields(field_space, free_fields,
-            deletion_requirements, parent_req_indexes, global_fields, 
-            local_fields, local_field_indexes, deletion_req_indexes);
       if (runtime->legion_spy_enabled)
-      {
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
-        if (unordered)
-          log_deletion_requirements();
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -8765,18 +8745,9 @@ namespace Legion {
       initialize_operation(ctx, !unordered/*track*/);
       kind = LOGICAL_REGION_DELETION;
       logical_region = handle; 
-      // If we're unordered then do this analysis here since we won't go
-      // through the normal logical dependence analysis stage
-      if (unordered)
-        parent_ctx->analyze_destroy_logical_region(logical_region,
-            deletion_requirements, parent_req_indexes, returnable_privileges);
       if (runtime->legion_spy_enabled)
-      {
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
-        if (unordered)
-          log_deletion_requirements();
-      }
     }
 
     //--------------------------------------------------------------------------
