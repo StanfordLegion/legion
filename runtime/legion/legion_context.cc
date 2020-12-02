@@ -3239,7 +3239,8 @@ namespace Legion {
               delete_now.begin(); it != delete_now.end(); it++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
-          op->initialize_logical_region_deletion(this, *it, true/*unordered*/);
+          op->initialize_logical_region_deletion(this, *it, true/*unordered*/,
+                                            true/*skip dependence analysis*/);
           op->set_execution_precondition(precondition);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
@@ -3320,7 +3321,8 @@ namespace Legion {
           FieldAllocatorImpl *allocator = 
             create_field_allocator(it->first, true/*unordered*/);
           op->initialize_field_deletions(this, it->first, it->second, 
-             true/*unordered*/, allocator, false/*non owner shard*/);
+             true/*unordered*/, allocator, false/*non owner shard*/,
+             true/*skip dependence analysis*/);
           op->set_execution_precondition(precondition);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
@@ -17922,7 +17924,8 @@ namespace Legion {
               delete_now.begin(); it != delete_now.end(); it++)
         {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
-          op->initialize_logical_region_deletion(this, *it, true/*unordered*/);
+          op->initialize_logical_region_deletion(this, *it, true/*unordered*/,
+                                            true/*skip dependence analysis*/);
           op->initialize_replication(this, ready_barrier, mapped_barrier, 
               execution_barrier, shard_manager->is_total_sharding(),
               shard_manager->is_first_local_shard(owner_shard));
@@ -17984,7 +17987,8 @@ namespace Legion {
           FieldAllocatorImpl *allocator = 
             create_field_allocator(it->first, true/*unordered*/);
           op->initialize_field_deletions(this, it->first, it->second, 
-              true/*unordered*/, allocator, (owner_shard->shard_id != 0));
+              true/*unordered*/, allocator, (owner_shard->shard_id != 0),
+              true/*skip dependence analysis*/);
           op->initialize_replication(this, ready_barrier, mapped_barrier, 
               execution_barrier, shard_manager->is_total_sharding(),
               shard_manager->is_first_local_shard(owner_shard));
