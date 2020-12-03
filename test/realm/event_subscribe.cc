@@ -18,7 +18,7 @@
 #include <realm.h>
 #include <realm/cmdline.h>
 
-#include <unistd.h>
+#include "osdep.h"
 
 using namespace Realm;
 

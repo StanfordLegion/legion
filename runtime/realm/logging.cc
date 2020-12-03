@@ -31,6 +31,11 @@
 #include <set>
 #include <map>
 
+#ifdef REALM_ON_WINDOWS
+#include <windows.h>
+#include <processthreadsapi.h>
+#endif
+
 namespace Realm {
 
   class LoggerFileStream : public LoggerOutputStream {
@@ -61,12 +66,20 @@ namespace Realm {
 	  now = 0;
 	pfxlen = snprintf(buffer, MAXLEN - 2, "[%d - %lx] %11.6f {%d}{%s}: ",
 			  Network::my_node_id,
+#ifdef REALM_ON_WINDOWS
+			  GetCurrentThreadId(),
+#else
 			  (unsigned long)pthread_self(),
+#endif
 			  now, level, name);
       } else
 	pfxlen = snprintf(buffer, MAXLEN - 2, "[%d - %lx] {%d}{%s}: ",
 			  Network::my_node_id,
+#ifdef REALM_ON_WINDOWS
+			  GetCurrentThreadId(),
+#else
 			  (unsigned long)pthread_self(),
+#endif
 			  level, name);
 
       // would simply concatenating this message overflow the buffer?

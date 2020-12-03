@@ -1009,15 +1009,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_barrier(Memoizable *memo,
-                                             ApBarrier lhs, ApEvent rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called on remote nodes
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ RemoteTraceRecorder* RemoteTraceRecorder::unpack_remote_recorder(
                         Deserializer &derez, Runtime *runtime, Memoizable *memo)
     //--------------------------------------------------------------------------
@@ -2769,8 +2760,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(void)
-      : open_state(NOT_OPEN), redop(0), rebuild_timeout(1), 
-        disjoint_shallow(false)
+      : open_state(NOT_OPEN), redop(0), disjoint_shallow(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2778,7 +2768,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
                            RegionTreeNode *child, std::set<RtEvent> &applied)
-      : redop(0), rebuild_timeout(1), disjoint_shallow(false)
+      : redop(0), disjoint_shallow(false)
     //--------------------------------------------------------------------------
     {
       if (IS_READ_ONLY(user.usage))
@@ -2802,7 +2792,7 @@ namespace Legion {
                            ProjectionFunction *proj, IndexSpaceNode *proj_space,
                            ShardingFunction *fn, IndexSpaceNode *shard_space,
                            RegionTreeNode *node, bool dirty_reduction)
-      : redop(0), rebuild_timeout(1), disjoint_shallow(false)
+      : redop(0), disjoint_shallow(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2833,7 +2823,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const FieldState &rhs)
       : open_state(rhs.open_state), redop(rhs.redop), 
-        rebuild_timeout(rhs.rebuild_timeout),
         disjoint_shallow(rhs.disjoint_shallow)
     //--------------------------------------------------------------------------
     {
@@ -2851,7 +2840,6 @@ namespace Legion {
       open_state = rhs.open_state;
       redop = rhs.redop;
       projections.swap(rhs.projections);
-      rebuild_timeout = rhs.rebuild_timeout;
       disjoint_shallow = rhs.disjoint_shallow;
     }
 
@@ -2877,7 +2865,6 @@ namespace Legion {
 #endif
       open_state = rhs.open_state;
       redop = rhs.redop;
-      rebuild_timeout = rhs.rebuild_timeout;
       disjoint_shallow = rhs.disjoint_shallow;
       return *this;
     }
@@ -2890,7 +2877,6 @@ namespace Legion {
       open_state = rhs.open_state;
       redop = rhs.redop;
       projections.swap(rhs.projections);
-      rebuild_timeout = rhs.rebuild_timeout;
       disjoint_shallow = rhs.disjoint_shallow;
       return *this;
     }
@@ -3504,7 +3490,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalCloser::LogicalCloser(const LogicalCloser &rhs)
-      : user(rhs.user), root_node(rhs.root_node), validates(rhs.validates)
+      : ctx(rhs.ctx), user(rhs.user), root_node(rhs.root_node), 
+        validates(rhs.validates)
     //--------------------------------------------------------------------------
     {
       // should never be called

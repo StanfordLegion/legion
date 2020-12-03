@@ -195,7 +195,7 @@ namespace Realm {
 
     case ENC_BITMASK:
       {
-	count += data.bitmask->set_bit(id);
+	count += unsigned(data.bitmask->set_bit(id));
 	break;
       }
     }
@@ -237,7 +237,7 @@ namespace Realm {
 	} else {
 	  // no, switch to a bitmask
 	  convert_to_bitmask();
-	  count += data.bitmask->set_range(lo, hi);
+	  count += unsigned(data.bitmask->set_range(lo, hi));
 	}
 	break;
       }
@@ -252,7 +252,7 @@ namespace Realm {
 	    } else {
 	      // partial overlap - punt to a bitmask representation
 	      convert_to_bitmask();
-	      count += data.bitmask->set_range(lo, hi);
+	      count += unsigned(data.bitmask->set_range(lo, hi));
 	    }
 	    return;
 	  }
@@ -282,13 +282,13 @@ namespace Realm {
 
 	// if not, convert to bitmask and then add
 	convert_to_bitmask();
-	count += data.bitmask->set_range(lo, hi);
+	count += unsigned(data.bitmask->set_range(lo, hi));
 	break;
       }
 
     case ENC_BITMASK:
       {
-	count += data.bitmask->set_range(lo, hi);
+	count += unsigned(data.bitmask->set_range(lo, hi));
 	break;
       }
     }

@@ -22,9 +22,55 @@
 
 #include <sys/types.h>
 #include <time.h>
-#include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+#include <unistd.h>
+#endif
+
+#ifdef REALM_ON_WINDOWS
+#include <windows.h>
+#include <io.h>
+
+static int open(const char *filename, int flags, int mode)
+{
+  int fd = -1;
+  int ret = _sopen_s(&fd, filename, flags, -SH_DENYNO, mode);
+  return (ret < 0) ? ret : fd;
+}
+
+#define close _close
+#define unlink _unlink
+
+static ssize_t pread(int fd, void *buf, size_t count, off_t offset)
+{
+  if(_lseeki64(fd, offset, SEEK_SET) < 0)
+    return -1;
+  int ret = _read(fd, buf, count);
+  return ret;
+}
+
+static ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset)
+{
+  if (_lseeki64(fd, offset, SEEK_SET) < 0)
+    return -1;
+  int ret = _write(fd, buf, count);
+  return ret;
+}
+
+static int ftruncate(int fd, off_t size)
+{
+  return _chsize_s(fd, (__int64)size);
+}
+
+static int fsync(int fd)
+{
+  // TODO: is there a way to limit to just the specified file descriptor?
+  _flushall();
+  return 0;
+}
+#endif
 
 namespace Realm {
   
@@ -42,7 +88,7 @@ namespace Realm {
 #else
       assert(ret == 0);
 #endif
-      free_blocks[0] = _size;
+      free_blocks[0] = (off_t)_size;
     }
 
     DiskMemory::~DiskMemory(void)

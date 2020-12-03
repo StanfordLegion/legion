@@ -25,7 +25,7 @@
 #include <iterator>
 
 #ifdef DEBUG_REALM
-#define DEBUG_REALM_NODESET
+//define DEBUG_REALM_NODESET
 #endif
 
 #ifdef DEBUG_REALM_NODESET

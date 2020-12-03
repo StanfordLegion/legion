@@ -785,13 +785,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::add_output_region(
-               const RegionRequirement &req, InstanceSet instances, bool global)
+    void TaskContext::add_output_region(const OutputRequirement &req,
+                                        InstanceSet instances,
+                                        bool global,
+                                        bool valid)
     //--------------------------------------------------------------------------
     {
       size_t index = output_regions.size();
-      OutputRegionImpl *impl =
-        new OutputRegionImpl(index, req, instances, this, runtime, global);
+      OutputRegionImpl *impl = new OutputRegionImpl(index,
+                                                    req,
+                                                    instances,
+                                                    this,
+                                                    runtime,
+                                                    global,
+                                                    valid);
       output_regions.push_back(OutputRegion(impl));
     }
 
@@ -10055,7 +10062,6 @@ namespace Legion {
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
       trace_recording_barrier = manager->get_trace_recording_barrier();
       summary_fence_barrier = manager->get_summary_fence_barrier();
-      replay_fence_barrier = manager->get_replay_fence_barrier();
       execution_fence_barrier = manager->get_execution_fence_barrier();
       attach_broadcast_barrier = manager->get_attach_broadcast_barrier();
       attach_reduce_barrier = manager->get_attach_reduce_barrier();
@@ -18329,17 +18335,6 @@ namespace Legion {
     {
       ApBarrier result = execution_fence_barrier;
       advance_replicate_barrier(execution_fence_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    ApBarrier ReplicateContext::get_next_replay_fence_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      const ApBarrier result = replay_fence_barrier;
-      // screw this for now, if we overflow then go to neweq where this is fixed
-      assert(result.exists()); 
-      Runtime::advance_barrier(replay_fence_barrier);
       return result;
     }
 

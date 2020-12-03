@@ -395,8 +395,20 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       owner_shard = tpl->find_owner_shard(trace_local_id);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
+      {
+        if (runtime->legion_spy_enabled)
+        {
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
+#ifdef LEGION_SPY
+        LegionSpy::log_replay_operation(unique_op_id);
+#endif
         shard_off(RtEvent::NO_RT_EVENT);
+      }
       else
         IndividualTask::replay_analysis();
     }
@@ -721,8 +733,15 @@ namespace Legion {
       // If it's empty we're done, otherwise we do the replay
       if (!internal_space.exists())
       {
-#ifdef LEGION_SPY
         // Still have to do this for legion spy
+        if (runtime->legion_spy_enabled)
+        {
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+          runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
+        }
+#ifdef LEGION_SPY
+        LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
@@ -1368,10 +1387,15 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       const ShardID owner_shard = tpl->find_owner_shard(trace_local_id);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
-#ifdef LEGION_SPY
         // Still have to do this for legion spy
+        if (runtime->legion_spy_enabled && !need_prepipeline_stage)
+          log_fill_requirement();
+#ifdef LEGION_SPY
+        LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
@@ -1575,8 +1599,11 @@ namespace Legion {
       // If it's empty we're done, otherwise we do the replay
       if (!local_space.exists())
       {
-#ifdef LEGION_SPY
         // Still have to do this for legion spy
+        if (runtime->legion_spy_enabled)
+          log_index_fill_requirement();
+#ifdef LEGION_SPY
+        LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
@@ -1801,10 +1828,15 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       const ShardID owner_shard = tpl->find_owner_shard(trace_local_id);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
-#ifdef LEGION_SPY
         // Still have to do this for legion spy
+        if (runtime->legion_spy_enabled && !need_prepipeline_stage)
+          log_copy_requirements();
+#ifdef LEGION_SPY
+        LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
@@ -2096,8 +2128,11 @@ namespace Legion {
       // If it's empty we're done, otherwise we do the replay
       if (!local_space.exists())
       {
-#ifdef LEGION_SPY
         // Still have to do this for legion spy
+        if (runtime->legion_spy_enabled && !need_prepipeline_stage)
+          log_index_copy_requirements();
+#ifdef LEGION_SPY
+        LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
@@ -4574,14 +4609,11 @@ namespace Legion {
             if (!execution_preconditions.empty())
               execution_fence_precondition = 
                   Runtime::merge_events(&trace_info, execution_preconditions);
+            if (is_recording())
+              trace_info.record_complete_replay(this, 
+                        execution_fence_precondition);
             Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/, 
                                           execution_fence_precondition);
-            if (is_recording())
-            {
-              trace_info.record_barrier(this, execution_fence_barrier, 
-                                        execution_fence_precondition);
-              trace_info.record_complete_replay(this, execution_fence_barrier);
-            }
             // We can always trigger the completion event when these are done
             request_early_complete(execution_fence_barrier);
             if (!execution_fence_barrier.has_triggered())
@@ -4604,8 +4636,16 @@ namespace Legion {
     {
       // free up these barriers since we didn't use them
       Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
-      Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/);
       FenceOp::replay_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFenceOp::complete_replay(ApEvent complete_event)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::phase_barrier_arrive(execution_fence_barrier, 
+                                    1/*count*/, complete_event);
+      FenceOp::complete_replay(execution_fence_barrier);
     }
 
     /////////////////////////////////////////////////////////////
@@ -6743,8 +6783,6 @@ namespace Legion {
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         summary_fence_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        replay_fence_barrier =
-          ApBarrier(Realm::Barrier::create_barrier(total_shards));
         execution_fence_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
         attach_broadcast_barrier = 
@@ -6817,7 +6855,6 @@ namespace Legion {
           mapping_fence_barrier.destroy_barrier();
           trace_recording_barrier.destroy_barrier();
           summary_fence_barrier.destroy_barrier();
-          replay_fence_barrier.destroy_barrier();
           execution_fence_barrier.destroy_barrier();
           attach_broadcast_barrier.destroy_barrier();
           attach_reduce_barrier.destroy_barrier();
@@ -7001,7 +7038,6 @@ namespace Legion {
           assert(mapping_fence_barrier.exists());
           assert(trace_recording_barrier.exists());
           assert(summary_fence_barrier.exists());
-          assert(replay_fence_barrier.exists());
           assert(execution_fence_barrier.exists());
           assert(attach_broadcast_barrier.exists());
           assert(attach_reduce_barrier.exists());
@@ -7020,7 +7056,6 @@ namespace Legion {
           rez.serialize(mapping_fence_barrier);
           rez.serialize(trace_recording_barrier);
           rez.serialize(summary_fence_barrier);
-          rez.serialize(replay_fence_barrier);
           rez.serialize(execution_fence_barrier);
           rez.serialize(attach_broadcast_barrier);
           rez.serialize(attach_reduce_barrier);
@@ -7076,7 +7111,6 @@ namespace Legion {
         derez.deserialize(mapping_fence_barrier);
         derez.deserialize(trace_recording_barrier);
         derez.deserialize(summary_fence_barrier);
-        derez.deserialize(replay_fence_barrier);
         derez.deserialize(execution_fence_barrier);
         derez.deserialize(attach_broadcast_barrier);
         derez.deserialize(attach_reduce_barrier);

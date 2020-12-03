@@ -6,12 +6,12 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
-#include <csignal>
 #include <cmath>
 #include <climits>
 
 #include <time.h>
-#include <unistd.h>
+
+#include "osdep.h"
 
 #include "philox.h"
 

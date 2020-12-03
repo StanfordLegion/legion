@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+#include "realm/realm_config.h"
+
+#ifdef REALM_ON_WINDOWS
+#define NOMINMAX
+#endif
+
 #include "realm/transfer/channel.h"
 #include "realm/transfer/channel_disk.h"
 #include "realm/transfer/transfer.h"
@@ -877,14 +883,6 @@ namespace Realm {
                || (kind == XFER_GPU_PEER_FB)
                || (kind == XFER_REMOTE_WRITE)
                || (kind == XFER_MEM_CPY);
-      }
-      void print_request_info(Request* req)
-      {
-        printf("request(%dD): src_off(%zd) dst_off(%zd) src_str(%zd)"
-               " dst_str(%zd) nbytes(%zu) nlines(%zu)\n",
-               req->dim + 1, (ssize_t)req->src_off, (ssize_t)req->dst_off,
-               (ssize_t)req->src_str, (ssize_t)req->dst_str,
-               req->nbytes, req->nlines);
       }
 
   size_t XferDes::update_control_info(ReadSequenceCache *rseqcache)
@@ -2443,8 +2441,8 @@ namespace Realm {
 
 	// fast path - assumes no serdez
 	bool did_work = false;
-	ReadSequenceCache rseqcache(this);
-	WriteSequenceCache wseqcache(this);
+	ReadSequenceCache rseqcache(this, 2 << 20);  // flush after 2MB
+	WriteSequenceCache wseqcache(this, 2 << 20);
 
 	while(true) {
 	  size_t min_xfer_size = 4096;  // TODO: make controllable
@@ -2487,6 +2485,10 @@ namespace Realm {
 
 		size_t bytes = 0;
 		size_t bytes_left = max_bytes - total_bytes;
+		// memcpys don't need to be particularly big to achieve
+		//  peak efficiency, so trim to something that takes
+		//  10's of us to be responsive to the time limit
+		bytes_left = std::min(bytes_left, size_t(256 << 10));
 
 		if(in_dim > 0) {
 		  if(out_dim > 0) {
@@ -2504,7 +2506,7 @@ namespace Realm {
 		      bytes = contig_bytes;
 		      memcpy_1d(out_base + out_offset,
 				in_base + in_offset,
-				contig_bytes);
+				bytes);
 		      in_alc.advance(0, bytes);
 		      out_alc.advance(0, bytes);
 		    } else {
@@ -3277,6 +3279,16 @@ namespace Realm {
 	} else
 	  dst_gpu = 0;
 
+	// if we're doing a multi-hop copy, we'll dial down the request
+	//  sizes to improve pipelining
+	bool multihop_copy = false;
+	for(size_t i = 1; i < input_ports.size(); i++)
+	  if(input_ports[i].peer_guid != XFERDES_NO_GUID)
+	    multihop_copy = true;
+	for(size_t i = 1; i < output_ports.size(); i++)
+	  if(output_ports[i].peer_guid != XFERDES_NO_GUID)
+	    multihop_copy = true;
+
 	if(src_gpu != 0) {
 	  if(dst_gpu != 0) {
 	    if(src_gpu == dst_gpu) {
@@ -3293,11 +3305,15 @@ namespace Realm {
 	  } else {
 	    kind = XFER_GPU_FROM_FB;
 	    channel = channel_manager->get_gpu_from_fb_channel(src_gpu);
+	    if(multihop_copy)
+	      max_req_size = 4 << 20;
 	  }
 	} else {
 	  if(dst_gpu != 0) {
 	    kind = XFER_GPU_TO_FB;
 	    channel = channel_manager->get_gpu_to_fb_channel(dst_gpu);
+	    if(multihop_copy)
+	      max_req_size = 4 << 20;
 	  } else {
 	    assert(0);
 	  }

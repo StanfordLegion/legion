@@ -3512,10 +3512,12 @@ namespace Legion {
                                        const RegionRequirement &r,
                                        InstanceSet is,
                                        TaskContext *ctx,
-                                       Runtime *rt, const bool global)
+                                       Runtime *rt, const bool global,
+                                       const bool valid)
       : Collectable(), runtime(rt), context(ctx),
         req(r), instance_set(is), num_elements(-1LU), index(i), 
-        created_region(req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG),
+        created_region(
+          (req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG) && !valid),
         global_indexing(global)
     //--------------------------------------------------------------------------
     {
@@ -9584,7 +9586,8 @@ namespace Legion {
             // Save the remaining messages onto the receiving
             // buffer, then handle them and reset the state.
             char *final_buffer = NULL;
-            unsigned final_messages = 0, final_index = 0, final_total = 0;
+            size_t final_index = 0;
+            unsigned final_messages = 0, final_total = 0;
             bool free_buffer = false;
             if (!ordered_channel)
             {
@@ -10787,7 +10790,7 @@ namespace Legion {
                                          const void *args, size_t arglen,
                                          char *&receiving_buffer,
                                          size_t &receiving_buffer_size,
-                                         unsigned &receiving_index,
+                                         size_t &receiving_index,
                                          unsigned &received_messages,
                                          unsigned &partial_messages)
     //--------------------------------------------------------------------------

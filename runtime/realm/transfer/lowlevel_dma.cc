@@ -23,11 +23,14 @@
 
 #include <errno.h>
 // included for file memory data transfer
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <unistd.h>
+#endif
 #ifdef REALM_USE_KERNEL_AIO
 #include <linux/aio_abi.h>
 #include <sys/syscall.h>
-#else
+#endif
+#ifdef REALM_USE_LIBAIO
 #include <aio.h>
 #endif
 
@@ -1235,7 +1238,9 @@ namespace Realm {
     {
       return completed;
     }
-#else
+#endif
+
+#ifdef REALM_USE_LIBAIO
     class PosixAIOWrite : public AsyncFileIOContext::AIOOperation {
     public:
       PosixAIOWrite(int fd, size_t offset, size_t bytes,
@@ -1395,8 +1400,11 @@ namespace Realm {
 #ifdef REALM_USE_KERNEL_AIO
       KernelAIOWrite *op = new KernelAIOWrite(aio_ctx,
 					      fd, offset, bytes, buffer, req);
-#else
+#elif defined(REALM_USE_LIBAIO)
       PosixAIOWrite *op = new PosixAIOWrite(fd, offset, bytes, buffer, req);
+#else
+      AsyncFileIOContext::AIOOperation* op = 0;
+      assert(0);
 #endif
       bool was_empty;
       {
@@ -1420,8 +1428,11 @@ namespace Realm {
 #ifdef REALM_USE_KERNEL_AIO
       KernelAIORead *op = new KernelAIORead(aio_ctx,
 					    fd, offset, bytes, buffer, req);
-#else
+#elif defined(REALM_USE_LIBAIO)
       PosixAIORead *op = new PosixAIORead(fd, offset, bytes, buffer, req);
+#else
+      AsyncFileIOContext::AIOOperation* op = 0;
+      assert(0);
 #endif
       bool was_empty;
       {

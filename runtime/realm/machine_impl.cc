@@ -23,6 +23,13 @@
 #include "realm/activemsg.h"
 #include "realm/transfer/channel.h"
 
+#ifdef REALM_ON_WINDOWS
+// TODO: clean up query cache code and renable!
+#define REALM_DISABLE_MACHINE_QUERY_CACHE
+
+static int lrand48() { return rand(); }
+#endif
+
 TYPE_IS_SERIALIZABLE(Realm::NodeAnnounceTag);
 TYPE_IS_SERIALIZABLE(Realm::Memory);
 TYPE_IS_SERIALIZABLE(Realm::Memory::Kind);

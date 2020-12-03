@@ -17,7 +17,9 @@
 
 #include "realm/codedesc.h"
 
+#ifdef REALM_USE_DLFCN
 #include <dlfcn.h>
+#endif
 
 #include "realm/logging.h"
 #include "realm/utils.h"

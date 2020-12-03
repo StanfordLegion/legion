@@ -2068,6 +2068,13 @@ extern "C" {
   legion_region_requirement_destroy(legion_region_requirement_t handle);
 
   /**
+   * @see Legion::RegionRequirement::add_flags
+   */
+  void
+  legion_region_requirement_add_flags(legion_region_requirement_t handle,
+                                      legion_region_flags_t flags);
+
+  /**
    * @see Legion::RegionRequirement::region
    */
   legion_logical_region_t

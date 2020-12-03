@@ -29,6 +29,11 @@
 #include <mach/mach.h>
 #endif
 
+#ifdef REALM_ON_WINDOWS
+#include <windows.h>
+#include <sysinfoapi.h>
+#endif
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
@@ -59,6 +64,11 @@ namespace Realm {
     clock_get_time(cclock, &ts);
     mach_port_deallocate(mach_task_self(), cclock);
     long long t = (1000000000LL * ts.tv_sec) + ts.tv_nsec;
+#endif
+#ifdef REALM_ON_WINDOWS
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    long long t = ((ft.dwHighDateTime * (1LL << 32)) + ft.dwLowDateTime) * 100;
 #endif
     if(!absolute)
       t -= zero_time;

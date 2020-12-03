@@ -15,6 +15,10 @@
 
 #include "realm_saxpy.h"
 
+#ifdef _MSC_VER
+static double drand48(void) { return rand() / (double(RAND_MAX) + 1); }
+#endif
+
 // Other experiments:
 // - Run computation out of Zero-Copy memory
 // - Use partitioning API

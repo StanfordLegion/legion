@@ -618,8 +618,9 @@ namespace Legion {
       void add_physical_region(const RegionRequirement &req, bool mapped,
           MapperID mid, MappingTagID tag, ApUserEvent unmap_event,
           bool virtual_mapped, const InstanceSet &physical_instances);
-      void add_output_region(const RegionRequirement &req, 
-                             InstanceSet instances, bool global_indexing);
+      void add_output_region(const OutputRequirement &req,
+                             InstanceSet instances,
+                             bool global_indexing, bool valid);
       void finalize_output_regions(void);
       void initialize_overhead_tracker(void);
       void unmap_all_regions(void); 
@@ -2109,7 +2110,6 @@ namespace Legion {
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
       ApBarrier get_next_execution_fence_barrier(void);
-      ApBarrier get_next_replay_fence_barrier(void);
       RtBarrier get_next_trace_recording_barrier(void);
       RtBarrier get_next_summary_fence_barrier(void);
       inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
@@ -2194,7 +2194,6 @@ namespace Legion {
       RtBarrier mapping_fence_barrier;
       RtBarrier trace_recording_barrier;
       RtBarrier summary_fence_barrier;
-      ApBarrier replay_fence_barrier;
       ApBarrier execution_fence_barrier;
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;

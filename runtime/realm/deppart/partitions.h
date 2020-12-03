@@ -107,7 +107,8 @@ namespace Realm {
     void sparsity_map_ready(SparsityMapImpl<N,T> *sparsity, bool precise);
 
     IntrusiveListLink<PartitioningMicroOp> uop_link;
-    typedef IntrusiveList<PartitioningMicroOp, &PartitioningMicroOp::uop_link, DummyLock> MicroOpList;
+    REALM_PMTA_DEFN(PartitioningMicroOp,IntrusiveListLink<PartitioningMicroOp>,uop_link);
+    typedef IntrusiveList<PartitioningMicroOp, REALM_PMTA_USE(PartitioningMicroOp,uop_link), DummyLock> MicroOpList;
 
   protected:
     PartitioningMicroOp(NodeID _requestor, AsyncMicroOp *_async_microop);
@@ -166,7 +167,8 @@ namespace Realm {
 				    long long inline_start_time);
 
     IntrusiveListLink<PartitioningOperation> op_link;
-    typedef IntrusiveList<PartitioningOperation, &PartitioningOperation::op_link, DummyLock> OpList;
+    REALM_PMTA_DEFN(PartitioningOperation,IntrusiveListLink<PartitioningOperation>,op_link);
+    typedef IntrusiveList<PartitioningOperation, REALM_PMTA_USE(PartitioningOperation,op_link), DummyLock> OpList;
 
     class DeferredLaunch : public EventWaiter {
     public:

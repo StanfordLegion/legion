@@ -140,6 +140,10 @@ namespace Realm {
 
   template <>
   REALM_INTERNAL_API_EXTERNAL_LINKAGE
+  bool convert_integer_cmdline_argument<unsigned long long>(const std::string& s, unsigned long long& target);
+
+  template <>
+  REALM_INTERNAL_API_EXTERNAL_LINKAGE
   bool convert_integer_cmdline_argument<bool>(const std::string& s, bool& target);
 
   template <typename T>
