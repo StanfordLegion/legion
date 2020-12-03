@@ -23,6 +23,8 @@
 #include <set>
 #include <cassert>
 
+#include "osdep.h"
+
 using namespace Realm;
 
 int num_nodesets = 32;

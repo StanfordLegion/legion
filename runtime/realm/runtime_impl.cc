@@ -40,8 +40,30 @@
 #include "realm/kokkos_interop.h"
 #endif
 
+#include <string.h>
+
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <unistd.h>
 #include <signal.h>
+#endif
+
+#ifdef REALM_ON_WINDOWS
+#include <processthreadsapi.h>
+#include <synchapi.h>
+
+static void sleep(int seconds)
+{
+  Sleep(seconds * 1000);
+}
+
+static char *strndup(const char *src, size_t maxlen)
+{
+  size_t actlen = strnlen(src, maxlen);
+  char *dst = (char *)malloc(actlen + 1);
+  strncpy(dst, src, actlen);
+  return dst;
+}
+#endif
 
 #include <fstream>
 
@@ -81,6 +103,7 @@ namespace Realm {
 
   static void register_error_signal_handler(void (*handler)(int))
   {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     // register our handler for the standard error signals - set SA_ONSTACK
     //  so that any thread with an alt stack uses it
     struct sigaction action;
@@ -94,10 +117,12 @@ namespace Realm {
     CHECK_LIBC( sigaction(SIGFPE, &action, 0) );
     CHECK_LIBC( sigaction(SIGBUS, &action, 0) );
     CHECK_LIBC( sigaction(SIGILL, &action, 0) );
+#endif
   }
 
   static void unregister_error_signal_handler(void)
   {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     // set standard error signals back to default handler
     struct sigaction action;
     action.sa_handler = SIG_DFL;
@@ -110,10 +135,12 @@ namespace Realm {
     CHECK_LIBC( sigaction(SIGFPE, &action, 0) );
     CHECK_LIBC( sigaction(SIGBUS, &action, 0) );
     CHECK_LIBC( sigaction(SIGILL, &action, 0) );
+#endif
   }
 
     static void realm_freeze(int signal)
     {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
       assert((signal == SIGINT) || (signal == SIGABRT) ||
              (signal == SIGSEGV) || (signal == SIGFPE) ||
              (signal == SIGBUS) || (signal == SIGILL));
@@ -133,6 +160,7 @@ namespace Realm {
       action.sa_flags = 0;
 
       CHECK_LIBC( sigaction(SIGINT, &action, 0) );
+#endif
 
       while (true)
         sleep(1);
@@ -1183,6 +1211,7 @@ namespace Realm {
 
       // debugging tool to dump realm event graphs after a fixed delay
       //  (easier than actually detecting a hang)
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
       {
 	const char *e = getenv("REALM_SHOW_EVENT_WAITERS");
 	if(e) {
@@ -1196,6 +1225,7 @@ namespace Realm {
 	  alarm(delay);
 	}
       }
+#endif
       
       bgwork.start_dedicated_workers(*core_reservations);
 
@@ -2440,9 +2470,11 @@ namespace Realm {
     /*static*/
     void RuntimeImpl::realm_backtrace(int signal)
     {
-      assert((signal == SIGILL) || (signal == SIGFPE) || 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+      assert((signal == SIGILL) || (signal == SIGFPE) ||
              (signal == SIGABRT) || (signal == SIGSEGV) ||
              (signal == SIGBUS) || (signal == SIGILL));
+#endif
 #if 0
       void *bt[256];
       int bt_size = backtrace(bt, 256);
@@ -2507,8 +2539,13 @@ namespace Realm {
 #endif
       unregister_error_signal_handler();
       std::cerr << "Signal " << signal << " received by node " << Network::my_node_id
-		<< ", process " << getpid()
+#ifdef REALM_ON_WINDOWS
+                << ", process " << GetCurrentProcessId()
+                << " (thread " << GetCurrentThreadId()
+#else
+                << ", process " << getpid()
                 << " (thread "  << std::hex << uintptr_t(pthread_self())
+#endif
                 << std::dec << ") - obtaining backtrace\n" << std::flush;
 
       Backtrace bt;
@@ -2517,8 +2554,14 @@ namespace Realm {
       fflush(stdout);
       fflush(stderr);
       std::cout << std::flush;
-      std::cerr << "Signal " << signal << " received by process " << getpid()
-                << " (thread "  << std::hex << uintptr_t(pthread_self())
+      std::cerr << "Signal " << signal
+#ifdef REALM_ON_WINDOWS
+                << " received by process " << GetCurrentProcessId()
+                << " (thread " << GetCurrentThreadId()
+#else
+                << " received by process " << getpid()
+                << " (thread " << std::hex << uintptr_t(pthread_self())
+#endif
                 << std::dec << ") at: " << bt << std::flush;
       // returning would almost certainly cause this signal to be raised again,
       //  so sleep for a second in case other threads also want to chronicle

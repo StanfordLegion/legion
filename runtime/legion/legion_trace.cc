@@ -198,14 +198,36 @@ namespace Legion {
     void LegionTrace::invalidate_trace_cache(Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      PhysicalTemplate *invalidated_template = NULL;
-      if (physical_trace != NULL)
+      if (physical_trace == NULL)
+        return;
+      PhysicalTemplate *current_template = 
+        physical_trace->get_current_template();
+      if (current_template == NULL)
+        return;
+      bool execution_fence = false;
+      if (invalidator->invalidates_physical_trace_template(execution_fence))
       {
-        invalidated_template = physical_trace->get_current_template();
-        physical_trace->clear_cached_template();
+        // Check to see if this is an execution fence or not
+        if (execution_fence)
+        {
+          // If it is an execution fence we need to record the previous
+          // templates completion event as a precondition for the fence
+#ifdef DEBUG_LEGION
+          FenceOp *fence_op = dynamic_cast<FenceOp*>(invalidator);
+          assert(fence_op != NULL);
+#else
+          FenceOp *fence_op = static_cast<FenceOp*>(invalidator);
+#endif
+          // Record that we had an intermediate execution fence between replays
+          // Update the execution event for the trace to be this fence event
+          physical_trace->record_intermediate_execution_fence(fence_op);
+        }
+        else
+        {
+          physical_trace->clear_cached_template();
+          current_template->issue_summary_operations(ctx, invalidator);
+        }
       }
-      if (invalidated_template != NULL)
-        invalidated_template->issue_summary_operations(ctx, invalidator);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1827,7 +1849,8 @@ namespace Legion {
         repl_ctx(dynamic_cast<ReplicateContext*>(lt->ctx)),
         current_template(NULL), nonreplayable_count(0), new_template_count(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
-        execution_fence_event(ApEvent::NO_AP_EVENT)
+        execution_fence_event(ApEvent::NO_AP_EVENT),
+        intermediate_execution_fence(false)
     //--------------------------------------------------------------------------
     {
       if (runtime->replay_on_cpus)
@@ -2000,6 +2023,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTrace::record_intermediate_execution_fence(FenceOp *fence)
+    //--------------------------------------------------------------------------
+    {
+      if (!intermediate_execution_fence)
+        fence->record_execution_precondition(previous_template_completion);
+      previous_template_completion = fence->get_completion_event();
+      intermediate_execution_fence = true;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTrace::initialize_template(
                                        ApEvent fence_completion, bool recurrent)
     //--------------------------------------------------------------------------
@@ -2007,7 +2040,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_template != NULL);
 #endif
-      current_template->initialize(runtime, fence_completion, recurrent);
+      // If we had an intermeidate execution fence between replays then
+      // we should no longer be considered recurrent when we replay the trace
+      current_template->initialize(runtime, fence_completion, 
+                                   recurrent && !intermediate_execution_fence);
+      // Reset this for the next replay
+      intermediate_execution_fence = false;
     }
 
     /////////////////////////////////////////////////////////////

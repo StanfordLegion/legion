@@ -40,7 +40,7 @@ void top_level_task(const Task *task,
 {
   int num_elements = 1024; 
   int num_subregions = 4;
-  int random_seed = 12345;
+
   // See if we have any command line arguments to parse
   // Note we now have a new command line parameter which specifies
   // how many subregions we should make.
@@ -52,8 +52,6 @@ void top_level_task(const Task *task,
         num_elements = atoi(command_args.argv[++i]);
       if (!strcmp(command_args.argv[i],"-b"))
         num_subregions = atoi(command_args.argv[++i]);
-      if (!strcmp(command_args.argv[i],"-seed"))
-        random_seed = atoi(command_args.argv[++i]);
     }
   }
   printf("Running daxpy for %d elements...\n", num_elements);

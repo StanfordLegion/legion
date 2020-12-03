@@ -10,7 +10,8 @@
 #include <cmath>
 
 #include <time.h>
-#include <unistd.h>
+
+#include "osdep.h"
 
 using namespace Realm;
 
@@ -57,6 +58,7 @@ namespace TestConfig {
   size_t buffer_size = 64 << 20; // should be bigger than any cache in system
   bool do_tasks = true;   // should tasks accessing memories be tested
   bool do_copies = true;  // should DMAs between memories be tested
+  int copy_reps = 0;      // if nonzero, average over #reps copies
   bool slow_mems = false;  // show slow memories be tested?
 };
 
@@ -340,44 +342,58 @@ void top_level_task(const void *args, size_t arglen,
 	dst[0].inst = inst2;
 	d.fill(dst, ProfilingRequestSet(), &fill_value, sizeof(fill_value)).wait();
 
-	// now perform two instance-to-instance copies
+	long long total_full_copy_time = 0;
+	long long total_short_copy_time = 0;
+	for(int rep = 0; rep <= TestConfig::copy_reps; rep++) {
+	  // now perform two instance-to-instance copies
 
-	// copy #1 - full copy
-	long long full_copy_time = -1;
-	UserEvent full_copy_done = UserEvent::create_user_event();
-	{
-	  CopyProfResult result;
-	  result.nanoseconds = &full_copy_time;
-	  result.done = full_copy_done;      
-	  ProfilingRequestSet prs;
-	  prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
-	    .add_measurement<ProfilingMeasurements::OperationTimeline>();
-	  d.copy(src, dst, prs).wait();
+	  // copy #1 - full copy
+	  long long full_copy_time = -1;
+	  UserEvent full_copy_done = UserEvent::create_user_event();
+	  {
+	    CopyProfResult result;
+	    result.nanoseconds = &full_copy_time;
+	    result.done = full_copy_done;
+	    ProfilingRequestSet prs;
+	    prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
+	      .add_measurement<ProfilingMeasurements::OperationTimeline>();
+	    d.copy(src, dst, prs).wait();
+	  }
+
+	  // copy #2 - single-element copy
+	  long long short_copy_time = -1;
+	  UserEvent short_copy_done = UserEvent::create_user_event();
+	  {
+	    CopyProfResult result;
+	    result.nanoseconds = &short_copy_time;
+	    result.done = short_copy_done;
+	    ProfilingRequestSet prs;
+	    prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
+	      .add_measurement<ProfilingMeasurements::OperationTimeline>();
+	    Rect<1>(0, 0).copy(src, dst, prs).wait();
+	  }
+
+	  // wait for both results
+	  full_copy_done.wait();
+	  short_copy_done.wait();
+
+	  if((rep > 0) || (TestConfig::copy_reps == 0)) {
+	    total_full_copy_time += full_copy_time;
+	    total_short_copy_time += short_copy_time;
+	  }
 	}
 
-	// copy #2 - single-element copy
-	long long short_copy_time = -1;
-	UserEvent short_copy_done = UserEvent::create_user_event();
-	{
-	  CopyProfResult result;
-	  result.nanoseconds = &short_copy_time;
-	  result.done = short_copy_done;      
-	  ProfilingRequestSet prs;
-	  prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
-	    .add_measurement<ProfilingMeasurements::OperationTimeline>();
-	  Rect<1>(0, 0).copy(src, dst, prs).wait();
+	if(TestConfig::copy_reps > 1) {
+	  total_full_copy_time /= TestConfig::copy_reps;
+	  total_short_copy_time /= TestConfig::copy_reps;
 	}
-
-	// wait for both results
-	full_copy_done.wait();
-	short_copy_done.wait();
 
 	// latency is estimated as time to perfom single copy
-	double latency = short_copy_time;
+	double latency = total_short_copy_time;
 
 	// bandwidth is estimated based on extra time taken by full copy
 	double bw = (1.0 * elements * field_sizes[0] /
-		     (full_copy_time - short_copy_time));
+		     (total_full_copy_time - total_short_copy_time));
 
 	log_app.info() << "copy " << m1 << " -> " << m2 << ": bw:" << bw << " lat:" << latency;
 
@@ -402,6 +418,7 @@ int main(int argc, char **argv)
   cp.add_option_int_units("-b", TestConfig::buffer_size, 'M')
     .add_option_int("-tasks", TestConfig::do_tasks)
     .add_option_int("-copies", TestConfig::do_copies)
+    .add_option_int("-reps", TestConfig::copy_reps)
     .add_option_int("-slowmem", TestConfig::slow_mems);
   bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
   assert(ok);

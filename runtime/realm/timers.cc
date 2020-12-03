@@ -21,7 +21,9 @@
 #include <string.h>
 #include <list>
 
+#ifdef DETAILED_TIMING
 pthread_key_t thread_timer_key;
+#endif
 
 namespace Realm {
 
@@ -115,6 +117,7 @@ namespace Realm {
       double accum_child_time;
     };
 
+#ifdef DETAILED_TIMING
     struct PerThreadTimerData {
     public:
       PerThreadTimerData(void)
@@ -137,15 +140,18 @@ namespace Realm {
       PerThreadTimerData *ptr = (PerThreadTimerData*)arg;
       delete ptr;
     }
+#endif
 
   /*static*/ void DetailedTimer::init_timers(void)
   {
+#ifdef DETAILED_TIMING
     // Create the key for the thread local data
 #ifndef NDEBUG
     int ret =
 #endif
       pthread_key_create(&thread_timer_key,thread_timer_free);
     assert(ret == 0);
+#endif
   }
 
 #ifdef DETAILED_TIMING

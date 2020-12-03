@@ -78,7 +78,9 @@ namespace Realm {
 
       // intrusive task list - used for pending, ready, and suspended tasks
       IntrusivePriorityListLink<Task> tl_link;
-      typedef IntrusivePriorityList<Task, int, &Task::tl_link, &Task::priority, DummyLock> TaskList;
+      REALM_PMTA_DEFN(Task,IntrusivePriorityListLink<Task>,tl_link);
+      REALM_PMTA_DEFN(Task,int,priority);
+      typedef IntrusivePriorityList<Task, int, REALM_PMTA_USE(Task,tl_link), REALM_PMTA_USE(Task,priority), DummyLock> TaskList;
 
       class DeferredSpawn : public EventWaiter {
       public:
@@ -171,7 +173,8 @@ namespace Realm {
       virtual void execute_on_processor(Processor p) = 0;
 
       IntrusiveListLink<InternalTask> tl_link;
-      typedef IntrusiveList<InternalTask, &InternalTask::tl_link, Mutex> TaskList;
+      REALM_PMTA_DEFN(InternalTask,IntrusiveListLink<InternalTask>,tl_link);
+      typedef IntrusiveList<InternalTask, REALM_PMTA_USE(InternalTask,tl_link), Mutex> TaskList;
     };
 
     // a task scheduler in which one or more worker threads execute tasks from one

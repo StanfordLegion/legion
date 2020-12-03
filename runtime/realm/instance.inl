@@ -127,7 +127,7 @@ namespace Realm {
     int dim_order[N];
     for (int i = 0; i < N; i++)
       dim_order[i] = i;
-    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc, dim_order);
+    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout<N,T>(space, ilc, dim_order);
     return create_instance(inst, memory, layout, reqs, wait_on);
   }
 
@@ -148,7 +148,7 @@ namespace Realm {
     int dim_order[N];
     for (int i = 0; i < N; i++)
       dim_order[i] = i;
-    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc, dim_order);
+    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout<N,T>(space, ilc, dim_order);
     return create_instance(inst, memory, layout, reqs, wait_on);
   }
 

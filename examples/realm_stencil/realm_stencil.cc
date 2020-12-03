@@ -110,6 +110,10 @@ AppConfig parse_config(int argc, char **argv)
   return config;
 }
 
+#ifdef _MSC_VER
+#define __sync_bool_compare_and_swap(ptr,old,new) _InterlockedCompareExchange64(ptr,new,old)
+#endif
+
 #define DECLARE_REDUCTION(CLASS, T, U, APPLY_OP, FOLD_OP, ID) \
   class CLASS {                                                         \
   public:                                                               \

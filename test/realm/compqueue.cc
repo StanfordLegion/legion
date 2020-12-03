@@ -20,8 +20,7 @@
 
 #include "philox.h"
 
-#include <signal.h>
-#include <unistd.h>
+#include "osdep.h"
 
 using namespace Realm;
 

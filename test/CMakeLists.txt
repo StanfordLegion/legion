@@ -20,6 +20,9 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
+# enable build warnings for all tutorials/examples/tests/etc.
+add_compile_options(${CXX_BUILD_WARNING_FLAGS})
+
 add_subdirectory(attach_file_mini)
 add_subdirectory(legion_stl)
 add_subdirectory(output_requirements)

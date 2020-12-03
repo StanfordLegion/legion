@@ -2,10 +2,10 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
-#include <csignal>
 
 #include <time.h>
-#include <unistd.h>
+
+#include "osdep.h"
 
 #include "realm.h"
 #include "realm/profiling.h"
@@ -98,7 +98,7 @@ void child_task(const void *args, size_t arglen,
 }
 
 Barrier response_counter;
-int expected_responses_remaining = 0;
+long expected_responses_remaining = 0;
 
 void response_task(const void *args, size_t arglen,
 		   const void *userdata, size_t userlen, Processor p)
@@ -267,8 +267,10 @@ void top_level_task(const void *args, size_t arglen,
   expected_responses_remaining = 9;
   response_counter = Barrier::create_barrier(expected_responses_remaining);
 
+#ifndef _MSC_VER
   // give ourselves 15 seconds for the tasks, and their profiling responses, to finish
   alarm(15);
+#endif
 
   ChildTaskArgs cargs;
   cargs.inject_fault = false;
@@ -379,7 +381,9 @@ int main(int argc, char **argv)
   rt.register_task(CHILD_TASK, child_task);
   rt.register_task(RESPONSE_TASK, response_task);
 
+#ifndef _MSC_VER
   signal(SIGALRM, sigalrm_handler);
+#endif
 
 #ifdef TRACK_MACHINE_UPDATES
   MyMachineUpdateTracker *tracker = new MyMachineUpdateTracker;

@@ -22,7 +22,8 @@
 
 #include <math.h>
 #include <time.h>
-#include <unistd.h>
+
+#include "osdep.h"
 
 using namespace Realm;
 

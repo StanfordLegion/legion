@@ -17,7 +17,6 @@
 
 #include "realm/serialize.h"
 
-#include <sys/resource.h>
 #include <string.h>
 
 #include <iostream>
@@ -27,6 +26,8 @@
 #include <map>
 #include <list>
 #include <set>
+
+#include "osdep.h"
 
 static bool verbose = false;
 static int error_count = 0;
@@ -140,14 +141,18 @@ size_t test_dynamic(const char *name, const T& input, size_t exp_size = 0)
     for(size_t i = 0; i < act_size; i++)
       std::cout << ' ' << std::setfill('0') << std::setw(2) << (int)((unsigned char *)buffer)[i];
     std::cout << std::dec << std::endl;
+#ifndef _MSC_VER
 #pragma GCC diagnostic push
 #ifdef __clang__
 #pragma GCC diagnostic ignored "-Wuninitialized"
 #else
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
+#endif
     std::cout << "Output: " << output << std::endl;
+#ifndef _MSC_VER
 #pragma GCC diagnostic pop
+#endif
     error_count++;
   }
 
@@ -228,14 +233,18 @@ void test_fixed(const char *name, const T& input, size_t exp_size)
     for(size_t i = 0; i < exp_size; i++)
       std::cout << ' ' << std::setfill('0') << std::setw(2) << (int)((unsigned char *)buffer)[i];
     std::cout << std::dec << std::endl;
+#ifndef _MSC_VER
 #pragma GCC diagnostic push
 #ifdef __clang__
 #pragma GCC diagnostic ignored "-Wuninitialized"
 #else
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
+#endif
     std::cout << "Output: " << output << std::endl;
+#ifndef _MSC_VER
 #pragma GCC diagnostic pop
+#endif
     error_count++;
   }
 
@@ -298,6 +307,7 @@ int main(int argc, const char *argv[])
 {
   parse_args(argc, argv);
 
+#ifndef _MSC_VER
   {
     // a common failure mode for the serialization logic is infinite recursion,
     //  so set very tight bounds on our stack size and run time
@@ -310,6 +320,7 @@ int main(int argc, const char *argv[])
     ret = setrlimit(RLIMIT_CPU, &rl);
     assert(ret == 0);
   }
+#endif
 
   int x = 5;
   do_test("int", x, sizeof(int));
@@ -321,7 +332,7 @@ int main(int argc, const char *argv[])
 
   do_test("pod struct", PODStruct(6.5, 7), sizeof(PODStruct));
 
-  do_test("pod packed", PODPacked(8.5, 9.1), 12 /* not sizeof(PODPacked)*/);
+  do_test("pod packed", PODPacked(8.5, 9.1f), 12 /* not sizeof(PODPacked)*/);
 
   do_test("pod packed2", PODPacked2(10.5, 'z'), 9 /* not sizeof(PODPacked2)*/);
 

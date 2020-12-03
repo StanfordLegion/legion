@@ -2,7 +2,8 @@
 #include "realm/id.h"
 
 #include <deque>
-#include <unistd.h>
+
+#include "osdep.h"
 
 using namespace Realm;
 
