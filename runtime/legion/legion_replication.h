@@ -1916,6 +1916,7 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
@@ -1923,6 +1924,7 @@ namespace Legion {
       virtual void elide_fences_post_sync(void);
     protected:
       PhysicalTemplate *current_template;
+      RtBarrier recording_fence;
       CollectiveID replayable_collective_id;
       CollectiveID replay_sync_collective_id;
       CollectiveID pre_elide_fences_collective_id;
@@ -1952,6 +1954,7 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
@@ -1960,6 +1963,7 @@ namespace Legion {
     protected:
       PhysicalTemplate *current_template;
       ApEvent template_completion;
+      RtBarrier recording_fence;
       CollectiveID replayable_collective_id;
       CollectiveID replay_sync_collective_id;
       CollectiveID pre_elide_fences_collective_id;

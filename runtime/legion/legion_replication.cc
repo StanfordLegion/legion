@@ -6471,6 +6471,7 @@ namespace Legion {
     {
       ReplTraceOp::activate();
       current_template = NULL;
+      recording_fence = RtBarrier::NO_RT_BARRIER;
       replayable_collective_id = 0;
       has_blocking_call = false;
       remove_trace_reference = false;
@@ -6508,9 +6509,6 @@ namespace Legion {
 #endif
       // Indicate that we are done capturing this trace
       local_trace->end_trace_capture();
-      // Register this fence with all previous users in the parent's context
-      ReplFenceOp::trigger_dependence_analysis();
-      parent_ctx->record_previous_trace(local_trace);
       if (local_trace->is_recording())
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
@@ -6521,7 +6519,35 @@ namespace Legion {
         physical_trace->record_previous_template_completion(
             get_completion_event());
         physical_trace->clear_cached_template();
+        // Get an additional mapping fence to ensure that all our prior
+        // operations are done mapping before anybody tries to finalize
+        // the capture which could induce races
+#ifdef DEBUG_LEGION
+        assert(!recording_fence.exists());
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        recording_fence = repl_ctx->get_next_mapping_fence_barrier();
       }
+      // Register this fence with all previous users in the parent's context
+      ReplFenceOp::trigger_dependence_analysis();
+      parent_ctx->record_previous_trace(local_trace);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCaptureOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (recording_fence.exists())
+      {
+        Runtime::phase_barrier_arrive(recording_fence, 1/*count*/);
+        enqueue_ready_operation(recording_fence);
+      }
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -6682,6 +6708,7 @@ namespace Legion {
       ReplTraceOp::activate();
       current_template = NULL;
       template_completion = ApEvent::NO_AP_EVENT;
+      recording_fence = RtBarrier::NO_RT_BARRIER;
       replayable_collective_id = 0;
       replayed = false;
       has_blocking_call = false;
@@ -6764,6 +6791,18 @@ namespace Legion {
         physical_trace->record_previous_template_completion(
             get_completion_event());
         physical_trace->clear_cached_template();
+        // Get an additional mapping fence to ensure that all our prior
+        // operations are done mapping before anybody tries to finalize
+        // the capture which could induce races
+#ifdef DEBUG_LEGION
+        assert(!recording_fence.exists());
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        recording_fence = repl_ctx->get_next_mapping_fence_barrier();
       } 
 
       // If this is a static trace, then we remove our reference when we're done
@@ -6774,6 +6813,19 @@ namespace Legion {
           delete static_trace;
       }
       ReplFenceOp::trigger_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCompleteOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (recording_fence.exists())
+      {
+        Runtime::phase_barrier_arrive(recording_fence, 1/*count*/);
+        enqueue_ready_operation(recording_fence);
+      }
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
