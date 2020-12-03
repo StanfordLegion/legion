@@ -2608,15 +2608,161 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceViewSet::transpose(LegionMap<IndexSpaceExpression*,
+    void TraceViewSet::transpose_uniquely(LegionMap<IndexSpaceExpression*,
                              FieldMaskSet<LogicalView> >::aligned &target) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(target.empty());
+#endif
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); ++vit)
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               vit->second.begin(); it != vit->second.end(); it++)
           target[it->first].insert(vit->first, it->second);
+      if (target.size() == 1)
+        return;
+      // Now for the hard part, we need to compare any expresions that overlap
+      // and have overlapping fields so we can uniquify them, this reduces the
+      // number of analyses in the precondition/anticondition cases, and is 
+      // necessary for correctness in the postcondition case where we cannot
+      // have multiple overwrites for the same fields and index expressions
+      FieldMaskSet<IndexSpaceExpression> expr_fields;
+      LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<LogicalView> >::aligned intermediate;
+      intermediate.swap(target);
+      for (LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<LogicalView> >::aligned::const_iterator it =
+            intermediate.begin(); it != intermediate.end(); it++)
+        expr_fields.insert(it->first, it->second.get_valid_mask());
+      LegionList<FieldSet<IndexSpaceExpression*> >::aligned field_exprs;
+      expr_fields.compute_field_sets(FieldMask(), field_exprs);
+      for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::const_iterator
+            eit = field_exprs.begin(); eit != field_exprs.end(); eit++)
+      {
+        if (eit->elements.size() == 1)
+        {
+          IndexSpaceExpression *expr = *(eit->elements.begin());
+          FieldMaskSet<LogicalView> &src_views = intermediate[expr];
+          FieldMaskSet<LogicalView> &dst_views = target[expr];
+          // No chance of overlapping so just move everything over
+          if (eit->set_mask != src_views.get_valid_mask())
+          {
+            // Move over the relevant expressions
+            for (FieldMaskSet<LogicalView>::const_iterator it = 
+                  src_views.begin(); it != src_views.end(); it++)
+            {
+              const FieldMask overlap = eit->set_mask & it->second;
+              if (!overlap)
+                continue;
+              dst_views.insert(it->first, overlap);
+            }
+          }
+          else if (!dst_views.empty())
+          {
+            for (FieldMaskSet<LogicalView>::const_iterator it = 
+                  src_views.begin(); it != src_views.end(); it++)
+              dst_views.insert(it->first, it->second);
+          }
+          else
+            dst_views.swap(src_views);
+          continue;
+        }
+        // Do pair-wise intersection tests for overlapping of the expressions
+        std::vector<IndexSpaceExpression*> disjoint_expressions;
+        std::vector<std::vector<IndexSpaceExpression*> > disjoint_components;
+        for (std::set<IndexSpaceExpression*>::const_iterator isit = 
+              eit->elements.begin(); isit != eit->elements.end(); isit++)
+        {
+          IndexSpaceExpression *current = *isit;
+          const size_t num_expressions = disjoint_expressions.size();
+          for (unsigned idx = 0; idx < num_expressions; idx++)
+          {
+            IndexSpaceExpression *expr = disjoint_expressions[idx];
+            // Compute the intersection
+            IndexSpaceExpression *intersection =
+              forest->intersect_index_spaces(expr, current);
+            const size_t volume = intersection->get_volume();
+            if (volume == 0)
+              continue;
+            if (volume == current->get_volume())
+            {
+              // this one dominates us, see if we need to split ourself off
+              if (volume < expr->get_volume())
+              {
+                disjoint_expressions.push_back(intersection);
+                disjoint_components.resize(disjoint_components.size() + 1);
+                std::vector<IndexSpaceExpression*> &components = 
+                  disjoint_components.back();
+                components.insert(components.end(),
+                    disjoint_components[idx].begin(), 
+                    disjoint_components[idx].end());
+                components.push_back(*isit);
+              }
+              else // Congruent so we are done
+                disjoint_components[idx].push_back(*isit);
+              current = NULL;
+              break;
+            }
+            else if (volume == expr->get_volume())
+            {
+              // We dominate the expression so add ourselves and compute diff
+              disjoint_components[idx].push_back(*isit); 
+              current = forest->subtract_index_spaces(current, intersection);
+#ifdef DEBUG_LEGION
+              assert(!current->is_empty());
+#endif
+            }
+            else
+            {
+              // Split into the three parts and keep going
+              disjoint_expressions.push_back(intersection);
+              disjoint_components.resize(disjoint_components.size() + 1);
+              std::vector<IndexSpaceExpression*> &components = 
+                disjoint_components.back();
+              components.insert(components.end(),
+                  disjoint_components[idx].begin(), 
+                  disjoint_components[idx].end());
+              components.push_back(*isit);
+              current = forest->subtract_index_spaces(current, intersection);
+#ifdef DEBUG_LEGION
+              assert(!current->is_empty());
+#endif
+            }
+            if (current != NULL)
+            {
+              disjoint_expressions.push_back(current);
+              disjoint_components.resize(disjoint_components.size() + 1);
+              disjoint_components.back().push_back(*isit);
+            }
+          }
+          // Now we have overlapping expressions and constituents for
+          // each of what used to be the old equivalence sets, so we 
+          // can now build the actual output target
+          for (unsigned idx = 0; idx < disjoint_expressions.size(); idx++)
+          {
+            FieldMaskSet<LogicalView> &dst_views = 
+              target[disjoint_expressions[idx]];
+            for (std::vector<IndexSpaceExpression*>::const_iterator sit =
+                  disjoint_components[idx].begin(); sit !=
+                  disjoint_components[idx].end(); sit++)
+            {
+#ifdef DEBUG_LEGION
+              assert(intermediate.find(*sit) != intermediate.end());
+#endif
+              const FieldMaskSet<LogicalView> &src_views = intermediate[*sit];
+              for (FieldMaskSet<LogicalView>::const_iterator it =
+                    src_views.begin(); it != src_views.end(); it++)
+              {
+                const FieldMask overlap = it->second & eit->set_mask;
+                if (!overlap)
+                  continue;
+                dst_views.insert(it->first, overlap);
+              }
+            }
+          }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2995,7 +3141,7 @@ namespace Legion {
       WrapperReferenceMutator mutator(ready);
       if (precondition_views != NULL)
       {
-        precondition_views->transpose(preconditions);
+        precondition_views->transpose_uniquely(preconditions);
         for (LegionMap<IndexSpaceExpression*,
                        FieldMaskSet<LogicalView> >::aligned::const_iterator 
               eit = preconditions.begin(); eit != preconditions.end(); eit++)
@@ -3008,7 +3154,7 @@ namespace Legion {
       }
       if (anticondition_views != NULL)
       {
-        anticondition_views->transpose(anticonditions);
+        anticondition_views->transpose_uniquely(anticonditions);
         for (LegionMap<IndexSpaceExpression*,
                        FieldMaskSet<LogicalView> >::aligned::const_iterator 
               eit = anticonditions.begin(); eit != anticonditions.end(); eit++)
@@ -3021,7 +3167,7 @@ namespace Legion {
       }
       if (postcondition_views != NULL)
       {
-        postcondition_views->transpose(postconditions);
+        postcondition_views->transpose_uniquely(postconditions);
         for (LegionMap<IndexSpaceExpression*,
                        FieldMaskSet<LogicalView> >::aligned::const_iterator 
               eit = postconditions.begin(); eit != postconditions.end(); eit++)
@@ -3032,6 +3178,19 @@ namespace Legion {
             it->first->add_base_valid_ref(TRACE_REF, &mutator);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool TraceConditionSet::is_empty(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (precondition_views != NULL)
+        return false;
+      if (anticondition_views != NULL)
+        return false;
+      if (postcondition_views != NULL)
+        return false;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -3791,9 +3950,19 @@ namespace Legion {
           wait_on.wait();
       }
       TraceViewSet::FailedPrecondition condition;
-      for (std::vector<TraceConditionSet*>::const_iterator it = 
-            conditions.begin(); it != conditions.end(); it++)
+      // Need this lock in case we invalidate empty conditions
+      AutoLock tpl_lock(template_lock);
+      for (std::vector<TraceConditionSet*>::iterator it = 
+            conditions.begin(); it != conditions.end(); /*nothing*/)
       {
+        if ((*it)->is_empty())
+        {
+          (*it)->invalidate_equivalence_sets();
+          if ((*it)->remove_reference())
+            delete (*it);
+          it = conditions.erase(it);
+          continue;
+        }
         bool not_subsumed = true;
         if (!(*it)->is_replayable(not_subsumed, &condition))
         {
@@ -3816,6 +3985,7 @@ namespace Legion {
                   false, "postcondition anti dependent");
           }
         }
+        it++;
       }
       return Replayable(true);
     }

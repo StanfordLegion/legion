@@ -560,7 +560,7 @@ namespace Legion {
                        FailedPrecondition *condition = NULL) const;
       bool independent_of(const TraceViewSet &set,
                        FailedPrecondition *condition = NULL) const;
-      void transpose(LegionMap<IndexSpaceExpression*,
+      void transpose_uniquely(LegionMap<IndexSpaceExpression*,
                             FieldMaskSet<LogicalView> >::aligned &target) const;
       void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
                          const bool expr_covers, const FieldMask &mask) const;
@@ -651,6 +651,7 @@ namespace Legion {
       void capture(EquivalenceSet *set, std::set<RtEvent> &ready_events);
       void receive_capture(TraceViewSet *pre, TraceViewSet *anti,
                            TraceViewSet *post, std::set<RtEvent> &ready);
+      bool is_empty(void) const;
       bool is_replayable(bool &not_subsumed, 
                          TraceViewSet::FailedPrecondition *failed);
       void dump_preconditions(void) const;
