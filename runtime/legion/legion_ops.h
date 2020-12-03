@@ -270,6 +270,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
       virtual Memoizable* get_memoizable(void) { return NULL; }
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { exec_fence = false; return true; }
     protected:
       // Base call
       void activate_operation(void);
@@ -801,6 +803,8 @@ namespace Legion {
       void remove_predicate_reference(void);
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     public:
       bool register_waiter(PredicateWaiter *waiter, 
                            GenerationID gen, bool &value);
@@ -1516,11 +1520,15 @@ namespace Legion {
                         bool need_future, bool track=true);
       inline void add_mapping_applied_condition(RtEvent precondition)
         { map_applied_conditions.insert(precondition); }
+      inline void record_execution_precondition(ApEvent precondition)
+        { execution_preconditions.insert(precondition); }
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { exec_fence = (fence_kind == EXECUTION_FENCE); return exec_fence; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -3595,6 +3603,8 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     protected:
       void activate_timing(void);
       void deactivate_timing(void);
@@ -3627,6 +3637,8 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     protected:
       void activate_all_reduce(void);
       void deactivate_all_reduce(void);

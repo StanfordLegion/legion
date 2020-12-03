@@ -277,6 +277,8 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { exec_fence = false; return !regions.empty(); }
     public:
       virtual void trigger_dependence_analysis(void) = 0;
       virtual void trigger_complete(void);
