@@ -486,6 +486,7 @@ namespace Legion {
       RtEvent fix_trace(PhysicalTemplate *tpl,
                         Operation *op,
                         bool has_blocking_call);
+      void record_intermediate_execution_fence(FenceOp *fence);
     public:
       const std::vector<Processor> &get_replay_targets(void)
         { return replay_targets; }
@@ -504,6 +505,8 @@ namespace Legion {
       ApEvent previous_template_completion;
       ApEvent execution_fence_event;
       std::vector<Processor> replay_targets;
+    private:
+      bool intermediate_execution_fence;
     };
 
     typedef Memoizable::TraceLocalID TraceLocalID;

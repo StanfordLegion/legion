@@ -7839,7 +7839,7 @@ namespace Legion {
                                      LegionTrace *trace, Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      if (previous_trace != NULL && previous_trace != trace)
+      if ((previous_trace != NULL) && (previous_trace != trace))
         previous_trace->invalidate_trace_cache(invalidator);
     }
 
