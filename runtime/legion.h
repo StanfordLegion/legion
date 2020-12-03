@@ -49,6 +49,10 @@
  * Legion C++ API
  */
 
+#if __cplusplus < 201103L
+#error "Legion requires C++11 as the minimum standard version"
+#endif
+
 #include "legion/legion_types.h"
 #include "legion/legion_domain.h"
 #include "legion/legion_constraint.h"
@@ -72,9 +76,6 @@
  * Namespace for all Legion runtime objects
  */
 namespace Legion {
-
-    LEGION_STATIC_ASSERT((__cplusplus >= 201103L),
-        "Legion requires C++11 as the minimum version");
 
     //==========================================================================
     //                       Data Description Classes
