@@ -813,7 +813,7 @@ namespace Realm {
 	}
 
 	// now go through all instance pairs
-	for(OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+	for(OASByInst::const_iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
 	  if(it->first.first.exists()) {
 	    RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(it->first.first);
 	    Event e = src_impl->request_metadata();
@@ -2305,30 +2305,12 @@ namespace Realm {
       log_dma.debug("request %p executing", this);
 
       DetailedTimer::ScopedPush sp(TIME_COPY);
-
-      // <NEWDMA>
-      if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>()) {
-        const InstPair &pair = oas_by_inst->begin()->first;
-        size_t total_field_size = 0;
-        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
-          for (size_t i = 0; i < it->second.size(); i++) {
-            total_field_size += it->second[i].size;
-          }
-        }
-
-        ProfilingMeasurements::OperationMemoryUsage usage;
-        usage.source = pair.first.get_location();
-        usage.target = pair.second.get_location();
-        usage.size = total_field_size * domain->volume();
-        measurements.add_measurement(usage);
-      }
-
       create_xfer_descriptors();
 
       mark_finished(true/*successful*/);
       return;
       // </NEWDMA>
-    } 
+    }
 
     void CopyRequest::mark_completed(void)
     {
@@ -2711,15 +2693,6 @@ namespace Realm {
       }
 
       //printf("kinds: " IDFMT "=%d " IDFMT "=%d\n", src_mem.id, src_mem.impl()->kind, dst_mem.id, dst_mem.impl()->kind);
-
-      if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>()) {
-        ProfilingMeasurements::OperationMemoryUsage usage;  
-        // Not precise, but close enough for now
-        usage.source = srcs[0].inst.get_location();
-        usage.target = dst.inst.get_location();
-        usage.size = total_bytes;
-        measurements.add_measurement(usage);
-      }
     }
 
     void ReduceRequest::mark_completed(void)
@@ -3182,13 +3155,6 @@ namespace Realm {
       if(rep_buffer)
 	free(rep_buffer);
       delete iter;
-
-      if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>()) {
-        ProfilingMeasurements::OperationMemoryUsage usage;
-        usage.source = Memory::NO_MEMORY;
-        usage.target = dst.inst.get_location();
-        measurements.add_measurement(usage);
-      }
     }
 
     void FillRequest::mark_completed(void)
@@ -3227,6 +3193,215 @@ namespace Realm {
       }
       return fill_size;
     }
+
+    bool CopyProfile::check_readiness(void)
+    {
+      if(state == STATE_INIT) {
+        state = STATE_BEFORE_EVENT;
+      }
+      // remember which queue we're going to be assigned to if we sleep
+      waiter.req = this;
+      if(state == STATE_BEFORE_EVENT) {
+        // has the before event triggered?  if not, wait on it
+        bool poisoned = false;
+        if(before_copy.has_triggered_faultaware(poisoned)) {
+          if(poisoned) {
+            log_dma.debug("request %p - poisoned precondition", this);
+            handle_poisoned_precondition(before_copy);
+            return true;  // not enqueued, but never going to be
+          } else {
+            log_dma.debug("request %p - before event triggered", this);
+            state = STATE_READY;
+            mark_ready();
+            mark_started();
+          }
+        } else {
+          log_dma.debug("request %p - before event not triggered", this);
+          log_dma.debug("request %p - sleeping on before event", this);
+          waiter.sleep_on_event(before_copy);
+          return false;
+        }
+      }
+      if(state == STATE_READY) {
+        if (measurements.wants_measurement<ProfilingMeasurements::OperationCopyInfo>())
+          {
+            measurements.add_measurement(cpinfo);
+          }
+        if (measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>())
+          {
+            ProfilingMeasurements::OperationMemoryUsage usage;
+            usage.source = src_mem;
+            usage.target = dst_mem;
+            usage.size = total_field_size;
+            measurements.add_measurement(usage);
+          }
+        state = STATE_QUEUED;
+      }
+      // this case we check if all the copies are done
+      if (state == STATE_QUEUED) {
+        bool poisoned = false;
+        if(end_copy.has_triggered_faultaware(poisoned)) {
+          if(poisoned) {
+            log_dma.debug("request %p - poisoned precondition", this);
+            handle_poisoned_precondition(end_copy);
+            return true;  // not enqueued, but never going to be
+          } else {
+            log_dma.debug("request %p - end copy triggered", this);
+            state = STATE_DONE;
+          }
+        } else {
+          log_dma.debug("request %p - end copy not triggered", this);
+          log_dma.debug("request %p - sleeping on end copy event", this);
+          waiter.sleep_on_event(end_copy);
+          return false;
+        }
+      }
+      if (state == STATE_DONE) {
+        // if we reach here - all the copies have finished
+        // we can record the end time
+        mark_finished(true /*successful*/);
+        return true;
+      }
+      // should never reach here
+      assert(0);
+      return false;
+    }
+
+  CopyProfile::~CopyProfile() {
+  }
+
+    // copy entry
+  void CopyProfile::add_copy_entry(const OASByInst *oas_by_inst,
+                                   const TransferDomain *domain,
+                                   bool is_src_indirect,
+                                   bool is_dst_indirect)
+  {
+    ++num_requests;
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>())
+      {
+        // scatter/gather operations
+        if (is_src_indirect || is_dst_indirect) {
+          src_mem = Memory::NO_MEMORY;
+          dst_mem = Memory::NO_MEMORY;
+        }
+        else {
+          size_t field_size = 0;
+          for (OASByInst::const_iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+            for (size_t i = 0; i < it->second.size(); i++)
+              field_size += it->second[i].size;
+            total_field_size += field_size * domain->volume();
+            if (num_requests == 1) {
+              src_mem = it->first.first.get_location();
+              dst_mem = it->first.second.get_location();
+            }
+          }
+        }
+      }
+
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationCopyInfo>())
+      {
+        if (is_src_indirect || is_dst_indirect)
+          {
+            ProfilingMeasurements::OperationCopyInfo::InstInfo entry;
+            entry.src_inst_id = RegionInstance::NO_INST;
+            entry.dst_inst_id = RegionInstance::NO_INST;
+            entry.num_fields = 1;
+            entry.request_type =
+              ProfilingMeasurements::OperationCopyInfo::COPY;
+            cpinfo.inst_info.push_back(entry);
+            return;
+          }
+        size_t total_fields = 0;
+        CustomSerdezID serdez_id = 0;
+        const InstPair &pair = oas_by_inst->begin()->first;
+        for (OASByInst::const_iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+          serdez_id = it->second[0].serdez_id;
+          for (size_t i = 0; i < it->second.size(); i++)
+            total_fields += 1;
+        }
+        ProfilingMeasurements::OperationCopyInfo::InstInfo entry;
+        entry.src_inst_id = pair.first;
+        entry.dst_inst_id = pair.second;
+        entry.num_fields = total_fields;
+        entry.request_type =
+          ProfilingMeasurements::OperationCopyInfo::COPY;
+
+        if(pair.first.exists() && pair.second.exists()) {
+          Memory src_mem = pair.first.get_location();
+          Memory dst_mem = pair.second.get_location();
+          MemPathInfo path_info;
+          bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
+                                       path_info);
+          assert(ok);
+          entry.num_hops = path_info.xd_kinds.size();
+        }
+        else
+          assert(0);
+        cpinfo.inst_info.push_back(entry);
+      }
+  }
+
+  void CopyProfile::add_reduc_entry(const CopySrcDstField &src,
+                                    const CopySrcDstField &dst,
+                                    const TransferDomain *td)
+  {
+    ++num_requests;
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>())
+      {
+        total_field_size = total_field_size +
+          dst.size * td->volume();
+        if (num_requests == 1) {
+          src_mem = src.inst.get_location();
+          dst_mem = dst.inst.get_location();
+        }
+      }
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationCopyInfo>())
+      {
+        ProfilingMeasurements::OperationCopyInfo::InstInfo entry;
+        entry.src_inst_id = src.inst;
+        entry.dst_inst_id = dst.inst;
+        entry.num_fields = 1;
+        entry.num_hops = 1;
+        entry.request_type =
+          ProfilingMeasurements::OperationCopyInfo::REDUCE;
+        if(src.inst.exists() && dst.inst.exists()) {
+          Memory src_mem = src.inst.get_location();
+          Memory dst_mem = dst.inst.get_location();
+          MemPathInfo path_info;
+          CustomSerdezID serdez_id = 0;
+          bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
+                                       path_info);
+          assert(ok);
+          entry.num_hops = path_info.xd_kinds.size();
+          cpinfo.inst_info.push_back(entry);
+        }
+      }
+  }
+
+  void CopyProfile::add_fill_entry(const CopySrcDstField &dst, const TransferDomain *domain)
+  {
+    ++num_requests;
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>())
+      {
+        total_field_size = total_field_size +
+          dst.size * domain->volume();
+        if (num_requests == 1) {
+          src_mem = Memory::NO_MEMORY;
+          dst_mem = dst.inst.get_location();
+        }
+      }
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationCopyInfo>())
+      {
+        ProfilingMeasurements::OperationCopyInfo::InstInfo entry;
+        entry.src_inst_id = RegionInstance::NO_INST;
+        entry.dst_inst_id = dst.inst;
+        entry.num_fields = 1;
+        entry.request_type =
+          ProfilingMeasurements::OperationCopyInfo::FILL;
+        entry.num_hops = 1;
+        cpinfo.inst_info.push_back(entry);
+      }
+  }
 
     // for now we use a single queue for all (local) dmas
     DmaRequestQueue *dma_queue = 0;

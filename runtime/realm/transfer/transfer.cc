@@ -1524,11 +1524,6 @@ namespace Realm {
   // class TransferPlan
   //
 
-  TransferPlan::TransferPlan(void)
-  {}
-
-  TransferPlan::~TransferPlan(void)
-  {}
 
   std::ostream& operator<<(std::ostream& os, const IndirectionInfo& ii)
   {
@@ -2700,7 +2695,32 @@ namespace Realm {
   IndirectionInfo *CopyIndirection<N,T>::Unstructured<N2,T2>::create_info(const IndexSpace<N,T>& is) const
   {
     return new IndirectionInfoTyped<N,T,N2,T2>(is, *this);
-  }  
+  }
+
+  class TransferPlan {
+  protected:
+    // subclasses constructed in plan_* calls below
+    TransferPlan(void) {}
+
+  public:
+    virtual ~TransferPlan(void) {}
+
+    static bool plan_copy(std::vector<TransferPlan *>& plans,
+			  const std::vector<CopySrcDstField> &srcs,
+			  const std::vector<CopySrcDstField> &dsts,
+			  ReductionOpID redop_id = 0, bool red_fold = false);
+
+    static bool plan_fill(std::vector<TransferPlan *>& plans,
+			  const std::vector<CopySrcDstField> &dsts,
+			  const void *fill_value, size_t fill_value_size);
+
+    virtual void execute_plan() = 0;
+
+    virtual Event create_plan(const TransferDomain *td,
+                              const ProfilingRequestSet& requests,
+                              Event wait_on, int priority) = 0;
+
+  };
 
   class TransferPlanCopy : public TransferPlan {
   public:
@@ -2709,14 +2729,17 @@ namespace Realm {
 		     IndirectionInfo *_scatter_info);
     virtual ~TransferPlanCopy(void);
 
-    virtual Event execute_plan(const TransferDomain *td,
-			       const ProfilingRequestSet& requests,
-			       Event wait_on, int priority);
+    virtual void execute_plan();
 
+    virtual Event create_plan(const TransferDomain *td,
+                              const ProfilingRequestSet& requests,
+                              Event wait_on, int priority);
   protected:
     OASByInst *oas_by_inst;
     IndirectionInfo *gather_info;
     IndirectionInfo *scatter_info;
+    Event ev;
+    CopyRequest *r;
   };
 
   TransferPlanCopy::TransferPlanCopy(OASByInst *_oas_by_inst,
@@ -2725,6 +2748,8 @@ namespace Realm {
     : oas_by_inst(_oas_by_inst)
     , gather_info(_gather_info)
     , scatter_info(_scatter_info)
+    , ev(Event::NO_EVENT)
+    , r(NULL)
   {}
 
   TransferPlanCopy::~TransferPlanCopy(void)
@@ -2733,6 +2758,58 @@ namespace Realm {
     delete gather_info;
     delete scatter_info;
   }
+
+  class TransferProfile {
+    CopyProfile *r;
+  public:
+    TransferProfile(): r(NULL) {}
+
+    void add_reduc_entry(const CopySrcDstField &src,
+                         const CopySrcDstField &dst,
+                         const TransferDomain *td)
+    {
+      assert(r != NULL);
+      r->add_reduc_entry(src,dst,td);
+    }
+
+    void add_fill_entry(const CopySrcDstField &dst, const TransferDomain *td)
+    {
+      assert(r != NULL);
+      r->add_fill_entry(dst,td);
+    }
+
+    void add_copy_entry(const OASByInst *oas_by_inst,const TransferDomain *td, bool is_src_indirect, bool is_dst_indirect)
+    {
+      assert(r != NULL);
+      r->add_copy_entry(oas_by_inst, td, is_src_indirect, is_dst_indirect);
+    }
+
+    Event create_profile(const ProfilingRequestSet &requests)
+    {
+      GenEventImpl *after_copy = GenEventImpl::create_genevent();
+      Event ev = after_copy->current_event();
+      EventImpl::gen_t after_gen = ID(ev).event_generation();
+      r = new CopyProfile(after_copy,
+                          after_gen, 0, requests);
+      get_runtime()->optable.add_local_operation(ev, r);
+      return ev;
+    }
+
+    void execute_plan() { assert(0); return; }
+    Event create_plan(const TransferDomain *td,
+                      const ProfilingRequestSet& requests,
+                      Event wait_on, int priority)
+    { assert(0); return Event::NO_EVENT; }
+    void execute(Event end_copy, Event start_copy)
+    {
+      assert(r != NULL);
+      r->set_end_copy(end_copy);
+      r->set_start_copy(start_copy);
+      r->check_readiness();
+    }
+    ~TransferProfile() {}
+  };
+
 
 #ifdef MIGRATE_COPY_REQUESTS
   static NodeID select_dma_node(Memory src_mem, Memory dst_mem,
@@ -2765,21 +2842,23 @@ namespace Realm {
   }
 #endif
 
-  Event TransferPlanCopy::execute_plan(const TransferDomain *td,
-				       const ProfilingRequestSet& requests,
-				       Event wait_on, int priority)
+    Event TransferPlanCopy::create_plan(const TransferDomain *td,
+                                        const ProfilingRequestSet& requests,
+                                        Event wait_on, int priority)
   {
     GenEventImpl *finish_event = GenEventImpl::create_genevent();
-    Event ev = finish_event->current_event();
+    ev = finish_event->current_event();
+    r = new CopyRequest(td, oas_by_inst,
+                                     gather_info, scatter_info,
+                                     wait_on,
+                                     finish_event,
+                                     ID(ev).event_generation(),
+                                     priority, requests);
+    return ev;
+  }
 
-#if 0
-    int priority = 0;
-    if (get_runtime()->get_memory_impl(src_mem)->kind == MemoryImpl::MKIND_GPUFB)
-      priority = 1;
-    else if (get_runtime()->get_memory_impl(dst_mem)->kind == MemoryImpl::MKIND_GPUFB)
-      priority = 1;
-#endif
-
+  void TransferPlanCopy::execute_plan()
+  {
 #ifdef MIGRATE_COPY_REQUESTS
     // ask which node should perform the copy
     Memory src_mem, dst_mem;
@@ -2795,18 +2874,11 @@ namespace Realm {
 #else
     NodeID dma_node = Network::my_node_id;
 #endif
-
-    CopyRequest *r = new CopyRequest(td, oas_by_inst, 
-				     gather_info, scatter_info,
-				     wait_on,
-				     finish_event, ID(ev).event_generation(),
-				     priority, requests);
     // we've given oas_by_inst and indirection info to the copyrequest, so forget it
     assert(oas_by_inst != 0);
     oas_by_inst = 0;
     gather_info = 0;
     scatter_info = 0;
-
     if(dma_node == Network::my_node_id) {
       log_dma.debug("performing copy on local node");
 
@@ -2818,8 +2890,6 @@ namespace Realm {
       // done with the local copy of the request
       r->remove_reference();
     }
-
-    return ev;
   }
 
   class TransferPlanReduce : public TransferPlan {
@@ -2828,15 +2898,19 @@ namespace Realm {
 		       const CopySrcDstField& _dst,
 		       ReductionOpID _redop_id, bool _red_fold);
 
-    virtual Event execute_plan(const TransferDomain *td,
-			       const ProfilingRequestSet& requests,
-			       Event wait_on, int priority);
+    virtual void execute_plan();
+
+    virtual Event create_plan(const TransferDomain *td,
+                              const ProfilingRequestSet& requests,
+                              Event wait_on, int priority);
 
   protected:
     CopySrcDstField src;
     CopySrcDstField dst;
     ReductionOpID redop_id;
     bool red_fold;
+    Event ev;
+    ReduceRequest *r;
   };
 
   TransferPlanReduce::TransferPlanReduce(const CopySrcDstField& _src,
@@ -2846,28 +2920,32 @@ namespace Realm {
     , dst(_dst)
     , redop_id(_redop_id)
     , red_fold(_red_fold)
+    , ev(Event::NO_EVENT)
+    , r(NULL)
   {}
 
-  Event TransferPlanReduce::execute_plan(const TransferDomain *td,
-					 const ProfilingRequestSet& requests,
-					 Event wait_on, int priority)
+  Event TransferPlanReduce::create_plan(const TransferDomain *td,
+                                        const ProfilingRequestSet& requests,
+                                        Event wait_on, int priority)
   {
-    GenEventImpl *finish_event = GenEventImpl::create_genevent();
-    Event ev = finish_event->current_event();
-
     // TODO
     bool inst_lock_needed = false;
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    ev = finish_event->current_event();
+    r = new ReduceRequest(td,
+                          std::vector<CopySrcDstField>(1, src),
+                          dst,
+                          inst_lock_needed,
+                          redop_id, red_fold,
+                          wait_on,
+                          finish_event,
+                          ID(ev).event_generation(),
+                          0 /*priority*/, requests);
+    return ev;
+  }
 
-    ReduceRequest *r = new ReduceRequest(td,
-					 std::vector<CopySrcDstField>(1, src),
-					 dst,
-					 inst_lock_needed,
-					 redop_id, red_fold,
-					 wait_on,
-					 finish_event,
-					 ID(ev).event_generation(),
-					 0 /*priority*/, requests);
-
+  void TransferPlanReduce::execute_plan()
+  {
     NodeID src_node = ID(src.inst).instance_owner_node();
     if(src_node == Network::my_node_id) {
       log_dma.debug("performing reduction on local node");
@@ -2881,7 +2959,6 @@ namespace Realm {
       // done with the local copy of the request
       r->remove_reference();
     }
-    return ev;
   }
 
   class TransferPlanFill : public TransferPlan {
@@ -2889,14 +2966,19 @@ namespace Realm {
     TransferPlanFill(const void *_data, size_t _size,
 		     RegionInstance _inst, FieldID _field_id);
 
-    virtual Event execute_plan(const TransferDomain *td,
-			       const ProfilingRequestSet& requests,
-			       Event wait_on, int priority);
+    virtual void execute_plan();
+
+    virtual Event create_plan(const TransferDomain *td,
+                              const ProfilingRequestSet& requests,
+                              Event wait_on, int priority);
+
 
   protected:
     ByteArray data;
     RegionInstance inst;
     FieldID field_id;
+    Event ev;
+    FillRequest *r;
   };
 
   TransferPlanFill::TransferPlanFill(const void *_data, size_t _size,
@@ -2904,11 +2986,13 @@ namespace Realm {
     : data(_data, _size)
     , inst(_inst)
     , field_id(_field_id)
+    , ev(Event::NO_EVENT)
+    , r(NULL)
   {}
 
-  Event TransferPlanFill::execute_plan(const TransferDomain *td,
-				       const ProfilingRequestSet& requests,
-				       Event wait_on, int priority)
+  Event TransferPlanFill::create_plan(const TransferDomain *td,
+                                     const ProfilingRequestSet& requests,
+                                     Event wait_on, int priority)
   {
     CopySrcDstField f;
     f.inst = inst;
@@ -2917,13 +3001,18 @@ namespace Realm {
     f.size = data.size();
 
     GenEventImpl *finish_event = GenEventImpl::create_genevent();
-    Event ev = finish_event->current_event();
-    FillRequest *r = new FillRequest(td, f, data.base(), data.size(),
-				     wait_on,
-				     finish_event,
-				     ID(ev).event_generation(),
-				     priority, requests);
+    ev = finish_event->current_event();
+    r = new FillRequest(td, f, data.base(), data.size(),
+                                     wait_on,
+                                     finish_event,
+                                     ID(ev).event_generation(),
+                                     priority, requests);
+    return ev;
+  }
 
+
+  void TransferPlanFill::execute_plan()
+  {
     NodeID tgt_node = ID(inst).instance_owner_node();
     if(tgt_node == Network::my_node_id) {
       get_runtime()->optable.add_local_operation(ev, r);
@@ -2935,8 +3024,6 @@ namespace Realm {
       // release local copy of operation
       r->remove_reference();
     }
-
-    return ev;
   }
 
   static void find_mergeable_fields(int idx,
@@ -2960,6 +3047,8 @@ namespace Realm {
       fields_to_merge.insert(i);
     }
   }
+
+
 			      
   template <int N, typename T>
   Event IndexSpace<N,T>::copy(const std::vector<CopySrcDstField>& srcs,
@@ -2968,6 +3057,14 @@ namespace Realm {
 			      const Realm::ProfilingRequestSet &requests,
 			      Event wait_on) const
   {
+    TransferProfile tp;
+    bool prof_requests=false;
+    Event prof_ev = Event::NO_EVENT;
+    if (!requests.empty()) {
+      prof_ev = tp.create_profile(requests);
+      prof_requests = true;
+    }
+
     TransferDomain *td = TransferDomain::construct(*this);
     std::vector<TransferPlan *> plans;
     assert(srcs.size() == dsts.size());
@@ -2999,6 +3096,8 @@ namespace Realm {
 					       dsts[i].inst,
 					       dsts[i].field_id);
 	plans.push_back(p);
+        if (prof_requests)
+          tp.add_fill_entry(dsts[i], td);
 	continue;
       }
 
@@ -3010,6 +3109,9 @@ namespace Realm {
 						 dsts[i].redop_id,
 						 dsts[i].red_fold);
 	plans.push_back(p);
+        if (prof_requests) {
+          tp.add_reduc_entry(srcs[i], dsts[i], td);
+        }
 	continue;
       }
 
@@ -3042,21 +3144,37 @@ namespace Realm {
 	}
       }
       TransferPlanCopy *p = new TransferPlanCopy(oas_by_inst,
-						 src_indirect, dst_indirect);
+					 src_indirect, dst_indirect);
       plans.push_back(p);
+      if (prof_requests) {
+        bool is_dst_indirect = dst_indirect == 0 ? false: true;
+        bool is_src_indirect = src_indirect == 0 ? false: true;
+        tp.add_copy_entry(oas_by_inst, td, is_src_indirect,
+                          is_dst_indirect);
+      }
     }
     // hack to eliminate duplicate profiling responses
     //assert(requests.empty() || (plans.size() == 1));
     ProfilingRequestSet empty_prs;
-    const ProfilingRequestSet *prsptr = &requests;
+    const ProfilingRequestSet *prsptr = &empty_prs;
     std::set<Event> finish_events;
     for(std::vector<TransferPlan *>::iterator it = plans.begin();
 	it != plans.end();
 	++it) {
-      //Event e = (*it)->execute_plan(td, requests, wait_on, 0 /*priority*/);
-      Event e = (*it)->execute_plan(td, *prsptr, wait_on, 0 /*priority*/);
-      prsptr = &empty_prs;
+      Event e = (*it)->create_plan(td, *prsptr, wait_on, 0 /*priority*/);
       finish_events.insert(e);
+    }
+    // record profiling state before copies ops begin
+    if (prof_requests)
+      {
+        tp.execute(Event::merge_events(finish_events), wait_on);
+        finish_events.insert(prof_ev);
+      }
+
+    for(std::vector<TransferPlan *>::iterator it = plans.begin();
+        it != plans.end();
+        ++it) {
+      (*it)->execute_plan();
       delete *it;
     }
     delete td;
