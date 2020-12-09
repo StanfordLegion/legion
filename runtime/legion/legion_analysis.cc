@@ -23690,7 +23690,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!node->as_region_node()->row_source->is_empty());
+      assert(!node->as_region_node()->row_source->is_empty() ||
+             (node == set->region_node));
 #endif
       AutoLock m_lock(manager_lock);
       if (equivalence_sets.insert(set, mask))
@@ -23703,9 +23704,6 @@ namespace Legion {
                                                         const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!node->as_region_node()->row_source->is_empty());
-#endif
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
       assert(mask * disjoint_complete);
@@ -23770,6 +23768,10 @@ namespace Legion {
             // Once it's valid for any field then it's valid for all of them
             if (it->second * finder->second)
               continue;
+#ifdef DEBUG_LEGION
+            assert(!node->as_region_node()->row_source->is_empty() ||
+                   (node == it->first->region_node));
+#endif
             if (equivalence_sets.insert(it->first, it->second))
               it->first->add_base_resource_ref(VERSION_MANAGER_REF);
             it->first->record_tracker(this, it->second);
