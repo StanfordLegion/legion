@@ -91,6 +91,8 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::MapperCallInfo&) = 0;
       virtual void serialize(const LegionProfInstance::RuntimeCallInfo&) = 0;
       virtual void serialize(const LegionProfInstance::GPUTaskInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::CopyInstInfo&,
+                             const LegionProfInstance::CopyInfo&) = 0;
 #ifdef LEGION_PROF_SELF_PROFILE
       virtual void serialize(const LegionProfInstance::ProfTaskInfo&) = 0;
 #endif
@@ -150,6 +152,8 @@ namespace Legion {
       void serialize(const LegionProfInstance::MapperCallInfo&);
       void serialize(const LegionProfInstance::RuntimeCallInfo&);
       void serialize(const LegionProfInstance::GPUTaskInfo&);
+      void serialize(const LegionProfInstance::CopyInstInfo&,
+                     const LegionProfInstance::CopyInfo&);
 #ifdef LEGION_PROF_SELF_PROFILE
       void serialize(const LegionProfInstance::ProfTaskInfo&);
 #endif
@@ -202,6 +206,8 @@ namespace Legion {
         PHYSICAL_INST_LAYOUT_ID,
         PHYSICAL_INST_LAYOUT_DIM_ID,
         INDEX_SPACE_SIZE_ID,
+        INDEX_INST_INFO_ID,
+        COPY_INST_INFO_ID,
 #ifdef LEGION_PROF_SELF_PROFILE
         PROFTASK_INFO_ID
 #endif
@@ -260,6 +266,8 @@ namespace Legion {
       void serialize(const LegionProfInstance::MapperCallInfo&);
       void serialize(const LegionProfInstance::RuntimeCallInfo&);
       void serialize(const LegionProfInstance::GPUTaskInfo&);
+      void serialize(const LegionProfInstance::CopyInstInfo&,
+                     const LegionProfInstance::CopyInfo&);
 #ifdef LEGION_PROF_SELF_PROFILE
       void serialize(const LegionProfInstance::ProfTaskInfo&);
 #endif

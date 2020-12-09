@@ -161,29 +161,6 @@ namespace Realm {
   {
     return Serialization::PolymorphicSerdezHelper<TransferDomain>::deserialize_new(deserializer);
   }
-
-  class TransferPlan {
-  protected:
-    // subclasses constructed in plan_* calls below
-    TransferPlan(void);
-
-  public:
-    virtual ~TransferPlan(void);
-
-    static bool plan_copy(std::vector<TransferPlan *>& plans,
-			  const std::vector<CopySrcDstField> &srcs,
-			  const std::vector<CopySrcDstField> &dsts,
-			  ReductionOpID redop_id = 0, bool red_fold = false);
-
-    static bool plan_fill(std::vector<TransferPlan *>& plans,
-			  const std::vector<CopySrcDstField> &dsts,
-			  const void *fill_value, size_t fill_value_size);
-
-    virtual Event execute_plan(const TransferDomain *td,
-			       const ProfilingRequestSet& requests,
-			       Event wait_on, int priority) = 0;
-  };
-
 }; // namespace Realm
 
 #endif // ifndef REALM_TRANSFER_H
