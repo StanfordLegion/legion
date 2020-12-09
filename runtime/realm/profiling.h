@@ -56,7 +56,7 @@ namespace Realm {
     PMID_OP_TIMELINE_GPU, // when a task was started and completed on the GPU
     PMID_OP_SUBGRAPH_INFO,  // identifying info for containing subgraph(s)
     PMID_OP_FINISH_EVENT, // finish event for an operation
-
+    PMID_OP_COPY_INFO, // copy transfer details
     // as the name suggests, this should always be last, allowing apps/runtimes
     // sitting on top of Realm to use some of the ID space
     PMID_REALM_LAST = 10000,
@@ -179,6 +179,27 @@ namespace Realm {
       Memory source;
       Memory target;
       size_t size;
+    };
+
+    // Track transfer details for copies
+    struct OperationCopyInfo {
+      static const ProfilingMeasurementID ID = PMID_OP_COPY_INFO;
+      // for each request create this
+      enum RequestType
+        {
+         FILL,
+         REDUCE,
+         COPY,
+        };
+
+      struct InstInfo {
+        RegionInstance src_inst_id;   // src instance
+        RegionInstance dst_inst_id;   // dst instance
+        unsigned num_fields; // num fields
+        RequestType request_type; // fill, reduce, copy
+        unsigned int num_hops; // num_hops for each request
+      };
+      std::vector<InstInfo> inst_info;
     };
 
     struct OperationFinishEvent {

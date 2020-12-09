@@ -3841,53 +3841,7 @@ namespace Legion {
       assert(handle.exists());
 #endif
       EquivalenceSet *root = NULL;
-      if (!symbolic && expr->is_empty())
-      {
-        // Special case for empty expression
-        {
-          const std::pair<RegionTreeID,IndexSpaceExprID> 
-            key(tree_id, expr->expr_id);
-          AutoLock tree_lock(tree_set_lock);
-          // Check to see if we already have an empty equivalence set
-          // and if not make it
-          std::map<std::pair<RegionTreeID,IndexSpaceExprID>,
-                   EquivalenceSet*>::const_iterator finder = 
-                     empty_equivalence_sets.find(key);
-          if (finder == empty_equivalence_sets.end())
-          {
-            const AddressSpaceID local_space = runtime->address_space;
-            IndexSpaceNode *node = runtime->forest->get_node(handle);
-            root = new EquivalenceSet(runtime,
-              runtime->get_available_distributed_id(),
-              local_space, local_space, expr, node, true/*register now*/); 
-            empty_equivalence_sets[key] = root;
-            root->add_base_resource_ref(CONTEXT_REF);
-          }
-          else
-            root = finder->second;
-        }
-        // Now that we have the empty equivalence set, either record it
-        // or send it back to the source node for the response
-        if (source != runtime->address_space)
-        {
-          // Not local so we need to send a message
-          RtUserEvent recorded_event = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(root->did);
-            rez.serialize(mask);
-            rez.serialize(manager);
-            rez.serialize(recorded_event);
-          }
-          runtime->send_equivalence_set_ray_trace_response(source, rez);
-          return recorded_event;
-        }
-        else
-          manager->record_equivalence_set(root, mask);
-        return RtEvent::NO_RT_EVENT;
-      }
-      else
+      if (symbolic || !expr->is_empty())
       {
         AutoLock tree_lock(tree_set_lock,1,false/*exclusive*/);
         std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder = 
@@ -3895,6 +3849,8 @@ namespace Legion {
         if (finder != tree_equivalence_sets.end())
           root = finder->second;
       }
+      else
+        return RtEvent::NO_RT_EVENT;
       if (root == NULL)
       {
         RegionNode *root_node = runtime->forest->get_tree(tree_id);

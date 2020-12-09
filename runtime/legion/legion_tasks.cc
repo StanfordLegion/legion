@@ -2724,6 +2724,7 @@ namespace Legion {
             case Realm::PMID_OP_STATUS:
             case Realm::PMID_OP_BACKTRACE:
             case Realm::PMID_OP_TIMELINE:
+            case Realm::PMID_OP_TIMELINE_GPU:
             case Realm::PMID_PCTRS_CACHE_L1I:
             case Realm::PMID_PCTRS_CACHE_L1D:
             case Realm::PMID_PCTRS_CACHE_L2:
