@@ -23998,18 +23998,12 @@ namespace Legion {
       {
         if (!disjoint_complete)
         {
-          // If we're not disjoint complete, keep going up
-          // If we're going up it is now safe to test for emptiness
-          if (!region_node->row_source->is_empty())
-            parent_traversal = mask;
+          parent_traversal = mask;
           return;
         }
         parent_traversal = mask - disjoint_complete;
         if (!!parent_traversal)
         {
-          // If we're going up, it's now safe to test for emptiness
-          if (region_node->row_source->is_empty())
-            return;
           mask -= parent_traversal;
           if (!mask)
             return;

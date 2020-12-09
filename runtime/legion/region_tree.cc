@@ -10200,8 +10200,6 @@ namespace Legion {
       assert(is_complete());
       assert(colors.empty());
 #endif 
-      if (expr->is_empty())
-        return;
       // Check to see if we have this in the cache
       {
         AutoLock n_lock(node_lock);
@@ -10233,6 +10231,9 @@ namespace Legion {
       LegionColor below_color = 0;
       if (!expr->is_below_in_tree(this, below_color))
       {
+        // We can only test this here after we've ruled out the symbolic check
+        if (expr->is_empty())
+          return;
         if (!find_interfering_children_kd(expr, colors))
         {
           if (total_children == max_linearized_color)
