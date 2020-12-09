@@ -18921,9 +18921,9 @@ namespace Legion {
       FieldMask parent_traversal;
       FieldMaskSet<PartitionNode> children_traversal;
       std::set<RtEvent> deferral_events;
-      manager.compute_equivalence_sets(ctx, target, target_space, mask, context,
-               opid, source, ready_events, children_traversal, parent_traversal,
-               deferral_events, downward_only);
+      manager.compute_equivalence_sets(ctx, expr, target, target_space, mask, 
+                context, opid, source, ready_events, children_traversal, 
+                parent_traversal, deferral_events, downward_only);
       if (!deferral_events.empty())
       {
 #ifdef DEBUG_LEGION

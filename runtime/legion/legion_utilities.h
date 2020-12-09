@@ -2707,6 +2707,7 @@ namespace Legion {
             result->second -= mask;
             // Don't filter valid fields since its unsound
           }
+
         inline void clear(void)
           {
             result->second.clear();

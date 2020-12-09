@@ -23703,6 +23703,9 @@ namespace Legion {
                                                         const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!node->as_region_node()->row_source->is_empty());
+#endif
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
       assert(mask * disjoint_complete);
@@ -23767,9 +23770,6 @@ namespace Legion {
             // Once it's valid for any field then it's valid for all of them
             if (it->second * finder->second)
               continue;
-#ifdef DEBUG_LEGION
-            assert(!node->as_region_node()->row_source->is_empty());
-#endif
             if (equivalence_sets.insert(it->first, it->second))
               it->first->add_base_resource_ref(VERSION_MANAGER_REF);
             it->first->record_tracker(this, it->second);
@@ -23894,6 +23894,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::compute_equivalence_sets(const ContextID ctx,
+                                          IndexSpaceExpression *expr,
                                           EqSetTracker *target,
                                           const AddressSpaceID target_space,
                                           FieldMask mask, InnerContext *context,
@@ -24032,6 +24033,10 @@ namespace Legion {
           }
         }
       }
+      // At this point we're done with the symbolic analysis so we
+      // can actually test the expression for emptiness
+      if ((expr != node->as_region_node()->row_source) && expr->is_empty())
+        return;
       // If we make it here then we should have equivalence sets for
       // all these remaining fields
 #ifdef DEBUG_LEGION
@@ -24267,24 +24272,54 @@ namespace Legion {
           !(mask * equivalence_sets.get_valid_mask()))
       {
         std::vector<EquivalenceSet*> to_delete;
-        for (FieldMaskSet<EquivalenceSet>::iterator it = 
-              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+#ifdef DEBUG_LEGION
+        assert(node->is_region());
+#endif
+        // Handle the nasty case where there is just one equivalence set
+        // and the index space is empty so the summary valid mask is aliased
+        if ((equivalence_sets.size() == 1) &&
+            node->as_region_node()->row_source->is_empty())
         {
-          // Skip any nodes that are not even part of a refinement 
-          if (it->first->region_node != node)
-            continue;
-          const FieldMask overlap = it->second & mask;
-          if (!overlap)
-            continue;
-          to_untrack.insert(it->first, overlap);
-          it.filter(overlap);
-          // Add a version manager reference to flow back
-          it->first->add_base_resource_ref(VERSION_MANAGER_REF);
-          if (!it->second)
+          FieldMaskSet<EquivalenceSet>::iterator finder =
+            equivalence_sets.begin();
+          const FieldMask overlap = finder->second & mask;
+          if (!!overlap)
           {
-            to_delete.push_back(it->first);
-            // Record this to be released once all the effects are applied
-            to_release.push_back(it->first);
+            finder.filter(overlap);
+            to_untrack.insert(finder->first, overlap);
+            // Add a version manager reference to flow back
+            finder->first->add_base_resource_ref(VERSION_MANAGER_REF);
+            // Remove this if the only remaining fields are not refinements
+            if (!finder->second || (finder->second * disjoint_complete))
+            {
+              to_delete.push_back(finder->first);
+              // Record this to be released once all the effects are applied
+              to_release.push_back(finder->first);
+            }
+          }
+        }
+        else
+        {
+          // This is the common case
+          for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          {
+            // Skip any nodes that are not even part of a refinement 
+            if (it->first->region_node != node)
+              continue;
+            const FieldMask overlap = it->second & mask;
+            if (!overlap)
+              continue;
+            to_untrack.insert(it->first, overlap);
+            it.filter(overlap);
+            // Add a version manager reference to flow back
+            it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+            if (!it->second)
+            {
+              to_delete.push_back(it->first);
+              // Record this to be released once all the effects are applied
+              to_release.push_back(it->first);
+            }
           }
         }
         if (!to_delete.empty())

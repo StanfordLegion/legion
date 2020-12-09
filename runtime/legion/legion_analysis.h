@@ -3345,6 +3345,7 @@ namespace Legion {
       void initialize_versioning_analysis(EquivalenceSet *set,
               const FieldMask &mask, std::set<RtEvent> &applied_events);
       void compute_equivalence_sets(const ContextID ctx,
+                                    IndexSpaceExpression *expr,
                                     EqSetTracker *target, 
                                     const AddressSpaceID target_space,
                                     FieldMask mask, InnerContext *context,
