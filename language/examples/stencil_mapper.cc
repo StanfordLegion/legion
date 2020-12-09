@@ -161,6 +161,22 @@ void StencilMapper::map_task(const MapperContext      ctx,
       if ((req.privilege == NO_ACCESS) || (req.privilege_fields.empty()))
         continue;
 
+      if (input.valid_instances[idx].empty()) {
+        // happens when the region is empty
+        output.chosen_instances[idx].resize(1);
+        const LayoutConstraintSet empty_constraints;
+        const std::vector<LogicalRegion> empty_regions(1, req.region);
+        bool created = false;
+        bool ok = runtime->find_or_create_physical_instance(ctx, 
+            default_policy_select_target_memory(ctx, task.target_proc, req),
+            empty_constraints, empty_regions, output.chosen_instances[idx].back(), 
+            created, true/*acquire*/);
+        if (!ok) {
+          log_stencil.error("failed to find or create empty instance");
+          assert(false);
+        }
+        continue;
+      }
       assert(input.valid_instances[idx].size() == 1);
       output.chosen_instances[idx] = input.valid_instances[idx];
       bool ok = runtime->acquire_and_filter_instances(ctx, output.chosen_instances);
