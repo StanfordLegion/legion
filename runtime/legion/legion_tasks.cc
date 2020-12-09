@@ -2244,8 +2244,7 @@ namespace Legion {
         if (version_info.has_version_info())
           continue;
         runtime->forest->perform_versioning_analysis(this, idx,
-              logical_regions[idx], version_info, ready_events,
-              logical_regions.is_output_created(idx));
+              logical_regions[idx], version_info, ready_events);
       }
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
@@ -4665,10 +4664,9 @@ namespace Legion {
 #endif
       // This is the normal equivalence set creation pathway for single tasks
       RegionNode *node = runtime->forest->get_node(regions[idx].region);
-      EquivalenceSet *result = node->row_source->is_empty() ?
-        node->find_or_create_empty_equivalence_set() :
-        new EquivalenceSet(runtime, runtime->get_available_distributed_id(), 
-            runtime->address_space, runtime->address_space, node, 
+      EquivalenceSet *result =
+        new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
+            runtime->address_space, runtime->address_space, node,
             true/*register now*/);
       // Add a context ref that will be removed after this is registered
       result->add_base_valid_ref(CONTEXT_REF);

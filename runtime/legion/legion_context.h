@@ -942,11 +942,11 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask, const UniqueID opid, 
-                      const AddressSpaceID original_source,const bool symbolic);
+                      const AddressSpaceID original_source);
       void record_pending_disjoint_complete_set(PendingEquivalenceSet *set);
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
           VersionManager *target, FieldMask mask, const UniqueID opid,
-          const AddressSpaceID source, RtUserEvent ready_event, bool symbolic);
+          const AddressSpaceID source, RtUserEvent ready_event);
       void invalidate_disjoint_complete_sets(RegionNode *region,
                                              const FieldMask &mask);
       virtual void deduplicate_invalidate_trackers(
@@ -1545,7 +1545,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask, const UniqueID opid, 
-                      const AddressSpaceID original_source,const bool symbolic);
+                      const AddressSpaceID original_source);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<RegionRequirement>       dummy_output_requirements;
@@ -1624,12 +1624,11 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_DISJOINT_COMPLETE_TASK_ID;
       public:
         DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *target,
-          FieldMaskSet<EquivalenceSet> &sets, RtUserEvent done_event, bool sym);
+                    FieldMaskSet<EquivalenceSet> &sets, RtUserEvent done_event);
       public:
         VersionManager *const target;
         FieldMaskSet<EquivalenceSet> *const sets;
         const RtUserEvent done_event;
-        const bool symbolic;
       };
     public:
       enum ReplicateAPICall {
@@ -2150,7 +2149,7 @@ namespace Legion {
                                                     Runtime *runtime);
       static void handle_defer_disjoint_complete_response(const void *args);
       static void finalize_disjoint_complete_response(VersionManager *target,
-                                  RtUserEvent done_event, const bool symbolic,
+                                  RtUserEvent done_event,
                                   const FieldMaskSet<EquivalenceSet> &sets);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
@@ -2197,7 +2196,7 @@ namespace Legion {
       bool replicate_partition_equivalence_sets(PartitionNode *node) const;
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
           VersionManager *target, FieldMask mask, const UniqueID opid,
-          const AddressSpaceID source, RtUserEvent ready_event, bool symbolic);
+          const AddressSpaceID source, RtUserEvent ready_event);
       virtual void deduplicate_invalidate_trackers(
                     const FieldMaskSet<EquivalenceSet> &to_untrack,
                     std::set<RtEvent> &applied_events);
@@ -2482,7 +2481,7 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask, const UniqueID opid, 
-                      const AddressSpaceID original_source,const bool symbolic);
+                      const AddressSpaceID original_source);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);

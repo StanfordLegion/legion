@@ -9484,7 +9484,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MergeCloseOp::record_refinements(const FieldMask &refinements, 
-                                      const bool overwrite, const bool symbolic)
+                                          const bool overwrite)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9495,7 +9495,6 @@ namespace Legion {
 #endif
       refinement_mask = refinements;
       refinement_overwrite = overwrite;
-      refinement_symbolic = symbolic;
     }
 
     //--------------------------------------------------------------------------
@@ -9511,7 +9510,6 @@ namespace Legion {
     {
       activate_close();
       refinement_overwrite = false;
-      refinement_symbolic = false;
     }
 
     //--------------------------------------------------------------------------
@@ -9600,33 +9598,30 @@ namespace Legion {
         std::set<RtEvent> map_applied_conditions;
         const ContextID ctx = parent_ctx->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region);
-        if (refinement_symbolic || !region_node->row_source->is_empty())
+        // Make a new equivalence set and record it at this node
+        const AddressSpaceID local_space = runtime->address_space;
+        EquivalenceSet *set = new EquivalenceSet(runtime,
+            runtime->get_available_distributed_id(),
+            local_space, local_space, region_node, true/*register now*/);
+        // Merge the state from the old equivalence sets if not overwriting
+        if (!refinement_overwrite)
         {
-          // Make a new equivalence set and record it at this node
-          const AddressSpaceID local_space = runtime->address_space;
-          EquivalenceSet *set = new EquivalenceSet(runtime,
-              runtime->get_available_distributed_id(),
-              local_space, local_space, region_node, true/*register now*/);
-          // Merge the state from the old equivalence sets if not overwriting
-          if (!refinement_overwrite)
-          {
-            const FieldMaskSet<EquivalenceSet> &previous_sets = 
-              version_info.get_equivalence_sets();
-            // Note that we'll explicitly get back any of these previous sets
-            // that are going to be released from the call to invalidate the
-            // refinement. We'll hold on to their references until we get to
-            // the complete stage to make sure they are not collected before
-            // the clone operation is finished.
-            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                  previous_sets.begin(); it != previous_sets.end(); it++)
-              set->clone_from(runtime->address_space, it->first, 
-                  it->second, false/*forward*/, map_applied_conditions);
-          }
-          region_node->invalidate_refinement(ctx, refinement_mask, 
-              false/*self*/, map_applied_conditions, to_release, parent_ctx);
-          region_node->record_refinement(ctx, set, refinement_mask,
-                                refinement_symbolic, map_applied_conditions);
+          const FieldMaskSet<EquivalenceSet> &previous_sets = 
+            version_info.get_equivalence_sets();
+          // Note that we'll explicitly get back any of these previous sets
+          // that are going to be released from the call to invalidate the
+          // refinement. We'll hold on to their references until we get to
+          // the complete stage to make sure they are not collected before
+          // the clone operation is finished.
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                previous_sets.begin(); it != previous_sets.end(); it++)
+            set->clone_from(runtime->address_space, it->first, 
+                it->second, false/*forward*/, map_applied_conditions);
         }
+        region_node->invalidate_refinement(ctx, refinement_mask, 
+            false/*self*/, map_applied_conditions, to_release, parent_ctx);
+        region_node->record_refinement(ctx, set, refinement_mask,
+                                       map_applied_conditions);
         if (!map_applied_conditions.empty())
           complete_mapping(Runtime::merge_events(map_applied_conditions));
         else
@@ -10285,7 +10280,6 @@ namespace Legion {
     {
       activate_internal();
       to_refine = NULL;
-      symbolic_refinement = false;
     }
 
     //--------------------------------------------------------------------------
@@ -10339,8 +10333,6 @@ namespace Legion {
 #endif
       initialize_internal(creator, index, trace_info);
       to_refine = root;
-      symbolic_refinement = 
-        (trace_info.req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG);
       MustEpochOp *must = creator->get_must_epoch_op();
       if (must != NULL)
         set_must_epoch(must, false/*do registration*/);
@@ -10437,8 +10429,6 @@ namespace Legion {
         // register them with the context so it can find them later
         IndexPartNode *index_part = it->first->row_source;
         std::vector<RegionNode*> &children = refinement_regions[it->first];
-        if (!symbolic_refinement && it->first->parent->row_source->is_empty())
-          continue;
         children.reserve(index_part->total_children);
         // Iterate over each child and make an equivalence set  
         if (index_part->total_children == index_part->max_linearized_color)
@@ -10447,12 +10437,8 @@ namespace Legion {
                 color < index_part->total_children; color++)
           {
             RegionNode *child = it->first->get_child(color);
-            // Skip empty regions since those are handled separately with 
-            // their own explicit empty equivalence sets
-            if (!symbolic_refinement && child->row_source->is_empty())
-              continue;
             PendingEquivalenceSet *pending = 
-              new PendingEquivalenceSet(child, it->second, symbolic_refinement);
+              new PendingEquivalenceSet(child, it->second);
             initialize_pending(pending, it->second, map_applied_conditions);
             // Parent context takes ownership here
             parent_ctx->record_pending_disjoint_complete_set(pending);
@@ -10467,12 +10453,8 @@ namespace Legion {
           {
             const LegionColor color = itr->yield_color();
             RegionNode *child = it->first->get_child(color);
-            // Skip empty regions since those are handled separately with 
-            // their own explicit empty equivalence sets
-            if (!symbolic_refinement && child->row_source->is_empty())
-              continue;
             PendingEquivalenceSet *pending = 
-              new PendingEquivalenceSet(child, it->second, symbolic_refinement);
+              new PendingEquivalenceSet(child, it->second);
             initialize_pending(pending, it->second, map_applied_conditions);
             // Parent context takes ownership here
             parent_ctx->record_pending_disjoint_complete_set(pending);
@@ -10503,7 +10485,7 @@ namespace Legion {
           continue;
         // Propagate this refinement up from the partition
         it->first->propagate_refinement(ctx, children, it->second, 
-                      symbolic_refinement, map_applied_conditions);
+                                        map_applied_conditions);
       }
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));

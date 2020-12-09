@@ -1177,24 +1177,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplMergeCloseOp::record_refinements(const FieldMask &refinement_mask,
-                                      const bool overwrite, const bool symbolic)
+                                              const bool overwrite)
     //--------------------------------------------------------------------------
     {
       // Call the base version of this
-      MergeCloseOp::record_refinements(refinement_mask, overwrite, symbolic);
-      // Now see if we need to get a barrier for a refinement invalidation
-      RegionNode *region_node = runtime->forest->get_node(requirement.region);
-      if (symbolic || !region_node->row_source->is_empty())
-      {
+      MergeCloseOp::record_refinements(refinement_mask, overwrite);
+      // Get a barrier for a refinement invalidation
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        refinement_barrier = repl_ctx->get_next_refinement_barrier();
-      }
+      refinement_barrier = repl_ctx->get_next_refinement_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -1292,38 +1288,35 @@ namespace Legion {
         std::set<RtEvent> map_applied_conditions;
         const ContextID ctx = parent_ctx->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region); 
-        if (refinement_symbolic || !region_node->row_source->is_empty())
-        {
 #ifdef DEBUG_LEGION
-          assert(refinement_barrier.exists());
+        assert(refinement_barrier.exists());
 #endif
-          // Make a new equivalence set and record it at this node
-          bool first = false;
-          const DistributedID did = did_collective->get_value(false/*block*/);
-          EquivalenceSet *set = 
-            repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                      region_node, refinement_mask, did, first);
-          // Merge the state from the old equivalence sets if not overwriting
-          if (first && !refinement_overwrite)
-          {
-            const FieldMaskSet<EquivalenceSet> &previous_sets = 
-              version_info.get_equivalence_sets();
-            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                  previous_sets.begin(); it != previous_sets.end(); it++)
-              set->clone_from(runtime->address_space, it->first, it->second,
-                          false/*forward to owner*/, map_applied_conditions, 
-                          false/*invalidate overlap*/);
-          }
-          // Invalidate the old refinement
-          region_node->invalidate_refinement(ctx, refinement_mask,
-              false/*self*/, map_applied_conditions, to_release, repl_ctx);
-          // Register this refinement in the tree 
-          region_node->record_refinement(ctx, set, refinement_mask, 
-                              refinement_symbolic, map_applied_conditions);
-          // Remove the CONTEXT_REF on the set now that it is registered
-          if (set->remove_base_valid_ref(CONTEXT_REF))
-            assert(false); // should never actually hit this
+        // Make a new equivalence set and record it at this node
+        bool first = false;
+        const DistributedID did = did_collective->get_value(false/*block*/);
+        EquivalenceSet *set = 
+          repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
+                                    region_node, refinement_mask, did, first);
+        // Merge the state from the old equivalence sets if not overwriting
+        if (first && !refinement_overwrite)
+        {
+          const FieldMaskSet<EquivalenceSet> &previous_sets = 
+            version_info.get_equivalence_sets();
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                previous_sets.begin(); it != previous_sets.end(); it++)
+            set->clone_from(runtime->address_space, it->first, it->second,
+                        false/*forward to owner*/, map_applied_conditions, 
+                        false/*invalidate overlap*/);
         }
+        // Invalidate the old refinement
+        region_node->invalidate_refinement(ctx, refinement_mask,
+            false/*self*/, map_applied_conditions, to_release, repl_ctx);
+        // Register this refinement in the tree 
+        region_node->record_refinement(ctx, set, refinement_mask, 
+                                       map_applied_conditions);
+        // Remove the CONTEXT_REF on the set now that it is registered
+        if (set->remove_base_valid_ref(CONTEXT_REF))
+          assert(false); // should never actually hit this
         if (!map_applied_conditions.empty())
           Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
               Runtime::merge_events(map_applied_conditions));
@@ -1490,10 +1483,6 @@ namespace Legion {
                   color += repl_ctx->total_shards)
             {
               RegionNode *child = it->first->get_child(color);
-              // Skip empty regions since those are handled separately with 
-              // their own explicit empty equivalence sets
-              if (!symbolic_refinement && child->row_source->is_empty())
-                continue;
               VersionInfo &info = sharded_region_version_infos[child];
               info.relax_valid_mask(it->second);
               if (!!version_mask)
@@ -1516,17 +1505,12 @@ namespace Legion {
             while (itr->is_valid())
             {
               RegionNode *child = it->first->get_child(itr->yield_color());
-              // Skip empty regions since those are handled separately with 
-              // their own explicit empty equivalence sets
-              if (symbolic_refinement || !child->row_source->is_empty())
-              {
-                VersionInfo &info = sharded_region_version_infos[child];
-                info.relax_valid_mask(it->second);
-                if (!!version_mask)
-                  child->perform_versioning_analysis(ctx, parent_ctx, &info,
-                        version_mask, unique_op_id, local_space, ready_events);
-                children.push_back(child);
-              }
+              VersionInfo &info = sharded_region_version_infos[child];
+              info.relax_valid_mask(it->second);
+              if (!!version_mask)
+                child->perform_versioning_analysis(ctx, parent_ctx, &info,
+                      version_mask, unique_op_id, local_space, ready_events);
+              children.push_back(child);
               // Skip ahead to the next color
               for (unsigned idx = 0; idx < (repl_ctx->total_shards-1); idx++)
               {
@@ -1600,8 +1584,7 @@ namespace Legion {
               sharded_region_version_infos.end(); it++)
         {
           PendingEquivalenceSet *pending = 
-            new PendingEquivalenceSet(it->first, 
-                it->second.get_valid_mask(), symbolic_refinement);
+            new PendingEquivalenceSet(it->first, it->second.get_valid_mask());
           pending->record_all(it->second, references_added);
           // Context takes ownership at this point
           parent_ctx->record_pending_disjoint_complete_set(pending);
@@ -1638,7 +1621,7 @@ namespace Legion {
             // correctly for control replication
             if (!it->first->parent->row_source->is_empty())
               it->first->propagate_refinement(ctx, NULL/*no child*/, it->second,
-                                   symbolic_refinement, map_applied_conditions);
+                                              map_applied_conditions);
             continue;
           }
           // We're not actually going to make the equivalence sets here
@@ -1649,7 +1632,7 @@ namespace Legion {
           // with a first touch policy so that the first writer will
           // the one to make the equivalence sets
           it->first->propagate_refinement(ctx, children, it->second, 
-                        symbolic_refinement, map_applied_conditions);
+                                          map_applied_conditions);
         }
       }
       if (!replicated_partitions.empty())
@@ -1669,8 +1652,6 @@ namespace Legion {
                   color < index_part->total_children; color++)
             {
               RegionNode *child = it->second->get_child(color);
-              if (!symbolic_refinement && child->row_source->is_empty())
-                continue;
               bool first = false;
               const DistributedID did = 
                 collective_dids[did_index++]->get_value(false/*block*/);
@@ -1679,8 +1660,7 @@ namespace Legion {
                                                       child, mask, did, first);
               if (first)
                 initialize_replicated_set(set, mask, map_applied_conditions);
-              child->record_refinement(ctx, set, mask, symbolic_refinement,
-                                       map_applied_conditions);
+              child->record_refinement(ctx, set, mask, map_applied_conditions);
               // Remove the CONTEXT_REF on the set now that it is registered
               if (set->remove_base_valid_ref(CONTEXT_REF))
                 assert(false); // should never actually hit this
@@ -1694,8 +1674,6 @@ namespace Legion {
             {
               const LegionColor color = itr->yield_color();
               RegionNode *child = it->second->get_child(color);
-              if (!symbolic_refinement && child->row_source->is_empty())
-                continue;
               bool first = false;
               const DistributedID did = 
                 collective_dids[did_index++]->get_value(false/*block*/);
@@ -1704,8 +1682,7 @@ namespace Legion {
                                                       child, mask, did, first);
               if (first)
                 initialize_replicated_set(set, mask, map_applied_conditions);
-              child->record_refinement(ctx, set, mask, symbolic_refinement,
-                                       map_applied_conditions);
+              child->record_refinement(ctx, set, mask, map_applied_conditions);
               // Remove the CONTEXT_REF on the set now that it is registered
               if (set->remove_base_valid_ref(CONTEXT_REF))
                 assert(false); // should never actually hit this
@@ -7934,10 +7911,9 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(req.region);
         const FieldMask mask = 
           node->column_source->get_field_mask(req.privilege_fields);
-        mapped_equivalence_sets[idx] = node->row_source->is_empty() ?
-          node->find_or_create_empty_equivalence_set() :
+        mapped_equivalence_sets[idx] =
           new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
-              runtime->address_space, runtime->address_space, node, 
+              runtime->address_space, runtime->address_space, node,
               true/*reg now*/, collective_mapping, &mask);
       }
       // Now either send the shards to the remote nodes or record them locally

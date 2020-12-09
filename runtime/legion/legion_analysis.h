@@ -3247,8 +3247,7 @@ namespace Legion {
         PendingEquivalenceSet *const pending;
       };
     public:
-      PendingEquivalenceSet(RegionNode *region_node, const FieldMask &mask,
-                            const bool symbolic);
+      PendingEquivalenceSet(RegionNode *region_node, const FieldMask &mask);
       PendingEquivalenceSet(const PendingEquivalenceSet &rhs);
       ~PendingEquivalenceSet(void);
     public:
@@ -3330,8 +3329,7 @@ namespace Legion {
                                        const FieldMask &version_mask,
                                        const UniqueID opid,
                                        const AddressSpaceID source,
-                                       std::set<RtEvent> &ready,
-                                       const bool symbolic);
+                                       std::set<RtEvent> &ready);
       virtual void add_tracker_reference(unsigned cnt = 1);
       virtual bool remove_tracker_reference(unsigned cnt = 1);
       virtual void record_equivalence_set(EquivalenceSet *set, 
@@ -3356,8 +3354,7 @@ namespace Legion {
                                     FieldMaskSet<PartitionNode> &children,
                                     FieldMask &parent_traversal,
                                     std::set<RtEvent> &deferral_events,
-                                    const bool downward_only,
-                                    const bool symbolic);
+                                    const bool downward_only);
       void find_or_create_empty_equivalence_sets(EqSetTracker *target,
                                     const AddressSpaceID target_space,
                                     const FieldMask &mask,
@@ -3366,7 +3363,7 @@ namespace Legion {
       static void handle_compute_equivalence_sets_response(
                       Deserializer &derez, Runtime *runtime);
       void record_refinement(EquivalenceSet *set, const FieldMask &mask,
-                             FieldMask &parent_mask, const bool symbolic,
+                             FieldMask &parent_mask,
                              std::set<RtEvent> &applied_events);
     public:
       // Call these from partition nodes

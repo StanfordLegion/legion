@@ -3805,7 +3805,7 @@ namespace Legion {
     RtEvent InnerContext::compute_equivalence_sets(EqSetTracker *target,
                                AddressSpaceID target_space, RegionNode *region,
                                const FieldMask &mask, const UniqueID opid,
-                               const AddressSpaceID source, const bool symbolic)
+                               const AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // We know we are on a node now where the version information
@@ -3815,7 +3815,7 @@ namespace Legion {
       const ContextID ctx = get_context_id();
       region->compute_equivalence_sets(ctx, this, target, target_space,
                                        region->row_source, mask, opid, source, 
-                                       ready, false/*down only*/, symbolic);
+                                       ready, false/*down only*/);
       if (!ready.empty())
         return Runtime::merge_events(ready);
       else
@@ -3841,7 +3841,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool InnerContext::finalize_disjoint_complete_sets(RegionNode *region, 
             VersionManager *target, FieldMask request_mask, const UniqueID opid,
-            const AddressSpaceID source, RtUserEvent ready_event, bool symbolic)
+            const AddressSpaceID source, RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> applied_events;
@@ -3863,8 +3863,7 @@ namespace Legion {
         EquivalenceSet *new_set = 
           (*it)->compute_refinement(source, runtime, applied_events);
         FieldMask dummy_parent;
-        target->record_refinement(new_set, overlap, dummy_parent,
-                                  symbolic, applied_events);
+        target->record_refinement(new_set,overlap,dummy_parent,applied_events);
         bool delete_now = false;
         if ((*it)->finalize(overlap, delete_now))
         {
@@ -8784,10 +8783,6 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(regions[idx].region);
         runtime->forest->invalidate_current_context(tree_context,
                                        false/*users only*/, node);
-        // Stupid empty equivalence set case
-        // These do not get invalidated because they weren't disjoint anyway
-        if (node->row_source->is_empty())
-          continue;
         // State is copied out by the virtual close ops if this is a
         // virtual mapped region so we invalidate like normal now
         const FieldMask close_mask = 
@@ -8862,10 +8857,8 @@ namespace Legion {
             RegionNode *node = runtime->forest->get_node(it->second.region);
             runtime->forest->invalidate_current_context(tree_context,
                                           false/*users only*/, node);
-            if (!node->row_source->is_empty() || 
-                (it->second.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG))
-              node->invalidate_refinement(tree_context.get_id(), all_ones_mask,
-                  true/*self*/, applied_events, invalidated_refinements, this);
+            node->invalidate_refinement(tree_context.get_id(), all_ones_mask,
+                true/*self*/, applied_events, invalidated_refinements, this);
             invalidated_regions.insert(it->second.region);
           }
         }
@@ -8910,12 +8903,9 @@ namespace Legion {
       RegionNode *node = runtime->forest->get_node(handle);
       runtime->forest->invalidate_current_context(tree_context,
                                           false/*users only*/, node);
-      if (!node->row_source->is_empty())
-      {
-        const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-        node->invalidate_refinement(tree_context.get_id(), all_ones_mask, 
-                          true/*self*/, applied_events, to_release, this);
-      }
+      const FieldMask all_ones_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      node->invalidate_refinement(tree_context.get_id(), all_ones_mask, 
+                        true/*self*/, applied_events, to_release, this);
     }
 
     //--------------------------------------------------------------------------
@@ -9687,11 +9677,9 @@ namespace Legion {
       derez.deserialize(original_source);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
-      bool symbolic;
-      derez.deserialize(symbolic);
 
       const RtEvent done = local_ctx->compute_equivalence_sets(target, source,
-                                region, mask, opid, original_source, symbolic);
+                                          region, mask, opid, original_source);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -10170,7 +10158,7 @@ namespace Legion {
     RtEvent TopLevelContext::compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask, const UniqueID opid,
-                      const AddressSpaceID original_source, const bool symbolic)
+                      const AddressSpaceID original_source)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -11154,10 +11142,6 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(regions[idx].region);
         runtime->forest->invalidate_current_context(tree_context,
                                       false/*users only*/, node);
-        // Stupid empty equivalence set case
-        // These do not get invalidated because they weren't disjoint anyway
-        if (node->row_source->is_empty())
-          continue;
         // State is copied out by the virtual close ops if this is a
         // virtual mapped region so we invalidate like normal now
         const FieldMask close_mask = 
@@ -17228,14 +17212,12 @@ namespace Legion {
       derez.deserialize(original_source);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      bool symbolic;
-      derez.deserialize(symbolic);
 
       RegionNode *node = runtime->forest->get_node(handle);
       VersionInfo result_info;
       std::set<RtEvent> ready_events;
-      node->perform_versioning_analysis(tree_context.get_id(),this,&result_info,
-                   request_mask, opid, original_source, ready_events, symbolic);
+      node->perform_versioning_analysis(tree_context.get_id(), this,
+          &result_info, request_mask, opid, original_source, ready_events);
       // In general these ready events should be empty because we 
       // are on the shard that owns these eqivalence sets so it should
       // just be able to compute them right away. We wait though just
@@ -17263,14 +17245,12 @@ namespace Legion {
           }
           rez.serialize(opid);
           rez.serialize(done_event);
-          rez.serialize<bool>(symbolic);
         }
         runtime->send_control_replicate_disjoint_complete_response(target_space,
                                                                    rez);
       }
       else // Local node so can just record them directly
-        finalize_disjoint_complete_response(target, done_event, 
-                                            symbolic, result_sets);
+        finalize_disjoint_complete_response(target, done_event, result_sets);
     }
 
     //--------------------------------------------------------------------------
@@ -17302,29 +17282,26 @@ namespace Legion {
       derez.deserialize(opid);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      bool symbolic;
-      derez.deserialize(symbolic);
       if (!ready_events.empty())
       {
         const RtEvent precondition = Runtime::merge_events(ready_events);
         if (precondition.exists() && !precondition.has_triggered())
         {
-          DeferDisjointCompleteResponseArgs args(opid, target, sets,
-                                                 done_event, symbolic);
+          DeferDisjointCompleteResponseArgs args(opid, target, sets,done_event);
           runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_DEFERRED_PRIORITY, precondition);
           return;
         }
       }
-      finalize_disjoint_complete_response(target, done_event, symbolic, sets);
+      finalize_disjoint_complete_response(target, done_event, sets);
     }
 
     //--------------------------------------------------------------------------
     ReplicateContext::DeferDisjointCompleteResponseArgs::
       DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *t,
-                       FieldMaskSet<EquivalenceSet> &s, RtUserEvent d, bool sym)
+                           FieldMaskSet<EquivalenceSet> &s, RtUserEvent d)
       : LgTaskArgs<DeferDisjointCompleteResponseArgs>(opid), target(t),
-        sets(new FieldMaskSet<EquivalenceSet>()), done_event(d), symbolic(sym)
+        sets(new FieldMaskSet<EquivalenceSet>()), done_event(d)
     //--------------------------------------------------------------------------
     {
       sets->swap(s);
@@ -17338,22 +17315,22 @@ namespace Legion {
       const DeferDisjointCompleteResponseArgs *dargs =
         (const DeferDisjointCompleteResponseArgs*)args;
       finalize_disjoint_complete_response(dargs->target, 
-          dargs->done_event, dargs->symbolic, *(dargs->sets));
+                      dargs->done_event, *(dargs->sets));
       delete dargs->sets;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void ReplicateContext::finalize_disjoint_complete_response(
-           VersionManager *target, RtUserEvent done_event, 
-           const bool symbolic, const FieldMaskSet<EquivalenceSet> &result_sets)
+                                VersionManager *target, RtUserEvent done_event, 
+                                const FieldMaskSet<EquivalenceSet> &result_sets)
     //--------------------------------------------------------------------------
     {
       FieldMask dummy_parent;
       std::set<RtEvent> applied_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             result_sets.begin(); it != result_sets.end(); it++)
-        target->record_refinement(it->first, it->second, dummy_parent, 
-                                  symbolic, applied_events);
+        target->record_refinement(it->first, it->second, 
+                                  dummy_parent, applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
@@ -18611,7 +18588,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool ReplicateContext::finalize_disjoint_complete_sets(RegionNode *region, 
             VersionManager *target, FieldMask request_mask, const UniqueID opid,
-            const AddressSpaceID source, RtUserEvent ready_event, bool symbolic)
+            const AddressSpaceID source, RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18646,13 +18623,12 @@ namespace Legion {
         rez.serialize(opid);
         rez.serialize(source);
         rez.serialize(ready_event);
-        rez.serialize<bool>(symbolic);
         shard_manager->send_disjoint_complete_request(target_shard, rez);
         return false;
       }
       else // we're the owner so just handle this here
         return InnerContext::finalize_disjoint_complete_sets(region, target,
-                          request_mask, opid, source, ready_event, symbolic);
+                                    request_mask, opid, source, ready_event);
     }
 
     //--------------------------------------------------------------------------
@@ -19060,7 +19036,7 @@ namespace Legion {
     RtEvent RemoteContext::compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region,
                       const FieldMask &mask, const UniqueID opid,
-                      const AddressSpaceID original_source, const bool symbolic)
+                      const AddressSpaceID original_source)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -19082,7 +19058,6 @@ namespace Legion {
         rez.serialize(opid);
         rez.serialize(original_source);
         rez.serialize(ready_event);
-        rez.serialize<bool>(symbolic);
       }
       // Send it to the owner space 
       runtime->send_compute_equivalence_sets_request(dest, rez);

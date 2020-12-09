@@ -3659,9 +3659,7 @@ namespace Legion {
           const bool overwriting = HAS_WRITE_DISCARD(user.usage) &&
                     !has_next_child && !user.op->is_predicated_op() && 
                     !trace_info.recording_trace;
-          const bool symbolic = 
-            (trace_info.req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG);
-          close_op->record_refinements(refinement_mask, overwriting, symbolic);
+          close_op->record_refinements(refinement_mask, overwriting);
 #ifdef DEBUG_LEGION
           assert(state.owner->is_region());
 #endif
@@ -23300,13 +23298,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PendingEquivalenceSet::PendingEquivalenceSet(RegionNode *node, 
-                                     const FieldMask &mask, const bool symbolic)
+                                                 const FieldMask &mask)
       : region_node(node), new_set(NULL)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(symbolic || !node->row_source->is_empty());
-#endif
       region_node->add_base_resource_ref(PENDING_REFINEMENT_REF);
       previous_sets.relax_valid_mask(mask);
     }
@@ -23522,11 +23517,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::perform_versioning_analysis(InnerContext *context,
-                           VersionInfo *version_info, RegionNode *region_node,
-                           IndexSpaceExpression *expr, const bool expr_covers,
-                           const FieldMask &version_mask, const UniqueID opid,
-                           const AddressSpaceID source, 
-                           std::set<RtEvent> &ready_events, const bool symbolic)
+                   VersionInfo *version_info, RegionNode *region_node,
+                   IndexSpaceExpression *expr, const bool expr_covers,
+                   const FieldMask &version_mask, const UniqueID opid,
+                   const AddressSpaceID source, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -23661,8 +23655,7 @@ namespace Legion {
         // Otherwise, bounce this computation off the context so that we know
         // that we are on the right node to perform it
         const RtEvent ready = context->compute_equivalence_sets(this, 
-            runtime->address_space, region_node, remaining_mask, 
-            opid, source, symbolic);
+            runtime->address_space, region_node, remaining_mask, opid, source);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
@@ -23696,6 +23689,9 @@ namespace Legion {
                                                 const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!node->as_region_node()->row_source->is_empty());
+#endif
       AutoLock m_lock(manager_lock);
       if (equivalence_sets.insert(set, mask))
         set->add_base_resource_ref(VERSION_MANAGER_REF);
@@ -23771,6 +23767,9 @@ namespace Legion {
             // Once it's valid for any field then it's valid for all of them
             if (it->second * finder->second)
               continue;
+#ifdef DEBUG_LEGION
+            assert(!node->as_region_node()->row_source->is_empty());
+#endif
             if (equivalence_sets.insert(it->first, it->second))
               it->first->add_base_resource_ref(VERSION_MANAGER_REF);
             it->first->record_tracker(this, it->second);
@@ -23823,6 +23822,9 @@ namespace Legion {
               wit++;
           }
         }
+        // We can relax the mask for the equivalence sets here so we don't
+        // recompute in the case that we are empty
+        equivalence_sets.relax_valid_mask(finder->second);
         equivalence_sets_ready.erase(finder);
       }
       if (!done_preconditions.empty())
@@ -23882,18 +23884,12 @@ namespace Legion {
       assert(node == set->region_node);
       assert(disjoint_complete * mask);
 #endif
-      if (!set->region_node->row_source->is_empty())
+      disjoint_complete |= mask;
+      if (equivalence_sets.insert(set, mask))
       {
-        disjoint_complete |= mask;
-        if (equivalence_sets.insert(set, mask))
-        {
-          WrapperReferenceMutator mutator(applied_events);
-          set->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
-        }
+        WrapperReferenceMutator mutator(applied_events);
+        set->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
       }
-      // Empty equivalence sets are treated differently
-      else if (equivalence_sets.insert(set, mask))
-        set->add_base_resource_ref(VERSION_MANAGER_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -23907,8 +23903,7 @@ namespace Legion {
                                           FieldMaskSet<PartitionNode> &children,
                                           FieldMask &parent_traversal,
                                           std::set<RtEvent> &deferral_events,
-                                          const bool downward_only,
-                                          const bool symbolic)
+                                          const bool downward_only)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -23974,7 +23969,7 @@ namespace Legion {
 #endif
         // Ask the context to fill in the disjoint complete sets here
         if (context->finalize_disjoint_complete_sets(region_node, this,
-              request_mask, opid, original_source, request_ready, symbolic) &&
+                    request_mask, opid, original_source, request_ready) &&
             request_ready.has_triggered())
         {
           // Special case where the context did this right away
@@ -23989,7 +23984,7 @@ namespace Legion {
         // shard in a control replication context, so we have to do it again
         // in order to be sure that the parent knows about it
         region_node->parent->propagate_refinement(ctx, region_node, 
-                    request_mask, false/*symbolic*/, ready_events);
+                                                  request_mask, ready_events);
         // If we don't have any local fields remaining then we are done
         if (!mask)
           return;
@@ -23997,16 +23992,6 @@ namespace Legion {
       // If we have deferral events then save this traversal for another time
       if (!deferral_events.empty())
         return;
-      // Check for the case where this is an empty region node
-      if (!symbolic && region_node->row_source->is_empty())
-      {
-        const RtEvent ready_event = 
-          region_node->find_or_create_empty_equivalence_set(target,
-                              target_space, mask, original_source);
-        if (ready_event.exists() && !ready_event.has_triggered())
-          ready_events.insert(ready_event);
-        return;
-      }
       // Do the local analysis on our owned equivalence sets
       AutoLock m_lock(manager_lock,1,false/*exclusive*/);
       if (!downward_only)
@@ -24014,12 +23999,17 @@ namespace Legion {
         if (!disjoint_complete)
         {
           // If we're not disjoint complete, keep going up
-          parent_traversal = mask;
+          // If we're going up it is now safe to test for emptiness
+          if (!region_node->row_source->is_empty())
+            parent_traversal = mask;
           return;
         }
         parent_traversal = mask - disjoint_complete;
         if (!!parent_traversal)
         {
+          // If we're going up, it's now safe to test for emptiness
+          if (region_node->row_source->is_empty())
+            return;
           mask -= parent_traversal;
           if (!mask)
             return;
@@ -24149,14 +24139,12 @@ namespace Legion {
     void VersionManager::record_refinement(EquivalenceSet *set, 
                                            const FieldMask &mask, 
                                            FieldMask &parent_mask,
-                                           const bool symbolic,
                                            std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
       assert(set->region_node == node);
-      assert(symbolic || !set->region_node->row_source->is_empty());
       // There should not be any other equivalence sets for these fields
       // This is a valid assertion in general, but not with control replication
       // where you can get two merge close ops updating subsets

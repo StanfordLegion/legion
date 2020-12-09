@@ -1202,7 +1202,7 @@ namespace Legion {
     public:
       void set_repl_close_info(RtBarrier mapped_barrier);
       virtual void record_refinements(const FieldMask &refinement_mask,
-                            const bool overwrite, const bool symbolic);
+                                      const bool overwrite);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
