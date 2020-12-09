@@ -680,6 +680,8 @@ namespace Legion {
      * of a task.
      */
     class LayoutConstraintSet {
+    public:
+      LayoutConstraintSet(void) { } // provided for dumb c++ compilers
     public: 
       LayoutConstraintSet&
         add_constraint(const SpecializedConstraint &constraint);
