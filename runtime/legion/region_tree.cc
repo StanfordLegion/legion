@@ -15459,6 +15459,7 @@ namespace Legion {
               // which are already disjoint complete at this level
               FieldMask refinement_mask = child_disjoint_complete &
                 state.disjoint_complete_tree;
+#if 0
               if (!IS_WRITE(user.usage) && 
                   !state.disjoint_complete_children.empty())
               {
@@ -15470,6 +15471,13 @@ namespace Legion {
                 refinement_mask -= avoid_refinement;
                 child_disjoint_complete -= avoid_refinement;
               }
+#else
+              if (!IS_WRITE(user.usage))
+              {
+                child_disjoint_complete -= refinement_mask;
+                refinement_mask.clear();
+              }
+#endif
               if (!!refinement_mask)
               {
                 RegionNode *region_node = as_region_node();
