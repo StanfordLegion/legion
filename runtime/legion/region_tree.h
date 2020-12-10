@@ -3627,7 +3627,7 @@ namespace Legion {
                                  const ProjectionInfo &projection_info,
                                  FieldMask &unopened_field_mask,
                                  FieldMask &already_closed_mask,
-                                 FieldMask &written_disjoint_complete,
+                                 FieldMask &disjoint_complete_below,
                                  FieldMaskSet<RefinementOp> &refinements,
                                  std::set<RtEvent> &applied_events,
                                  const bool check_unversioned);
@@ -3683,8 +3683,8 @@ namespace Legion {
                                   LegionDeque<FieldState>::aligned &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
-      void filter_written_disjoint_complete_children(LogicalState &state,
-                                                     const FieldMask &mask);
+      void filter_access_disjoint_complete_children(LogicalState &state,
+                                                    const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
                                       const RegionUsage usage,
                                       const FieldMask &uninitialized,
@@ -3998,7 +3998,8 @@ namespace Legion {
       void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
                                          const FieldMask &refinement_mask,
                                          FieldMask &refined_partition,
-                                         std::set<RtEvent> &applied_events);
+                                         std::set<RtEvent> &applied_events,
+                                         const bool written);
       void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
                     const FieldMask &mask, std::set<RtEvent> &applied_events);
       void perform_versioning_analysis(ContextID ctx, 
@@ -4125,7 +4126,8 @@ namespace Legion {
     public:
       void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
                                          const FieldMask &refinement_mask,
-                                         std::set<RtEvent> &applied_events);
+                                         std::set<RtEvent> &applied_events,
+                                         const bool written);
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *context,
                                     EqSetTracker *target,

@@ -3727,7 +3727,7 @@ namespace Legion {
 #endif
       root_node->filter_prev_epoch_users(state, close_mask);
       root_node->filter_curr_epoch_users(state, close_mask);
-      root_node->filter_written_disjoint_complete_children(state, close_mask); 
+      root_node->filter_access_disjoint_complete_children(state, close_mask); 
     }
 
     //--------------------------------------------------------------------------

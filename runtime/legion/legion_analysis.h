@@ -842,6 +842,9 @@ namespace Legion {
       // ourselves are written and we should propagate this information
       // up the tree to see if we want to change refinements
       FieldMaskSet<RegionTreeNode> written_disjoint_complete_children;
+      // Track the names of other children which have "complete accesses"
+      // for non-write privileges open below.
+      FieldMaskSet<RegionTreeNode> other_disjoint_complete_children;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
