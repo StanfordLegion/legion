@@ -10437,8 +10437,7 @@ namespace Legion {
                 color < index_part->total_children; color++)
           {
             RegionNode *child = it->first->get_child(color);
-            PendingEquivalenceSet *pending = 
-              new PendingEquivalenceSet(child, it->second);
+            PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
             initialize_pending(pending, it->second, map_applied_conditions);
             // Parent context takes ownership here
             parent_ctx->record_pending_disjoint_complete_set(pending);
@@ -10453,8 +10452,7 @@ namespace Legion {
           {
             const LegionColor color = itr->yield_color();
             RegionNode *child = it->first->get_child(color);
-            PendingEquivalenceSet *pending = 
-              new PendingEquivalenceSet(child, it->second);
+            PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
             initialize_pending(pending, it->second, map_applied_conditions);
             // Parent context takes ownership here
             parent_ctx->record_pending_disjoint_complete_set(pending);
@@ -10502,21 +10500,32 @@ namespace Legion {
       IndexSpaceNode *child_expr = pending->region_node->row_source;
       const FieldMaskSet<EquivalenceSet> &previous_sets = 
         version_info.get_equivalence_sets();
-      // Import state into this equivalence set
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            previous_sets.begin(); it != previous_sets.end(); it++)
+      if (!previous_sets.empty() && !child_expr->is_empty())
       {
-        // See if the fields overlap first
-        const FieldMask overlap = it->second & set_mask;
-        if (!overlap)
-          continue;
-        IndexSpaceExpression *overlap_expr = 
-          runtime->forest->intersect_index_spaces(child_expr,
-                        it->first->region_node->row_source);
-        if (overlap_expr->is_empty())
-          continue;
-        pending->record_previous(it->first, overlap, applied_events);
+        // Import state into this equivalence set
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              previous_sets.begin(); it != previous_sets.end(); it++)
+        {
+          // See if the fields overlap first
+          const FieldMask overlap = it->second & set_mask;
+          if (!overlap)
+            continue;
+          if (child_expr != it->first->region_node->row_source)
+          {
+            IndexSpaceExpression *overlap_expr =
+              runtime->forest->intersect_index_spaces(child_expr,
+                            it->first->region_node->row_source);
+            if (overlap_expr->is_empty())
+              continue;
+          }
+          pending->record_previous(it->first, overlap, applied_events);
+        }
+#ifdef DEBUG_LEGION
+        assert(set_mask == pending->get_valid_mask());
+#endif
       }
+      else
+        pending->relax_valid_mask(set_mask);
     }
 
     //--------------------------------------------------------------------------

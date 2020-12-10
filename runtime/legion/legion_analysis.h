@@ -3250,7 +3250,7 @@ namespace Legion {
         PendingEquivalenceSet *const pending;
       };
     public:
-      PendingEquivalenceSet(RegionNode *region_node, const FieldMask &mask);
+      PendingEquivalenceSet(RegionNode *region_node);
       PendingEquivalenceSet(const PendingEquivalenceSet &rhs);
       ~PendingEquivalenceSet(void);
     public:
@@ -3260,6 +3260,7 @@ namespace Legion {
                            std::set<RtEvent> &applied_events);
       void record_all(VersionInfo &version_info, 
                       std::set<RtEvent> &applied_events);
+      void relax_valid_mask(const FieldMask &mask);
     public:
       inline const FieldMask& get_valid_mask(void) const
         { return previous_sets.get_valid_mask(); }

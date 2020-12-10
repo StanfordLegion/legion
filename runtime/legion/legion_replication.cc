@@ -1583,9 +1583,11 @@ namespace Legion {
               sharded_region_version_infos.begin(); it !=
               sharded_region_version_infos.end(); it++)
         {
-          PendingEquivalenceSet *pending = 
-            new PendingEquivalenceSet(it->first, it->second.get_valid_mask());
+          PendingEquivalenceSet *pending = new PendingEquivalenceSet(it->first);
           pending->record_all(it->second, references_added);
+#ifdef DEBUG_LEGION
+          assert(it->second.get_valid_mask() == pending->get_valid_mask());
+#endif
           // Context takes ownership at this point
           parent_ctx->record_pending_disjoint_complete_set(pending);
         }

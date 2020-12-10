@@ -23297,13 +23297,11 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PendingEquivalenceSet::PendingEquivalenceSet(RegionNode *node, 
-                                                 const FieldMask &mask)
+    PendingEquivalenceSet::PendingEquivalenceSet(RegionNode *node) 
       : region_node(node), new_set(NULL)
     //--------------------------------------------------------------------------
     {
       region_node->add_base_resource_ref(PENDING_REFINEMENT_REF);
-      previous_sets.relax_valid_mask(mask);
     }
 
     //--------------------------------------------------------------------------
@@ -23346,6 +23344,10 @@ namespace Legion {
                        const FieldMask &mask, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            previous_sets.begin(); it != previous_sets.end(); it++)
+        assert((set->region_node != it->first->region_node) ||
+            (mask * it->second));
       if (previous_sets.insert(set, mask))
       {
         WrapperReferenceMutator mutator(applied_events);
@@ -23366,6 +23368,16 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             previous_sets.begin(); it != previous_sets.end(); it++)
         it->first->add_base_valid_ref(PENDING_REFINEMENT_REF, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingEquivalenceSet::relax_valid_mask(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(previous_sets.empty());
+#endif
+      previous_sets.relax_valid_mask(mask);
     }
 
     //--------------------------------------------------------------------------
