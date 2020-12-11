@@ -397,12 +397,14 @@ end
 cas_uint32:setinlined(true)
 
 function cudahelper.generate_atomic_update(op, typ)
-  if op == "+" and typ == float then
-    return terralib.intrinsic("llvm.nvvm.atomic.load.add.f32.p0f32",
-                              {&float,float} -> {float})
-  elseif op == "+" and typ == double and get_cuda_version() >= 60 then
-    return terralib.intrinsic("llvm.nvvm.atomic.load.add.f64.p0f64",
-                              {&double,double} -> {double})
+  if terralib.llvmversion <= 38 then
+    if op == "+" and typ == float then
+      return terralib.intrinsic("llvm.nvvm.atomic.load.add.f32.p0f32",
+                                {&float,float} -> {float})
+    elseif op == "+" and typ == double and get_cuda_version() >= 60 then
+      return terralib.intrinsic("llvm.nvvm.atomic.load.add.f64.p0f64",
+                                {&double,double} -> {double})
+    end
   end
 
   local cas_type
