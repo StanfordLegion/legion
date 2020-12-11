@@ -10520,12 +10520,8 @@ namespace Legion {
           }
           pending->record_previous(it->first, overlap, applied_events);
         }
-#ifdef DEBUG_LEGION
-        assert(set_mask == pending->get_valid_mask());
-#endif
       }
-      else
-        pending->relax_valid_mask(set_mask);
+      pending->relax_valid_mask(set_mask);
     }
 
     //--------------------------------------------------------------------------

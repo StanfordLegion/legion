@@ -2992,6 +2992,16 @@ namespace Legion {
     inline void FieldMaskSet<T>::relax_valid_mask(const FieldMask &m)
     //--------------------------------------------------------------------------
     {
+      if (single && (entries.single_entry != NULL))
+      {
+        if (!(m - valid_fields))
+          return;
+        // have to avoid the aliasing case
+        T *entry = entries.single_entry;
+        entries.multi_entries = new typename LegionMap<T*,FieldMask>::aligned();
+        entries.multi_entries->insert(std::make_pair(entry, valid_fields));
+        single = false;
+      }
       valid_fields |= m;
     }
 

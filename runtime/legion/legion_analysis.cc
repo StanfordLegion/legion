@@ -23371,16 +23371,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingEquivalenceSet::relax_valid_mask(const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(previous_sets.empty());
-#endif
-      previous_sets.relax_valid_mask(mask);
-    }
-
-    //--------------------------------------------------------------------------
     EquivalenceSet* PendingEquivalenceSet::compute_refinement(
                               AddressSpaceID suggested_owner, Runtime *runtime,
                               std::set<RtEvent> &ready_events)

@@ -3260,8 +3260,9 @@ namespace Legion {
                            std::set<RtEvent> &applied_events);
       void record_all(VersionInfo &version_info, 
                       std::set<RtEvent> &applied_events);
-      void relax_valid_mask(const FieldMask &mask);
     public:
+      inline void relax_valid_mask(const FieldMask &mask)
+        { previous_sets.relax_valid_mask(mask); }
       inline const FieldMask& get_valid_mask(void) const
         { return previous_sets.get_valid_mask(); }
       EquivalenceSet* compute_refinement(AddressSpaceID suggested_owner,
