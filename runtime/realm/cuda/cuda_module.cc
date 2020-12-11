@@ -661,7 +661,7 @@ namespace Realm {
 	    }
 	  } else {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
-	      unsigned int val = *(srcdata + offset);
+	      unsigned char val = *(srcdata + offset);
 	      CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset,
 					  fill_data_size /*pitch*/,
 					  val,
@@ -772,7 +772,7 @@ namespace Realm {
 	    }
 	  } else {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
-	      unsigned int val = *(srcdata + offset);
+	      unsigned char val = *(srcdata + offset);
 	      for(size_t l = 0; l < lines; l++)
 		CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					    fill_data_size /*pitch*/,
@@ -887,7 +887,7 @@ namespace Realm {
 	    }
 	  } else {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
-	      unsigned int val = *(srcdata + offset);
+	      unsigned char val = *(srcdata + offset);
 	      for(size_t l = 0; l < height; l++)
 		CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					    fill_data_size /*pitch*/,

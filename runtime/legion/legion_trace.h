@@ -826,6 +826,7 @@ namespace Legion {
                                             Operation *invalidator);
     public:
       void dump_template(void);
+      virtual void dump_sharded_template(void) { }
     private:
       void dump_instructions(const std::vector<Instruction*> &instructions);
 #ifdef LEGION_SPY
@@ -1198,6 +1199,7 @@ namespace Legion {
                                             ShardingFunction *function);
       virtual void issue_summary_operations(InnerContext *context,
                                             Operation *invalidator);
+      virtual void dump_sharded_template(void);
     public:
       virtual ShardID find_owner_shard(unsigned trace_local_id);
       virtual IndexSpace find_local_space(unsigned trace_local_id);

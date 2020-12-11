@@ -10415,7 +10415,8 @@ namespace Legion {
                      RtEvent global_done, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_PERFORM_REGISTRATION_CALLBACK);
@@ -10485,7 +10486,8 @@ namespace Legion {
                                        size_t num_elements, size_t element_size)
     //--------------------------------------------------------------------------
     {
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CONSENSUS_MATCH);
@@ -10550,7 +10552,8 @@ namespace Legion {
       if (inside_registration_callback)
         return TaskContext::register_variant(registrar, user_data, 
             user_data_size, desc, ret, vid, check_task_id);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_REGISTER_TASK_VARIANT);
@@ -10604,7 +10607,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_trace_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_TRACE_ID);
@@ -10636,7 +10640,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_mapper_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_MAPPER_ID);
@@ -10668,7 +10673,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_projection_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_PROJECTION_ID);
@@ -10701,7 +10707,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_sharding_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_SHARDING_ID);
@@ -10733,7 +10740,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_task_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_TASK_ID);
@@ -10765,7 +10773,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_reduction_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_REDUCTION_ID);
@@ -10797,7 +10806,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_serdez_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_SERDEZ_ID);
@@ -11242,7 +11252,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
@@ -11337,7 +11348,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_UNBOUND_INDEX_SPACE);
@@ -11393,7 +11405,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
@@ -11488,7 +11501,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
@@ -11525,7 +11539,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
@@ -11561,7 +11576,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_UNION_INDEX_SPACES);
@@ -11664,7 +11680,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_INTERSECT_INDEX_SPACES);
@@ -11767,7 +11784,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_SUBTRACT_INDEX_SPACES);
@@ -11859,7 +11877,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_SHARED_OWNERSHIP);
@@ -11896,7 +11915,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_INDEX_SPACE);
@@ -11982,7 +12002,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_SHARED_OWNERSHIP);
@@ -12011,7 +12032,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_INDEX_PARTITION);
@@ -12226,7 +12248,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_EQUAL_PARTITION);
@@ -12270,7 +12293,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_WEIGHTS);
@@ -12316,7 +12340,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_UNION);
@@ -12417,7 +12442,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_INTERSECTION);
@@ -12516,7 +12542,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_INTERSECTION);
@@ -12598,7 +12625,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_DIFFERENCE);
@@ -12687,7 +12715,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_CROSS_PRODUCT_PARTITIONS);
@@ -12832,7 +12861,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_ASSOCIATION);
@@ -12888,7 +12918,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_RESTRICTED_PARTITION);
@@ -12948,7 +12979,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_DOMAIN);
@@ -13032,7 +13064,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_DOMAIN);
@@ -13092,7 +13125,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_FIELD);
@@ -13175,7 +13209,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_IMAGE);
@@ -13268,7 +13303,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_IMAGE_RANGE);
@@ -13360,7 +13396,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_PREIMAGE);
@@ -13467,7 +13504,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_PREIMAGE_RANGE);
@@ -13554,7 +13592,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PENDING_PARTITION);
@@ -13628,7 +13667,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_UNION);
@@ -13664,7 +13704,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_UNION);
@@ -13698,7 +13739,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_INTERSECTION);
@@ -13734,7 +13776,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_INTERSECTION);
@@ -13769,7 +13812,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_DIFFERENCE);
@@ -14049,7 +14093,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_FIELD_SPACE);
@@ -14146,7 +14191,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_FIELD_SPACE);
@@ -14241,7 +14287,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_FIELD_SPACE);
@@ -14402,7 +14449,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_FIELD_SPACE);
@@ -14487,7 +14535,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ALLOCATE_FIELD);
@@ -14609,7 +14658,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ALLOCATE_FIELD);
@@ -14706,7 +14756,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_FREE_FIELD);
@@ -14753,7 +14804,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ALLOCATE_FIELDS);
@@ -14852,7 +14904,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ALLOCATE_FIELDS);
@@ -14961,7 +15014,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_FREE_FIELDS);
@@ -15019,7 +15073,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_LOGICAL_REGION);
@@ -15144,7 +15199,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_SHARED_OWNERSHIP);
@@ -15180,7 +15236,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_LOGICAL_REGION);
@@ -15258,7 +15315,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_FIELD_ALLOCATOR);
@@ -15338,7 +15396,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_FIELD_ALLOCATOR);
@@ -15492,7 +15551,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_EXECUTE_TASK);
@@ -15579,7 +15639,8 @@ namespace Legion {
         return result;
       }
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE);
@@ -15714,7 +15775,8 @@ namespace Legion {
             "all future values. This feature is not currently implemented.",
             get_task_name(), get_unique_id())
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE);
@@ -15796,7 +15858,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_REDUCE_FUTURE_MAP);
@@ -15825,7 +15888,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_MAP_REGION);
@@ -15892,7 +15956,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_REMAP_REGION);
@@ -15921,7 +15986,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_FILL_FIELDS);
@@ -15992,7 +16058,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_FILL_FIELDS);
@@ -16074,7 +16141,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ISSUE_COPY);
@@ -16143,7 +16211,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ISSUE_COPY);
@@ -16249,7 +16318,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ATTACH_RESOURCE);
@@ -16338,7 +16408,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DETACH_RESOURCE);
@@ -16375,7 +16446,8 @@ namespace Legion {
       issue_execution_fence(); 
 #endif
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication && 
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_MUST_EPOCH);
@@ -16432,7 +16504,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_TIMING_MEASUREMENT);
@@ -16463,7 +16536,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication && 
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_MAPPING_FENCE);
@@ -16485,7 +16559,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_EXECUTION_FENCE);
@@ -16832,7 +16907,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication && 
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PHASE_BARRIER);
@@ -16861,7 +16937,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication && 
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_PHASE_BARRIER);
@@ -16880,7 +16957,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ADVANCE_PHASE_BARRIER);
@@ -16943,7 +17021,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication && 
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ADVANCE_DYNAMIC_COLLECTIVE);

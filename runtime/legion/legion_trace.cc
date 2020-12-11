@@ -5333,6 +5333,7 @@ namespace Legion {
            it != frontiers.end(); ++it)
         log_tracing.info() << "  events[" << it->second << "] = events["
                            << it->first << "]";
+      dump_sharded_template();
 
       log_tracing.info() << "[Precondition]";
       for (std::vector<TraceConditionSet*>::const_iterator it =
@@ -7791,6 +7792,20 @@ namespace Legion {
                                         invalidator->get_unique_op_id());
 #endif
       op->execute_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::dump_sharded_template(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it =
+            remote_frontiers.begin(); it != remote_frontiers.end(); it++)
+        log_tracing.info() << "events[" << it->second
+                      << "] = Runtime::barrier_advance(" << it->first.id << ")";
+      for (std::map<unsigned,ApBarrier>::const_iterator it =
+            local_frontiers.begin(); it != local_frontiers.end(); it++)
+        log_tracing.info() << "Runtime::phase_barrier_arrive(" <<
+          it->second.id << ", events[" << it->first << "])";
     }
 
     //--------------------------------------------------------------------------
