@@ -2261,7 +2261,8 @@ namespace Realm {
 
       // control information has to get to the merge at the end
       // HACK!
-      Memory dst_ib_mem = ID::make_ib_memory(ID(dst_mem).memory_owner_node(), 0).convert<Memory>();
+      NodeID dst_node = ID(dst_mem).memory_owner_node();
+      Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
       if(dst_ib_mem != addr_ib_mem) {
 	MemPathInfo path;
 	bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
@@ -2275,14 +2276,21 @@ namespace Realm {
 
       // next complication: if all the data paths don't use the same final
       //  step, we need to force them to go through an intermediate
+      // also insist that the final step be owned by the destination node
+      //  (i.e. the merging should not be done via rdma)
       XferDesKind last_kind = path_infos[0].xd_kinds[path_infos[0].xd_kinds.size() - 1];
       bool same_last_kind = true;
-      for(size_t i = 1; i < path_infos.size(); i++)
+      for(size_t i = 0; i < path_infos.size(); i++) {
 	if(path_infos[i].xd_kinds[path_infos[i].xd_kinds.size() - 1] !=
 	   last_kind) {
 	  same_last_kind = false;
 	  break;
 	}
+	if(path_infos[i].xd_target_nodes[path_infos[i].xd_kinds.size() - 1] != dst_node) {
+	  same_last_kind = false;
+	  break;
+	}
+      }
       if(!same_last_kind) {
 	// figure out what the final kind will be (might not be the same as
 	//  any of the current paths)
@@ -2506,10 +2514,11 @@ namespace Realm {
       }
 
       // next, see what work we need to get the addresses to where the
-      //  target data instances live
+      //  last step of each path is running
       for(size_t i = 0; i < spaces.size(); i++) {
 	// HACK!
-	Memory dst_ib_mem = ID::make_ib_memory(ID(insts[i]).instance_owner_node(), 0).convert<Memory>();
+	NodeID dst_node = path_infos[path_idx[i]].xd_target_nodes[path_infos[path_idx[i]].xd_target_nodes.size() - 1];
+	Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
 	if(dst_ib_mem != addr_ib_mem) {
 	  MemPathInfo path;
 	  bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
