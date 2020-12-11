@@ -562,7 +562,7 @@ namespace Realm {
       struct Write1DMessage {
 	XferDesID next_xd_guid;
 	int next_port_idx;
-	size_t span_start, pre_bytes_total;
+	size_t span_start;
 
 	static void handle_message(NodeID sender,
 				   const Write1DMessage &args,
