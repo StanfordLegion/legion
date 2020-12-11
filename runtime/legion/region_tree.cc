@@ -8506,6 +8506,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
+      bool pack_space = false;
       bool still_valid = false;
       bool has_reference = false;
       // Do our check to see if we're still valid
@@ -8518,7 +8519,7 @@ namespace Legion {
         // First see if we are still valid
         if (tree_valid && ((parent == NULL) || (send_references > 0)))
         {
-          still_valid = true;
+          still_valid = true; 
           // Grab a reference on the parent to keep it from being deleted
           if (parent != NULL)
           {
@@ -8533,6 +8534,8 @@ namespace Legion {
         }
         else if (above)
           return false;
+        // Have to record this atomically with recording as a remote instance
+        pack_space = realm_index_space_set.has_triggered();
       }
       // If we have a parent check to see if it is the owner
       // If it is then we can continue traversing up
@@ -8576,7 +8579,7 @@ namespace Legion {
             rez.serialize(index_space_ready);
             rez.serialize(expr_id);
             rez.serialize(initialized);
-            if (realm_index_space_set.has_triggered())
+            if (pack_space)
               pack_index_space(rez, true/*include size*/);
             else
               rez.serialize<size_t>(0);
