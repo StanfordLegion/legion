@@ -6246,10 +6246,9 @@ namespace Legion {
                                              ApEvent completion, bool recurrent)
     //--------------------------------------------------------------------------
     {
-      // We have to make sure that the previous trace replay is done before
-      // we start changing these data structures for the next replay
-      if (replay_done.exists() && !replay_done.has_triggered())
-        replay_done.wait();
+      // Do the base call first, this will also make sure the previous
+      // replay is done before we start changing data structures
+      PhysicalTemplate::initialize(runtime, completion, recurrent);
       // Now update all of our barrier information
       if (recurrent)
       {
@@ -6360,7 +6359,6 @@ namespace Legion {
           if (advance_barriers)
             Runtime::advance_barrier(it->second);
         }
-        PhysicalTemplate::initialize(runtime, completion, recurrent);
         for (std::vector<std::pair<ApBarrier,unsigned> >::iterator it = 
               remote_frontiers.begin(); it != remote_frontiers.end(); it++)
         {
@@ -6371,7 +6369,6 @@ namespace Legion {
       }
       else
       {
-        PhysicalTemplate::initialize(runtime, completion, recurrent);
         for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it =
               remote_frontiers.begin(); it != remote_frontiers.end(); it++)
           events[it->second] = completion;
