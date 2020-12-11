@@ -2231,19 +2231,18 @@ namespace Legion {
       assert(!index_space_set);
       assert(!realm_index_space_set.has_triggered());
 #endif
-      // We can set this now but triggering the realm_index_space_set
-      // event has to be done while holding the node_lock on the owner
+      // We can set this now and trigger the event but setting the
+      // flag has to be done while holding the node_lock on the owner
       // node so that it is serialized with respect to queries from 
       // remote nodes for copies about the remote instance
       realm_index_space = value;
-      index_space_set = true;
+      Runtime::trigger_event(realm_index_space_set, ready_event);
       // If we're not the owner, send a message back to the
       // owner specifying that it can set the index space value
       const AddressSpaceID owner_space = get_owner_space();
       if (owner_space != context->runtime->address_space)
       {
-        // We're not the owner so we can trigger the event without the lock
-        Runtime::trigger_event(realm_index_space_set, ready_event);
+        index_space_set = true;
         // We're not the owner, if this is not from the owner then
         // send a message there telling the owner that it is set
         if ((source != owner_space) && (mapping == NULL))
@@ -2261,8 +2260,7 @@ namespace Legion {
       {
         // Hold the lock while walking over the node set
         AutoLock n_lock(node_lock);
-        // Now we can trigger the event while holding the lock
-        Runtime::trigger_event(realm_index_space_set, ready_event);
+        index_space_set = true;
         if (has_remote_instances())
         {
           // We're the owner, send messages to everyone else that we've 

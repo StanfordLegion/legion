@@ -8373,7 +8373,7 @@ namespace Legion {
         else if (above)
           return false;
         // Have to record this atomically with recording as a remote instance
-        pack_space = realm_index_space_set.has_triggered();
+        pack_space = index_space_set;
       }
       // If we have a parent check to see if it is the owner
       // If it is then we can continue traversing up
