@@ -411,6 +411,7 @@ namespace Realm {
 #else
       std::deque<GPUMemcpy *> pending_copies;
 #endif
+      bool issuing_copies;
 
       struct PendingEvent {
 	CUevent event;

@@ -57,7 +57,7 @@ namespace Realm {
   // class GPUStream
 
     GPUStream::GPUStream(GPU *_gpu, GPUWorker *_worker)
-      : gpu(_gpu), worker(_worker)
+      : gpu(_gpu), worker(_worker), issuing_copies(false)
     {
       assert(worker != 0);
       CHECK_CU( cuStreamCreate(&stream, CU_STREAM_NON_BLOCKING) );
@@ -89,8 +89,11 @@ namespace Realm {
       {
 	AutoLock<> al(mutex);
 
-	// remember to add ourselves to the worker if we didn't already have work
-	add_to_worker = pending_copies.empty() && pending_events.empty();
+	// if we didn't already have work AND if there's not an active
+	//  worker issuing copies, request attention
+	add_to_worker = (pending_copies.empty() &&
+			 pending_events.empty() &&
+			 !issuing_copies);
 
 	pending_copies.push_back(copy);
       }
@@ -138,8 +141,12 @@ namespace Realm {
       {
 	AutoLock<> al(mutex);
 
-	// remember to add ourselves to the worker if we didn't already have work
-	add_to_worker = pending_events.empty() && pending_copies.empty();
+	// if we didn't already have work AND if there's not an active
+	//  worker issuing copies, request attention
+	add_to_worker = (pending_copies.empty() &&
+			 pending_events.empty() &&
+			 !issuing_copies);
+
 
 	PendingEvent e;
 	e.event = event;
@@ -185,23 +192,25 @@ namespace Realm {
     //   current) - returns true if any work remains
     bool GPUStream::issue_copies(TimeLimit work_until)
     {
-      while(true) {
-	// if we cause the list to go empty, we stop even if more copies show
-	//  up because we don't want to requeue ourselves twice
-	bool list_exhausted = false;
-	GPUMemcpy *copy = 0;
-	{
-	  AutoLock<> al(mutex);
+      // we have to make sure copies for a given stream are issued
+      //  in order, so grab the thing at the front of the queue, but
+      //  also set a flag taking ownership of the head of the queue
+      GPUMemcpy *copy = 0;
+      {
+	AutoLock<> al(mutex);
 
-	  if(pending_copies.empty())
-	    // no copies left, but stream might have other work left
-	    return has_work();
-
-	  copy = pending_copies.front();
-	  pending_copies.pop_front();
-	  list_exhausted = !has_work();
+	// if the flag is set, we can't do any copies
+	if(issuing_copies || pending_copies.empty()) {
+	  // no copies left, but stream might have other work left
+	  return has_work();
 	}
 
+	copy = pending_copies.front();
+	pending_copies.pop_front();
+	issuing_copies = true;
+      }
+
+      while(true) {
 	{
 	  AutoGPUContext agc(gpu);
 	  copy->execute(this);
@@ -210,13 +219,29 @@ namespace Realm {
 	// TODO: recycle these
 	delete copy;
 
-	// if the list was exhausted, let the caller know
-	if(list_exhausted)
-	  return false;
+	// don't take another copy (but do clear the ownership flag)
+	//  if we're out of time
+	bool expired = work_until.is_expired();
 
-	// if we still have work, but time's up, return also
-	if(work_until.is_expired())
-	  return true;
+	{
+	  AutoLock<> al(mutex);
+
+	  if(pending_copies.empty()) {
+	    issuing_copies = false;
+	    // no copies left, but stream might have other work left
+	    return has_work();
+	  } else {
+	    if(expired) {
+	      issuing_copies = false;
+	      // definitely still work to do
+	      return true;
+	    } else {
+	      // take the next copy
+	      copy = pending_copies.front();
+	      pending_copies.pop_front();
+	    }
+	  }
+	}
       }
     }
 
