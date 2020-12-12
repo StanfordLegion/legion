@@ -214,6 +214,8 @@ namespace Realm {
 
       virtual void print(std::ostream& os) const;
 
+      void mark_gpu_work_start();
+
     protected:
       static void cuda_start_callback(CUstream stream, CUresult res, void *data);
     };

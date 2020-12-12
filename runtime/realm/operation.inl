@@ -114,6 +114,11 @@ namespace Realm {
       return 0;
   }
 
+  inline bool Operation::wants_gpu_work_start() const
+  {
+    return wants_gpu_timeline;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -133,13 +138,6 @@ namespace Realm {
   inline void Operation::AsyncWorkItem::mark_finished(bool successful)
   {
     op->work_item_finished(this, successful);
-  }
-
-  inline void Operation::AsyncWorkItem::mark_gpu_task_start()
-  {
-    if(op->wants_timeline)
-      op->timeline_gpu.record_start_time();
-    mark_finished(true);
   }
 
 }; // namespace Realm

@@ -308,7 +308,7 @@ namespace Realm {
 	}
 
         if (start) {
-          start->mark_gpu_task_start();
+          start->mark_gpu_work_start();
         }
 	if(fence)
 	  fence->mark_finished(true /*successful*/);
@@ -1470,12 +1470,18 @@ namespace Realm {
       }
     }
 
+    void GPUWorkStart::mark_gpu_work_start()
+    {
+      op->mark_gpu_work_start();
+      mark_finished(true);
+    }
+
     /*static*/ void GPUWorkStart::cuda_start_callback(CUstream stream, CUresult res, void *data)
     {
       GPUWorkStart *me = (GPUWorkStart *)data;
       assert(res == CUDA_SUCCESS);
       // record the real start time for the operation
-      me->mark_gpu_task_start();
+      me->mark_gpu_work_start();
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -1673,11 +1679,12 @@ namespace Realm {
       GPUWorkFence *fence = new GPUWorkFence(task);
       task->add_async_work_item(fence);
 
-      // event to record the GPU start time for the task
-      GPUWorkStart *start = new GPUWorkStart(task);
-      task->add_async_work_item(start);
-      // enqueue start event
-      start->enqueue_on_stream(s);
+      // event to record the GPU start time for the task, if requested
+      if(task->wants_gpu_work_start()) {
+	GPUWorkStart *start = new GPUWorkStart(task);
+	task->add_async_work_item(start);
+	start->enqueue_on_stream(s);
+      }
 
       bool ok = T::execute_task(task);
 
