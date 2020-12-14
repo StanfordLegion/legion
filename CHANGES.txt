@@ -1,6 +1,21 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 20.12.0 (December ??, 2020)
+  * Build
+    - Legion and Realm now require a compiler with (at least) c++11 support
+    - Python scripts (e.g. legion_prof and legion_spy) require Python 3.5
+  * Realm
+    - Improved performance of inter-node instance copies when data is not
+        contiguous in source and/or destination
+    - Improved responsiveness of utility processors by not using them for
+        background work by default
+    - Experimental support for building on Windows with MSVC
+    - Improved performance (and correctness) when running CUDA tasks without
+        the runtime hijack enabled
+  * Examples
+    - `examples/nccl` gives a simple example of using NCCL with Legion
+
 Version 20.09.0 (September 28, 2020)
   * Legion
     - Support for mapper-controlled reuse of reduction instances.  See:
