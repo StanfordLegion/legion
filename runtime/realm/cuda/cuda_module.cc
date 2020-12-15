@@ -3172,7 +3172,7 @@ namespace Realm {
       , cfg_zc_ib_size(256 << 20)
       , cfg_fb_mem_size(256 << 20)
       , cfg_num_gpus(0)
-      , cfg_gpu_streams(12)
+      , cfg_gpu_streams(1)
       , cfg_use_worker_threads(false)
       , cfg_use_shared_worker(true)
       , cfg_pin_sysmem(true)
