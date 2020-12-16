@@ -13,6 +13,11 @@ Version 20.12.0 (December ??, 2020)
     - Experimental support for building on Windows with MSVC
     - Improved performance (and correctness) when running CUDA tasks without
         the runtime hijack enabled
+  * Legion
+    - The mapping interface no longer requires the runtime to return valid
+      instances for empty regions (e.g. regions with no points their index space)
+  * Tools
+    - Legion Spy now has support for arbitrary number of dimensions
   * Examples
     - `examples/nccl` gives a simple example of using NCCL with Legion
 
