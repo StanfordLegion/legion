@@ -23402,14 +23402,10 @@ namespace Legion {
                 it->first.register_task(LG_ENDPOINT_TASK_ID, endpoint_task,
                   no_requests, &it->second, sizeof(it->second))));
         }
-        // Profiling tasks get registered on CPUs and utility processors
-        if ((it->first.kind() == Processor::LOC_PROC) ||
-            (it->first.kind() == Processor::TOC_PROC) ||
-            (it->first.kind() == Processor::UTIL_PROC) ||
-            (it->first.kind() == Processor::IO_PROC))
-          registered_events.insert(RtEvent(
-              it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
-                no_requests, &it->second, sizeof(it->second))));
+        // Register profiling return meta-task on all processor kinds
+        registered_events.insert(RtEvent(
+            it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
+              no_requests, &it->second, sizeof(it->second))));
         // Application processor tasks get registered on all
         // processors which are not utility processors
 #ifdef LEGION_SEPARATE_META_TASKS
