@@ -6074,6 +6074,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::advise_analysis_subtree(LogicalRegion parent,
+                                   const std::set<LogicalRegion> &regions,
+                                   const std::set<LogicalPartition> &partitions,
+                                   const std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Ignore advisement calls inside of traces
+      if ((current_trace != NULL) && current_trace->is_fixed())
+      {
+        REPORT_LEGION_WARNING(
+            LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+            "Ignoring advised analysis subtree in %s (UID %lld) because "
+            "advisement was made inside of a trace.",
+            get_task_name(), get_unique_id())
+        return;
+      }
+      if (fields.empty())
+      {
+        REPORT_LEGION_WARNING(
+            LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+            "Ignoring advised analysis subtree in %s (UID %lld) because "
+            "advisement contains no fields.",
+            get_task_name(), get_unique_id())
+        return;
+      }
+      if (regions.empty() && partitions.empty())
+      {
+        REPORT_LEGION_WARNING(
+            LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+            "Ignoring advised analysis subtree in %s (UID %lld) because "
+            "advisement contains no regions and partitions.",
+            get_task_name(), get_unique_id())
+        return;
+      }
+      AdvisementOp *advisement = runtime->get_available_advisement_op();
+      advisement->initialize(this, parent, regions, partitions, fields);
+      add_to_dependence_queue(advisement);
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::get_local_field_set(const FieldSpace handle,
                                            const std::set<unsigned> &indexes,
                                            std::set<FieldID> &to_set) const
@@ -15310,6 +15351,65 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::advise_analysis_subtree(LogicalRegion parent,
+                                   const std::set<LogicalRegion> &regions,
+                                   const std::set<LogicalPartition> &partitions,
+                                   const std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_ADVISE_ANALYSIS_SUBTREE);
+        hasher.hash(parent);
+        for (std::set<LogicalRegion>::const_iterator it =
+              regions.begin(); it != regions.end(); it++)
+          hasher.hash(*it);
+        for (std::set<LogicalPartition>::const_iterator it =
+              partitions.begin(); it != partitions.end(); it++)
+          hasher.hash(*it);
+        for (std::set<FieldID>::const_iterator it =
+              fields.begin(); it != fields.end(); it++)
+          hasher.hash(*it);
+        verify_replicable(hasher, "advise_analysis_subtree");
+      }
+      // Ignore advisement calls inside of traces replays
+      if ((current_trace != NULL) && current_trace->is_fixed())
+      {
+        REPORT_LEGION_WARNING(
+            LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+            "Ignoring advised analysis subtree in %s (UID %lld) because "
+            "advisement was made inside of a trace.",
+            get_task_name(), get_unique_id())
+        return;
+      }
+      if (fields.empty())
+      {
+        REPORT_LEGION_WARNING(
+            LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+            "Ignoring advised analysis subtree in %s (UID %lld) because "
+            "advisement contains no fields.",
+            get_task_name(), get_unique_id())
+        return;
+      }
+      if (regions.empty() && partitions.empty())
+      {
+        REPORT_LEGION_WARNING(
+            LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+            "Ignoring advised analysis subtree in %s (UID %lld) because "
+            "advisement contains no regions and partitions.",
+            get_task_name(), get_unique_id())
+        return;
+      }
+      AdvisementOp *advisement = runtime->get_available_advisement_op();
+      advisement->initialize(this, parent, regions, partitions, fields,
+          shard_manager->find_sharding_function(0/*default sharding*/));
+      add_to_dependence_queue(advisement);
+    }
+
+    //--------------------------------------------------------------------------
     FieldAllocatorImpl* ReplicateContext::create_field_allocator(
                                               FieldSpace handle, bool unordered)
     //--------------------------------------------------------------------------
@@ -20579,6 +20679,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::advise_analysis_subtree(LogicalRegion parent,
+                                   const std::set<LogicalRegion> &regions,
+                                   const std::set<LogicalPartition> &partitions,
+                                   const std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      // No-op
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::get_local_field_set(const FieldSpace handle,
                                           const std::set<unsigned> &indexes,
                                           std::set<FieldID> &to_set) const
@@ -22261,6 +22371,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->destroy_logical_region(handle, unordered);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::advise_analysis_subtree(LogicalRegion parent,
+                                   const std::set<LogicalRegion> &regions,
+                                   const std::set<LogicalPartition> &partitions,
+                                   const std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->advise_analysis_subtree(parent, regions, partitions, fields);
     }
 
     //--------------------------------------------------------------------------

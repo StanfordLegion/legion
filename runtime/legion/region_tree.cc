@@ -15493,7 +15493,7 @@ namespace Legion {
                 refinement_op->initialize(user.op, user.idx, trace_info, 
                                           region_node, refinement_mask);
                 // Invalidate the old disjoint complete tree
-                invalidate_disjoint_complete_tree(ctx, refinement_mask, 
+                invalidate_disjoint_complete_tree(ctx, refinement_mask,
                                                   false/*self*/);
 #ifdef DEBUG_LEGION
                 assert(!(refinement_mask - state.disjoint_complete_tree));

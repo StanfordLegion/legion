@@ -119,6 +119,7 @@ namespace Legion {
         VIRTUAL_CLOSE_OP_KIND,
         RETURN_CLOSE_OP_KIND,
         REFINEMENT_OP_KIND,
+        ADVISEMENT_OP_KIND,
         ACQUIRE_OP_KIND,
         RELEASE_OP_KIND,
         DYNAMIC_COLLECTIVE_OP_KIND,
@@ -155,6 +156,7 @@ namespace Legion {
         "Virtual Close",            \
         "Return Close",             \
         "Refinement",               \
+        "Advisement",               \
         "Acquire",                  \
         "Release",                  \
         "Dynamic Collective",       \
@@ -2095,6 +2097,51 @@ namespace Legion {
       std::vector<EquivalenceSet*> to_release;
       // Fields which do not have initialized equivalence sets
       FieldMask uninitialized_fields;
+    };
+
+    /**
+     * \class AdvisementOp
+     * An advisement operation is an operation that goes through
+     * the execution pipeline for the sole purpose of generating
+     * refinement operations to alter the equivalence sets of a
+     * region tree.
+     */
+    class AdvisementOp : public Operation {
+    public:
+      AdvisementOp(Runtime *runtime);
+      AdvisementOp(const AdvisementOp &rhs);
+      virtual ~AdvisementOp(void);
+    public:
+      AdvisementOp& operator=(const AdvisementOp &rhs);
+    public:
+      void initialize(InnerContext *ctx, LogicalRegion parent,
+                      const std::set<LogicalRegion> &regions,
+                      const std::set<LogicalPartition> &partitions,
+                      const std::set<FieldID> &fields, 
+                      ShardingFunction *function = NULL);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual size_t get_region_count(void) const;
+    public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
+#ifdef LEGION_SPY
+      virtual void trigger_complete(void);
+#endif
+    protected:
+      LogicalRegion parent;
+      std::vector<LogicalRegion> regions;
+      std::vector<LogicalPartition> partitions;
+      std::vector<FieldID> fields;
+      std::vector<RegionRequirement> requirements;
+      std::vector<RegionTreePath> privilege_paths;
+      std::set<RtEvent> map_applied_conditions;
+      ShardingFunction *sharding_function;
     };
 
     /**

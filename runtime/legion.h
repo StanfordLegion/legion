@@ -5752,6 +5752,30 @@ namespace Legion {
           "logical region or their index spartition are destroyed.")
       void destroy_logical_partition(Context ctx, LogicalPartition handle,
                                      const bool unordered = false);
+
+      /**
+       * Internally the runtime selects sets of disjoint and complete
+       * partitions to use for guiding the dependence analysis that it
+       * performs on region trees. The runtime has heuristics for selecting
+       * these partitions, but users may want to suggest specific regions and
+       * partitions to use to aid improve runtime performance. This method
+       * allows users to suggest specific regions and partitions to use for
+       * this analysis. The suggested regions and partitions must all be from
+       * the same region tree and must constitute a covering of the parent
+       * region. Furthermore all the partitions in the tree must be disjoint
+       * and complete and any ancestor partitions must also be disjoint
+       * and complete. This call will have no bearing on correctness, but
+       * will influence the amount of runtime overhead observed.
+       * @param ctx enclosing task context
+       * @param parent the logical region where privileges are derived from
+       * @param regions recommended analysis regions
+       * @param parts recommended analysis partitions
+       * @param fields the fields for which these should apply
+       */
+      void advise_analysis_subtree(Context ctx, LogicalRegion parent,
+                                   const std::set<LogicalRegion> &regions,
+                                   const std::set<LogicalPartition> &parts,
+                                   const std::set<FieldID> &fields);
     public:
       //------------------------------------------------------------------------
       // Logical Region Tree Traversal Operations

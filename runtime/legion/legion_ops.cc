@@ -10572,6 +10572,363 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Advisement Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AdvisementOp::AdvisementOp(Runtime *runtime)
+      : Operation(runtime)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AdvisementOp::AdvisementOp(const AdvisementOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    AdvisementOp::~AdvisementOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AdvisementOp& AdvisementOp::operator=(const AdvisementOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void AdvisementOp::initialize(InnerContext *ctx, LogicalRegion par,
+                                  const std::set<LogicalRegion> &regs,
+                                  const std::set<LogicalPartition> &parts,
+                                  const std::set<FieldID> &fids,
+                                  ShardingFunction *function)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+      parent = par;
+      sharding_function = function;
+      if (!regs.empty())
+        regions.insert(regions.end(), regs.begin(), regs.end());
+      if (!parts.empty())
+        partitions.insert(partitions.end(), parts.begin(), parts.end());
+      fields.insert(fields.end(), fids.begin(), fids.end());
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_advisement_operation(parent_ctx->get_unique_id(), 
+                                            unique_op_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void AdvisementOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+      parent = LogicalRegion::NO_REGION;
+      sharding_function = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void AdvisementOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      regions.clear();
+      partitions.clear();
+      fields.clear();
+      requirements.clear();
+      privilege_paths.clear();
+      map_applied_conditions.clear();
+      runtime->free_advisement_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* AdvisementOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[ADVISEMENT_OP_KIND]; 
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind AdvisementOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ADVISEMENT_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t AdvisementOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (regions.size() + partitions.size());
+    }
+
+    //--------------------------------------------------------------------------
+    void AdvisementOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *root = runtime->forest->get_node(parent);
+      std::vector<RegionNode*> region_nodes;
+      region_nodes.reserve(regions.size());
+      std::vector<PartitionNode*> part_nodes;
+      part_nodes.reserve(partitions.size());
+      std::map<PartitionNode*,std::set<RegionNode*> > observed_children;
+      for (std::vector<LogicalRegion>::const_iterator it =
+            regions.begin(); it != regions.end(); it++)
+      {
+        // Skip anything that is not in the same tree
+        if (parent.get_tree_id() != it->get_tree_id())
+        {
+          REPORT_LEGION_WARNING(
+              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+              "Ignoring advised analysis subtree for region (%d,%d,%d) "
+              "because it is not in parent region tree %d in %s (UID %lld)",
+              it->get_index_space().get_id(),
+              it->get_field_space().get_id(), it->get_tree_id(),
+              parent.get_tree_id(), parent_ctx->get_task_name(), 
+              parent_ctx->get_unique_id())
+          continue;
+        }
+        RegionNode *node = runtime->forest->get_node(*it);
+        // Skip anything higher in the tree than the parent
+        if (node->row_source->depth <= root->row_source->depth)
+        {
+          REPORT_LEGION_WARNING(
+              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+              "Ignoring advised analysis subtree for region (%d,%d,%d) "
+              "because it is not a descendant of parent region (%d,%d,%d) "
+              "in %s (UID %lld)", it->get_index_space().get_id(),
+              it->get_field_space().get_id(), it->get_tree_id(),
+              parent.get_index_space().get_id(),
+              parent.get_field_space().get_id(), parent.get_tree_id(), 
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+          continue;
+        }
+        region_nodes.push_back(node);
+        while (node != root)
+        {
+          observed_children[node->parent].insert(node);
+          node = node->parent->parent;
+        }
+      }
+      for (std::vector<LogicalPartition>::const_iterator it =
+            partitions.begin(); it != partitions.end(); it++)
+      {
+        // Skip anything that is not in the same tree
+        if (parent.get_tree_id() != it->get_tree_id())
+        {
+          REPORT_LEGION_WARNING(
+              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+              "Ignoring advised analysis subtree for partition (%d,%d,%d) "
+              "because it is not in parent region tree %d in %s (UID %lld)",
+              it->get_index_partition().get_id(),
+              it->get_field_space().get_id(), it->get_tree_id(),
+              parent.get_tree_id(), parent_ctx->get_task_name(), 
+              parent_ctx->get_unique_id())
+          continue;
+        }
+        PartitionNode *node = runtime->forest->get_node(*it);
+        // Skip anything higher in the tree than the parent
+        if (node->row_source->depth < root->row_source->depth)
+        {
+          REPORT_LEGION_WARNING(
+              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+              "Ignoring advised analysis subtree for partition (%d,%d,%d) "
+              "because it is not a descendant of parent region (%d,%d,%d) "
+              "in %s (UID %lld)", it->get_index_partition().get_id(),
+              it->get_field_space().get_id(), it->get_tree_id(),
+              parent.get_index_space().get_id(),
+              parent.get_field_space().get_id(), parent.get_tree_id(), 
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+          continue;
+        }
+        // Skip any partitions that are not disjoint
+        if (!node->row_source->is_disjoint(false/*from app*/))
+        {
+          REPORT_LEGION_WARNING(
+              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+              "Ignoring advised analysis subtree for partition (%d,%d,%d) "
+              "because it is not disjoint in %s (UID %lld)",
+              it->get_index_partition().get_id(),
+              it->get_field_space().get_id(), it->get_tree_id(),
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+          continue;
+        }
+        if (!node->row_source->is_complete(false/*from app*/))
+        {
+          REPORT_LEGION_WARNING(
+              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+              "Ignoring advised analysis subtree for partition (%d,%d,%d) "
+              "because it is not complete in %s (UID %lld)",
+              it->get_index_partition().get_id(),
+              it->get_field_space().get_id(), it->get_tree_id(),
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+          continue;
+        }
+        part_nodes.push_back(node);
+        RegionNode *region = node->parent;
+        // Record everything up the tree to see if we received
+        // a complete description of the tree
+        while (region != root)
+        {
+          node = region->parent;
+          observed_children[node].insert(region);
+          region = node->parent;
+        }
+      }
+      // Check to make sure that all the intermeidate partitions are
+      // disjoint and complete as well
+      for (std::map<PartitionNode*,std::set<RegionNode*> >::const_iterator it =
+            observed_children.begin(); it != observed_children.end(); it++)
+      {
+        if (!it->first->row_source->is_disjoint(false/*from app*/))
+        {
+          REPORT_LEGION_WARNING(
+              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+              "Ignoring advised analysis intermediate subtree for partition "
+              "(%d,%d,%d) because it is not disjoint in %s (UID %lld)",
+              it->first->handle.get_index_partition().get_id(),
+              it->first->handle.get_field_space().get_id(), 
+              it->first->handle.get_tree_id(), parent_ctx->get_task_name(), 
+              parent_ctx->get_unique_id())
+          return;
+        }
+        if (!it->first->row_source->is_complete(false/*from app*/))
+        {
+          REPORT_LEGION_WARNING(
+              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+              "Ignoring advised analysis intermediate subtree for partition "
+              "(%d,%d,%d) because it is not complete in %s (UID %lld)",
+              it->first->handle.get_index_partition().get_id(),
+              it->first->handle.get_field_space().get_id(), 
+              it->first->handle.get_tree_id(), parent_ctx->get_task_name(), 
+              parent_ctx->get_unique_id())
+          return;
+        }
+        if (it->second.size() != it->first->row_source->get_num_children())
+        {
+          REPORT_LEGION_WARNING(
+              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+              "Ignoring advised analysis intermediate subtree for partition "
+              "(%d,%d,%d) because only %zd children of %zd where found in "
+              "%s (UID %lld)", it->first->handle.get_index_partition().get_id(),
+              it->first->handle.get_field_space().get_id(), 
+              it->first->handle.get_tree_id(), it->second.size(),
+              it->first->row_source->get_num_children(),
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+          return;
+        }
+      }
+      // Once we get here then we can make the region requirements
+      requirements.reserve(region_nodes.size() + part_nodes.size());
+      for (std::vector<RegionNode*>::const_iterator it =
+            region_nodes.begin(); it != region_nodes.end(); it++)
+        requirements.emplace_back(
+            RegionRequirement((*it)->handle, LEGION_READ_WRITE,
+              LEGION_EXCLUSIVE, parent));
+      for (std::vector<PartitionNode*>::const_iterator it =
+            part_nodes.begin(); it != part_nodes.end(); it++)
+        requirements.emplace_back(
+            RegionRequirement((*it)->handle, 0/*proj id*/,
+              LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent));
+      privilege_paths.resize(requirements.size());
+      for (unsigned idx = 0; idx < requirements.size(); idx++)
+      {
+        requirements[idx].privilege_fields.insert(fields.begin(), fields.end());
+        initialize_privilege_path(privilege_paths[idx], requirements[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void AdvisementOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < requirements.size(); idx++)
+      {
+        const RegionRequirement &req = requirements[idx];
+        // Check to see if this is a singular or projection requirement
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
+        {
+          PartitionNode *partition = runtime->forest->get_node(req.partition);
+          ProjectionInfo projection_info(runtime, req, 
+              partition->row_source->color_space, sharding_function);
+          runtime->forest->perform_dependence_analysis(this, idx, req,
+                                                       projection_info,
+                                                       privilege_paths[idx],
+                                                       map_applied_conditions);
+          if (runtime->legion_spy_enabled)
+          {
+            LegionSpy::log_logical_requirement(unique_op_id, idx, 
+                                               false/*region*/,
+                                               req.partition.index_partition.id,
+                                               req.partition.field_space.id,
+                                               req.partition.tree_id,
+                                               req.privilege,
+                                               req.prop, req.redop,
+                                               req.parent.index_space.id);
+            LegionSpy::log_requirement_fields(unique_op_id, idx, fields);
+            LegionSpy::log_requirement_projection(unique_op_id, idx, 
+                                                  req.projection);
+          }
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+          ProjectionInfo projection_info;
+          runtime->forest->perform_dependence_analysis(this, 0/*idx*/, req,
+                                                       projection_info,
+                                                       privilege_paths[idx],
+                                                       map_applied_conditions);
+          if (runtime->legion_spy_enabled)
+          {
+            LegionSpy::log_logical_requirement(unique_op_id, idx, 
+                                               true/*region*/,
+                                               req.region.index_space.id,
+                                               req.region.field_space.id,
+                                               req.region.tree_id,
+                                               req.privilege,
+                                               req.prop, req.redop,
+                                               req.parent.index_space.id);
+            LegionSpy::log_requirement_fields(unique_op_id, idx, fields);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void AdvisementOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
+      complete_execution();
+    }
+
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    void AdvisementOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Still need this to record that this operation is done for LegionSpy
+      LegionSpy::log_operation_events(unique_op_id, 
+          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+      complete_operation();
+    }
+#endif
+
+    /////////////////////////////////////////////////////////////
     // External Acquire
     /////////////////////////////////////////////////////////////
 

@@ -344,6 +344,10 @@ namespace Legion {
       virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered) = 0;
+      virtual void advise_analysis_subtree(LogicalRegion parent,
+                                      const std::set<LogicalRegion> &regions,
+                                      const std::set<LogicalPartition> &parts,
+                                      const std::set<FieldID> &fields) = 0;
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle,
                                                          bool unordered);
       virtual void destroy_field_allocator(FieldSpaceNode *node);
@@ -1163,6 +1167,10 @@ namespace Legion {
                                             const bool output_region = false);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
+      virtual void advise_analysis_subtree(LogicalRegion parent,
+                                      const std::set<LogicalRegion> &regions,
+                                      const std::set<LogicalPartition> &parts,
+                                      const std::set<FieldID> &fields);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const;
@@ -1676,6 +1684,7 @@ namespace Legion {
         REPLICATE_FREE_FIELDS,
         REPLICATE_CREATE_LOGICAL_REGION,
         REPLICATE_DESTROY_LOGICAL_REGION,
+        REPLICATE_ADVISE_ANALYSIS_SUBTREE,
         REPLICATE_CREATE_FIELD_ALLOCATOR,
         REPLICATE_DESTROY_FIELD_ALLOCATOR,
         REPLICATE_EXECUTE_TASK,
@@ -2052,6 +2061,10 @@ namespace Legion {
       virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
+      virtual void advise_analysis_subtree(LogicalRegion parent,
+                                      const std::set<LogicalRegion> &regions,
+                                      const std::set<LogicalPartition> &parts,
+                                      const std::set<FieldID> &fields);
     public:
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle,
                                                          bool unordered);
@@ -2768,6 +2781,10 @@ namespace Legion {
                                             const bool output_region = false);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
+      virtual void advise_analysis_subtree(LogicalRegion parent,
+                                      const std::set<LogicalRegion> &regions,
+                                      const std::set<LogicalPartition> &parts,
+                                      const std::set<FieldID> &fields);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const;
@@ -3190,6 +3207,10 @@ namespace Legion {
       virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
+      virtual void advise_analysis_subtree(LogicalRegion parent,
+                                      const std::set<LogicalRegion> &regions,
+                                      const std::set<LogicalPartition> &parts,
+                                      const std::set<FieldID> &fields);
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle,
                                                          bool unordered);
       virtual void destroy_field_allocator(FieldSpaceNode *node);

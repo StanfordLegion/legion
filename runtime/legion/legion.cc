@@ -5113,6 +5113,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::advise_analysis_subtree(Context ctx, LogicalRegion parent,
+                                        const std::set<LogicalRegion> &regions,
+                                        const std::set<LogicalPartition> &parts,
+                                        const std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      ctx->advise_analysis_subtree(parent, regions, parts, fields);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition Runtime::get_logical_partition(Context ctx, 
                                     LogicalRegion parent, IndexPartition handle)
     //--------------------------------------------------------------------------

@@ -574,6 +574,12 @@ namespace Legion {
         log_spy.print("Refinement Operation %llu %llu", context, unique_id);
       }
 
+      static inline void log_advisement_operation(UniqueID context,
+                                                  UniqueID unique_id)
+      {
+        log_spy.print("Advisement Operation %llu %llu", context, unique_id);
+      }
+
       static inline void log_internal_op_creator(UniqueID internal_op_id,
                                                  UniqueID creator_op_id,
                                                  int idx)

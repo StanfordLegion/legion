@@ -14157,6 +14157,13 @@ namespace Legion {
         delete (*it);
       }
       available_refinement_ops.clear();
+      for (std::deque<AdvisementOp*>::const_iterator it =
+            available_advisement_ops.begin(); it !=
+            available_advisement_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_advisement_ops.clear();
       for (std::deque<DynamicCollectiveOp*>::const_iterator it = 
             available_dynamic_collective_ops.begin(); it !=
             available_dynamic_collective_ops.end(); it++)
@@ -24307,6 +24314,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AdvisementOp* Runtime::get_available_advisement_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(advisement_op_lock, available_advisement_ops);
+    }
+
+    //--------------------------------------------------------------------------
     DynamicCollectiveOp* Runtime::get_available_dynamic_collective_op(void)
     //--------------------------------------------------------------------------
     {
@@ -24788,6 +24802,14 @@ namespace Legion {
     {
       AutoLock r_lock(refinement_op_lock);
       release_operation<false>(available_refinement_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_advisement_op(AdvisementOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(advisement_op_lock);
+      release_operation<false>(available_advisement_ops, op);
     }
 
     //--------------------------------------------------------------------------

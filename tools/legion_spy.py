@@ -91,6 +91,7 @@ PREDICATE_OP_KIND = 23
 MUST_EPOCH_OP_KIND = 24
 CREATION_OP_KIND = 25
 REFINEMENT_OP_KIND = 26
+ADVISEMENT_OP_KIND = 27
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -126,6 +127,7 @@ OpNames = [
 "Must Epoch Op",
 "Creation Op",
 "Refinement Op",
+"Advisement Op",
 ]
 
 INDEX_SPACE_EXPR = 0
@@ -7817,6 +7819,7 @@ class Operation(object):
             PREDICATE_OP_KIND : "olivedrab1",
             MUST_EPOCH_OP_KIND : "tomato",
             REFINEMENT_OP_KIND : "royalblue",
+            ADVISEMENT_OP_KIND : "magenta",
             }[self.kind]
 
     @property
