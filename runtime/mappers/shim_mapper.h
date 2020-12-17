@@ -101,6 +101,8 @@ namespace Legion {
         virtual UniqueID get_unique_id(void) const;
         virtual size_t get_context_index(void) const;
         virtual int get_depth(void) const;
+        virtual bool has_parent_task(void) const;
+        virtual const Legion::Task* get_parent_task(void) const;
         virtual const char* get_task_name(void) const;
         virtual bool has_trace(void) const;
       public:
@@ -140,6 +142,7 @@ namespace Legion {
         virtual UniqueID get_unique_id(void) const;
         virtual size_t get_context_index(void) const;
         virtual int get_depth(void) const;
+        virtual const Legion::Task* get_parent_task(void) const;
       public:
         inline UniqueID get_unique_inline_id(void) const { return unique_id; }
       public:
@@ -162,6 +165,7 @@ namespace Legion {
         virtual UniqueID get_unique_id(void) const;
         virtual size_t get_context_index(void) const;
         virtual int get_depth(void) const;
+        virtual const Legion::Task* get_parent_task(void) const;
       public:
         inline UniqueID get_unique_copy_id(void) const { return unique_id; }
       public:
