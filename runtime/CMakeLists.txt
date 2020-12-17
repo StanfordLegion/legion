@@ -186,7 +186,7 @@ list(APPEND REALM_SRC
   realm/subgraph.inl
   realm/timers.h           realm/timers.cc
   realm/timers.inl
-  realm/utils.h
+  realm/utils.h            realm/utils.cc
 )
 
 # generate per-dimension object files for deppart stuff
