@@ -8,6 +8,7 @@ import argparse
 import os
 import tempfile
 import subprocess
+import base64
 
 parser = argparse.ArgumentParser(description='Generate Dockerfile from GitLab CI YAML configuration file')
 parser.add_argument('-b', '--branch', type=str, default='master',
@@ -17,6 +18,9 @@ parser.add_argument('--repo', type=str,
                     help='repository to clone')
 parser.add_argument('-l', '--localtree', type=str,
                     help='local tree to test (instead of cloning)')
+parser.add_argument('-L', '--localchanges', type=str, default='abort',
+                    choices=('copy', 'ignore', 'abort'),
+                    help='action to take if local tree has uncommitted changes')
 parser.add_argument('-o', '--outdir', type=str,
                     help='write Dockerfile to output directory instead of building')
 parser.add_argument('-k', '--keep', action='store_true',
@@ -27,6 +31,8 @@ parser.add_argument('-n', '--noscript', action='store_true',
                     help='do not actually run /script.sh during docker build')
 parser.add_argument('-t', '--tag', type=str,
                     help='tag to apply to built container')
+parser.add_argument('-N', '--network', type=str,
+                    help='name of docker network to use during build')
 parser.add_argument('cfgfile', type=str,
                     help='path to GitLab CI config file')
 parser.add_argument('jobname', type=str,
@@ -65,13 +71,13 @@ def generate_dockerfile(args, cfg, job, script=None):
     s = ''
     s += 'FROM {}\n'.format(args.image or job['image'])
     s += 'SHELL [ "/bin/bash", "-c" ]\n'
-    for k, v in cfg['variables'].iteritems():
+    for k, v in cfg['variables'].items():
         s += 'ENV {}="{}"\n'.format(k, v)
-    for k, v in job.get('variables', {}).iteritems():
+    for k, v in job.get('variables', {}).items():
         s += 'ENV {}="{}"\n'.format(k, v)
 
     if script:
-        b64 = script.encode('base64')[0:-1]  # trim trailing newline
+        b64 = base64.b64encode(bytes(script, 'latin-1')).decode('latin-1')
         b64 = b64.replace('\n', '\\\n')
         s += 'RUN echo \\\n' + b64 + ' | base64 -d > script.sh\n'
     else:
@@ -88,7 +94,14 @@ def generate_dockerfile(args, cfg, job, script=None):
             if ret == 0:
                 reclone = True
             else:
-                print('WARNING: local tree looks like a git repository, but has uncommitted changes - copying entire tree to be safe')
+                if args.localchanges == 'ignore':
+                    print('WARNING: local tree looks like a git repository, but has uncommitted changes - ignoring them')
+                    reclone = True
+                elif args.localchanges == 'copy':
+                    print('WARNING: local tree looks like a git repository, but has uncommitted changes - copying entire tree to be safe')
+                else:
+                    print('WARNING: local tree looks like a git repository, but has uncommitted changes - use -L {ignore,copy} to specify desired action')
+                    exit(1)
 
         if reclone:
             args.localtree = os.path.join(args.localtree, '.git')
@@ -129,6 +142,9 @@ else:
 
     cmd = [ 'docker', 'build' ]
 
+    if args.network:
+        cmd.extend([ '--network', args.network ])
+
     if args.tag:
         cmd.extend([ '-t', args.tag ])
 
@@ -136,15 +152,19 @@ else:
         # we use the target tree as the context, which means we need to
         #  put the dockerfile somewhere else (and tell docker about it)
         fd, dfilename = tempfile.mkstemp(text=True)
-        os.write(fd, df)
+        os.write(fd, bytes(df, 'latin-1'))
         os.close(fd)
         cmd.extend([ '-f', dfilename, os.path.abspath(args.localtree) ])
     else:
         cmd.append('-')
 
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-    p.communicate(df)
-    ret = p.wait()
+    try:
+        p.communicate(bytes(df, 'latin-1'))
+        ret = p.wait()
+    except KeyboardInterrupt:
+        p.terminate()
+        ret = p.wait()
     if args.localtree:
         # clean up temp file
         os.unlink(dfilename)
