@@ -2501,7 +2501,7 @@ namespace Legion {
       unsigned idx = ranges[SENTINEL].next_free;
       while (idx != SENTINEL) {
         Range &r = ranges[idx];
-        logger.debug("range %u: %zd bytes [%lx,%lx)",
+        logger.debug("range %u: %zd bytes [%zx,%zx)",
                      idx, r.last - r.first, r.first, r.last);
         idx = r.next_free;
       }

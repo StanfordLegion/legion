@@ -74,7 +74,7 @@ namespace Realm {
       virtual ~AsyncWorkItem(void);
 
       void mark_finished(bool successful);
-      void mark_gpu_task_start(void);
+
       virtual void request_cancellation(void) = 0;
 
       virtual void print(std::ostream& os) const = 0;
@@ -95,6 +95,10 @@ namespace Realm {
 
     // used to record event wait intervals, if desired
     ProfilingMeasurements::OperationEventWaits::WaitInterval *create_wait_interval(Event e);
+
+    // used to measure when device-side work starts for a gpu task
+    bool wants_gpu_work_start() const;
+    void mark_gpu_work_start();
 
   protected:
     // called by AsyncWorkItem::mark_finished from an arbitrary thread
@@ -123,6 +127,7 @@ namespace Realm {
     ProfilingMeasurements::OperationStatus status;
     bool wants_timeline;
     ProfilingMeasurements::OperationTimeline timeline;
+    bool wants_gpu_timeline;
     ProfilingMeasurements::OperationTimelineGPU timeline_gpu; // gpu start/end times
     bool wants_event_waits;
     ProfilingMeasurements::OperationEventWaits waits;

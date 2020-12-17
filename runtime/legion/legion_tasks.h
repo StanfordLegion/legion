@@ -179,6 +179,8 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
+      virtual bool has_parent_task(void) const;
+      virtual const Task* get_parent_task(void) const;
       virtual const char* get_task_name(void) const;
       virtual bool is_reducing_future(void) const;
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
@@ -382,6 +384,8 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
+      virtual bool has_parent_task(void) const;
+      virtual const Task* get_parent_task(void) const;
       virtual const char* get_task_name(void) const;
       virtual void set_context_index(size_t index);
     public:

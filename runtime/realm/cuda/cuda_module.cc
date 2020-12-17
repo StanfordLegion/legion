@@ -57,7 +57,7 @@ namespace Realm {
   // class GPUStream
 
     GPUStream::GPUStream(GPU *_gpu, GPUWorker *_worker)
-      : gpu(_gpu), worker(_worker)
+      : gpu(_gpu), worker(_worker), issuing_copies(false)
     {
       assert(worker != 0);
       CHECK_CU( cuStreamCreate(&stream, CU_STREAM_NON_BLOCKING) );
@@ -89,8 +89,11 @@ namespace Realm {
       {
 	AutoLock<> al(mutex);
 
-	// remember to add ourselves to the worker if we didn't already have work
-	add_to_worker = pending_copies.empty() && pending_events.empty();
+	// if we didn't already have work AND if there's not an active
+	//  worker issuing copies, request attention
+	add_to_worker = (pending_copies.empty() &&
+			 pending_events.empty() &&
+			 !issuing_copies);
 
 	pending_copies.push_back(copy);
       }
@@ -138,8 +141,12 @@ namespace Realm {
       {
 	AutoLock<> al(mutex);
 
-	// remember to add ourselves to the worker if we didn't already have work
-	add_to_worker = pending_events.empty() && pending_copies.empty();
+	// if we didn't already have work AND if there's not an active
+	//  worker issuing copies, request attention
+	add_to_worker = (pending_copies.empty() &&
+			 pending_events.empty() &&
+			 !issuing_copies);
+
 
 	PendingEvent e;
 	e.event = event;
@@ -185,23 +192,25 @@ namespace Realm {
     //   current) - returns true if any work remains
     bool GPUStream::issue_copies(TimeLimit work_until)
     {
-      while(true) {
-	// if we cause the list to go empty, we stop even if more copies show
-	//  up because we don't want to requeue ourselves twice
-	bool list_exhausted = false;
-	GPUMemcpy *copy = 0;
-	{
-	  AutoLock<> al(mutex);
+      // we have to make sure copies for a given stream are issued
+      //  in order, so grab the thing at the front of the queue, but
+      //  also set a flag taking ownership of the head of the queue
+      GPUMemcpy *copy = 0;
+      {
+	AutoLock<> al(mutex);
 
-	  if(pending_copies.empty())
-	    // no copies left, but stream might have other work left
-	    return has_work();
-
-	  copy = pending_copies.front();
-	  pending_copies.pop_front();
-	  list_exhausted = !has_work();
+	// if the flag is set, we can't do any copies
+	if(issuing_copies || pending_copies.empty()) {
+	  // no copies left, but stream might have other work left
+	  return has_work();
 	}
 
+	copy = pending_copies.front();
+	pending_copies.pop_front();
+	issuing_copies = true;
+      }
+
+      while(true) {
 	{
 	  AutoGPUContext agc(gpu);
 	  copy->execute(this);
@@ -210,13 +219,29 @@ namespace Realm {
 	// TODO: recycle these
 	delete copy;
 
-	// if the list was exhausted, let the caller know
-	if(list_exhausted)
-	  return false;
+	// don't take another copy (but do clear the ownership flag)
+	//  if we're out of time
+	bool expired = work_until.is_expired();
 
-	// if we still have work, but time's up, return also
-	if(work_until.is_expired())
-	  return true;
+	{
+	  AutoLock<> al(mutex);
+
+	  if(pending_copies.empty()) {
+	    issuing_copies = false;
+	    // no copies left, but stream might have other work left
+	    return has_work();
+	  } else {
+	    if(expired) {
+	      issuing_copies = false;
+	      // definitely still work to do
+	      return true;
+	    } else {
+	      // take the next copy
+	      copy = pending_copies.front();
+	      pending_copies.pop_front();
+	    }
+	  }
+	}
       }
     }
 
@@ -283,7 +308,7 @@ namespace Realm {
 	}
 
         if (start) {
-          start->mark_gpu_task_start();
+          start->mark_gpu_work_start();
         }
 	if(fence)
 	  fence->mark_finished(true /*successful*/);
@@ -1445,12 +1470,18 @@ namespace Realm {
       }
     }
 
+    void GPUWorkStart::mark_gpu_work_start()
+    {
+      op->mark_gpu_work_start();
+      mark_finished(true);
+    }
+
     /*static*/ void GPUWorkStart::cuda_start_callback(CUstream stream, CUresult res, void *data)
     {
       GPUWorkStart *me = (GPUWorkStart *)data;
       assert(res == CUDA_SUCCESS);
       // record the real start time for the operation
-      me->mark_gpu_task_start();
+      me->mark_gpu_work_start();
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -1563,6 +1594,172 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // class ContextSynchronizer
+
+    ContextSynchronizer::ContextSynchronizer(GPU *_gpu,
+					     CUcontext _context,
+					     CoreReservationSet& crs,
+					     int _max_threads)
+      : gpu(_gpu)
+      , context(_context)
+      , max_threads(_max_threads)
+      , condvar(mutex)
+      , shutdown_flag(false)
+      , total_threads(0)
+      , sleeping_threads(0)
+      , syncing_threads(0)
+    {
+      Realm::CoreReservationParameters params;
+      params.set_num_cores(1);
+      params.set_alu_usage(params.CORE_USAGE_SHARED);
+      params.set_fpu_usage(params.CORE_USAGE_MINIMAL);
+      params.set_ldst_usage(params.CORE_USAGE_MINIMAL);
+      params.set_max_stack_size(1 << 20);
+
+      std::string name = stringbuilder() << "GPU ctxsync " << context;
+
+      core_rsrv = new Realm::CoreReservation(name, crs, params);
+    }
+
+    ContextSynchronizer::~ContextSynchronizer()
+    {
+      assert(total_threads == 0);
+      delete core_rsrv;
+    }
+
+    void ContextSynchronizer::shutdown_threads()
+    {
+      // set the shutdown flag and wake up everybody
+      {
+	AutoLock<> al(mutex);
+	shutdown_flag = true;
+	if(sleeping_threads > 0)
+	  condvar.broadcast();
+      }
+
+      for(int i = 0; i < total_threads; i++) {
+	worker_threads[i]->join();
+	delete worker_threads[i];
+      }
+
+      worker_threads.clear();
+      total_threads = false;
+      sleeping_threads = false;
+      syncing_threads = false;
+      shutdown_flag = false;
+    }
+
+    void ContextSynchronizer::add_fence(GPUWorkFence *fence)
+    {
+      bool start_new_thread = false;
+      {
+	AutoLock<> al(mutex);
+
+	fences.push_back(fence);
+
+	// if all the current threads are asleep or busy syncing, we
+	//  need to do something
+	if((sleeping_threads + syncing_threads) == total_threads) {
+	  // is there a sleeping thread we can wake up to handle this?
+	  if(sleeping_threads > 0) {
+	    // just poke one of them
+	    condvar.signal();
+	  } else {
+	    // can we start a new thread?  (if not, we'll just have to
+	    //  be patient)
+	    if(total_threads < max_threads) {
+	      total_threads++;
+	      syncing_threads++; // threads starts as if it's syncing
+	      start_new_thread = true;
+	    }
+	  }
+	}
+      }
+
+      if(start_new_thread) {
+	Realm::ThreadLaunchParameters tlp;
+
+	Thread *t = Realm::Thread::create_kernel_thread<ContextSynchronizer,
+							&ContextSynchronizer::thread_main>(this,
+											   tlp,
+											   *core_rsrv,
+											   0);
+	// need the mutex to put this thread in the list
+	{
+	  AutoLock<> al(mutex);
+	  worker_threads.push_back(t);
+	}
+      }
+    }
+
+    void ContextSynchronizer::thread_main()
+    {
+      while(true) {
+	GPUWorkFence::FenceList my_fences;
+
+	// attempt to get a non-empty list of fences to synchronize,
+	//  sleeping when needed and paying attention to the shutdown
+	//  flag
+	{
+	  AutoLock<> al(mutex);
+
+	  syncing_threads--;
+
+	  while(true) {
+	    if(shutdown_flag)
+	      return;
+
+	    if(fences.empty()) {
+	      // sleep until somebody tells us there's stuff to do
+	      sleeping_threads++;
+	      condvar.wait();
+	      sleeping_threads--;
+	    } else {
+	      // grab everything (a single sync covers however much stuff
+	      //  was pushed ahead of it)
+	      syncing_threads++;
+	      my_fences.swap(fences);
+	      break;
+	    }
+	  }
+	}
+
+	// shouldn't get here with an empty list
+	assert(!my_fences.empty());
+
+	log_stream.debug() << "starting ctx sync: ctx=" << context;
+
+	{
+	  AutoGPUContext agc(gpu);
+
+	  CUresult res = cuCtxSynchronize();
+
+	  // complain loudly about any errors
+	  if(res != CUDA_SUCCESS) {
+	    const char *ename = 0;
+	    const char *estr = 0;
+	    cuGetErrorName(res, &ename);
+	    cuGetErrorString(res, &estr);
+	    log_gpu.fatal() << "CUDA error reported on GPU " << gpu->info->index << ": " << estr << " (" << ename << ")";
+	    abort();
+	  }
+	}
+
+	log_stream.debug() << "finished ctx sync: ctx=" << context;
+
+	// mark all the fences complete
+	while(!my_fences.empty()) {
+	  GPUWorkFence *fence = my_fences.pop_front();
+	  fence->mark_finished(true /*successful*/);
+	}
+
+	// and go back around for more...
+      }
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class GPUTaskScheduler<T>
 
     // we want to subclass the scheduler to replace the execute_task method, but we also want to
@@ -1648,11 +1845,12 @@ namespace Realm {
       GPUWorkFence *fence = new GPUWorkFence(task);
       task->add_async_work_item(fence);
 
-      // event to record the GPU start time for the task
-      GPUWorkStart *start = new GPUWorkStart(task);
-      task->add_async_work_item(start);
-      // enqueue start event
-      start->enqueue_on_stream(s);
+      // event to record the GPU start time for the task, if requested
+      if(task->wants_gpu_work_start()) {
+	GPUWorkStart *start = new GPUWorkStart(task);
+	task->add_async_work_item(start);
+	start->enqueue_on_stream(s);
+      }
 
       bool ok = T::execute_task(task);
 
@@ -1665,14 +1863,6 @@ namespace Realm {
         delete ThreadLocal::created_gpu_streams;
         ThreadLocal::created_gpu_streams = 0;
       }
-
-      // now enqueue the fence on the local stream
-      fence->enqueue_on_stream(s);
-
-      // A useful debugging macro
-#ifdef FORCE_GPU_STREAM_SYNCHRONIZE
-      CHECK_CU( cuStreamSynchronize(s->get_stream()) );
-#endif
 
 #ifdef REALM_USE_CUDART_HIJACK
       // if our hijack code is not active, the application may have put some work for this
@@ -1687,12 +1877,21 @@ namespace Realm {
 	  log_gpu.warning() << "CUDART hijack code not active"
 			    << " - device synchronizations required after every GPU task!";
 	}
-	CHECK_CU( cuCtxSynchronize() );
+	gpu_proc->ctxsync.add_fence(fence);
+      } else {
+	// a fence on the local stream is sufficient when hijack is active
+	fence->enqueue_on_stream(s);
       }
 #else
-      // no hijack at all, so always synchronize to ensure all effects are observable
-      CHECK_CU( cuCtxSynchronize() );
+      // always use a full ctx synchronization to capture task effects
+      gpu_proc->ctxsync.add_fence(fence);
 #endif
+
+      // A useful debugging macro
+#ifdef FORCE_GPU_STREAM_SYNCHRONIZE
+      CHECK_CU( cuStreamSynchronize(s->get_stream()) );
+#endif
+
       // pop the CUDA context for this GPU back off
       gpu_proc->gpu->pop_context();
 
@@ -1761,6 +1960,7 @@ namespace Realm {
       : LocalTaskProcessor(_me, Processor::TOC_PROC)
       , gpu(_gpu)
       , block_on_synchronize(false)
+      , ctxsync(_gpu, _gpu->context, crs, _gpu->module->cfg_max_ctxsync_threads)
     {
       Realm::CoreReservationParameters params;
       params.set_num_cores(1);
@@ -2094,6 +2294,8 @@ namespace Realm {
 
       // shut down threads/scheduler
       LocalTaskProcessor::shutdown();
+
+      ctxsync.shutdown_threads();
 
       // synchronize the device so we can flush any printf buffers - do
       //  this after shutting down the threads so that we know all work is done
@@ -3181,6 +3383,7 @@ namespace Realm {
       , cfg_skip_gpu_count(0)
       , cfg_skip_busy_gpus(false)
       , cfg_min_avail_mem(0)
+      , cfg_max_ctxsync_threads(4)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
     {}
@@ -3275,7 +3478,8 @@ namespace Realm {
 	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)
 	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
 	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
-	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm');
+	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
+	  .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads);
 #ifdef REALM_USE_CUDART_HIJACK
 	cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
 #endif

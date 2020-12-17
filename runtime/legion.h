@@ -3303,6 +3303,8 @@ namespace Legion {
       virtual size_t get_context_index(void) const = 0;
       // Return the depth of this operation in the task tree
       virtual int get_depth(void) const = 0;
+      // Get the parent task associated with this mappable  
+      virtual const Task* get_parent_task(void) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const = 0;
       virtual const Task* as_task(void) const = 0;
@@ -3318,6 +3320,11 @@ namespace Legion {
     public:
       MapperID                                  map_id;
       MappingTagID                              tag;
+    public:
+      // The 'parent_task' member is here for backwards compatibility
+      // It's better to use the 'get_parent_task' method
+      // as this may be NULL until that method is called
+      mutable const Task*                       parent_task;
     public:
       // Mapper annotated data 
       void*                                     mapper_data;
@@ -3358,6 +3365,8 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       Task(void);
     public:
+      // Check whether this task has a parent task
+      virtual bool has_parent_task(void) const = 0;
       virtual const char* get_task_name(void) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3402,9 +3411,6 @@ namespace Legion {
       unsigned                            steal_count;
       bool                                stealable;
       bool                                speculated;
-    public:
-      // Parent task (only guaranteed to be good for one recursion)
-      const Task*                         parent_task;
     };
 
     /**
@@ -3445,9 +3451,6 @@ namespace Legion {
       Domain                            index_domain;
       DomainPoint                       index_point;
       IndexSpace                        sharding_space;
-    public:
-      // Parent task for the copy operation
-      const Task*                       parent_task;
     };
 
     /**
@@ -3480,9 +3483,6 @@ namespace Legion {
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
       LayoutConstraintID                layout_constraint_id; 
-    public:
-      // Parent task for the inline operation
-      const Task*                       parent_task;
     };
 
     /**
@@ -3516,9 +3516,6 @@ namespace Legion {
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
-    public:
-      // Parent task for the acquire operation
-      const Task*                       parent_task;
     };
 
     /**
@@ -3552,9 +3549,6 @@ namespace Legion {
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
-    public:
-      // Parent task for the release operation
-      const Task*                       parent_task;
     };
 
     /**
@@ -3587,9 +3581,6 @@ namespace Legion {
     public:
       // Synthesized region requirement
       RegionRequirement                 requirement;
-    public:
-      // Parent task for the inline operation
-      const Task*                       parent_task;
     };
 
     /**
@@ -3628,9 +3619,6 @@ namespace Legion {
       Domain                            index_domain;
       DomainPoint                       index_point;
       IndexSpace                        sharding_space;
-    public:
-      // Parent task for the fill operation
-      const Task*                       parent_task;
     };
 
     /**
@@ -3676,9 +3664,6 @@ namespace Legion {
       bool                                is_index_space;
       Domain                              index_domain;
       DomainPoint                         index_point;
-    public:
-      // Parent task for the partition operation
-      const Task*                         parent_task;
     };
 
     /**
@@ -3712,9 +3697,6 @@ namespace Legion {
       // Index space of points for the must epoch operation
       Domain                                    launch_domain;
       IndexSpace                                sharding_space;
-    public:
-      // Parent task for the must epoch operation
-      const Task*                               parent_task;
     };
 
     //==========================================================================

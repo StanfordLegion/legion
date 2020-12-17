@@ -3134,8 +3134,8 @@ class LogicalRegion(object):
 
     def update_parent(self):
         if not self.parent and self.index_space.parent is not None:
-            self.parent = self.state.get_partition(
-                self.index_space.parent.uid, self.field_space.uid, self.tree_id)
+            self.set_parent(self.state.get_partition(
+                self.index_space.parent.uid, self.field_space.uid, self.tree_id))
 
     def __str__(self):
         if self.name is None:
@@ -3567,8 +3567,8 @@ class LogicalPartition(object):
     def update_parent(self):
         if not self.parent:
             assert self.index_partition.parent
-            self.parent = self.state.get_region(self.index_partition.parent.uid,
-                                             self.field_space.uid, self.tree_id)
+            self.set_parent(self.state.get_region(self.index_partition.parent.uid,
+                                                  self.field_space.uid, self.tree_id))
 
     def __str__(self):
         if self.name is None:
@@ -3713,7 +3713,7 @@ class LogicalPartition(object):
                 ' [style=dotted,color=black,penwidth=2];')
 
     def gen_id(self):
-        return 'part: '+hex(self.index_partition.uid)+','+\
+        return 'part: '+str(self.index_partition.uid)+','+\
                 'field: '+str(self.field_space.uid)+','+\
                 'tree: '+str(self.tree_id)
 

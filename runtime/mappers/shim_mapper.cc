@@ -90,6 +90,7 @@ namespace Legion {
       selected_variant = 0;
       task_priority = 0;
       post_map_task = false;
+      parent_task = t.get_parent_task();
       // Also fill in our region requirements by copying, sucks but whatever
       regions.resize(t.regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -154,6 +155,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ShimMapper::Task::has_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_task != NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    const Legion::Task* ShimMapper::Task::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
     const char* ShimMapper::Task::get_task_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -174,6 +189,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       requirement = m.requirement;
+      parent_task = m.get_parent_task();
     }
 
     //--------------------------------------------------------------------------
@@ -232,6 +248,13 @@ namespace Legion {
     {
       return depth;
     }
+
+    //--------------------------------------------------------------------------
+    const Legion::Task* ShimMapper::Inline::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return parent_task;
+    }
     
     //--------------------------------------------------------------------------
     ShimMapper::Copy::Copy(const Legion::Copy &c)
@@ -247,6 +270,7 @@ namespace Legion {
         src_requirements[idx] = c.src_requirements[idx];
         dst_requirements[idx] = c.dst_requirements[idx];
       }
+      parent_task = c.get_parent_task();
     }
 
     //--------------------------------------------------------------------------
@@ -304,6 +328,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return depth;
+    }
+
+    //--------------------------------------------------------------------------
+    const Legion::Task* ShimMapper::Copy::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return parent_task;
     }
 
     //--------------------------------------------------------------------------
