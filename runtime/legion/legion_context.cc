@@ -9594,6 +9594,22 @@ namespace Legion {
     {
       context_index = index;
     }
+
+    //--------------------------------------------------------------------------
+    bool RemoteTask::has_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (get_depth() > 0);
+    }
+
+    //--------------------------------------------------------------------------
+    const Task* RemoteTask::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if ((parent_task == NULL) && has_parent_task())
+        parent_task = owner->get_parent_task();
+      return parent_task;
+    }
     
     //--------------------------------------------------------------------------
     const char* RemoteTask::get_task_name(void) const
@@ -9922,6 +9938,18 @@ namespace Legion {
       parent_ctx = runtime->find_context(parent_context_uid, true/*can fail*/);
       if (parent_ctx != NULL)
         remote_task.parent_task = parent_ctx->get_task();
+    }
+
+    //--------------------------------------------------------------------------
+    const Task* RemoteContext::get_parent_task(void)
+    //--------------------------------------------------------------------------
+    {
+      // Note that it safe to actually perform the find_context call here
+      // because we are no longer in the virtual channel for unpacking
+      // remote contexts therefore we can page in the context
+      if (parent_ctx == NULL)
+        parent_ctx = runtime->find_context(parent_context_uid);
+      return parent_ctx->get_task();
     }
 
     //--------------------------------------------------------------------------

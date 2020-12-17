@@ -3273,6 +3273,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const Task* MapOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
     void MapOp::check_privilege(void)
     //--------------------------------------------------------------------------
     { 
@@ -5392,6 +5401,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const Task* CopyOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
     }
 
     //--------------------------------------------------------------------------
@@ -8706,6 +8724,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const Task* CloseOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
     Mappable* CloseOp::get_mappable(void)
     //--------------------------------------------------------------------------
     {
@@ -9983,6 +10010,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const Task* AcquireOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
     const RegionRequirement& AcquireOp::get_requirement(void) const
     //--------------------------------------------------------------------------
     {
@@ -10878,6 +10914,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const Task* ReleaseOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
     const RegionRequirement& ReleaseOp::get_requirement(void) const
     //--------------------------------------------------------------------------
     {
@@ -11304,6 +11349,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const Task* DynamicCollectiveOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
     }
 
     //--------------------------------------------------------------------------
@@ -14558,6 +14612,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const Task* DependentPartitionOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
     Mappable* DependentPartitionOp::get_mappable(void)
     //--------------------------------------------------------------------------
     {
@@ -15456,6 +15519,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const Task* FillOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
     }
 
     //--------------------------------------------------------------------------
@@ -18327,6 +18399,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const Task* RemoteMapOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
     const char* RemoteMapOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -18364,7 +18445,7 @@ namespace Legion {
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_inline_sources(this, &input, &output);
       compute_ranking(mapper, output.chosen_ranking, sources, ranking);
-    } 
+    }
 
     //--------------------------------------------------------------------------
     void RemoteMapOp::pack_remote_operation(Serializer &rez,
@@ -18445,6 +18526,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const Task* RemoteCopyOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
     }
 
     //--------------------------------------------------------------------------
@@ -18574,6 +18664,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const Task* RemoteCloseOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
     const char* RemoteCloseOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -18696,6 +18795,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const Task* RemoteAcquireOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
     const char* RemoteAcquireOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -18800,6 +18908,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const Task* RemoteReleaseOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
     }
 
     //--------------------------------------------------------------------------
@@ -18924,6 +19041,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const Task* RemoteFillOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
     const char* RemoteFillOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -19027,6 +19153,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const Task* RemotePartitionOp::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (parent_task == NULL)
+        parent_task = parent_ctx->get_task();
+      return parent_task;
     }
 
     //--------------------------------------------------------------------------

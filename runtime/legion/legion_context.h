@@ -1390,6 +1390,8 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const; 
       virtual void set_context_index(size_t index);
+      virtual bool has_parent_task(void) const;
+      virtual const Task* get_parent_task(void) const;
       virtual const char* get_task_name(void) const;
       virtual bool has_trace(void) const;
     public:
@@ -1463,6 +1465,8 @@ namespace Legion {
                                                   LogicalRegion parent);
       virtual void invalidate_region_tree_contexts(void);
       virtual void invalidate_remote_tree_contexts(Deserializer &derez);
+    public:
+      const Task* get_parent_task(void);
     public:
       void unpack_local_field_update(Deserializer &derez);
       static void handle_local_field_update(Deserializer &derez);
