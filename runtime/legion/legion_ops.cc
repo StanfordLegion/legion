@@ -10645,6 +10645,7 @@ namespace Legion {
       partitions.clear();
       fields.clear();
       requirements.clear();
+      parent_indexes.clear();
       privilege_paths.clear();
       map_applied_conditions.clear();
       runtime->free_advisement_op(this);
@@ -10839,11 +10840,24 @@ namespace Legion {
         requirements.emplace_back(
             RegionRequirement((*it)->handle, 0/*proj id*/,
               LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent));
+      parent_indexes.resize(requirements.size());
       privilege_paths.resize(requirements.size());
       for (unsigned idx = 0; idx < requirements.size(); idx++)
       {
-        requirements[idx].privilege_fields.insert(fields.begin(), fields.end());
-        initialize_privilege_path(privilege_paths[idx], requirements[idx]);
+        RegionRequirement &req = requirements[idx];
+        req.privilege_fields.insert(fields.begin(), fields.end());
+        int parent_index = parent_ctx->find_parent_region_req(req);
+        if (parent_index < 0)
+          REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ADVISEMENT,
+              "Parent task %s (UID %lld) of advisement operation "
+              "(ID %lld) does not have a parent region requirement "
+              "associated with parent region (%d,%d,%d).",
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+              unique_op_id, parent.index_space.id, 
+              parent.field_space.id, parent.tree_id)
+        else
+          parent_indexes[idx] = unsigned(parent_index);
+        initialize_privilege_path(privilege_paths[idx], req);
       }
     }
 
@@ -10927,6 +10941,16 @@ namespace Legion {
       complete_operation();
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    unsigned AdvisementOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < parent_indexes.size());
+#endif
+      return parent_indexes[idx];
+    }
 
     /////////////////////////////////////////////////////////////
     // External Acquire

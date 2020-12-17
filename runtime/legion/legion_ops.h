@@ -2133,11 +2133,13 @@ namespace Legion {
 #ifdef LEGION_SPY
       virtual void trigger_complete(void);
 #endif
+      virtual unsigned find_parent_index(unsigned idx);
     protected:
       LogicalRegion parent;
       std::vector<LogicalRegion> regions;
       std::vector<LogicalPartition> partitions;
       std::vector<FieldID> fields;
+      std::vector<unsigned> parent_indexes;
       std::vector<RegionRequirement> requirements;
       std::vector<RegionTreePath> privilege_paths;
       std::set<RtEvent> map_applied_conditions;
