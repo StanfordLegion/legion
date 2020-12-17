@@ -128,23 +128,32 @@ variables:
   USE_LLVM: "1"
 .cuda: &cuda
   USE_CUDA: "1"
-.gasnet: &gasnet
+.gasnet1_mpi: &gasnet1_mpi
   REALM_NETWORKS: "gasnet1"
   CONDUIT: "mpi"
-.gasnetdbg: &gasnetdbg
-  REALM_NETWORKS: "gasnet1"
+  # can't change the default until the ucx-conduit/mpi-interop issue is resolved
+  GASNET_VERSION: "GASNet-2020.11.0-memory_kinds_prototype"
+.gasnetex_mpi: &gasnetex_mpi
+  REALM_NETWORKS: "gasnetex"
+  CONDUIT: "mpi"
+  # can't change the default until the ucx-conduit/mpi-interop issue is resolved
+  GASNET_VERSION: "GASNet-2020.11.0-memory_kinds_prototype"
+.gasnetex_mpi_debug: &gasnetex_mpi_debug
+  REALM_NETWORKS: "gasnetex"
   CONDUIT: "mpi"
   GASNET_DEBUG: "1"
   # GASNet headers are not guaranteed to be warning-free in debug mode
   WARN_AS_ERROR: "0"
-.gasnetex: &gasnetex
-  REALM_NETWORKS: "gasnet1"
+  # can't change the default until the ucx-conduit/mpi-interop issue is resolved
+  GASNET_VERSION: "GASNet-2020.11.0-memory_kinds_prototype"
+.gasnetex_mpi_nightly: &gasnetex_mpi_nightly
+  REALM_NETWORKS: "gasnetex"
   CONDUIT: "mpi"
   GASNET_VERSION: "GASNet-EX-snapshot"
   # source URL is set by a GitLab CI variable as the GASNet-EX team prefers
   #  it not to be public at this time
   #GASNETEX_SNAPSHOT_SOURCE_URL: ...
-.gasnet_ucx : &gasnet_ucx
+.gasnet1_ucx : &gasnet1_ucx
   REALM_NETWORKS: "gasnet1"
   CONDUIT: "ucx"
   UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.8.0/ucx-1.8.0.tar.gz"
@@ -233,7 +242,7 @@ before_script:
       # MPICH:
       export LAUNCHER="mpirun -n 2"
       export MPICH_CXX=${CXX}
-      if [[ "$REALM_NETWORKS" = "gasnet1" ]]; then
+      if [[ "$REALM_NETWORKS" == gasnet* ]]; then
         if [[ "$GASNET_DEBUG" -eq 1 ]]; then
           export GASNET_ROOT="$PWD/gasnet/debug"
         else
@@ -579,40 +588,53 @@ gcc49_cxx11_debug_hdf5_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *regent]
-#   * GASNet
-gcc49_cxx11_release_gasnet_legion:
+#   * GASNet-1 (legacy API)
+gcc49_cxx11_release_gasnet1_mpi_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnet, *legion]
-gcc49_cxx11_debug_gasnet_cmake_legion:
+    <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnet1_mpi, *legion]
+gcc49_cxx11_debug_gasnet1_mpi_cmake_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnet, *cmake, *legion, *ctest, *short]
-gcc49_cxx11_debug_gasnet_regent:
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnet1_mpi, *cmake, *legion, *ctest]
+gcc49_cxx11_debug_gasnet1_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnet, *regent, *incremental, *short]
-gcc49_cxx11_debug_gasnetdbg_regent:
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnet1_mpi, *regent, *incremental]
+#   * GASNet-EX (native API, 2020.11.0+)
+gcc49_cxx11_release_gasnetex_mpi_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnetdbg, *regent, *incremental]
-gcc49_cxx11_debug_gasnetex_regent:
+    <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnetex_mpi, *legion]
+gcc49_cxx11_debug_gasnetex_mpi_cmake_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnetex, *regent, *incremental]
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnetex_mpi, *cmake, *legion, *ctest, *short]
+gcc49_cxx11_debug_gasnetex_mpi_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnetex_mpi, *regent, *incremental, *short]
+gcc49_cxx11_debug_gasnetex_mpi_debug_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnetex_mpi_debug, *regent, *incremental]
+gcc49_cxx11_debug_gasnetex_mpi_nightly_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnetex_mpi_nightly, *regent, *incremental]
 #   * GASNet (UCX conduit)
-gcc49_cxx11_release_gasnet_ucx_legion:
+gcc49_cxx11_release_gasnet1_ucx_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnet_ucx, *legion]
-gcc49_cxx11_release_gasnet_ucx_cmake_legion:
+    <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnet1_ucx, *legion]
+gcc49_cxx11_release_gasnet1_ucx_cmake_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnet_ucx, *cmake, *legion, *ctest]
-gcc49_cxx11_release_gasnet_ucx_regent:
+    <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnet1_ucx, *cmake, *legion, *ctest]
+gcc49_cxx11_release_gasnet1_ucx_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnet_ucx, *regent, *incremental]
+    <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnet1_ucx, *regent, *incremental]
 #   * MPI
 gcc49_cxx11_release_mpi_legion:
   <<: [*linux_compute, *image, *tests]
@@ -636,14 +658,14 @@ gcc49_cxx11_debug_python3_regent:
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx11_normal, *python3, *regent]
 # * Integration: LLVM + GASNet
-gcc49_cxx11_debug_llvm_gasnet_legion:
+gcc49_cxx11_debug_llvm_gasnetex_mpi_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *llvm, *gasnet, *legion]
-gcc49_cxx11_debug_llvm_gasnet_regent:
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *legion]
+gcc49_cxx11_debug_llvm_gasnetex_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *llvm, *gasnet, *regent, *incremental]
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *regent, *incremental]
 # * Integration: LLVM + MPI
 gcc49_cxx11_debug_llvm_mpi_legion:
   <<: [*linux_compute, *image, *tests]
@@ -654,14 +676,14 @@ gcc49_cxx11_debug_llvm_mpi_regent:
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx11_normal, *llvm, *mpi, *regent, *incremental]
 # * Integration: HDF5 + GASNet
-gcc49_cxx11_debug_hdf5_gasnet_legion:
+gcc49_cxx11_debug_hdf5_gasnetex_mpi_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *gasnet, *legion]
-gcc49_cxx11_debug_hdf5_gasnet_regent:
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *gasnetex_mpi, *legion]
+gcc49_cxx11_debug_hdf5_gasnetex_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *gasnet, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *gasnetex_mpi, *regent]
 # * Integration: HDF5 + MPI
 gcc49_cxx11_debug_hdf5_mpi_legion:
   <<: [*linux_compute, *image, *tests]
@@ -672,10 +694,10 @@ gcc49_cxx11_debug_hdf5_mpi_regent:
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *mpi, *regent]
 # Multi-node Legion Spy
-gcc49_cxx11_debug_spy_gasnet_regent:
+gcc49_cxx11_debug_spy_gasnet1_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *cxx11_normal, *spy, *gasnet, *regent, *short]
+    <<: [*gcc49, *terra38, *cxx11_normal, *spy, *gasnet1_mpi, *regent, *short]
 gcc49_cxx11_debug_spy_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -768,14 +790,14 @@ clang38_cxx11_debug_hdf5_regent:
   variables:
     <<: [*clang38, *terra38, *debug, *cxx11_normal, *hdf5, *regent]
 #   * GASNet
-clang38_cxx11_debug_gasnet_cmake_legion:
+clang38_cxx11_debug_gasnetex_mpi_cmake_legion:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx11_normal, *gasnet, *cmake, *legion, *ctest]
-clang38_cxx11_debug_gasnet_regent:
+    <<: [*clang38, *terra38, *debug, *cxx11_normal, *gasnetex_mpi, *cmake, *legion, *ctest]
+clang38_cxx11_debug_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx11_normal, *gasnet, *regent, *incremental]
+    <<: [*clang38, *terra38, *debug, *cxx11_normal, *gasnetex_mpi, *regent, *incremental]
 #   * MPI
 clang38_cxx11_debug_mpi_cmake_legion:
   <<: [*linux_compute, *image_clang, *tests]
@@ -795,14 +817,14 @@ clang38_cxx11_debug_python3_regent:
   variables:
     <<: [*clang38, *terra38, *debug, *cxx11_normal, *python3, *regent]
 # * Integration: LLVM + GASNet
-clang38_cxx11_debug_llvm_gasnet_legion:
+clang38_cxx11_debug_llvm_gasnetex_mpi_legion:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx11_normal, *llvm, *gasnet, *legion]
-clang38_cxx11_debug_llvm_gasnet_regent:
+    <<: [*clang38, *terra38, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *legion]
+clang38_cxx11_debug_llvm_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx11_normal, *llvm, *gasnet, *regent, *incremental]
+    <<: [*clang38, *terra38, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *regent, *incremental]
 # * Integration: LLVM + MPI
 clang38_cxx11_debug_llvm_mpi_legion:
   <<: [*linux_compute, *image_clang, *tests]
@@ -813,14 +835,14 @@ clang38_cxx11_debug_llvm_mpi_regent:
   variables:
     <<: [*clang38, *terra38, *debug, *cxx11_normal, *llvm, *mpi, *regent, *incremental]
 # * Integration: HDF5 + GASNet
-clang38_cxx11_debug_hdf5_gasnet_legion:
+clang38_cxx11_debug_hdf5_gasnetex_mpi_legion:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx11_normal, *hdf5, *gasnet, *legion]
-clang38_cxx11_debug_hdf5_gasnet_regent:
+    <<: [*clang38, *terra38, *debug, *cxx11_normal, *hdf5, *gasnetex_mpi, *legion]
+clang38_cxx11_debug_hdf5_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx11_normal, *hdf5, *gasnet, *regent, *incremental]
+    <<: [*clang38, *terra38, *debug, *cxx11_normal, *hdf5, *gasnetex_mpi, *regent, *incremental]
 # * Integration: HDF5 + MPI
 clang38_cxx11_debug_hdf5_mpi_legion:
   <<: [*linux_compute, *image_clang, *tests]
