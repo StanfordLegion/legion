@@ -10677,6 +10677,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RegionNode *root = runtime->forest->get_node(parent);
+      for (std::vector<FieldID>::iterator it = 
+            fields.begin(); it != fields.end(); /*nothing*/)
+      {
+        if (!root->column_source->has_field(*it))
+        {
+          REPORT_LEGION_WARNING(
+              LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE,
+              "Ignoring advised analysis subtree for field ID %d in task %s "
+              "(UID %lld) because it is not a memeber of field space %d",
+              *it, parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+              parent.get_field_space().get_id())
+          it = fields.erase(it);
+          if (fields.empty())
+            return;
+        }
+        else
+          it++;
+      }
       std::vector<RegionNode*> region_nodes;
       region_nodes.reserve(regions.size());
       std::vector<PartitionNode*> part_nodes;
