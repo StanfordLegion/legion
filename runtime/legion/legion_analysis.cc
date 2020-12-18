@@ -723,8 +723,8 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
+          rez.serialize<bool>(reduction_initialization);
         }
-        rez.serialize<bool>(reduction_initialization);
         runtime->send_remote_trace_update(origin_space, rez);
         applied_events.insert(done);
       }
