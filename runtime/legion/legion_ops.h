@@ -2065,6 +2065,7 @@ namespace Legion {
                       const LogicalTraceInfo &trace_info,
                       RegionNode *to_refine, const FieldMask &mask);
       void record_refinement(PartitionNode *node, const FieldMask &mask);
+      void record_refinements(FieldMaskSet<RegionNode> &region_refinements);
       void record_uninitialized(const FieldMask &mask);
 #ifdef DEBUG_LEGION
       void verify_refinement_mask(const FieldMask &refinement_mask);
@@ -2091,6 +2092,8 @@ namespace Legion {
       RegionNode *to_refine;
       // The current equivalence sets for the node to be refined
       VersionInfo version_info;
+      // Individual regions from which to make refinements
+      FieldMaskSet<RegionNode> regions_from;
       // New partitions from which to make refinements
       FieldMaskSet<PartitionNode> make_from;
       // Equivalence sets that need to be released at completion

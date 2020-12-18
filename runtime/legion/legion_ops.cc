@@ -10324,6 +10324,7 @@ namespace Legion {
       deactivate_internal();
       version_info.clear();
       make_from.clear();
+      regions_from.clear();
       to_release.clear();
       uninitialized_fields.clear();
     }
@@ -10346,6 +10347,13 @@ namespace Legion {
     const FieldMask& RefinementOp::get_internal_mask(void) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Note that make_from fields should always dominate regions_from
+      // fields because regions_from can only store regions from intermediate
+      // partitions in the region tree, all of which will have siblings that
+      // are refined with full partitions in make_from
+      assert(!(regions_from.get_valid_mask() - make_from.get_valid_mask()));
+#endif
       return make_from.get_valid_mask();
     }
 
@@ -10391,6 +10399,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RefinementOp::record_refinements(FieldMaskSet<RegionNode> &regions)
+    //--------------------------------------------------------------------------
+    {
+      if (!regions_from.empty())
+      {
+        for (FieldMaskSet<RegionNode>::const_iterator it =
+              regions.begin(); it != regions.end(); it++)
+          regions_from.insert(it->first, it->second);
+      }
+      else
+        regions_from.swap(regions);
+    }
+
+    //--------------------------------------------------------------------------
     void RefinementOp::record_uninitialized(const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
@@ -10402,7 +10424,7 @@ namespace Legion {
     void RefinementOp::verify_refinement_mask(const FieldMask &refinement_mask)
     //--------------------------------------------------------------------------
     {
-      assert(make_from.get_valid_mask() == refinement_mask);
+      assert(get_internal_mask() == refinement_mask);
     }
 #endif
 
@@ -10425,7 +10447,7 @@ namespace Legion {
       if (!!uninitialized_fields)
       {
         const FieldMask version_mask = 
-          make_from.get_valid_mask() - uninitialized_fields;
+          get_internal_mask() - uninitialized_fields;
         if (!!version_mask)
           to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
                                           version_mask, unique_op_id,
@@ -10433,8 +10455,8 @@ namespace Legion {
       }
       else
         to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
-                                      make_from.get_valid_mask(), unique_op_id,
-                                      runtime->address_space, ready_events);
+                                          get_internal_mask(), unique_op_id,
+                                          runtime->address_space, ready_events);
       if (!ready_events.empty())
         enqueue_ready_operation(Runtime::merge_events(ready_events));
       else
@@ -10488,18 +10510,26 @@ namespace Legion {
           delete itr;
         }
       }
+      for (FieldMaskSet<RegionNode>::const_iterator it =
+            regions_from.begin(); it != regions_from.end(); it++)
+      {
+        PendingEquivalenceSet *pending = new PendingEquivalenceSet(it->first);
+        initialize_pending(pending, it->second, map_applied_conditions);
+        // Parent context takes ownership here
+        parent_ctx->record_pending_disjoint_complete_set(pending);
+      }
       // Now we can invalidate the previous refinement
       const ContextID ctx = parent_ctx->get_context().get_id();
       if (!!uninitialized_fields)
       {
         const FieldMask invalidate_mask = 
-          make_from.get_valid_mask() - uninitialized_fields;
+          get_internal_mask() - uninitialized_fields;
         if (!!invalidate_mask)
           to_refine->invalidate_refinement(ctx, invalidate_mask, false/*self*/,
                                 map_applied_conditions, to_release, parent_ctx);
       }
       else
-        to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(), 
+        to_refine->invalidate_refinement(ctx, get_internal_mask(),
             false/*self*/, map_applied_conditions, to_release, parent_ctx);
       // Finally propagate the new refinements up from the partitions
       for (FieldMaskSet<PartitionNode>::const_iterator it = 
@@ -10512,6 +10542,11 @@ namespace Legion {
         it->first->propagate_refinement(ctx, children, it->second, 
                                         map_applied_conditions);
       }
+      // Propagate up from any regions as well
+      for (FieldMaskSet<RegionNode>::const_iterator it =
+            regions_from.begin(); it != regions_from.end(); it++)
+        it->first->parent->propagate_refinement(ctx, it->first, it->second,
+                                                map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else

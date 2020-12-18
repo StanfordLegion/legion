@@ -20478,7 +20478,7 @@ namespace Legion {
         refinement_op->record_refinement(this, refinement_mask);
         return;
       }
-      FieldMask child_overlap = refinement_mask & 
+      const FieldMask child_overlap = refinement_mask & 
         access_disjoint_complete_children.get_valid_mask();
       if (!child_overlap)
       {
@@ -20489,43 +20489,48 @@ namespace Legion {
       const FieldMask non_child_overlap = refinement_mask - child_overlap;
       if (!!non_child_overlap)
         refinement_op->record_refinement(this, non_child_overlap);
-#ifdef DEBUG_LEGION
-      bool first_refined_child = true;
-#endif
-      FieldMask refined_children;
       const bool need_filter = (child_overlap !=
           access_disjoint_complete_children.get_valid_mask());
+      // We need to check to see if all the children below here are
+      // refined the same way or whether they are "ragged" where 
+      // some children are refined and others are not so we need
+      // to tell the refinement operation to refine those individual
+      // regions which have no partition refinements of their own
+      FieldMaskSet<RegionNode> unrefined_children;
+      FieldMask all_unrefined_children = child_overlap;
       for (FieldMaskSet<RegionTreeNode>::iterator it = 
             access_disjoint_complete_children.begin(); it !=
             access_disjoint_complete_children.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        // All children should dominate the child overlap
 #ifndef NDEBUG
+        // All children should dominate the child overlap
         if (need_filter)
           assert(!(child_overlap - it->second));
         else
           assert(child_overlap == it->second);
 #endif
+#endif
         // Traverse it here and perform our checks that all the 
         // children are refined the same way
         FieldMask refined_child;
-        it->first->as_region_node()->update_disjoint_complete_tree(ctx,
+        RegionNode *child = it->first->as_region_node();
+        child->as_region_node()->update_disjoint_complete_tree(ctx,
           refinement_op, child_overlap, refined_child, applied_events, written);
-        if (first_refined_child && !!refined_child)
+        if (!!refined_child)
         {
-          refined_children = refined_child;
-          first_refined_child = false;
+          const FieldMask unrefined = child_overlap - refined_child;
+          if (!!unrefined)
+          {
+            unrefined_children.insert(child, unrefined);
+            if (!!all_unrefined_children)
+              all_unrefined_children &= unrefined;
+          }
+          else if (!!all_unrefined_children)
+            all_unrefined_children.clear();
         }
-#ifndef NDEBUG
         else
-          assert(!refined_child || (refined_children == refined_child));
-#endif
-#else
-        // Release mode so just trust all children refine the same way
-        it->first->as_region_node()->update_disjoint_complete_tree(ctx,
-          refinement_op,child_overlap,refined_children,applied_events,written);
-#endif
+          unrefined_children.insert(child, child_overlap);
         // Add it to the current set
         if (state.disjoint_complete_children.insert(it->first, child_overlap))
         {
@@ -20536,10 +20541,36 @@ namespace Legion {
         if (need_filter)
           it.filter(child_overlap);
       }
-      if (!!refined_children)
-        child_overlap -= refined_children;
-      if (!!child_overlap)
-        refinement_op->record_refinement(this, child_overlap); 
+      // Record that the refinement operation should perform refinements for
+      // this partition if all the children were unrefined for some fields
+      if (!!all_unrefined_children)
+      {
+        refinement_op->record_refinement(this, all_unrefined_children);
+        if (all_unrefined_children != unrefined_children.get_valid_mask())
+        {
+          // Filter out just the fields that were unrefined for all
+          // the children, leaving only the partials remaning
+          std::vector<RegionNode*> to_delete;
+          for (FieldMaskSet<RegionNode>::iterator it =
+               unrefined_children.begin(); it != unrefined_children.end(); it++)
+          {
+            it.filter(all_unrefined_children);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<RegionNode*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+              unrefined_children.erase(*it);
+          }
+          unrefined_children.tighten_valid_mask();
+        }
+        else
+          unrefined_children.clear();
+      }
+      if (!unrefined_children.empty())
+        refinement_op->record_refinements(unrefined_children);
       if (need_filter)
         access_disjoint_complete_children.tighten_valid_mask();
       else

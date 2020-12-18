@@ -1417,8 +1417,9 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Iterate through each of the partitions and see if we are going to
-      // shard them or not when making equivalence sets
-      size_t total_replicate_subregions = 0;
+      // shard them or not when making equivalence sets, we always duplicate
+      // the creation of equivalence sets for intermediate regions
+      size_t total_replicate_subregions = regions_from.size();
       for (FieldMaskSet<PartitionNode>::const_iterator it =
             make_from.begin(); it != make_from.end(); it++)
       {
@@ -1457,7 +1458,7 @@ namespace Legion {
     {
       std::set<RtEvent> ready_events;      
       const ContextID ctx = parent_ctx->get_context().get_id();
-      FieldMask replicated_mask;
+      FieldMask replicated_mask = regions_from.get_valid_mask();
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
@@ -1595,13 +1596,13 @@ namespace Legion {
       if (!!uninitialized_fields)
       {
         const FieldMask invalidate_mask = 
-          make_from.get_valid_mask() - uninitialized_fields;
+          get_internal_mask() - uninitialized_fields;
         if (!!invalidate_mask)
           to_refine->invalidate_refinement(ctx, invalidate_mask, false/*self*/,
                                   map_applied_conditions, to_release, repl_ctx);
       }
       else
-        to_refine->invalidate_refinement(ctx, make_from.get_valid_mask(),
+        to_refine->invalidate_refinement(ctx, get_internal_mask(),
             false/*self*/, map_applied_conditions, to_release, repl_ctx);
       if (make_from.size() != replicated_partitions.size())
       {
@@ -1634,7 +1635,7 @@ namespace Legion {
                                           map_applied_conditions);
         }
       }
-      if (!replicated_partitions.empty())
+      if (!replicated_partitions.empty() || !regions_from.empty())
       {
         // Now make the replicated partitions
         unsigned did_index = 0;
@@ -1688,6 +1689,23 @@ namespace Legion {
             }
             delete itr;
           }
+        }
+        for (FieldMaskSet<RegionNode>::const_iterator it =
+              regions_from.begin(); it != regions_from.end(); it++)
+        {
+          bool first = false;
+          const DistributedID did = 
+            collective_dids[did_index++]->get_value(false/*block*/);
+          EquivalenceSet *set = 
+            repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
+                                        it->first, it->second, did, first);
+          if (first)
+            initialize_replicated_set(set, it->second, map_applied_conditions);
+          it->first->record_refinement(ctx, set, it->second, 
+                                       map_applied_conditions);
+          // Remove the CONTEXT_REF on the set now that it is registered
+          if (set->remove_base_valid_ref(CONTEXT_REF))
+            assert(false); // should never actually hit this
         }
         if (did_index < collective_dids.size())
         {
