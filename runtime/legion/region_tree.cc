@@ -20490,7 +20490,7 @@ namespace Legion {
       if (!!non_child_overlap)
         refinement_op->record_refinement(this, non_child_overlap);
 #ifdef DEBUG_LEGION
-      bool first_child = true;
+      bool first_refined_child = true;
 #endif
       FieldMask refined_children;
       const bool need_filter = (child_overlap !=
@@ -20512,14 +20512,14 @@ namespace Legion {
         FieldMask refined_child;
         it->first->as_region_node()->update_disjoint_complete_tree(ctx,
           refinement_op, child_overlap, refined_child, applied_events, written);
-        if (first_child)
+        if (first_refined_child && !!refined_child)
         {
           refined_children = refined_child;
-          first_child = false;
+          first_refined_child = false;
         }
 #ifndef NDEBUG
         else
-          assert(refined_children == refined_child);
+          assert(!refined_child || (refined_children == refined_child));
 #endif
 #else
         // Release mode so just trust all children refine the same way
@@ -20536,7 +20536,8 @@ namespace Legion {
         if (need_filter)
           it.filter(child_overlap);
       }
-      child_overlap -= refined_children;
+      if (!!refined_children)
+        child_overlap -= refined_children;
       if (!!child_overlap)
         refinement_op->record_refinement(this, child_overlap); 
       if (need_filter)
