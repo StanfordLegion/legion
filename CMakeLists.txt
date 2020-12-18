@@ -129,6 +129,7 @@ set(CMAKE_ENABLE_EXPORTS ON)
 # builds so we override the cmake defaults here for release, this changes 
 # -O3 to -O2 and removes -DNDEBUG
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
 
 # Legion can't handle certain optimizations. See:
 # https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
