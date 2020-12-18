@@ -2960,6 +2960,8 @@ namespace Realm {
 											      in_alc.get_stride(1),
 											      dst_buf,
 											      true /*w/ congestion*/);
+		    // round the recommendation down to a multiple of the line size
+		    rec_bytes -= (rec_bytes % icount);
 		    src_2d_maxbytes = std::min({ dst_1d_maxbytes,
 			                         icount * lines,
 			                         rec_bytes });
