@@ -2450,8 +2450,8 @@ namespace Legion {
       assert(prev_epoch_users.empty());
       assert(!reduction_fields);
       assert(!disjoint_complete_tree);
-      assert(disjoint_complete_children.empty());
-      assert(written_disjoint_complete_children.empty());
+      assert(disjoint_complete_accesses.empty());
+      assert(disjoint_complete_child_counts.empty());
 #endif
     }
 
@@ -2499,7 +2499,8 @@ namespace Legion {
             delete it->first;
         disjoint_complete_children.clear();
       }
-      written_disjoint_complete_children.clear(); 
+      disjoint_complete_accesses.clear(); 
+      disjoint_complete_child_counts.clear();
     } 
 
     //--------------------------------------------------------------------------
@@ -2601,12 +2602,26 @@ namespace Legion {
         }
         src.disjoint_complete_children.clear();
       }
-      if (!src.written_disjoint_complete_children.empty())
+      if (!src.disjoint_complete_accesses.empty())
       {
         for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-              src.written_disjoint_complete_children.begin(); it !=
-              src.written_disjoint_complete_children.end(); it++)
-          written_disjoint_complete_children.insert(it->first, it->second);
+              src.disjoint_complete_accesses.begin(); it !=
+              src.disjoint_complete_accesses.end(); it++)
+          disjoint_complete_accesses.insert(it->first, it->second);
+      }
+      if (!src.disjoint_complete_child_counts.empty())
+      {
+        for (LegionMap<size_t,FieldMask>::aligned::const_iterator it =
+              src.disjoint_complete_child_counts.begin(); it !=
+              src.disjoint_complete_child_counts.end(); it++)
+        {
+          LegionMap<size_t,FieldMask>::aligned::iterator finder =
+            disjoint_complete_child_counts.find(it->first);
+          if (finder == disjoint_complete_child_counts.end())
+            disjoint_complete_child_counts.insert(*it);
+          else
+            finder->second |= it->second;
+        }
       }
 #ifdef DEBUG_LEGION
       src.check_init();
@@ -2635,9 +2650,8 @@ namespace Legion {
         disjoint_complete_tree = src.disjoint_complete_tree;
         src.disjoint_complete_tree.clear();
       }
-      disjoint_complete_children.swap(src.disjoint_complete_children);
-      written_disjoint_complete_children.swap(
-                              src.written_disjoint_complete_children);
+      disjoint_complete_accesses.swap(src.disjoint_complete_accesses);
+      disjoint_complete_child_counts.swap(src.disjoint_complete_child_counts);
       for (LegionList<FieldState>::aligned::const_iterator fit = 
             field_states.begin(); fit != field_states.end(); fit++)
         for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
@@ -3727,7 +3741,7 @@ namespace Legion {
 #endif
       root_node->filter_prev_epoch_users(state, close_mask);
       root_node->filter_curr_epoch_users(state, close_mask);
-      root_node->filter_access_disjoint_complete_children(state, close_mask); 
+      root_node->filter_disjoint_complete_accesses(state, close_mask); 
     }
 
     //--------------------------------------------------------------------------

@@ -3683,8 +3683,8 @@ namespace Legion {
                                   LegionDeque<FieldState>::aligned &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
-      void filter_access_disjoint_complete_children(LogicalState &state,
-                                                    const FieldMask &mask);
+      void filter_disjoint_complete_accesses(LogicalState &state,
+                                             const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
                                       const RegionUsage usage,
                                       const FieldMask &uninitialized,
@@ -3998,8 +3998,7 @@ namespace Legion {
       void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
                                          const FieldMask &refinement_mask,
                                          FieldMask &refined_partition,
-                                         std::set<RtEvent> &applied_events,
-                                         const bool written);
+                                         std::set<RtEvent> &applied_events);
       void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
                     const FieldMask &mask, std::set<RtEvent> &applied_events);
       void perform_versioning_analysis(ContextID ctx, 
@@ -4126,8 +4125,7 @@ namespace Legion {
     public:
       void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
                                          const FieldMask &refinement_mask,
-                                         std::set<RtEvent> &applied_events,
-                                         const bool written);
+                                         std::set<RtEvent> &applied_events);
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *context,
                                     EqSetTracker *target,

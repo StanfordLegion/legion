@@ -837,14 +837,15 @@ namespace Legion {
       // Note that this might also be empty for partition nodes where
       // we have issued projections
       FieldMaskSet<RegionTreeNode> disjoint_complete_children;
-      // Track the names of children which have "complete writes" open
-      // below. If we've written all our open children below then we
-      // ourselves are written and we should propagate this information
-      // up the tree to see if we want to change refinements
-      FieldMaskSet<RegionTreeNode> written_disjoint_complete_children;
-      // Track the names of other children which have "complete accesses"
-      // for non-write privileges open below.
-      FieldMaskSet<RegionTreeNode> other_disjoint_complete_children;
+      // Keep track of the disjoint complete accesses that have been
+      // done in other children to track whether we want to change later
+      // For partitions we'll only use the mask here since we know we
+      // never need to store the names of the actual regions
+      FieldMaskSet<RegionTreeNode> disjoint_complete_accesses;
+      // For partitions only, we record the counts of the numbers of
+      // children that we've observed for all fields to see when we're 
+      // close enough to be counted as being considered refined
+      LegionMap<size_t,FieldMask>::aligned disjoint_complete_child_counts;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;

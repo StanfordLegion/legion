@@ -15348,9 +15348,16 @@ namespace Legion {
           IndexPartNode *part_node = as_partition_node()->row_source;
           if (part_node->is_disjoint() && part_node->is_complete())
           {
+            // See if we are a depth 0 projection function
+
+            // If depth 0, see if we've got enough points for
+            // at least half the subspaces, if so that is good enough
             disjoint_complete_below = user.field_mask;
             if (!!state.disjoint_complete_tree)
               disjoint_complete_below -= state.disjoint_complete_tree;
+            // Not depth 0, so we're projecting farther down the tree
+            // Query the projection function for its intermediate partitions
+
           }
         }
         else
@@ -15359,9 +15366,16 @@ namespace Legion {
           if ((parent != NULL) && parent->row_source->is_disjoint() &&
               parent->row_source->is_complete())
           {
+            // See if this is a depth 0 projection function
+            
+            // If depth 0 then this is disjoint complete on this region
             disjoint_complete_below = user.field_mask;
             if (!!state.disjoint_complete_tree)
               disjoint_complete_below -= state.disjoint_complete_tree;
+            
+            // Not depth 0, so we're projection farther down the tree
+            // Query the projection function for its intermediate partitions
+
           }
         }
       }
@@ -15390,40 +15404,6 @@ namespace Legion {
         next_child->register_logical_user(ctx, user, path, trace_info,
            proj_info, unopened_field_mask, already_closed_mask, 
            child_disjoint_complete, refinements, applied_events, false);
-        if (!!child_disjoint_complete)
-        {
-          // Check to see if this child was already recorded as disjoint
-          // and complete the opposite way from our privileges
-          if (IS_WRITE(user.usage))
-          {
-            // Remove any fields from the other set since we prefer
-            // to know that this child is written disjoint complete
-            if (!state.other_disjoint_complete_children.empty())
-            {
-              FieldMaskSet<RegionTreeNode>::iterator finder = 
-                state.other_disjoint_complete_children.find(next_child);
-              if (finder != state.other_disjoint_complete_children.end())
-              {
-                if (!(finder->second * child_disjoint_complete))
-                {
-                  finder.filter(child_disjoint_complete);
-                  if (!finder->second)
-                    state.other_disjoint_complete_children.erase(finder);
-                  state.other_disjoint_complete_children.tighten_valid_mask();
-                }
-              }
-            }
-          }
-          else if (!state.written_disjoint_complete_children.empty())
-          {
-            // If this is an other disjoint complete, remove any fields
-            // that we know are already written disjoint complete
-            FieldMaskSet<RegionTreeNode>::const_iterator finder =
-              state.written_disjoint_complete_children.find(next_child);
-            if (finder != state.written_disjoint_complete_children.end())
-              child_disjoint_complete -= finder->second;
-          }
-        }
         if (!refinements.empty() &&
             (!state.curr_epoch_users.empty() || 
              !state.prev_epoch_users.empty()))
@@ -15462,16 +15442,102 @@ namespace Legion {
               // which are already disjoint complete at this level
               FieldMask refinement_mask = child_disjoint_complete &
                 state.disjoint_complete_tree;
-              if (!IS_WRITE(user.usage) && 
-                  !state.disjoint_complete_children.empty())
+              if (!!refinement_mask)
               {
-                // This is a heuristic here: any "other" accesses will
-                // only produce a refinement if this particular region
-                // is not already refined for now.
-                const FieldMask &avoid_refinement = 
-                  state.disjoint_complete_children.get_valid_mask(); 
-                refinement_mask -= avoid_refinement;
-                child_disjoint_complete -= avoid_refinement;
+                // If we're refined for any overlapping fields with 
+                // the disjoint+complete child, then there are two cases:
+                // 1. We don't overlap with any existing disjoint+complete
+                //    child refinements, in which case we're going to refine
+                //    right away to maximize analysis parallelism
+                FieldMask previously_refined = refinement_mask & 
+                  state.disjoint_complete_children.get_valid_mask();
+                if (!!previously_refined)
+                {
+                  // 2. We overlap with some existing children that are refined
+                  //    in which case we need to see two consecutive accesses
+                  //    to this new child partition without any interference
+                  //    before we decide to continue with the refinement
+#ifdef DEBUG_LEGION
+                  // The child should not already be considered refined for
+                  // any of these fields
+                  assert((state.disjoint_complete_children.find(next_child) ==
+                          state.disjoint_complete_children.end()) ||
+                         (state.disjoint_complete_children[next_child] * 
+                          previously_refined));
+#endif
+                  FieldMask perform_refinement;
+                  FieldMaskSet<RegionTreeNode>::iterator finder = 
+                    state.disjoint_complete_accesses.find(next_child);
+                  if (finder != state.disjoint_complete_accesses.end())
+                  {
+                    perform_refinement = finder->second & previously_refined;
+                    if (!!perform_refinement)
+                    {
+                      finder.filter(perform_refinement);
+                      if (!finder->second)
+                      {
+                        state.disjoint_complete_accesses.erase(finder);
+                        if (!state.disjoint_complete_accesses.empty())
+                          state.disjoint_complete_accesses.clear();
+                      }
+                    }
+                  }
+                  if (perform_refinement != previously_refined)
+                  {
+                    // Filter all the fields that overlap that are not 
+                    // the same as our target next child
+                    std::vector<RegionTreeNode*> to_delete;
+                    for (FieldMaskSet<RegionTreeNode>::iterator it =
+                         state.disjoint_complete_accesses.begin(); it !=
+                         state.disjoint_complete_accesses.end(); it++)
+                    {
+                      // Case handled above
+                      if (it->first == next_child)
+                        continue;
+                      const FieldMask overlap = it->second & previously_refined;
+                      if (!overlap)
+                        continue;
+                      it.filter(overlap);
+                      if (!it->second)
+                        to_delete.push_back(it->first);
+                    }
+                    if (!to_delete.empty())
+                    {
+                      if (to_delete.size() != 
+                          state.disjoint_complete_accesses.size())
+                      {
+                        for (std::vector<RegionTreeNode*>::const_iterator it =
+                              to_delete.begin(); it != to_delete.end(); it++)
+                          state.disjoint_complete_accesses.erase(*it);
+                      }
+                      else
+                        state.disjoint_complete_accesses.clear();
+                    }
+                  }
+                  if (!!perform_refinement)
+                  {
+                    const FieldMask first_access =
+                      previously_refined - perform_refinement;
+                    if (!!first_access)
+                    {
+                      // Record the first access for these fields
+                      state.disjoint_complete_accesses.insert(
+                                            next_child, first_access);
+                      // Not refining these fields yet
+                      refinement_mask -= first_access;
+                      child_disjoint_complete -= first_access;
+                    }
+                  }
+                  else
+                  {
+                    // Record the first access for these fields
+                    state.disjoint_complete_accesses.insert(next_child, 
+                                                            previously_refined);
+                    // Not refining these fields yet
+                    refinement_mask -= previously_refined;
+                    child_disjoint_complete -= previously_refined;
+                  }
+                }
               }
               if (!!refinement_mask)
               {
@@ -15511,7 +15577,7 @@ namespace Legion {
                 // Update the refinement tree for the full subtree
                 PartitionNode *part_child = next_child->as_partition_node();
                 part_child->update_disjoint_complete_tree(ctx, refinement_op,
-                           refinement_mask, applied_events, true/*written*/);
+                                             refinement_mask, applied_events);
 #ifdef DEBUG_LEGION
                 // Sanity check that we recorded refinements for
                 // all the fields in the refinement mask
@@ -15548,9 +15614,7 @@ namespace Legion {
               // Only remember the most-recent access for a disjoint complete
               // child for a region node
               FieldMaskSet<RegionTreeNode> &access_disjoint_complete_children =
-                IS_WRITE(user.usage) ?
-                    state.written_disjoint_complete_children :
-                    state.other_disjoint_complete_children;
+                state.disjoint_complete_accesses;
               if (!(child_disjoint_complete * 
                     access_disjoint_complete_children.get_valid_mask()))
               {
@@ -15587,42 +15651,88 @@ namespace Legion {
               }
             }
           }
-          else
+          else if (!!child_disjoint_complete)
           {
-            IndexPartNode *part_node = as_partition_node()->row_source;
+            // At this point we're a partition that is not refined
+            IndexPartNode *part_node = as_partition_node()->row_source; 
             // If we're not a disjoint complete partition then
             // we can just ignore this child being complete
             if (part_node->is_disjoint() && part_node->is_complete())
             {
-              // Filter off any fields for which we are already
-              // disjoint and complete
+#ifdef DEBUG_LEGION
+              assert(state.disjoint_complete_accesses.empty());
+#endif
+              // Filter out any additional fields for which we are
+              // already disjoint and complete but just didn't refine
+              // for the children because we were the lowest level partition
               if (!!state.disjoint_complete_tree)
                 child_disjoint_complete -= state.disjoint_complete_tree;
               if (!!child_disjoint_complete)
               {
-                FieldMaskSet<RegionTreeNode> &access_disjoint_complete_children 
-                  = IS_WRITE(user.usage) ?
-                    state.written_disjoint_complete_children :
-                    state.other_disjoint_complete_children;
-                // Record it and then see if our whole partition
-                // is now complete for any children
-                access_disjoint_complete_children.insert(next_child,
-                                                  child_disjoint_complete);
-                if (access_disjoint_complete_children.size() ==
-                    part_node->get_num_children())
+                // Remove any fields that have already been passed up
+                const FieldMask &handled = 
+                  state.disjoint_complete_accesses.get_valid_mask();
+                if (!!handled)
+                  child_disjoint_complete -= handled;
+              }
+              if (!!child_disjoint_complete)
+              {
+                // Scan through and update the counts, if we hit
+                // the thresholds then we can count this as refined
+                for (LegionMap<size_t,FieldMask>::aligned::reverse_iterator it =
+                      state.disjoint_complete_child_counts.rbegin(); it !=
+                      state.disjoint_complete_child_counts.rend(); /*nothing*/)
                 {
-                  // See which fields are complete for all subregions
-                  for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-                        access_disjoint_complete_children.begin();it !=
-                        access_disjoint_complete_children.end(); it++)
+                  const FieldMask overlap = 
+                    child_disjoint_complete & it->second;
+                  if (!overlap)
                   {
-                    child_disjoint_complete &= it->second;
-                    if (!child_disjoint_complete)
-                      break;
+                    it++;
+                    continue;
                   }
-                  // this mask is the one that flows back up the tree
-                  if (!!child_disjoint_complete)
-                    disjoint_complete_below = child_disjoint_complete;
+                  // Now see if we're done with this one
+                  const size_t next_count = it->first + 1;
+                  it->second -= overlap;
+                  if (!it->second)
+                  {
+                    // Remove it from the set
+                    // This is a reverse iterator, so we have to increment
+                    // first and then delete the base
+                    it++;
+                    state.disjoint_complete_child_counts.erase(it.base());
+                  }
+                  else
+                    it++;
+                  // Add one for the overlap fields, will not break iterator
+                  // since it is going to be behind our traversal
+                  LegionMap<size_t,FieldMask>::aligned::iterator finder = 
+                    state.disjoint_complete_child_counts.find(next_count);
+                  if (finder != state.disjoint_complete_child_counts.end())
+                    finder->second |= overlap;
+                  else
+                    state.disjoint_complete_child_counts[next_count] = overlap;
+                  child_disjoint_complete -= overlap;
+                  if (!child_disjoint_complete)
+                    break;
+                }
+                if (!!child_disjoint_complete)
+                  state.disjoint_complete_child_counts[1] = 
+                                              child_disjoint_complete;
+                // Only the last count can be big enough to exceed the
+                // threshold so check to see if it is big enough
+                LegionMap<size_t,FieldMask>::aligned::reverse_iterator last =
+                  state.disjoint_complete_child_counts.rbegin();
+                // This is a heuristic here!
+                // We're looking for the count to grow to be at least as
+                // big as half of the children, we could change this later
+                if (last->first >= ((part_node->get_num_children() + 1) / 2))
+                {
+                  disjoint_complete_below = last->second;
+                  state.disjoint_complete_accesses.relax_valid_mask(
+                                                        last->second);
+                  // Same deal with deleting a reverse iterator
+                  // increment first and then get the base
+                  state.disjoint_complete_child_counts.erase((++last).base());
                 }
               }
             }
@@ -15807,7 +15917,7 @@ namespace Legion {
       if (!(state.reduction_fields * closing_mask))
         clear_logical_reduction_fields(state, closing_mask);
       // Clear out any written disjoint complete children too
-      filter_access_disjoint_complete_children(state, closing_mask);
+      filter_disjoint_complete_accesses(state, closing_mask);
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
 #endif
@@ -17001,22 +17111,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::filter_access_disjoint_complete_children(
+    void RegionTreeNode::filter_disjoint_complete_accesses(
                                      LogicalState &state, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      if (!state.written_disjoint_complete_children.empty())
+      if (!state.disjoint_complete_accesses.empty())
       {
         const FieldMask &summary_mask = 
-          state.written_disjoint_complete_children.get_valid_mask();
+          state.disjoint_complete_accesses.get_valid_mask();
         if (!!summary_mask)
         {
           if (!!(summary_mask - mask))
           {
             std::vector<RegionTreeNode*> to_delete;
             for (FieldMaskSet<RegionTreeNode>::iterator it =
-                  state.written_disjoint_complete_children.begin(); it !=
-                  state.written_disjoint_complete_children.end(); it++)
+                  state.disjoint_complete_accesses.begin(); it !=
+                  state.disjoint_complete_accesses.end(); it++)
             {
               it.filter(mask);
               if (!it->second)
@@ -17024,37 +17134,27 @@ namespace Legion {
             }
             for (std::vector<RegionTreeNode*>::const_iterator it =
                   to_delete.begin(); it != to_delete.end(); it++)
-              state.written_disjoint_complete_children.erase(*it);
-            state.written_disjoint_complete_children.tighten_valid_mask();
+              state.disjoint_complete_accesses.erase(*it);
+            state.disjoint_complete_accesses.tighten_valid_mask();
           }
           else
-            state.written_disjoint_complete_children.clear();
+            state.disjoint_complete_accesses.clear();
         }
       }
-      if (!state.other_disjoint_complete_children.empty())
+      if (!state.disjoint_complete_child_counts.empty())
       {
-        const FieldMask &summary_mask = 
-          state.other_disjoint_complete_children.get_valid_mask();
-        if (!!summary_mask)
+        for (LegionMap<size_t,FieldMask>::aligned::iterator it =
+              state.disjoint_complete_child_counts.begin(); it !=
+              state.disjoint_complete_child_counts.end(); /*nothing*/)
         {
-          if (!!(summary_mask - mask))
+          it->second -= mask;
+          if (!it->second)
           {
-            std::vector<RegionTreeNode*> to_delete;
-            for (FieldMaskSet<RegionTreeNode>::iterator it =
-                  state.other_disjoint_complete_children.begin(); it !=
-                  state.other_disjoint_complete_children.end(); it++)
-            {
-              it.filter(mask);
-              if (!it->second)
-                to_delete.push_back(it->first);
-            }
-            for (std::vector<RegionTreeNode*>::const_iterator it =
-                  to_delete.begin(); it != to_delete.end(); it++)
-              state.other_disjoint_complete_children.erase(*it);
-            state.other_disjoint_complete_children.tighten_valid_mask();
+            LegionMap<size_t,FieldMask>::aligned::iterator to_delete = it++;
+            state.disjoint_complete_child_counts.erase(to_delete);
           }
           else
-            state.other_disjoint_complete_children.clear();
+            it++;
         }
       }
     }
@@ -17195,21 +17295,26 @@ namespace Legion {
           assert(disjoint_complete_previous * it->second);
           disjoint_complete_previous |= it->second;
         }
-        FieldMask written_previous;
+        FieldMask access_previous;
         for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-              state.written_disjoint_complete_children.begin(); it !=
-              state.written_disjoint_complete_children.end(); it++)
+              state.disjoint_complete_accesses.begin(); it !=
+              state.disjoint_complete_accesses.end(); it++)
         {
-          assert(written_previous * it->second);
-          written_previous |= it->second;
+          assert(access_previous * it->second);
+          access_previous |= it->second;
         }
-        FieldMask other_previous;
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-              state.other_disjoint_complete_children.begin(); it !=
-              state.other_disjoint_complete_children.end(); it++)
+        assert(state.disjoint_complete_child_counts.empty());
+      }
+      else
+      {
+        assert(state.disjoint_complete_accesses.empty());
+        FieldMask count_previous;
+        for (LegionMap<size_t,FieldMask>::aligned::const_iterator it =
+              state.disjoint_complete_child_counts.begin(); it !=
+              state.disjoint_complete_child_counts.end(); it++)
         {
-          assert(other_previous * it->second);
-          other_previous |= it->second;
+          assert(count_previous * it->second);
+          count_previous |= it->second;
         }
       }
     }
@@ -17735,10 +17840,10 @@ namespace Legion {
         if (to_traverse.insert(std::make_pair(child_color, it->first)).second)
           it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/);
       }
-      rez.serialize<size_t>(state.written_disjoint_complete_children.size());
+      rez.serialize<size_t>(state.disjoint_complete_accesses.size());
       for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-            state.written_disjoint_complete_children.begin(); it !=
-            state.written_disjoint_complete_children.end(); it++)
+            state.disjoint_complete_accesses.begin(); it !=
+            state.disjoint_complete_accesses.end(); it++)
       {
         const LegionColor child_color = it->first->get_color();
         rez.serialize(child_color);
@@ -17749,19 +17854,13 @@ namespace Legion {
         assert(to_traverse.find(child_color) != to_traverse.end());
 #endif
       }
-      rez.serialize<size_t>(state.other_disjoint_complete_children.size());
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-            state.other_disjoint_complete_children.begin(); it !=
-            state.other_disjoint_complete_children.end(); it++)
+      rez.serialize<size_t>(state.disjoint_complete_child_counts.size());
+      for (LegionMap<size_t,FieldMask>::aligned::const_iterator it =
+            state.disjoint_complete_child_counts.begin(); it !=
+            state.disjoint_complete_child_counts.end(); it++)
       {
-        const LegionColor child_color = it->first->get_color();
-        rez.serialize(child_color);
+        rez.serialize(it->first);
         rez.serialize(it->second);
-#ifdef DEBUG_LEGION
-        // All the children here should be open from the field states
-        // which means we should be able to find it in to_traverse
-        assert(to_traverse.find(child_color) != to_traverse.end());
-#endif
       }
       // Now recurse down the tree in a deterministic way
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
@@ -17845,34 +17944,40 @@ namespace Legion {
         }
         to_traverse.insert(std::make_pair(child_color, child));
       }
-      size_t num_written_disjoint_complete_children;
-      derez.deserialize(num_written_disjoint_complete_children);
-      for (unsigned idx = 0; 
-            idx < num_written_disjoint_complete_children; idx++)
+      size_t num_disjoint_complete_accesses;
+      derez.deserialize(num_disjoint_complete_accesses);
+      for (unsigned idx = 0; idx < num_disjoint_complete_accesses; idx++)
       {
         LegionColor child_color;
         derez.deserialize(child_color);
         RegionTreeNode *child = get_tree_child(child_color);
         FieldMask mask;
         derez.deserialize(mask);
-        state.written_disjoint_complete_children.insert(child, mask);
+        state.disjoint_complete_accesses.insert(child, mask);
 #ifdef DEBUG_LEGION
         assert(to_traverse.find(child_color) != to_traverse.end());
 #endif
       }
-      size_t num_other_disjoint_complete_children;
-      derez.deserialize(num_other_disjoint_complete_children);
-      for (unsigned idx = 0; idx < num_other_disjoint_complete_children; idx++)
+      size_t num_disjoint_complete_counts;
+      derez.deserialize(num_disjoint_complete_counts);
+      const bool inline_counts = state.disjoint_complete_child_counts.empty();
+      for (unsigned idx = 0; idx < num_disjoint_complete_counts; idx++)
       {
-        LegionColor child_color;
-        derez.deserialize(child_color);
-        RegionTreeNode *child = get_tree_child(child_color);
-        FieldMask mask;
-        derez.deserialize(mask);
-        state.other_disjoint_complete_children.insert(child, mask);
-#ifdef DEBUG_LEGION
-        assert(to_traverse.find(child_color) != to_traverse.end());
-#endif
+        size_t count;
+        derez.deserialize(count);
+        if (!inline_counts)
+        {
+          LegionMap<size_t,FieldMask>::aligned::iterator finder =
+            state.disjoint_complete_child_counts.find(count);
+          if (finder != state.disjoint_complete_child_counts.end())
+          {
+            FieldMask mask;
+            derez.deserialize(mask);
+            finder->second |= mask;
+            continue;
+          }
+        }
+        derez.deserialize(state.disjoint_complete_child_counts[count]);
       }
       RtEvent applied;
       if (!applied_events.empty())
@@ -18950,8 +19055,7 @@ namespace Legion {
                                               RefinementOp *refinement_op, 
                                               const FieldMask &refinement_mask,
                                               FieldMask &refined_partition,
-                                              std::set<RtEvent> &applied_events,
-                                              const bool written)
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
@@ -18960,9 +19064,7 @@ namespace Legion {
 #endif
       state.disjoint_complete_tree |= refinement_mask;
       FieldMaskSet<RegionTreeNode> &access_disjoint_complete_children = 
-        written ?
-          state.written_disjoint_complete_children :
-          state.other_disjoint_complete_children;
+        state.disjoint_complete_accesses;
       if (access_disjoint_complete_children.empty() ||
          (refinement_mask * access_disjoint_complete_children.get_valid_mask()))
         return;
@@ -18976,7 +19078,7 @@ namespace Legion {
           continue;
         // Traverse it and add it to the refined partition set
         it->first->as_partition_node()->update_disjoint_complete_tree(ctx,
-                          refinement_op, overlap, applied_events, written);
+                                  refinement_op, overlap, applied_events);
         refined_partition |= overlap;
         // Add it to the current set
         if (state.disjoint_complete_children.insert(it->first, overlap))
@@ -20459,27 +20561,23 @@ namespace Legion {
     void PartitionNode::update_disjoint_complete_tree(ContextID ctx,
                                               RefinementOp *refinement_op,
                                               const FieldMask &refinement_mask,
-                                              std::set<RtEvent> &applied_events,
-                                              const bool written)
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
 #ifdef DEBUG_LEGION
       assert(refinement_mask * state.disjoint_complete_tree);
+      assert(row_source->is_disjoint(false/*from app*/));
+      assert(row_source->is_complete(false/*from app*/));
+      assert(state.disjoint_complete_accesses.empty());
 #endif
       state.disjoint_complete_tree |= refinement_mask;
-      FieldMaskSet<RegionTreeNode> &access_disjoint_complete_children =
-        written ?
-          state.written_disjoint_complete_children :
-          state.other_disjoint_complete_children;
-      if (access_disjoint_complete_children.empty())
-      {
-        // Record that this is a leaf-partition of this refinement
-        refinement_op->record_refinement(this, refinement_mask);
-        return;
-      }
-      const FieldMask child_overlap = refinement_mask & 
-        access_disjoint_complete_children.get_valid_mask();
+      // The fields in the disjoint_complete_accesses valid mask 
+      // represent the ones that we had child refinement notifications
+      // for and therefore we need to traverse all those children
+      // to see which refinements they have
+      const FieldMask child_overlap = refinement_mask &
+        state.disjoint_complete_accesses.get_valid_mask();
       if (!child_overlap)
       {
         // Record that this is a leaf-partition of this refinement
@@ -20489,8 +20587,6 @@ namespace Legion {
       const FieldMask non_child_overlap = refinement_mask - child_overlap;
       if (!!non_child_overlap)
         refinement_op->record_refinement(this, non_child_overlap);
-      const bool need_filter = (child_overlap !=
-          access_disjoint_complete_children.get_valid_mask());
       // We need to check to see if all the children below here are
       // refined the same way or whether they are "ragged" where 
       // some children are refined and others are not so we need
@@ -20498,48 +20594,73 @@ namespace Legion {
       // regions which have no partition refinements of their own
       FieldMaskSet<RegionNode> unrefined_children;
       FieldMask all_unrefined_children = child_overlap;
-      for (FieldMaskSet<RegionTreeNode>::iterator it = 
-            access_disjoint_complete_children.begin(); it !=
-            access_disjoint_complete_children.end(); it++)
+      // Have to iterate over all the chlidren here
+      if (row_source->total_children == row_source->max_linearized_color)
       {
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        // All children should dominate the child overlap
-        if (need_filter)
-          assert(!(child_overlap - it->second));
-        else
-          assert(child_overlap == it->second);
-#endif
-#endif
-        // Traverse it here and perform our checks that all the 
-        // children are refined the same way
-        FieldMask refined_child;
-        RegionNode *child = it->first->as_region_node();
-        child->as_region_node()->update_disjoint_complete_tree(ctx,
-          refinement_op, child_overlap, refined_child, applied_events, written);
-        if (!!refined_child)
+        for (LegionColor color = 0; color < row_source->total_children; color++)
         {
-          const FieldMask unrefined = child_overlap - refined_child;
-          if (!!unrefined)
+          RegionNode *child = get_child(color);
+          // Traverse it here and perform our checks that all the 
+          // children are refined the same way
+          FieldMask refined_child;
+          child->as_region_node()->update_disjoint_complete_tree(ctx,
+              refinement_op, child_overlap, refined_child, applied_events);
+          if (!!refined_child)
           {
-            unrefined_children.insert(child, unrefined);
-            if (!!all_unrefined_children)
-              all_unrefined_children &= unrefined;
+            const FieldMask unrefined = child_overlap - refined_child;
+            if (!!unrefined)
+            {
+              unrefined_children.insert(child, unrefined);
+              if (!!all_unrefined_children)
+                all_unrefined_children &= unrefined;
+            }
+            else if (!!all_unrefined_children)
+              all_unrefined_children.clear();
           }
-          else if (!!all_unrefined_children)
-            all_unrefined_children.clear();
+          else
+            unrefined_children.insert(child, child_overlap);
+          // Add it to the current set
+          if (state.disjoint_complete_children.insert(child, child_overlap))
+          {
+            WrapperReferenceMutator mutator(applied_events);
+            child->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+          }
         }
-        else
-          unrefined_children.insert(child, child_overlap);
-        // Add it to the current set
-        if (state.disjoint_complete_children.insert(it->first, child_overlap))
+      }
+      else
+      {
+        ColorSpaceIterator *itr = 
+          row_source->color_space->create_color_space_iterator();
+        while (itr->is_valid())
         {
-          WrapperReferenceMutator mutator(applied_events);
-          it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+          RegionNode *child = get_child(itr->yield_color());
+          // Traverse it here and perform our checks that all the 
+          // children are refined the same way
+          FieldMask refined_child;
+          child->as_region_node()->update_disjoint_complete_tree(ctx,
+              refinement_op, child_overlap, refined_child, applied_events);
+          if (!!refined_child)
+          {
+            const FieldMask unrefined = child_overlap - refined_child;
+            if (!!unrefined)
+            {
+              unrefined_children.insert(child, unrefined);
+              if (!!all_unrefined_children)
+                all_unrefined_children &= unrefined;
+            }
+            else if (!!all_unrefined_children)
+              all_unrefined_children.clear();
+          }
+          else
+            unrefined_children.insert(child, child_overlap);
+          // Add it to the current set
+          if (state.disjoint_complete_children.insert(child, child_overlap))
+          {
+            WrapperReferenceMutator mutator(applied_events);
+            child->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+          }
         }
-        // Remove it from this set
-        if (need_filter)
-          it.filter(child_overlap);
+        delete itr;
       }
       // Record that the refinement operation should perform refinements for
       // this partition if all the children were unrefined for some fields
@@ -20571,10 +20692,7 @@ namespace Legion {
       }
       if (!unrefined_children.empty())
         refinement_op->record_refinements(unrefined_children);
-      if (need_filter)
-        access_disjoint_complete_children.tighten_valid_mask();
-      else
-        access_disjoint_complete_children.clear();
+      state.disjoint_complete_accesses.filter_valid_mask(child_overlap);
     }
 
     //--------------------------------------------------------------------------
