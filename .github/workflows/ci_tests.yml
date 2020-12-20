@@ -1,4 +1,4 @@
-name: What's in a name
+name: ci_tests
 on: push
 jobs:
   test1:
@@ -6,6 +6,7 @@ jobs:
     runs-on: ubuntu-18.04
     env:
       CXX: g++
+    if: false
     steps:
       - name: system info
         run: |
@@ -28,7 +29,7 @@ jobs:
       - name: system info
         run: |
           uname -a
-          free
+          vm_stat
           pwd
           ${CXX} --version
       - name: checkout
