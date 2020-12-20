@@ -5633,7 +5633,11 @@ namespace Legion {
         local_gpu = finder.first();
       }
 #endif
-      if (!is_owner) return;
+      // We do not make eager pool instances if we are not the owner or if the
+      // memory has capacity zero (e.g. disk memory) where the creation of any 
+      // instances that are not external instances are disallowed
+      if (!is_owner || (capacity == 0)) 
+        return;
 
       // Allocate eager pool
       const coord_t eager_pool_size = 
