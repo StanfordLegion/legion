@@ -25,6 +25,7 @@ jobs:
     runs-on: macos-10.15
     env:
       CXX: clang++
+      CXXFLAGS: "-std=c++11"
     steps:
       - name: system info
         run: |
