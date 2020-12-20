@@ -12,6 +12,25 @@ jobs:
           uname -a
           free
           pwd
+          ${CXX} --version
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: test
+        run: ./test.py
+        env:
+          TEST_REGENT: 0
+  test2:
+    name: Test macos
+    runs-on: macos-10.15
+    env:
+      CXX: clang++
+    steps:
+      - name: system info
+        run: |
+          uname -a
+          free
+          pwd
+          ${CXX} --version
       - name: checkout
         uses: actions/checkout@v2
       - name: test
