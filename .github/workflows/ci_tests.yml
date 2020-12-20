@@ -1,0 +1,21 @@
+name: What's in a name
+on: push
+jobs:
+  test1:
+    name: Test 1
+    runs-on: ubuntu-18.04
+    env:
+      CXX: g++
+    steps:
+      - name: system info
+        run: |
+          uname -a
+          free
+          pwd
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: test
+        run: ./test.py
+        env:
+          TEST_REGENT: 0
+
