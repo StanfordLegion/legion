@@ -26,6 +26,7 @@ jobs:
     env:
       CXX: clang++
       CXXFLAGS: "-std=c++11"
+    if: false
     steps:
       - name: system info
         run: |
@@ -39,4 +40,47 @@ jobs:
         run: ./test.py
         env:
           TEST_REGENT: 0
+
+  test3:
+    name: Test 3
+    runs-on: ubuntu-18.04
+    env:
+      CXX: g++
+    steps:
+      - name: system info
+        run: |
+          uname -a
+          free
+          pwd
+          ${CXX} --version
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: test
+        run: ./test.py
+        env:
+          TEST_LEGION_CXX: 0
+          TEST_REALM: 0
+          TEST_FUZZER: 0
+
+  test4:
+    name: Test macos regent
+    runs-on: macos-10.15
+    env:
+      CXX: clang++
+      CXXFLAGS: "-std=c++11"
+    steps:
+      - name: system info
+        run: |
+          uname -a
+          vm_stat
+          pwd
+          ${CXX} --version
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: test
+        run: ./test.py
+        env:
+          TEST_LEGION_CXX: 0
+          TEST_REALM: 0
+          TEST_FUZZER: 0
 
