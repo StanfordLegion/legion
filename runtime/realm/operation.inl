@@ -39,8 +39,8 @@ namespace Realm {
   {
     status.error_code = 0;
     measurements.import_requests(requests); 
-    wants_timeline = (measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>() ||
-		      measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>());
+    wants_timeline = measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>();
+    wants_gpu_timeline = measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>();
     wants_event_waits = measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>();
     if(wants_timeline)
       timeline.record_create_time();
