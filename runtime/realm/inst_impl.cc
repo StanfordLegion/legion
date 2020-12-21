@@ -1394,6 +1394,13 @@ namespace Realm {
       assert(ok);
     }
 
+  // these are used above, but may get inlined, so we need to explicitly
+  //  instantiate them to satisfy metadata.cc's reference
+  template
+  void RegionInstanceImpl::Metadata::serialize_msg(Serialization::ByteCountSerializer&) const;
+  template
+  void RegionInstanceImpl::Metadata::serialize_msg(ActiveMessage<MetadataResponseMessage>&) const;
+
     void RegionInstanceImpl::Metadata::deserialize(const void *in_data, size_t in_size)
     {
       Serialization::FixedBufferDeserializer fbd(in_data, in_size);
