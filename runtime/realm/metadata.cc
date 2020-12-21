@@ -231,7 +231,10 @@ namespace Realm {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
       bool valid = impl->metadata.handle_request(sender);
       if(valid) {
-	ActiveMessage<MetadataResponseMessage> amsg(sender, 65536);
+	Serialization::ByteCountSerializer bcs;
+	impl->metadata.serialize_msg(bcs);
+	size_t req_size = bcs.bytes_used();
+	ActiveMessage<MetadataResponseMessage> amsg(sender, req_size);
 	impl->metadata.serialize_msg(amsg);
 	amsg->id = args.id;
 	log_metadata.info("metadata for " IDFMT " requested by %d",

@@ -208,7 +208,6 @@ namespace Realm {
 	  //amsg->src_inst_id = req->src_inst_id;
 	  //amsg->dst_inst_id = req->dst_inst_id;
 	  amsg->offset = ib_offset;
-	  amsg->size = req->ib_size;
 	  amsg.commit();
         }
         // Remember to free IBAllocRequest
@@ -259,14 +258,13 @@ namespace Realm {
 	  //req->idx, inst_pair, req->ib_size, ib_offset);
         } else {
           // remote ib alloc request
-	  ActiveMessage<RemoteIBAllocResponseAsync> amsg(req->owner, 8);
+	  ActiveMessage<RemoteIBAllocResponseAsync> amsg(req->owner);
 	  amsg->req = req->req;
 	  amsg->ibinfo = req->ibinfo;
 	  //amsg->idx = req->idx;
 	  //amsg->src_inst_id = req->src_inst_id;
 	  //amsg->dst_inst_id = req->dst_inst_id;
 	  amsg->offset = ib_offset;
-	  amsg << req->ib_size;
 	  amsg.commit();
         }
         it->second->pop();
@@ -481,15 +479,26 @@ namespace Realm {
 
     void CopyRequest::forward_request(NodeID target_node)
     {
-      ActiveMessage<RemoteCopyMessage> amsg(target_node, 65536);
+      Serialization::ByteCountSerializer bcs;
+      {
+	bool ok = ((bcs << *domain) &&
+		   (bcs << *oas_by_inst) &&
+		   (bcs << requests));
+	assert(ok);
+      }
+      size_t req_size = bcs.bytes_used();
+      ActiveMessage<RemoteCopyMessage> amsg(target_node, req_size);
       amsg->redop_id = 0;
       amsg->red_fold = false;
       amsg->before_copy = before_copy;
       amsg->after_copy = get_finish_event();
       amsg->priority = priority;
-      amsg << *domain;
-      amsg << *oas_by_inst;
-      amsg << requests;
+      {
+	bool ok = ((amsg << *domain) &&
+		   (amsg << *oas_by_inst) &&
+		   (amsg << requests));
+	assert(ok);
+      }
 
       // TODO: serialize these
       assert(gather_info == 0);
@@ -654,13 +663,13 @@ namespace Realm {
         ib_req_queue->enqueue_request(tgt_mem, ib_req);
       } else {
         // create remote intermediate buffer
-	ActiveMessage<RemoteIBAllocRequestAsync> amsg(ID(tgt_mem).memory_owner_node(), 8);
+	ActiveMessage<RemoteIBAllocRequestAsync> amsg(ID(tgt_mem).memory_owner_node());
 	amsg->memory = tgt_mem;
 	amsg->req = this;
 	amsg->idx = idx;
 	amsg->src_inst_id = inst_pair.first.id;
 	amsg->dst_inst_id = inst_pair.second.id;
-	amsg << ib_size;
+	amsg->size = ib_size;
 	amsg.commit();
       }
     }
@@ -2389,17 +2398,30 @@ namespace Realm {
 
     void ReduceRequest::forward_request(NodeID target_node)
     {
-      ActiveMessage<RemoteCopyMessage> amsg(target_node,65536);
+      Serialization::ByteCountSerializer bcs;
+      {
+	bool ok = ((bcs << *domain) &&
+		   (bcs << srcs) &&
+		   (bcs << dst) &&
+		   (bcs << inst_lock_needed) &&
+		   (bcs << requests));
+	assert(ok);
+      }
+      size_t req_size = bcs.bytes_used();
+      ActiveMessage<RemoteCopyMessage> amsg(target_node, req_size);
       amsg->redop_id = redop_id;
       amsg->red_fold = red_fold;
       amsg->before_copy = before_copy;
       amsg->after_copy = get_finish_event();
       amsg->priority = priority;
-      amsg << *domain;
-      amsg << srcs;
-      amsg << dst;
-      amsg << inst_lock_needed;
-      amsg << requests;
+      {
+	bool ok = ((amsg << *domain) &&
+		   (amsg << srcs) &&
+		   (amsg << dst) &&
+		   (amsg << inst_lock_needed) &&
+		   (amsg << requests));
+	assert(ok);
+      }
       amsg.commit();
       log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << get_finish_event();
       clear_profiling();
@@ -2781,17 +2803,27 @@ namespace Realm {
 
     void FillRequest::forward_request(NodeID target_node)
     {
-      ByteArray ba(fill_buffer, fill_size); // TODO
-      ActiveMessage<RemoteFillMessage> amsg(target_node,65536);
+      Serialization::ByteCountSerializer bcs;
+      {
+	bool ok = ((bcs << *domain) &&
+		   (bcs << ByteArrayRef(fill_buffer, fill_size)) &&
+		   (bcs << requests));
+	assert(ok);
+      }
+      size_t req_size = bcs.bytes_used();
+      ActiveMessage<RemoteFillMessage> amsg(target_node, req_size);
       amsg->inst = dst.inst;
       amsg->field_id = dst.field_id;
       assert(dst.subfield_offset == 0);
       amsg->size = fill_size;
       amsg->before_fill = before_fill;
       amsg->after_fill = get_finish_event();
-      amsg << *domain;
-      amsg << ba;
-      amsg << requests;
+      {
+	bool ok = ((amsg << *domain) &&
+		   (amsg << ByteArrayRef(fill_buffer, fill_size)) &&
+		   (amsg << requests));
+	assert(ok);
+      }
       amsg.commit();
       log_dma.debug() << "forwarding fill: target=" << target_node << " finish=" << get_finish_event();
       clear_profiling();

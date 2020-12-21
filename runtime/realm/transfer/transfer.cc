@@ -1706,23 +1706,36 @@ namespace Realm {
 	dma_request->mark_started();
       
       // remote creation
-      ActiveMessage<XferDesCreateMessage<AddressSplitXferDes<N,T> > > amsg(target_node, 65536);
+      Serialization::ByteCountSerializer bcs;
+      {
+	bool ok = ((bcs << inputs_info) &&
+		   (bcs << outputs_info) &&
+		   (bcs << false /*mark_started*/) &&
+		   (bcs << max_req_size) &&
+		   (bcs << max_nr) &&
+		   (bcs << priority) &&
+		   (bcs << bytes_per_element) &&
+		   (bcs << spaces));
+	assert(ok);
+      }
+      size_t req_size = bcs.bytes_used();
+      ActiveMessage<XferDesCreateMessage<AddressSplitXferDes<N,T> > > amsg(target_node, req_size);
       amsg->inst = inst;
       amsg->complete_fence  = complete_fence;
       amsg->launch_node = launch_node;
       amsg->guid = guid;
       amsg->dma_request = dma_request;
-      
-      bool ok = ((amsg << inputs_info) &&
-		 (amsg << outputs_info) &&
-		 (amsg << false /*mark_started*/) &&
-		 (amsg << max_req_size) &&
-		 (amsg << max_nr) &&
-		 (amsg << priority) &&
-		 (amsg << bytes_per_element) &&
-		 (amsg << spaces));
-      assert(ok);
-      
+      {
+	bool ok = ((amsg << inputs_info) &&
+		   (amsg << outputs_info) &&
+		   (amsg << false /*mark_started*/) &&
+		   (amsg << max_req_size) &&
+		   (amsg << max_nr) &&
+		   (amsg << priority) &&
+		   (amsg << bytes_per_element) &&
+		   (amsg << spaces));
+	assert(ok);
+      }
       amsg.commit();
     }
   }
