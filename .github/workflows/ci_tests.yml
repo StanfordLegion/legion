@@ -61,7 +61,7 @@ jobs:
           TEST_LEGION_CXX: 0
           TEST_REALM: 0
           TEST_FUZZER: 0
-	  CMAKE_PREFIX_PATH=/usr/share/llvm-9.0/cmake
+          CMAKE_PREFIX_PATH=/usr/share/llvm-9.0/cmake
 
   test4:
     name: Test macos regent
@@ -86,8 +86,8 @@ jobs:
         run: |
           PATH=`pwd`/clang9/clang+llvm-9.0.0-x86_64-darwin-apple:$PATH
           export CMAKE_PREFIX_PATH=clang9/clang+llvm-9.0.0-x86_64-darwin-apple
-	  ${CXX} --version
-	  which llvm-config
+          ${CXX} --version
+          which llvm-config
           ./test.py
         env:
           TEST_LEGION_CXX: 0
