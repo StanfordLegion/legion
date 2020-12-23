@@ -53,9 +53,6 @@ jobs:
           free
           pwd
           ${CXX} --version
-          dpkg -l | egrep 'clang|llvm'
-          apt-get update
-          apt-get install -y llvm-9-dev clang-9-dev
       - name: checkout
         uses: actions/checkout@v2
       - name: test
@@ -64,6 +61,7 @@ jobs:
           TEST_LEGION_CXX: 0
           TEST_REALM: 0
           TEST_FUZZER: 0
+	  CMAKE_PREFIX_PATH=/usr/share/llvm-9.0/cmake
 
   test4:
     name: Test macos regent
@@ -78,7 +76,7 @@ jobs:
           vm_stat
           pwd
           ${CXX} --version
-          mkdir -p /clang9
+          mkdir -p clang9
           cd clang9
           curl -L -O http://releases.llvm.org/9.0.0/clang+llvm-9.0.0-x86_64-darwin-apple.tar.xz
           tar xf clang+llvm-9.0.0-x86_64-darwin-apple.tar.xz
@@ -88,6 +86,8 @@ jobs:
         run: |
           PATH=`pwd`/clang9/clang+llvm-9.0.0-x86_64-darwin-apple:$PATH
           export CMAKE_PREFIX_PATH=clang9/clang+llvm-9.0.0-x86_64-darwin-apple
+	  ${CXX} --version
+	  which llvm-config
           ./test.py
         env:
           TEST_LEGION_CXX: 0
