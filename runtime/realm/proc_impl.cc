@@ -235,13 +235,24 @@ namespace Realm {
 	NodeID target = it->first;
 	RemoteTaskRegistration *reg_op = new RemoteTaskRegistration(tro, target);
 	tro->add_async_work_item(reg_op);
-	ActiveMessage<RegisterTaskMessage> amsg(target, 65536);
+	Serialization::ByteCountSerializer bcs;
+	{
+	  bool ok = ((bcs << it->second) &&
+		     (bcs << tro->codedesc) &&
+		     (bcs << tro->userdata));
+	  assert(ok);
+	}
+	size_t req_size = bcs.bytes_used();
+	ActiveMessage<RegisterTaskMessage> amsg(target, req_size);
 	amsg->func_id = func_id;
 	amsg->kind = NO_KIND;
 	amsg->reg_op = reg_op;
-	amsg << it->second;
-	amsg << tro->codedesc;
-	amsg << ByteArrayRef(tro->userdata.base(), tro->userdata.size());
+	{
+	  bool ok = ((amsg << it->second) &&
+		     (amsg << tro->codedesc) &&
+		     (amsg << tro->userdata));
+	  assert(ok);
+	}
 	amsg.commit();
       }
 
@@ -309,13 +320,24 @@ namespace Realm {
 
 	  RemoteTaskRegistration *reg_op = new RemoteTaskRegistration(tro, target);
 	  tro->add_async_work_item(reg_op);
-	  ActiveMessage<RegisterTaskMessage> amsg(target, 65536);
+	  Serialization::ByteCountSerializer bcs;
+	  {
+	    bool ok = ((bcs << std::vector<Processor>()) &&
+		       (bcs << tro->codedesc) &&
+		       (bcs << tro->userdata));
+	    assert(ok);
+	  }
+	  size_t req_size = bcs.bytes_used();
+	  ActiveMessage<RegisterTaskMessage> amsg(target, req_size);
 	  amsg->func_id = func_id;
 	  amsg->kind = target_kind;
 	  amsg->reg_op = reg_op;
-	  amsg << std::vector<Processor>();
-	  amsg << tro->codedesc;
-	  amsg << ByteArrayRef(tro->userdata.base(), tro->userdata.size());
+	  {
+	    bool ok = ((amsg << std::vector<Processor>()) &&
+		       (amsg << tro->codedesc) &&
+		       (amsg << tro->userdata));
+	    assert(ok);
+	  }
 	  amsg.commit();
 	}
       }
@@ -745,19 +767,24 @@ namespace Realm {
 			 << " finish=" << e;
 
 	get_runtime()->optable.add_remote_operation(e, target);
-	// if profiling data need DynamicBufferSerializer?
-	size_t len = reqs.empty() ? arglen: arglen+512;
-	ActiveMessage<SpawnTaskMessage> amsg(target, len);
+	Serialization::ByteCountSerializer bcs;
+	{
+	  bool ok = (bcs.append_bytes(args, arglen) &&
+		     (bcs << reqs));
+	  assert(ok);
+	}
+	size_t req_size = bcs.bytes_used();
+	ActiveMessage<SpawnTaskMessage> amsg(target, req_size);
 	amsg->proc = me;
 	amsg->start_event = start_event;
 	amsg->finish_event = e;
-	amsg->user_arglen = arglen;
+	amsg->arglen = arglen;
 	amsg->priority = priority;
 	amsg->func_id = func_id;
-	amsg.add_payload(args, arglen);
-	// if profiling data
-	if (!reqs.empty()) {
-	  amsg << reqs;
+	{
+	  amsg.add_payload(args, arglen);
+	  bool ok = (amsg << reqs);
+	  assert(ok);
 	}
 	amsg.commit();
 	return;
@@ -918,19 +945,24 @@ namespace Realm {
       }
 
       get_runtime()->optable.add_remote_operation(e, target);
-      // if profiling data need DynamicBufferSerializer?
-      size_t len = reqs.empty() ? arglen: arglen+512;
-      ActiveMessage<SpawnTaskMessage> amsg(target,len);
+      Serialization::ByteCountSerializer bcs;
+      {
+	bool ok = (bcs.append_bytes(args, arglen) &&
+		   (bcs << reqs));
+	assert(ok);
+      }
+      size_t req_size = bcs.bytes_used();
+      ActiveMessage<SpawnTaskMessage> amsg(target, req_size);
       amsg->proc = me;
       amsg->start_event = start_event;
       amsg->finish_event = e;
-      amsg->user_arglen = arglen;
+      amsg->arglen = arglen;
       amsg->priority = priority;
       amsg->func_id = func_id;
-      amsg.add_payload(args, arglen);
-      // if profiling data
-      if (!reqs.empty()) {
-	amsg << reqs;
+      {
+	amsg.add_payload(args, arglen);
+	bool ok = (amsg << reqs);
+	assert(ok);
       }
       amsg.commit();
     }
@@ -1329,15 +1361,16 @@ namespace Realm {
 		     << " finish=" << args.finish_event;
 
     Serialization::FixedBufferDeserializer fbd(data, datalen);
-    fbd.extract_bytes(0, args.user_arglen);  // skip over task args - we'll access those directly
 
-    // profiling requests are optional - extract only if there's data
+    const void *taskargs = fbd.peek_bytes(args.arglen);
     ProfilingRequestSet prs;
-    if(fbd.bytes_left() > 0)
-      fbd >> prs;
+
+    bool ok = (fbd.extract_bytes(0, args.arglen) &&
+	       (fbd >> prs));
+    assert(ok);
 
     GenEventImpl *finish_impl = get_runtime()->get_genevent_impl(args.finish_event);
-    p->spawn_task(args.func_id, data, args.user_arglen, prs,
+    p->spawn_task(args.func_id, taskargs, args.arglen, prs,
 		  args.start_event,
 		  finish_impl, ID(args.finish_event).event_generation(),
 		  args.priority);

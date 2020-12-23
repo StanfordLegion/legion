@@ -1159,9 +1159,12 @@ namespace Realm {
       metadata.mark_valid(early_reqs);
       if(!early_reqs.empty()) {
 	log_inst.debug() << "sending instance metadata to early requestors: isnt=" << me;
-	ActiveMessage<MetadataResponseMessage> amsg(early_reqs,65536);
-	metadata.serialize_msg(amsg);
+	Serialization::ByteCountSerializer bcs;
+	metadata.serialize_msg(bcs);
+	size_t resp_size = bcs.bytes_used();
+	ActiveMessage<MetadataResponseMessage> amsg(early_reqs, resp_size);
 	amsg->id = ID(me).id;
+	metadata.serialize_msg(amsg);
 	amsg.commit();
       }
 
@@ -1260,7 +1263,7 @@ namespace Realm {
 
       // send a message to the target node to fetch metadata
       // TODO: save a hop by sending request to owner directly?
-      ActiveMessage<InstanceMetadataPrefetchRequest> amsg(target_node, 0);
+      ActiveMessage<InstanceMetadataPrefetchRequest> amsg(target_node);
       amsg->inst = me;
       amsg->valid_event = e;
       amsg.commit();
@@ -1390,6 +1393,13 @@ namespace Realm {
 		 (fbs << *layout));
       assert(ok);
     }
+
+  // these are used above, but may get inlined, so we need to explicitly
+  //  instantiate them to satisfy metadata.cc's reference
+  template
+  void RegionInstanceImpl::Metadata::serialize_msg(Serialization::ByteCountSerializer&) const;
+  template
+  void RegionInstanceImpl::Metadata::serialize_msg(ActiveMessage<MetadataResponseMessage>&) const;
 
     void RegionInstanceImpl::Metadata::deserialize(const void *in_data, size_t in_size)
     {

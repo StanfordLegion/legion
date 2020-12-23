@@ -348,7 +348,7 @@ namespace Realm {
       Processor proc;
       Event start_event;
       Event finish_event;
-      size_t user_arglen;
+      size_t arglen;
       int priority;
       Processor::TaskFuncID func_id;
 

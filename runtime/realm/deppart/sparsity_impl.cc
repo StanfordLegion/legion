@@ -740,7 +740,7 @@ namespace Realm {
     }
     
     if(request_approx || request_precise) {
-      ActiveMessage<RemoteSparsityRequest> amsg(ID(me).sparsity_creator_node(), 0);
+      ActiveMessage<RemoteSparsityRequest> amsg(ID(me).sparsity_creator_node());
       amsg->sparsity = me;
       amsg->send_precise = request_precise;
       amsg->send_approx = request_approx;
@@ -777,7 +777,7 @@ namespace Realm {
       }
     } else {
       // send the contributor count to the owner node
-      ActiveMessage<SetContribCountMessage> amsg(ID(me).sparsity_creator_node(), 0);
+      ActiveMessage<SetContribCountMessage> amsg(ID(me).sparsity_creator_node());
       amsg->sparsity = me;
       amsg->count = count;
       amsg.commit();
@@ -791,7 +791,7 @@ namespace Realm {
 
     if(owner != Network::my_node_id) {
       // send (the lack of) data to the owner to collect
-      ActiveMessage<RemoteSparsityContrib> amsg(owner, 0);
+      ActiveMessage<RemoteSparsityContrib> amsg(owner);
       amsg->sparsity = me;
       amsg->piece_count = 1;
       amsg.commit();
@@ -1087,7 +1087,7 @@ namespace Realm {
     }
 
     if(request_approx || request_precise) {
-      ActiveMessage<RemoteSparsityRequest> amsg(ID(me).sparsity_creator_node(), 0);
+      ActiveMessage<RemoteSparsityRequest> amsg(ID(me).sparsity_creator_node());
       amsg->sparsity = me;
       amsg->send_precise = request_precise;
       amsg->send_approx = request_approx;
