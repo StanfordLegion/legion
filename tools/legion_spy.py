@@ -5899,7 +5899,14 @@ class Operation(object):
                 continue
             if field not in refinement_req.fields:
                 continue
-            return refinement
+            # Lastly check to see if the refinement node is an ancestor
+            if refinement_req.logical_node is node:
+                return refinement
+            ancestor = node.parent
+            while ancestor is not None:
+                if ancestor is refinement_req.logical_node:
+                    return refinement
+                ancestor = ancestor.parent
         return None
 
     def set_pending_partition_info(self, node, kind):
