@@ -13064,6 +13064,87 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ProjectionFunction::project_refinement(IndexSpaceNode *domain,
+                  RegionTreeNode *node, std::vector<RegionNode*> &regions) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // should only get this call on functional projection functors
+      assert(is_functional);
+#endif
+      Domain launch_domain;
+      domain->get_launch_space_domain(launch_domain);
+      // If we're exclusive, we'll store the handles until after
+      // we release the lock to go look them up in the region tree
+      std::vector<LogicalRegion> handles;
+      if (is_exclusive)
+        handles.reserve(domain->get_volume());
+      else
+        regions.reserve(domain->get_volume());
+      RegionTreeForest *forest = node->context;
+      // No need to bother error checking here, this projection functor
+      // was already invoked in the same way by an actual operation so
+      // any errors will be handled automatically
+      if (node->is_region())
+      {
+        RegionNode *root = node->as_region_node();
+        if (is_exclusive)
+        {
+          AutoLock p_lock(projection_reservation);
+          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+          {
+            const LogicalRegion handle = 
+              functor->project(root->handle, itr.p, launch_domain);
+            if (handle.exists())
+              handles.push_back(handle);
+          }
+        }
+        else
+        {
+          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+          {
+            const LogicalRegion handle = 
+              functor->project(root->handle, itr.p, launch_domain);
+            if (handle.exists())
+              regions.push_back(forest->get_node(handle));
+          }
+        }
+      }
+      else
+      {
+        PartitionNode *root = node->as_partition_node();
+        if (is_exclusive)
+        {
+          AutoLock p_lock(projection_reservation);
+          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+          {
+            const LogicalRegion handle = 
+              functor->project(root->handle, itr.p, launch_domain);
+            if (handle.exists())
+              handles.push_back(handle);
+          }
+        }
+        else
+        {
+          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+          {
+            const LogicalRegion handle = 
+              functor->project(root->handle, itr.p, launch_domain);
+            if (handle.exists())
+              regions.push_back(forest->get_node(handle));
+          }
+        }
+      }
+      if (is_exclusive)
+      {
+        regions.reserve(handles.size());
+        for (std::vector<LogicalRegion>::const_iterator it =
+              handles.begin(); it != handles.end(); it++)
+          regions.push_back(forest->get_node(*it));
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ProjectionFunction::check_projection_region_result(
         const RegionRequirement &req, const Task *task, unsigned idx,
         LogicalRegion result, Runtime *runtime)
@@ -13263,6 +13344,69 @@ namespace Legion {
           "%d of task %s (UID %lld).", projection_id, index,
           task->get_task_name(), task->get_unique_id())
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunction::is_complete(RegionTreeNode *node, Operation *op,
+                         unsigned index, IndexSpaceNode *projection_space) const
+    //--------------------------------------------------------------------------
+    {
+      Domain launch_domain;
+      projection_space->get_launch_space_domain(launch_domain);
+      if (node->is_region())
+      {
+        RegionNode *region = node->as_region_node();
+        if (is_functional)
+        {
+          if (is_exclusive)
+          {
+            AutoLock p_lock(projection_reservation);
+            return functor->is_complete(region->handle, launch_domain);
+          }
+          else
+            return functor->is_complete(region->handle, launch_domain);
+        }
+        else
+        {
+          Mappable *mappable = op->get_mappable();
+          if (is_exclusive)
+          {
+            AutoLock p_lock(projection_reservation);
+            return functor->is_complete(mappable, index,
+                                        region->handle, launch_domain);
+          }
+          else
+            return functor->is_complete(mappable, index, 
+                                        region->handle, launch_domain);
+        }
+      }
+      else
+      {
+        PartitionNode *partition = node->as_partition_node();
+        if (is_functional)
+        {
+          if (is_exclusive)
+          {
+            AutoLock p_lock(projection_reservation);
+            return functor->is_complete(partition->handle, launch_domain);
+          }
+          else
+            return functor->is_complete(partition->handle, launch_domain);
+        }
+        else
+        {
+          Mappable *mappable = op->get_mappable();
+          if (is_exclusive)
+          {
+            AutoLock p_lock(projection_reservation);
+            return functor->is_complete(mappable, index,
+                                        partition->handle, launch_domain);
+          }
+          else
+            return functor->is_complete(mappable, index,
+                                        partition->handle, launch_domain);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

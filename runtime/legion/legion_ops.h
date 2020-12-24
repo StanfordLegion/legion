@@ -2064,13 +2064,22 @@ namespace Legion {
       void initialize(Operation *creator, unsigned idx, 
                       const LogicalTraceInfo &trace_info,
                       RegionNode *to_refine, const FieldMask &mask);
-      void record_refinement(PartitionNode *node, const FieldMask &mask);
-      void record_refinements(FieldMaskSet<RegionNode> &region_refinements);
+      void record_refinement(RegionTreeNode *node, const FieldMask &mask,
+                             RefProjectionSummary *summary = NULL);
+      void record_refinements(FieldMaskSet<RegionTreeNode> &nodes);
       void record_uninitialized(const FieldMask &mask);
 #ifdef DEBUG_LEGION
       void verify_refinement_mask(const FieldMask &refinement_mask);
 #endif
     protected:
+      void initialize_region(RegionNode *node, const FieldMask &mask,
+         std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
+                            FieldMaskSet<PartitionNode> &refinement_partitions,
+                            std::set<RtEvent> &map_applied_conditions);
+      void initialize_partition(PartitionNode *node, const FieldMask &mask,
+         std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
+                            FieldMaskSet<PartitionNode> &refinement_partitions,
+                            std::set<RtEvent> &map_applied_conditions);
       void initialize_pending(PendingEquivalenceSet *set, const FieldMask &mask,
                               std::set<RtEvent> &applied_events);
     public:
@@ -2092,10 +2101,11 @@ namespace Legion {
       RegionNode *to_refine;
       // The current equivalence sets for the node to be refined
       VersionInfo version_info;
-      // Individual regions from which to make refinements
-      FieldMaskSet<RegionNode> regions_from;
-      // New partitions from which to make refinements
-      FieldMaskSet<PartitionNode> make_from;
+      // Region tree nodes from which to make refinements
+      FieldMaskSet<RegionTreeNode> make_from;
+      // Projection summaries for non-trivial projections from nodes
+      LegionMap<RegionTreeNode*,
+                FieldMaskSet<RefProjectionSummary> >::aligned projections;
       // Equivalence sets that need to be released at completion
       std::vector<EquivalenceSet*> to_release;
       // Fields which do not have initialized equivalence sets

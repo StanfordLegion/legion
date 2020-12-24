@@ -463,6 +463,7 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        const ProjectionInfo &projection_info,
                                        const RegionTreePath &path,
+                                       RefinementTracker &refinement_tracker,
                                        std::set<RtEvent> &applied_events);
       bool perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
@@ -3629,7 +3630,9 @@ namespace Legion {
                                  FieldMask &already_closed_mask,
                                  FieldMask &disjoint_complete_below,
                                  FieldMaskSet<RefinementOp> &refinements,
+                                 RefinementTracker &refinement_tracker,
                                  std::set<RtEvent> &applied_events,
+                                 const bool track_disjoint_complete_below,
                                  const bool check_unversioned);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
@@ -3922,6 +3925,10 @@ namespace Legion {
       void remove_child(const LegionColor p);
       void add_tracker(PartitionTracker *tracker);
       void initialize_disjoint_complete_tree(ContextID ctx, const FieldMask &m);
+      void refine_disjoint_complete_tree(ContextID ctx, PartitionNode *child,
+                                         RefinementOp *refinement, 
+                                         const FieldMask &refinement_mask,
+                                         std::set<RtEvent> &applied_events);
       bool filter_unversioned_fields(ContextID ctx, TaskContext *context,
                                      const FieldMask &filter_mask,
                                      RegionRequirement &req);

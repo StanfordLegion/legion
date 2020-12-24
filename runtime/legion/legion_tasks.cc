@@ -5532,11 +5532,13 @@ namespace Legion {
     {
       perform_base_dependence_analysis();
       ProjectionInfo projection_info;
+      RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      logical_regions[idx], 
                                                      projection_info,
                                                      privilege_paths[idx],
+                                                     refinement_tracker,
                                                      map_applied_conditions);
     }
 
@@ -8421,6 +8423,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
+      RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
         RegionRequirement &req = logical_regions[idx];
@@ -8428,6 +8431,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, req,
                                                      projection_info,
                                                      privilege_paths[idx],
+                                                     refinement_tracker,
                                                      map_applied_conditions);
       }
     }

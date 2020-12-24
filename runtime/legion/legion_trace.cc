@@ -2767,12 +2767,12 @@ namespace Legion {
               assert(!current->is_empty());
 #endif
             }
-            if (current != NULL)
-            {
-              disjoint_expressions.push_back(current);
-              disjoint_components.resize(disjoint_components.size() + 1);
-              disjoint_components.back().push_back(*isit);
-            }
+          }
+          if (current != NULL)
+          {
+            disjoint_expressions.push_back(current);
+            disjoint_components.resize(disjoint_components.size() + 1);
+            disjoint_components.back().push_back(*isit);
           }
           // Now we have overlapping expressions and constituents for
           // each of what used to be the old equivalence sets, so we 

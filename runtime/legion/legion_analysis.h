@@ -623,6 +623,8 @@ namespace Legion {
                      IndexSpace shard_space = IndexSpace::NO_SPACE);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
+      bool is_complete_projection(RegionTreeNode *node,
+                                  const LogicalUser &user) const;
     public:
       ProjectionFunction *projection;
       ProjectionType projection_type;
@@ -684,6 +686,7 @@ namespace Legion {
                         IndexSpaceNode *sd,
                         std::set<RtEvent> &applied);
       ProjectionSummary(const ProjectionInfo &info, std::set<RtEvent> &applied);
+      ProjectionSummary(ProjectionSummary &&rhs);
       ProjectionSummary(const ProjectionSummary &rhs);
       ~ProjectionSummary(void);
     public:
@@ -702,6 +705,26 @@ namespace Legion {
       ProjectionFunction *projection;
       ShardingFunction *sharding;
       IndexSpaceNode *sharding_domain;
+    };
+
+    /**
+     * \struct RefProjectionSummary
+     * A refinement projection summary is just a projection summary
+     * with support for reference counting and no copies
+     */
+    struct RefProjectionSummary : public ProjectionSummary, public Collectable {
+    public:
+      RefProjectionSummary(const ProjectionInfo &info, std::set<RtEvent> &ap);
+      RefProjectionSummary(ProjectionSummary &&rhs);
+      RefProjectionSummary(const RefProjectionSummary &rhs);
+      ~RefProjectionSummary(void);
+    public:
+      RefProjectionSummary& operator=(const RefProjectionSummary &rhs);
+    public:
+      void project_refinement(RegionTreeNode *node, 
+                              std::vector<RegionNode*> &regions) const;
+      void project_refinement(RegionTreeNode *node, ShardID shard,
+                              std::vector<RegionNode*> &regions) const;
     };
 
     /**
@@ -846,6 +869,10 @@ namespace Legion {
       // children that we've observed for all fields to see when we're 
       // close enough to be counted as being considered refined
       LegionMap<size_t,FieldMask>::aligned disjoint_complete_child_counts;
+      // If we have non-zero depth projection functions then we can get
+      // these at the bottom of the disjoint complete access trees to say
+      // how to project from a given node in the region tree
+      FieldMaskSet<RefProjectionSummary> disjoint_complete_projections;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
@@ -924,6 +951,48 @@ namespace Legion {
       // Cache the generation IDs so we can kick off ops before adding users
       GenerationID merge_close_gen;
     }; 
+
+    /**
+     * \class RefinementTracker
+     * The refinement tracker records all the refinements to be performed
+     * by an operation and then performs them after all of the region 
+     * requirements for that operation are done being analyzed. That ensures
+     * that we have at most one refinement change for all region requirements
+     * in an operation that touch the same fields of the same region tree.
+     */
+    class RefinementTracker {
+    public:
+      struct PendingRefinement {
+      public:
+        PendingRefinement(void)
+          : refinement_op(NULL), partition(NULL), index(0) { }
+        PendingRefinement(RefinementOp *op, PartitionNode *p, 
+                          const FieldMask &m, unsigned idx)
+          : refinement_mask(m), refinement_op(op), partition(p), index(idx) { }
+      public:
+        FieldMask refinement_mask;
+        RefinementOp *refinement_op;
+        PartitionNode *partition;
+        unsigned index;
+      };
+    public:
+      RefinementTracker(Operation *op, std::set<RtEvent> &applied_events);
+      RefinementTracker(const RefinementTracker &rhs);
+      ~RefinementTracker(void);
+    public:
+      RefinementTracker& operator=(const RefinementTracker &rhs);
+    public:
+      RefinementOp* create_refinement(const LogicalUser &user,
+          PartitionNode *partition, const FieldMask &refinement_mask,
+          const LogicalTraceInfo &trace_info);
+    public:
+      Operation *const op;
+      InnerContext *const context;
+    protected:
+      std::set<RtEvent> &applied_events;
+      // Need these in order for control replication
+      LegionVector<PendingRefinement>::aligned pending_refinements;
+    };
 
 #if NEWEQ 
     class KDTree {

@@ -3882,6 +3882,37 @@ namespace Legion {
                           std::vector<DomainPoint> &ordered_points);
       ///@}
       
+      ///@{
+      /**
+       * Indicate to the runtime whether this projection function 
+       * invoked on the given upper bound node in the region tree with
+       * the given index space domain will completely "cover" the
+       * all the upper bound points. Specifically will each point in
+       * the upper bound node exist in at least one logical region that
+       * is projected to be one of the points in the domain. It is always
+       * sound to return 'false' even if the projection will ultimately
+       * turn out to be complete. The only cost will be in additional
+       * runtime analysis overhead. It is unsound to return 'true' if
+       * the resulting projection is not complete. Undefined behavior
+       * in this scenario. In general users only need to worry about 
+       * implementing these functions if they have a projection functor
+       * that has depth greater than zero.
+       * @param mappable the mappable oject for non-functional functors
+       * @param index index of region requirement for non-functional functors
+       * @param upper_bound the upper bound region/partition to consider
+       * @param launch_domain the set of points for the projection
+       * @return bool indicating whether this projection is complete
+       */
+      virtual bool is_complete(LogicalRegion upper_bound, 
+                               const Domain &launch_domain);
+      virtual bool is_complete(LogicalPartition upper_bound,
+                               const Domain &launch_domain);
+      virtual bool is_complete(Mappable *mappable, unsigned index,
+            LogicalRegion upper_bound, const Domain &launch_domain);
+      virtual bool is_complete(Mappable *mappable, unsigned index,
+            LogicalPartition upper_bound, const Domain &launch_domain); 
+      ///@}
+      
       /**
        * Indicate whether calls to this projection functor
        * must be serialized or can be performed in parallel.

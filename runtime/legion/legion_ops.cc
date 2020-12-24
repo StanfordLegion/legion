@@ -3381,10 +3381,11 @@ namespace Legion {
       if (runtime->check_privileges)
         check_privilege();
       ProjectionInfo projection_info;
+      RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions);
     }
 
@@ -4904,11 +4905,13 @@ namespace Legion {
       // Register a dependence on our predicate
       register_predicate_dependence();
       ProjectionInfo projection_info;
+      RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      projection_info,
                                                      src_privilege_paths[idx],
+                                                     refinement_tracker,
                                                      map_applied_conditions);
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -4922,6 +4925,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      projection_info,
                                                      dst_privilege_paths[idx],
+                                                     refinement_tracker,
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -4936,6 +4940,7 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  projection_info,
                                                  gather_privilege_paths[idx],
+                                                 refinement_tracker,
                                                  map_applied_conditions);
       }
       if (!dst_indirect_requirements.empty())
@@ -4947,6 +4952,7 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  projection_info,
                                                  scatter_privilege_paths[idx],
+                                                 refinement_tracker,
                                                  map_applied_conditions);
       }
     }
@@ -7144,6 +7150,7 @@ namespace Legion {
         check_copy_privileges(true/*permit projection*/);
       // Register a dependence on our predicate
       perform_base_dependence_analysis();
+      RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         ProjectionInfo src_info(runtime, src_requirements[idx], launch_space); 
@@ -7151,6 +7158,7 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      src_info,
                                                      src_privilege_paths[idx],
+                                                     refinement_tracker,
                                                      map_applied_conditions);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -7166,6 +7174,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      dst_info,
                                                      dst_privilege_paths[idx],
+                                                     refinement_tracker,
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -7182,6 +7191,7 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  gather_info,
                                                  gather_privilege_paths[idx],
+                                                 refinement_tracker,
                                                  map_applied_conditions);
         }
       }
@@ -7196,6 +7206,7 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
                                                  scatter_privilege_paths[idx],
+                                                 refinement_tracker,
                                                  map_applied_conditions);
         }
       }
@@ -9792,10 +9803,11 @@ namespace Legion {
       // for other kinds of operations 
       // see RegionTreeNode::register_logical_node
       ProjectionInfo projection_info;
+      RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions);
     }
 
@@ -10175,10 +10187,11 @@ namespace Legion {
       // close operations necessary for the virtual close op to
       // do its job, so it needs to do nothing else
       ProjectionInfo projection_info;
+      RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions);
     }
 
@@ -10324,7 +10337,19 @@ namespace Legion {
       deactivate_internal();
       version_info.clear();
       make_from.clear();
-      regions_from.clear();
+      if (!projections.empty())
+      {
+        for (LegionMap<RegionTreeNode*,FieldMaskSet<RefProjectionSummary> >::
+              aligned::const_iterator pit = projections.begin(); pit !=
+              projections.end(); pit++)
+        {
+          for (FieldMaskSet<RefProjectionSummary>::const_iterator it =
+                pit->second.begin(); it != pit->second.end(); it++)
+            if (it->first->remove_reference())
+              delete it->first;
+        }
+        projections.clear();
+      }
       to_release.clear();
       uninitialized_fields.clear();
     }
@@ -10347,13 +10372,6 @@ namespace Legion {
     const FieldMask& RefinementOp::get_internal_mask(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      // Note that make_from fields should always dominate regions_from
-      // fields because regions_from can only store regions from intermediate
-      // partitions in the region tree, all of which will have siblings that
-      // are refined with full partitions in make_from
-      assert(!(regions_from.get_valid_mask() - make_from.get_valid_mask()));
-#endif
       return make_from.get_valid_mask();
     }
 
@@ -10391,25 +10409,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RefinementOp::record_refinement(PartitionNode *node, 
-                                         const FieldMask &mask)
+    void RefinementOp::record_refinement(RegionTreeNode *node, 
+                           const FieldMask &mask, RefProjectionSummary *summary)
     //--------------------------------------------------------------------------
     {
       make_from.insert(node, mask);
+      if (summary != NULL)
+      {
+        FieldMaskSet<RefProjectionSummary> &summaries = projections[node];
+#ifdef DEBUG_LEGION
+        assert(summaries.get_valid_mask() * mask);
+#endif
+        if (summaries.insert(summary, mask))
+          summary->add_reference();
+      }
     }
 
     //--------------------------------------------------------------------------
-    void RefinementOp::record_refinements(FieldMaskSet<RegionNode> &regions)
+    void RefinementOp::record_refinements(FieldMaskSet<RegionTreeNode> &nodes)
     //--------------------------------------------------------------------------
     {
-      if (!regions_from.empty())
+      if (!make_from.empty())
       {
-        for (FieldMaskSet<RegionNode>::const_iterator it =
-              regions.begin(); it != regions.end(); it++)
-          regions_from.insert(it->first, it->second);
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+              nodes.begin(); it != nodes.end(); it++)
+          make_from.insert(it->first, it->second);
       }
       else
-        regions_from.swap(regions);
+        make_from.swap(nodes);
     }
 
     //--------------------------------------------------------------------------
@@ -10470,53 +10497,46 @@ namespace Legion {
       // Go through and build the pending refinements so we get valid
       // references on all the old equivalence sets before they are invalidated
       std::set<RtEvent> map_applied_conditions;
+      FieldMaskSet<PartitionNode> refinement_partitions;
       std::map<PartitionNode*,std::vector<RegionNode*> > refinement_regions;
-      for (FieldMaskSet<PartitionNode>::const_iterator it = 
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
             make_from.begin(); it != make_from.end(); it++)
       {
-        // Make pending refinements for each of the child regions and
-        // register them with the context so it can find them later
-        IndexPartNode *index_part = it->first->row_source;
-        std::vector<RegionNode*> &children = refinement_regions[it->first];
-        children.reserve(index_part->total_children);
-        // Iterate over each child and make an equivalence set  
-        if (index_part->total_children == index_part->max_linearized_color)
+        // Check to see if we have any projections to handle from this node
+        // if not then we are doing the trivial projections
+        if (!projections.empty() && 
+            (projections.find(it->first) != projections.end()))
         {
-          for (LegionColor color = 0; 
-                color < index_part->total_children; color++)
+          const FieldMaskSet<RefProjectionSummary> &summaries = 
+            projections[it->first];
+          for (FieldMaskSet<RefProjectionSummary>::const_iterator sit =
+                summaries.begin(); sit != summaries.end(); sit++)
           {
-            RegionNode *child = it->first->get_child(color);
-            PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
-            initialize_pending(pending, it->second, map_applied_conditions);
-            // Parent context takes ownership here
-            parent_ctx->record_pending_disjoint_complete_set(pending);
-            children.push_back(child);
+            // Do the projection to get the regions
+            std::vector<RegionNode*> regions;
+            sit->first->project_refinement(it->first, regions);
+            for (std::vector<RegionNode*>::const_iterator rit =
+                  regions.begin(); rit != regions.end(); rit++)
+              initialize_region(*rit, sit->second, refinement_regions,
+                                refinement_partitions, map_applied_conditions);
+          }
+          const FieldMask remaining = it->second - summaries.get_valid_mask();
+          if (!!remaining)
+          {
+            if (it->first->is_region())
+              initialize_region(it->first->as_region_node(), remaining, 
+               refinement_regions,refinement_partitions,map_applied_conditions);
+            else
+              initialize_partition(it->first->as_partition_node(), remaining, 
+               refinement_regions,refinement_partitions,map_applied_conditions);
           }
         }
+        else if (it->first->is_region())
+          initialize_region(it->first->as_region_node(), it->second,
+             refinement_regions, refinement_partitions, map_applied_conditions);
         else
-        {
-          ColorSpaceIterator *itr = 
-            index_part->color_space->create_color_space_iterator();
-          while (itr->is_valid())
-          {
-            const LegionColor color = itr->yield_color();
-            RegionNode *child = it->first->get_child(color);
-            PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
-            initialize_pending(pending, it->second, map_applied_conditions);
-            // Parent context takes ownership here
-            parent_ctx->record_pending_disjoint_complete_set(pending);
-            children.push_back(child);
-          }
-          delete itr;
-        }
-      }
-      for (FieldMaskSet<RegionNode>::const_iterator it =
-            regions_from.begin(); it != regions_from.end(); it++)
-      {
-        PendingEquivalenceSet *pending = new PendingEquivalenceSet(it->first);
-        initialize_pending(pending, it->second, map_applied_conditions);
-        // Parent context takes ownership here
-        parent_ctx->record_pending_disjoint_complete_set(pending);
+          initialize_partition(it->first->as_partition_node(), it->second,
+             refinement_regions, refinement_partitions, map_applied_conditions);
       }
       // Now we can invalidate the previous refinement
       const ContextID ctx = parent_ctx->get_context().get_id();
@@ -10531,27 +10551,128 @@ namespace Legion {
       else
         to_refine->invalidate_refinement(ctx, get_internal_mask(),
             false/*self*/, map_applied_conditions, to_release, parent_ctx);
-      // Finally propagate the new refinements up from the partitions
-      for (FieldMaskSet<PartitionNode>::const_iterator it = 
-            make_from.begin(); it != make_from.end(); it++)
+      // Finally propagate the new refinements up from the regions
+      for (FieldMaskSet<PartitionNode>::const_iterator it =
+            refinement_partitions.begin(); it !=
+            refinement_partitions.end(); it++)
       {
-        std::vector<RegionNode*> &children = refinement_regions[it->first];
-        if (children.empty())
-          continue;
-        // Propagate this refinement up from the partition
-        it->first->propagate_refinement(ctx, children, it->second, 
-                                        map_applied_conditions);
+#ifdef DEBUG_LEGION
+        assert(refinement_regions.find(it->first) != refinement_regions.end());
+#endif
+        it->first->propagate_refinement(ctx, refinement_regions[it->first],
+                                        it->second, map_applied_conditions);
       }
-      // Propagate up from any regions as well
-      for (FieldMaskSet<RegionNode>::const_iterator it =
-            regions_from.begin(); it != regions_from.end(); it++)
-        it->first->parent->propagate_refinement(ctx, it->first, it->second,
-                                                map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::initialize_region(RegionNode *node,const FieldMask &mask, 
+         std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
+         FieldMaskSet<PartitionNode> &refinement_partitions,
+         std::set<RtEvent> &map_applied_conditions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(node->parent != NULL); // should always have a parent
+#endif
+      PendingEquivalenceSet *pending = new PendingEquivalenceSet(node);
+      initialize_pending(pending, mask, map_applied_conditions);
+      // Parent context takes ownership here
+      parent_ctx->record_pending_disjoint_complete_set(pending);
+      std::vector<RegionNode*> &children = refinement_regions[node->parent];
+      if (children.size() < node->parent->get_num_children())
+      {
+        // Iterate through the existing children and see if we find ourselves
+        bool found = false;
+        for (std::vector<RegionNode*>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+        {
+          if ((*it) != node)
+            continue;
+          found = true;
+          break;
+        }
+        if (!found)
+          children.push_back(node);
+      }
+      refinement_partitions.insert(node->parent, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::initialize_partition(PartitionNode *node,
+         const FieldMask &mask, 
+         std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
+         FieldMaskSet<PartitionNode> &refinement_partitions,
+         std::set<RtEvent> &map_applied_conditions)
+    //--------------------------------------------------------------------------
+    {
+      // Make pending refinements for each of the child regions and
+      // register them with the context so it can find them later
+      IndexPartNode *index_part = node->row_source;
+      std::vector<RegionNode*> &children = refinement_regions[node];
+      const size_t max_check = children.size();
+      const bool add_children = (max_check < index_part->total_children);
+      if (add_children)
+        children.reserve(index_part->total_children);
+      // Iterate over each child and make an equivalence set  
+      if (index_part->total_children == index_part->max_linearized_color)
+      {
+        for (LegionColor color = 0; 
+              color < index_part->total_children; color++)
+        {
+          RegionNode *child = node->get_child(color);
+          PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
+          initialize_pending(pending, mask, map_applied_conditions);
+          // Parent context takes ownership here
+          parent_ctx->record_pending_disjoint_complete_set(pending);
+          if (add_children)
+          {
+            bool found = false;
+            for (unsigned idx = 0; idx < max_check; idx++)
+            {
+              if (children[idx] != child)
+                continue;
+              found = true;
+              break;
+            }
+            if (!found)
+              children.push_back(child);
+          }
+        }
+      }
+      else
+      {
+        ColorSpaceIterator *itr = 
+          index_part->color_space->create_color_space_iterator();
+        while (itr->is_valid())
+        {
+          const LegionColor color = itr->yield_color();
+          RegionNode *child = node->get_child(color);
+          PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
+          initialize_pending(pending, mask, map_applied_conditions);
+          // Parent context takes ownership here
+          parent_ctx->record_pending_disjoint_complete_set(pending);
+          if (add_children)
+          {
+            bool found = false;
+            for (unsigned idx = 0; idx < max_check; idx++)
+            {
+              if (children[idx] != child)
+                continue;
+              found = true;
+              break;
+            }
+            if (!found)
+              children.push_back(child);
+          }
+        }
+        delete itr;
+      }
+      refinement_partitions.insert(node, mask);
     }
 
     //--------------------------------------------------------------------------
@@ -10918,6 +11039,7 @@ namespace Legion {
     void AdvisementOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < requirements.size(); idx++)
       {
         const RegionRequirement &req = requirements[idx];
@@ -10930,6 +11052,7 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, idx, req,
                                                        projection_info,
                                                        privilege_paths[idx],
+                                                       refinement_tracker,
                                                        map_applied_conditions);
           if (runtime->legion_spy_enabled)
           {
@@ -10955,6 +11078,7 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, 0/*idx*/, req,
                                                        projection_info,
                                                        privilege_paths[idx],
+                                                       refinement_tracker,
                                                        map_applied_conditions);
           if (runtime->legion_spy_enabled)
           {
@@ -11276,10 +11400,11 @@ namespace Legion {
       register_predicate_dependence();
       // First register any mapping dependences that we have
       ProjectionInfo projection_info;
+      RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions);
     }
 
@@ -12156,11 +12281,12 @@ namespace Legion {
       register_predicate_dependence();
       // First register any mapping dependences that we have
       ProjectionInfo projection_info;
+      RefinementTracker tracker(this, map_applied_conditions);
       // Register any mapping dependences that we have
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions);
     }
 
@@ -15747,10 +15873,12 @@ namespace Legion {
       ProjectionInfo projection_info;
       if (is_index_space)
         projection_info = ProjectionInfo(runtime, requirement, launch_space); 
+      RefinementTracker refinement_tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
+                                                   refinement_tracker,
                                                    map_applied_conditions);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
@@ -17388,10 +17516,11 @@ namespace Legion {
       if (future.impl != NULL)
         future.impl->register_dependence(this);
       ProjectionInfo projection_info;
+      RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions);
     }
 
@@ -18048,10 +18177,11 @@ namespace Legion {
       if (future.impl != NULL)
         future.impl->register_dependence(this);
       ProjectionInfo projection_info(runtime, requirement, launch_space);
+      RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions);
     }
 
@@ -18757,10 +18887,11 @@ namespace Legion {
       if (runtime->check_privileges)
         check_privilege();
       ProjectionInfo projection_info;
+      RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions); 
     }
 
@@ -19319,10 +19450,11 @@ namespace Legion {
       // Before we do our dependence analysis, we can remove the 
       // restricted coherence on the logical region
       ProjectionInfo projection_info;
+      RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement, 
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions);
     }
 

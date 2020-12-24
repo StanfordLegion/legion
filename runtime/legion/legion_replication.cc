@@ -760,6 +760,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
+      RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
         RegionRequirement &req = logical_regions[idx];
@@ -768,6 +769,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, req, 
                                                      projection_info,
                                                      privilege_paths[idx],
+                                                     refinement_tracker,
                                                      map_applied_conditions);
       }
     }
@@ -1386,9 +1388,11 @@ namespace Legion {
           delete (*it);
         collective_dids.clear();
       }
+      replicated_regions.clear();
       replicated_partitions.clear();
       sharded_region_version_infos.clear();
-      refinement_regions.clear();
+      sharded_regions.clear();
+      sharded_partitions.clear();
       runtime->free_repl_refinement_op(this);
     }
 
@@ -1419,14 +1423,30 @@ namespace Legion {
       // Iterate through each of the partitions and see if we are going to
       // shard them or not when making equivalence sets, we always duplicate
       // the creation of equivalence sets for intermediate regions
-      size_t total_replicate_subregions = regions_from.size();
-      for (FieldMaskSet<PartitionNode>::const_iterator it =
+      // Anything that is projected and therefore sharded is not duplicated
+      size_t total_replicate_subregions = 0;
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
             make_from.begin(); it != make_from.end(); it++)
       {
-        if (repl_ctx->replicate_partition_equivalence_sets(it->first))
+        // Check to see first if we are not projecting for any fields
+        if (!projections.empty() && 
+            (projections.find(it->first) != projections.end()) &&
+            (it->second == projections[it->first].get_valid_mask()))
+          continue;
+        if (!it->first->is_region())
         {
-          replicated_partitions[it->first->handle] = it->first;
-          total_replicate_subregions += it->first->get_num_children();
+          PartitionNode *part_node = it->first->as_partition_node();
+          if (repl_ctx->replicate_partition_equivalence_sets(part_node))
+          {
+            replicated_partitions[part_node->handle] = part_node;
+            total_replicate_subregions += part_node->get_num_children();
+          }
+        }
+        else
+        {
+          RegionNode *region = it->first->as_region_node();
+          replicated_regions[region->handle] = region;
+          total_replicate_subregions++;
         }
       }
       if (total_replicate_subregions > 0)
@@ -1458,77 +1478,169 @@ namespace Legion {
     {
       std::set<RtEvent> ready_events;      
       const ContextID ctx = parent_ctx->get_context().get_id();
-      FieldMask replicated_mask = regions_from.get_valid_mask();
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
+      FieldMask replicated_mask;
       const AddressSpaceID local_space = runtime->address_space;
-      for (FieldMaskSet<PartitionNode>::const_iterator it =
+      // Fill in the sharded_regions and sharded_partitions
+      // data structures, we'll use those to compute the equivalence sets
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
             make_from.begin(); it != make_from.end(); it++)
       {
-        const FieldMask &version_mask = it->second - uninitialized_fields;
-        if (replicated_partitions.find(it->first->handle) == 
-            replicated_partitions.end())
+        FieldMask version_mask = it->second;
+        // Check to see if any fields are projected, if so then we only
+        // need to compute equivalence sets for the projected regions
+        LegionMap<RegionTreeNode*,
+          FieldMaskSet<RefProjectionSummary> >::aligned::const_iterator 
+            finder = projections.find(it->first);
+        if (finder != projections.end())
+        {
+          for (FieldMaskSet<RefProjectionSummary>::const_iterator sit =
+                finder->second.begin(); sit != finder->second.end(); sit++)
+          {
+            std::vector<RegionNode*> regions;
+            sit->first->project_refinement(it->first, 
+                repl_ctx->owner_shard->shard_id, regions);
+            for (std::vector<RegionNode*>::const_iterator rit =
+                  regions.begin(); rit != regions.end(); rit++)
+            {
+              PartitionNode *parent = (*rit)->parent;
+              std::vector<RegionNode*> &children = sharded_regions[parent];
+              if (children.size() < parent->get_num_children())
+              {
+                bool found = false;
+                for (unsigned idx = 0; idx < children.size(); idx++)
+                {
+                  if ((*rit) != children[idx])
+                    continue;
+                  found = true;
+                  break;
+                }
+                if (!found)
+                  children.push_back(*rit);
+              }
+              sharded_partitions.insert(parent, sit->second);
+            }
+          }
+          version_mask -= finder->second.get_valid_mask();
+          if (!version_mask)
+            continue;
+        }
+        if (!it->first->is_region() &&
+            (replicated_partitions.find(it->first->as_partition_node()->handle) 
+             == replicated_partitions.end()))
         {
           // Only compute equivalence sets for the subregions that
           // are sharded to this particular shard
-          IndexPartNode *index_part = it->first->row_source;
-          std::vector<RegionNode*> &children = refinement_regions[it->first];
-          if (index_part->total_children == index_part->max_linearized_color)
+          PartitionNode *part_node = it->first->as_partition_node();
+          IndexPartNode *index_part = part_node->row_source;
+          std::vector<RegionNode*> &children = sharded_regions[part_node];
+          sharded_partitions.insert(part_node, version_mask);
+          // This is probably too conservative a check, but it is sound
+          if (children.size() < index_part->get_num_children())
           {
-            for (LegionColor color = repl_ctx->owner_shard->shard_id; 
-                  color < index_part->total_children; 
-                  color += repl_ctx->total_shards)
+            const size_t max_check = children.size();
+            if (index_part->total_children == index_part->max_linearized_color)
             {
-              RegionNode *child = it->first->get_child(color);
-              VersionInfo &info = sharded_region_version_infos[child];
-              info.relax_valid_mask(it->second);
-              if (!!version_mask)
-                child->perform_versioning_analysis(ctx, parent_ctx, &info,
-                      version_mask, unique_op_id, local_space, ready_events);
-              children.push_back(child);
+              for (LegionColor color = repl_ctx->owner_shard->shard_id; 
+                    color < index_part->total_children; 
+                    color += repl_ctx->total_shards)
+              {
+                RegionNode *child = part_node->get_child(color);
+                bool found = false;
+                for (unsigned idx = 0; idx < max_check; idx++)
+                {
+                  if (children[idx] != child)
+                      continue;
+                  found = true;
+                  break;
+                }
+                if (!found)
+                  children.push_back(child);
+              }
             }
-          }
-          else
-          {
-            ColorSpaceIterator *itr = 
-              index_part->color_space->create_color_space_iterator();
-            // Skip ahead for our shard
-            for (unsigned idx = 0; idx < repl_ctx->owner_shard->shard_id; idx++)
+            else
             {
-              itr->yield_color();
-              if (!itr->is_valid())
-                break;
-            }
-            while (itr->is_valid())
-            {
-              RegionNode *child = it->first->get_child(itr->yield_color());
-              VersionInfo &info = sharded_region_version_infos[child];
-              info.relax_valid_mask(it->second);
-              if (!!version_mask)
-                child->perform_versioning_analysis(ctx, parent_ctx, &info,
-                      version_mask, unique_op_id, local_space, ready_events);
-              children.push_back(child);
-              // Skip ahead to the next color
-              for (unsigned idx = 0; idx < (repl_ctx->total_shards-1); idx++)
+              ColorSpaceIterator *itr = 
+                index_part->color_space->create_color_space_iterator();
+              // Skip ahead for our shard
+              for (unsigned idx = 0; 
+                    idx < repl_ctx->owner_shard->shard_id; idx++)
               {
                 itr->yield_color();
                 if (!itr->is_valid())
                   break;
               }
+              while (itr->is_valid())
+              {
+                RegionNode *child = part_node->get_child(itr->yield_color());
+                bool found = false;
+                for (unsigned idx = 0; idx < max_check; idx++)
+                {
+                  if (children[idx] != child)
+                    continue;
+                  found = true;
+                  break;
+                }
+                if (!found)
+                  children.push_back(child);
+                // Skip ahead to the next color
+                for (unsigned idx = 0; idx < (repl_ctx->total_shards-1); idx++)
+                {
+                  itr->yield_color();
+                  if (!itr->is_valid())
+                    break;
+                }
+              }
+              delete itr;
             }
-            delete itr;
+          }
+        }
+        else // we can compute versions from the root to_refine
+          replicated_mask |= version_mask;
+      }
+      // At this point we know which regions we need equivalence sets for
+      // Start with the root ones which we'll put in the normal version_info
+      if (!!replicated_mask)
+      {
+        if (!!uninitialized_fields)
+          replicated_mask -= uninitialized_fields;
+        if (!!replicated_mask)
+          to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
+                      replicated_mask, unique_op_id, local_space, ready_events);
+      }
+      // Now compute the shard specific ones
+      for (FieldMaskSet<PartitionNode>::const_iterator pit =
+            sharded_partitions.begin(); pit != sharded_partitions.end(); pit++)
+      {
+        const std::vector<RegionNode*> &children = sharded_regions[pit->first];
+        if (!!uninitialized_fields)
+        {
+          const FieldMask request_mask = pit->second - uninitialized_fields;
+          for (std::vector<RegionNode*>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+          {
+            VersionInfo &region_info = sharded_region_version_infos[*it];
+            if (!!request_mask)
+              (*it)->perform_versioning_analysis(ctx, parent_ctx, &region_info,
+                  request_mask, unique_op_id, local_space, ready_events);
           }
         }
         else
-          replicated_mask |= version_mask;
+        {
+          for (std::vector<RegionNode*>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+          {
+            VersionInfo &region_info = sharded_region_version_infos[*it];
+            (*it)->perform_versioning_analysis(ctx, parent_ctx, &region_info,
+                pit->second, unique_op_id, local_space, ready_events);
+          }
+        }
       }
-      if (!!replicated_mask)
-        to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
-                    replicated_mask, unique_op_id, local_space, ready_events);
 #ifdef DEBUG_LEGION
       assert(refinement_barrier.exists());
 #endif
@@ -1584,6 +1696,9 @@ namespace Legion {
               sharded_region_version_infos.begin(); it !=
               sharded_region_version_infos.end(); it++)
         {
+          // If we had unintialized fields, relax the valid mask for any of them
+          if (!!uninitialized_fields)
+            it->second.relax_valid_mask(sharded_partitions[it->first->parent]);
           PendingEquivalenceSet *pending = new PendingEquivalenceSet(it->first);
           pending->record_all(it->second, references_added);
           // Context takes ownership at this point
@@ -1604,47 +1719,52 @@ namespace Legion {
       else
         to_refine->invalidate_refinement(ctx, get_internal_mask(),
             false/*self*/, map_applied_conditions, to_release, repl_ctx);
-      if (make_from.size() != replicated_partitions.size())
+      // First propagate the refinements for the sharded regions and partitions
+      for (FieldMaskSet<PartitionNode>::const_iterator it =
+            sharded_partitions.begin(); it != sharded_partitions.end(); it++)
       {
-        // First make the equivalence sets for our sharded partitions
-        for (FieldMaskSet<PartitionNode>::const_iterator it =
-              make_from.begin(); it != make_from.end(); it++)
+        const std::vector<RegionNode*> &children = sharded_regions[it->first];
+        if (children.empty())
         {
-          // Skip any partitions which are going to be replicated
-          if (replicated_partitions.find(it->first->handle) != 
-              replicated_partitions.end())
-            continue;
-          std::vector<RegionNode*> &children = refinement_regions[it->first];
-          if (children.empty())
-          {
-            // Still propagate the refinement so we can do lookups
-            // correctly for control replication
-            if (!it->first->parent->row_source->is_empty())
-              it->first->propagate_refinement(ctx, NULL/*no child*/, it->second,
-                                              map_applied_conditions);
-            continue;
-          }
-          // We're not actually going to make the equivalence sets here
-          // Instead we're going to just fill in the right data structure
-          // on the partition so that any traversals of the children
-          // will ping the context to figure out who the owner is. The
-          // actual owner of the initial equivalence set will be done
-          // with a first touch policy so that the first writer will
-          // the one to make the equivalence sets
-          it->first->propagate_refinement(ctx, children, it->second, 
+          // Still propagate the refinement so we can do lookups
+          // correctly for control replication
+          it->first->propagate_refinement(ctx, NULL/*no child*/, it->second,
                                           map_applied_conditions);
+          continue;
         }
+        // We're not actually going to make the equivalence sets here
+        // Instead we're going to just fill in the right data structure
+        // on the partition so that any traversals of the children
+        // will ping the context to figure out who the owner is. The
+        // actual owner of the initial equivalence set will be done
+        // with a first touch policy so that the first writer will
+        // the one to make the equivalence sets
+        it->first->propagate_refinement(ctx, children, it->second, 
+                                        map_applied_conditions);
       }
-      if (!replicated_partitions.empty() || !regions_from.empty())
+      // Now we do the replicated partitions and regions
+      if (!replicated_partitions.empty() || !replicated_regions.empty())
       {
-        // Now make the replicated partitions
         unsigned did_index = 0;
+        // Now make the replicated partitions
         for (std::map<LogicalPartition,PartitionNode*>::const_iterator it =
               replicated_partitions.begin(); it != 
               replicated_partitions.end(); it++)
         {
+#ifdef DEBUG_LEGION
+          assert(did_index < collective_dids.size());
+#endif
           IndexPartNode *index_part = it->second->row_source;
-          const FieldMask &mask = make_from[it->second];
+          FieldMask mask = make_from[it->second];
+          // Prune out any projection fields for this node
+          LegionMap<RegionTreeNode*,
+            FieldMaskSet<RefProjectionSummary> >::aligned::const_iterator
+              finder = projections.find(it->second);
+          if (finder != projections.end())
+            mask -= finder->second.get_valid_mask();
+#ifdef DEBUG_LEGION
+          assert(!!mask);
+#endif
           // Iterate over each child and make an equivalence set  
           if (index_part->total_children == index_part->max_linearized_color)
           {
@@ -1690,30 +1810,39 @@ namespace Legion {
             delete itr;
           }
         }
-        for (FieldMaskSet<RegionNode>::const_iterator it =
-              regions_from.begin(); it != regions_from.end(); it++)
+        for (std::map<LogicalRegion,RegionNode*>::const_iterator it =
+              replicated_regions.begin(); it != replicated_regions.end(); it++)
         {
+#ifdef DEBUG_LEGION
+          assert(did_index < collective_dids.size());
+#endif
           bool first = false;
           const DistributedID did = 
             collective_dids[did_index++]->get_value(false/*block*/);
+          FieldMask mask = make_from[it->second];
+          // Prune out any projection fields for this node
+          LegionMap<RegionTreeNode*,
+            FieldMaskSet<RefProjectionSummary> >::aligned::const_iterator
+              finder = projections.find(it->second);
+          if (finder != projections.end())
+            mask -= finder->second.get_valid_mask();
+#ifdef DEBUG_LEGION
+          assert(!!mask);
+#endif
           EquivalenceSet *set = 
             repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                        it->first, it->second, did, first);
+                                        it->second, mask, did, first);
           if (first)
-            initialize_replicated_set(set, it->second, map_applied_conditions);
-          it->first->record_refinement(ctx, set, it->second, 
-                                       map_applied_conditions);
+            initialize_replicated_set(set, mask, map_applied_conditions);
+          it->second->record_refinement(ctx, set, mask, 
+                                        map_applied_conditions);
           // Remove the CONTEXT_REF on the set now that it is registered
           if (set->remove_base_valid_ref(CONTEXT_REF))
             assert(false); // should never actually hit this
         }
-        if (did_index < collective_dids.size())
-        {
-          for (unsigned idx = did_index; idx < collective_dids.size(); idx++)
-            if (collective_dids[idx]->is_origin())
-              runtime->free_distributed_id(
-                  collective_dids[idx]->get_value(false/*block*/));
-        }
+#ifdef DEBUG_LEGION
+        assert(did_index == collective_dids.size());
+#endif
       }
       if (!map_applied_conditions.empty())
         Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
@@ -2075,12 +2204,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
+      RefinementTracker tracker(this, map_applied_conditions);
       ProjectionInfo projection_info(runtime, requirement, launch_space, 
                                      sharding_function, sharding_space);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions);
     }
 
@@ -2528,6 +2658,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
+      RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         ProjectionInfo projection_info (runtime, src_requirements[idx], 
@@ -2536,6 +2667,7 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      projection_info,
                                                      src_privilege_paths[idx],
+                                                     refinement_tracker,
                                                      map_applied_conditions);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -2552,6 +2684,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      projection_info,
                                                      dst_privilege_paths[idx],
+                                                     refinement_tracker,
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -2568,6 +2701,7 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  gather_info,
                                                  gather_privilege_paths[idx],
+                                                 refinement_tracker,
                                                  map_applied_conditions);
         }
       }
@@ -2582,6 +2716,7 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
                                                  scatter_privilege_paths[idx],
+                                                 refinement_tracker,
                                                  map_applied_conditions);
         }
       }
@@ -3833,13 +3968,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         log_requirement();
       ProjectionInfo projection_info;
+      RefinementTracker tracker(this, map_applied_conditions);
       if (is_index_space)
         projection_info = ProjectionInfo(runtime, requirement, 
                                          launch_space, sharding_function);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations

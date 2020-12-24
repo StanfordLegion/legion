@@ -1905,6 +1905,9 @@ namespace Legion {
                           const RegionRequirement &req, 
                           Runtime *runtime, const Domain &launch_domain,
                           const std::vector<ProjectionPoint*> &points);
+      // Projection for refinements
+      void project_refinement(IndexSpaceNode *domain, RegionTreeNode *node,
+                              std::vector<RegionNode*> &regions) const;
     protected:
       // Old checking code explicitly for tasks
       void check_projection_region_result(const RegionRequirement &req,
@@ -1925,6 +1928,9 @@ namespace Legion {
                            const std::vector<DomainPoint> &ordered_points);
       void check_containment(const Task *task, unsigned idx,
                              const std::vector<DomainPoint> &ordered_points);
+    public:
+      bool is_complete(RegionTreeNode *node, Operation *op, 
+                       unsigned index, IndexSpaceNode *projection_space) const;
     public:
       bool find_elide_close_result(const ProjectionInfo &info, 
                   const std::set<ProjectionSummary> &projections, 
@@ -1947,7 +1953,7 @@ namespace Legion {
       static void add_to_projection_tree(LogicalRegion region,
                   IndexTreeNode *root, RegionTreeForest *context, 
                   std::map<IndexTreeNode*,ProjectionTree*> &node_map,
-                  ShardID owner_shard = 0);
+                  ShardID owner_shard = 0); 
     public:
       const int depth; 
       const bool is_exclusive;

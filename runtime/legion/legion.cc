@@ -3329,6 +3329,38 @@ namespace Legion {
       assert(false);
     }
 
+    //--------------------------------------------------------------------------
+    bool ProjectionFunctor::is_complete(LogicalRegion upper_bound,
+                                        const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunctor::is_complete(LogicalPartition upper_bound,
+                                        const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunctor::is_complete(Mappable *mappable, unsigned index,
+                         LogicalRegion upper_bound, const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunctor::is_complete(Mappable *mappable, unsigned index,
+                      LogicalPartition upper_bound, const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
     /////////////////////////////////////////////////////////////
     // ShardingFunctor 
     /////////////////////////////////////////////////////////////

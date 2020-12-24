@@ -2000,6 +2000,17 @@ namespace Legion {
     {
     }
 
+    //--------------------------------------------------------------------------
+    bool ProjectionInfo::is_complete_projection(RegionTreeNode *node,
+                                                const LogicalUser &user) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_projecting());
+#endif
+      return projection->is_complete(node, user.op, user.idx, projection_space);
+    }
+
     /////////////////////////////////////////////////////////////
     // PathTraverser 
     /////////////////////////////////////////////////////////////
@@ -2452,6 +2463,7 @@ namespace Legion {
       assert(!disjoint_complete_tree);
       assert(disjoint_complete_accesses.empty());
       assert(disjoint_complete_child_counts.empty());
+      assert(disjoint_complete_projections.empty());
 #endif
     }
 
@@ -2501,6 +2513,15 @@ namespace Legion {
       }
       disjoint_complete_accesses.clear(); 
       disjoint_complete_child_counts.clear();
+      if (!disjoint_complete_projections.empty())
+      {
+        for (FieldMaskSet<RefProjectionSummary>::const_iterator it =
+              disjoint_complete_projections.begin(); it !=
+              disjoint_complete_projections.end(); it++)
+          if (it->first->remove_reference())
+            delete it->first;
+        disjoint_complete_projections.clear();
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -2623,6 +2644,14 @@ namespace Legion {
             finder->second |= it->second;
         }
       }
+      if (!src.disjoint_complete_projections.empty())
+      {
+        for (FieldMaskSet<RefProjectionSummary>::const_iterator it =
+              src.disjoint_complete_projections.begin(); it !=
+              src.disjoint_complete_projections.end(); it++)
+          disjoint_complete_projections.insert(it->first, it->second);
+        src.disjoint_complete_projections.clear();
+      }
 #ifdef DEBUG_LEGION
       src.check_init();
 #endif
@@ -2661,6 +2690,7 @@ namespace Legion {
             disjoint_complete_children.begin(); it != 
             disjoint_complete_children.end(); it++)
         to_traverse.insert(it->first);
+      disjoint_complete_projections.swap(src.disjoint_complete_projections);
 #ifdef DEBUG_LEGION
       src.check_init();
 #endif
@@ -2705,6 +2735,18 @@ namespace Legion {
         domain->add_base_valid_ref(FIELD_STATE_REF, &mutator);
       if (sharding_domain != NULL)
         sharding_domain->add_base_valid_ref(FIELD_STATE_REF, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::ProjectionSummary(ProjectionSummary &&rhs)
+      : domain(rhs.domain), projection(rhs.projection),
+        sharding(rhs.sharding), sharding_domain(rhs.sharding_domain)
+    //--------------------------------------------------------------------------
+    {
+      rhs.domain = NULL;
+      rhs.projection = NULL;
+      rhs.sharding = NULL;
+      rhs.sharding_domain = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -2834,6 +2876,76 @@ namespace Legion {
       derez.deserialize(pid);
       result.projection = context->runtime->find_projection_function(pid);
       return result;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // RefProjectionSummary
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RefProjectionSummary::RefProjectionSummary(const ProjectionInfo &rhs,
+                                               std::set<RtEvent> &applied)
+      : ProjectionSummary(rhs, applied), Collectable()
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RefProjectionSummary::RefProjectionSummary(ProjectionSummary &&rhs)
+      : ProjectionSummary(rhs), Collectable()
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RefProjectionSummary::RefProjectionSummary(const RefProjectionSummary &rhs)
+      : ProjectionSummary(rhs), Collectable()
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RefProjectionSummary::~RefProjectionSummary(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RefProjectionSummary& RefProjectionSummary::operator=(
+                                                const RefProjectionSummary &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void RefProjectionSummary::project_refinement(RegionTreeNode *node,
+                                        std::vector<RegionNode*> &regions) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding == NULL);
+#endif
+      projection->project_refinement(domain, node, regions);
+    }
+
+    //--------------------------------------------------------------------------
+    void RefProjectionSummary::project_refinement(RegionTreeNode *node,
+                      ShardID shard_id, std::vector<RegionNode*> &regions) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding != NULL);
+#endif
+      // Find the domain of points for this shard
+      IndexSpace shard_handle = sharding->find_shard_space(shard_id, domain,
+          (sharding_domain != NULL) ? sharding_domain->handle : domain->handle);
+      IndexSpaceNode *shard_domain = node->context->get_node(shard_handle);
+      projection->project_refinement(shard_domain, node, regions);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3756,6 +3868,108 @@ namespace Legion {
       const LogicalUser close_user(close_op, merge_close_gen,0/*idx*/,
         RegionUsage(LEGION_READ_WRITE, LEGION_EXCLUSIVE,0/*redop*/),close_mask);
       users.push_back(close_user);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // KDNode
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RefinementTracker::RefinementTracker(Operation *o,std::set<RtEvent> &events)
+      : op(o), context(op->get_context()), applied_events(events)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementTracker::RefinementTracker(const RefinementTracker &rhs)
+      : op(rhs.op), context(rhs.context), applied_events(rhs.applied_events)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementTracker::~RefinementTracker(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!pending_refinements.empty())
+      {
+        const RegionTreeContext ctx = context->get_context();
+        // Note that we walk these refinements in order for control replication
+        for (LegionVector<PendingRefinement>::aligned::const_iterator it =
+             pending_refinements.begin(); it != pending_refinements.end(); it++)
+        {
+          // Update the disjoint-complete tree for this refinement
+          RegionNode *root = it->partition->parent;
+          root->refine_disjoint_complete_tree(ctx.get_id(), it->partition, 
+                  it->refinement_op, it->refinement_mask, applied_events);
+#ifdef DEBUG_LEGION
+          // Sanity check that we recorded refinements for
+          // all the fields in the refinement mask
+          it->refinement_op->verify_refinement_mask(it->refinement_mask);
+#endif
+          // Trigger this here so it happens in a determinsitic order
+          // for control replication. It has to happen after we've got
+          // the list of refinements to make from updating the 
+          // disjoint-complete tree
+          it->refinement_op->trigger_dependence_analysis();
+          // Now we can finish the dependence analysis for this refinement
+          // Grab these before we end the dependence analysis which will
+          // dump the refinement op into the pipeline
+          const GenerationID refinement_gen = 
+            it->refinement_op->get_generation();
+#ifdef LEGION_SPY
+          const UniqueID refinement_uid = it->refinement_op->get_unique_op_id();
+#endif
+          it->refinement_op->end_dependence_analysis();
+          // Record that our operation depends on this refinement
+          op->register_region_dependence(it->index, it->refinement_op, 
+              refinement_gen, 0/*index*/, LEGION_TRUE_DEPENDENCE,
+              false/*validates*/, it->refinement_mask);
+#ifdef LEGION_SPY
+          LegionSpy::log_mapping_dependence(context->get_unique_id(),
+              refinement_uid, 0/*index*/, op->get_unique_op_id(), it->index,
+              LEGION_TRUE_DEPENDENCE);
+#endif
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementTracker& RefinementTracker::operator=(const RefinementTracker &rs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementOp* RefinementTracker::create_refinement(const LogicalUser &user,
+                     PartitionNode *partition, const FieldMask &refinement_mask,
+                     const LogicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op == user.op);
+#endif
+      RegionNode *root = partition->parent;
+#ifdef DEBUG_LEGION_COLLECTIVES
+      RefinementOp *refinement_op = context->get_refinement_op(user, root);
+#else
+      RefinementOp *refinement_op = context->get_refinement_op();
+#endif
+      refinement_op->initialize(op, user.idx, trace_info, root,refinement_mask);
+      pending_refinements.emplace_back(
+        PendingRefinement(refinement_op, partition, refinement_mask, user.idx));
+      // Start the dependence analysis for this refinement now
+      // We'll finish the dependence analysis in the destructor when we
+      // know all the region requirements are traversed and we can safely
+      // update the disjoint-complete tree
+      refinement_op->begin_dependence_analysis();
+      return refinement_op;
     }
 
 #ifdef NEWEQ

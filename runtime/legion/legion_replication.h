@@ -1244,12 +1244,16 @@ namespace Legion {
       // for these partitions in a order that is consistent across
       // shards because all shards will sort the keys the same way
       std::map<LogicalPartition,PartitionNode*> replicated_partitions;
+      // Same thing for one-off regions
+      std::map<LogicalRegion,RegionNode*> replicated_regions;
       // Version information objects for each of our local regions
       // that we are own after sharding non-replicated partitions
       LegionMap<RegionNode*,VersionInfo>::aligned sharded_region_version_infos;
       // Regions for which we need to propagate refinements for
       // non-replicated partition refinements
-      std::map<PartitionNode*,std::vector<RegionNode*> > refinement_regions;
+      std::map<PartitionNode*,std::vector<RegionNode*> > sharded_regions;
+      // Fields for partitions that have refinement regions
+      FieldMaskSet<PartitionNode> sharded_partitions;
     };
 
     /**
