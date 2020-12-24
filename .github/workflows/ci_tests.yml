@@ -40,7 +40,6 @@ jobs:
         run: ./test.py
         env:
           TEST_REGENT: 0
-
   test3:
     name: Test 3
     runs-on: ubuntu-18.04
@@ -61,7 +60,7 @@ jobs:
           TEST_LEGION_CXX: 0
           TEST_REALM: 0
           TEST_FUZZER: 0
-          CMAKE_PREFIX_PATH=/usr/share/llvm-9.0/cmake
+          CMAKE_PREFIX_PATH: "/usr/share/llvm-9.0/cmake"
   test4:
     name: Test macos regent
     runs-on: macos-10.15
