@@ -220,6 +220,13 @@ find_package(Threads REQUIRED)
 cmake_policy(SET CMP0063 NEW) # visibility controls in all builds
 add_library(RealmRuntime ${REALM_SRC})
 target_compile_options(RealmRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
+
+# turn on warnings about partially-overloaded methods, if supported
+check_cxx_compiler_flag("-Woverloaded-virtual" COMPILER_SUPORTS_OVERLOADED_VIRTUAL_WARNING)
+if(COMPILER_SUPORTS_OVERLOADED_VIRTUAL_WARNING)
+  target_compile_options(RealmRuntime PRIVATE "-Woverloaded-virtual")
+endif()
+
 if(COMPILER_SUPPORTS_DEFCHECK)
   # use the cxx_defcheck wrapper to make sure realm_defines.h is included
   #  any place it needs to be
