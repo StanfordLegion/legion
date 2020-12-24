@@ -3039,8 +3039,8 @@ namespace Realm {
 	const std::string *prev_dsetname = 0;
 	while(!iter->done()) {
 	  TransferIterator::AddressInfoHDF5 info;
-	  size_t act_bytes = iter->step(size_t(-1), // max_bytes
-					info);
+	  size_t act_bytes = iter->step_hdf5(size_t(-1), // max_bytes
+					     info);
 	  assert(act_bytes >= 0);
 
 	  // compare the pointers, not the string contents...

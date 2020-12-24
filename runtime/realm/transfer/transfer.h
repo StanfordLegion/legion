@@ -96,8 +96,8 @@ namespace Realm {
     virtual size_t step(size_t max_bytes, AddressInfo& info, unsigned flags,
 			bool tentative = false) = 0;
 #ifdef REALM_USE_HDF5
-    virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
-			bool tentative = false);
+    virtual size_t step_hdf5(size_t max_bytes, AddressInfoHDF5& info,
+			     bool tentative = false);
 #endif
     virtual void confirm_step(void) = 0;
     virtual void cancel_step(void) = 0;

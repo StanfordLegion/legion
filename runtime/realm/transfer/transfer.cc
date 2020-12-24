@@ -56,8 +56,8 @@ namespace Realm {
   }
   
 #ifdef REALM_USE_HDF5
-  size_t TransferIterator::step(size_t max_bytes, AddressInfoHDF5& info,
-				bool tentative /*= false*/)
+  size_t TransferIterator::step_hdf5(size_t max_bytes, AddressInfoHDF5& info,
+				     bool tentative /*= false*/)
   {
     // should never be called
     return 0;
@@ -86,8 +86,8 @@ namespace Realm {
 			unsigned flags,
 			bool tentative = false);
 #ifdef REALM_USE_HDF5
-    virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
-			bool tentative = false);
+    virtual size_t step_hdf5(size_t max_bytes, AddressInfoHDF5& info,
+			     bool tentative = false);
 #endif
     virtual void confirm_step(void);
     virtual void cancel_step(void);
@@ -321,8 +321,9 @@ namespace Realm {
 
 #ifdef REALM_USE_HDF5
   template <int N, typename T>
-  size_t TransferIteratorBase<N,T>::step(size_t max_bytes, AddressInfoHDF5& info,
-						bool tentative /*= false*/)
+  size_t TransferIteratorBase<N,T>::step_hdf5(size_t max_bytes,
+					      AddressInfoHDF5& info,
+					      bool tentative /*= false*/)
   {
     // check to see if we're done - if not, we'll have a valid rectangle
     if(done() || !have_rect)

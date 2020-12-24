@@ -3553,8 +3553,8 @@ namespace Realm {
 	  TransferIterator::AddressInfoHDF5 hdf5_info;
 
 	  // always ask the HDF5 size for a step first
-	  size_t hdf5_bytes = hdf5_iter->step(max_bytes, hdf5_info,
-					      true /*tentative*/);
+	  size_t hdf5_bytes = hdf5_iter->step_hdf5(max_bytes, hdf5_info,
+						   true /*tentative*/);
           if(hdf5_bytes == 0) {
             // not enough space for even a single element - try again later
             break;
@@ -3570,7 +3570,7 @@ namespace Realm {
 	    // cancel the hdf5 step and try to just step by mem_bytes
 	    assert(mem_bytes < hdf5_bytes);  // should never be larger
 	    hdf5_iter->cancel_step();
-	    hdf5_bytes = hdf5_iter->step(mem_bytes, hdf5_info);
+	    hdf5_bytes = hdf5_iter->step_hdf5(mem_bytes, hdf5_info);
 	    // multi-dimensional hdf5 iterators may round down the size,
 	    //  so re-check the mem bytes
 	    if(hdf5_bytes == mem_bytes) {
