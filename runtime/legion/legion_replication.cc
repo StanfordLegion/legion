@@ -1691,18 +1691,27 @@ namespace Legion {
       // invalidate the old refinements
       if (!sharded_region_version_infos.empty())
       {
-        std::set<RtEvent> references_added;
-        for (LegionMap<RegionNode*,VersionInfo>::aligned::iterator it =
-              sharded_region_version_infos.begin(); it !=
-              sharded_region_version_infos.end(); it++)
+        for (FieldMaskSet<PartitionNode>::const_iterator pit =
+             sharded_partitions.begin(); pit != sharded_partitions.end(); pit++)
         {
-          // If we had unintialized fields, relax the valid mask for any of them
-          if (!!uninitialized_fields)
-            it->second.relax_valid_mask(sharded_partitions[it->first->parent]);
-          PendingEquivalenceSet *pending = new PendingEquivalenceSet(it->first);
-          pending->record_all(it->second, references_added);
-          // Context takes ownership at this point
-          parent_ctx->record_pending_disjoint_complete_set(pending);
+          const std::vector<RegionNode*> &children = 
+            sharded_regions[pit->first];
+          for (std::vector<RegionNode*>::const_iterator rit =
+                children.begin(); rit != children.end(); rit++)
+          {
+            LegionMap<RegionNode*,VersionInfo>::aligned::iterator finder =
+              sharded_region_version_infos.find(*rit);
+#ifdef DEBUG_LEGION
+            assert(finder != sharded_region_version_infos.end());
+#endif
+            // If we had unintialized fields or this is an empy region, 
+            // relax the valid mask for any of them
+            finder->second.relax_valid_mask(pit->second);
+            PendingEquivalenceSet *pending = new PendingEquivalenceSet(*rit);
+            pending->record_all(finder->second, map_applied_conditions);
+            // Context takes ownership at this point
+            parent_ctx->record_pending_disjoint_complete_set(pending);
+          }
         }
       }
       // Now go through and invalidate the current refinements for
