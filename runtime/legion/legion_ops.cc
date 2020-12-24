@@ -10615,7 +10615,7 @@ namespace Legion {
       IndexPartNode *index_part = node->row_source;
       std::vector<RegionNode*> &children = refinement_regions[node];
       const size_t max_check = children.size();
-      const bool add_children = (max_check < index_part->total_children);
+      const bool add_children = (max_check < index_part->get_num_children());
       if (add_children)
         children.reserve(index_part->total_children);
       // Iterate over each child and make an equivalence set  
