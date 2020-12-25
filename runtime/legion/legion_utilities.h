@@ -611,7 +611,10 @@ namespace Legion {
     inline void Serializer::serialize(const T &element)
     //--------------------------------------------------------------------------
     {
+      // Old versions of g++ don't have support for all of c++11
+#if !defined(__GNUC__) || (__GNUC__ >= 5)
       static_assert(std::is_trivially_copyable<T>::value, "unserializable");
+#endif
       while ((index + sizeof(T)) > total_bytes)
         resize();
       memcpy(buffer+index, &element, sizeof(T));
@@ -832,7 +835,10 @@ namespace Legion {
     inline void Deserializer::deserialize(T &element)
     //--------------------------------------------------------------------------
     {
+      // Old versions of g++ don't have support for all of c++11
+#if !defined(__GNUC__) || (__GNUC__ >= 5)
       static_assert(std::is_trivially_copyable<T>::value, "unserializable");
+#endif
 #ifdef DEBUG_LEGION
       // Check to make sure we don't read past the end
       assert((index+sizeof(T)) <= total_bytes);
