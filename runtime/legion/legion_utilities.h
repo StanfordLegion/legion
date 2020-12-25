@@ -619,7 +619,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       context_bytes += sizeof(T);
 #endif
-      element = *((const bool *)(buffer+index));
     }
 
     //--------------------------------------------------------------------------
