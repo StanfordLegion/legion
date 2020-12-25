@@ -200,7 +200,10 @@ namespace Legion {
         for (std::vector<std::pair<IndexSpace,bool> >::const_iterator it = 
               deleted_index_spaces.begin(); it != 
               deleted_index_spaces.end(); it++)
-          rez.serialize(*it);
+        {
+          rez.serialize(it->first);
+          rez.serialize<bool>(it->second);
+        }
         deleted_index_spaces.clear();
       }
       rez.serialize<size_t>(created_index_partitions.size());
@@ -221,7 +224,10 @@ namespace Legion {
         for (std::vector<std::pair<IndexPartition,bool> >::const_iterator it = 
               deleted_index_partitions.begin(); it !=
               deleted_index_partitions.end(); it++)
-          rez.serialize(*it);
+        {
+          rez.serialize(it->first);
+          rez.serialize<bool>(it->second);
+        }
         deleted_index_partitions.clear();
       }
     }
@@ -314,7 +320,10 @@ namespace Legion {
       std::vector<std::pair<IndexSpace,bool> > 
           deleted_index_spaces(num_deleted_index_spaces);
       for (unsigned idx = 0; idx < num_deleted_index_spaces; idx++)
-        derez.deserialize(deleted_index_spaces[idx]);
+      {
+        derez.deserialize(deleted_index_spaces[idx].first);
+        derez.deserialize<bool>(deleted_index_spaces[idx].second);
+      }
       size_t num_created_index_partitions;
       derez.deserialize(num_created_index_partitions);
       std::map<IndexPartition,unsigned> created_index_partitions;
@@ -329,7 +338,10 @@ namespace Legion {
       std::vector<std::pair<IndexPartition,bool> > 
           deleted_index_partitions(num_deleted_index_partitions);
       for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
-        derez.deserialize(deleted_index_partitions[idx]);
+      {
+        derez.deserialize(deleted_index_partitions[idx].first);
+        derez.deserialize<bool>(deleted_index_partitions[idx].second);
+      }
       std::set<RtEvent> preconditions;
       target->receive_resources(return_index, created_regions, deleted_regions,
           created_fields, deleted_fields, created_field_spaces,

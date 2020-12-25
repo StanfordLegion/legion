@@ -611,13 +611,15 @@ namespace Legion {
     inline void Serializer::serialize(const T &element)
     //--------------------------------------------------------------------------
     {
+      static_assert(std::is_trivially_copyable<T>::value, "unserializable");
       while ((index + sizeof(T)) > total_bytes)
         resize();
-      *((T*)(buffer+index)) = element;
+      memcpy(buffer+index, &element, sizeof(T));
       index += sizeof(T);
 #ifdef DEBUG_LEGION
       context_bytes += sizeof(T);
 #endif
+      element = *((const bool *)(buffer+index));
     }
 
     //--------------------------------------------------------------------------
@@ -625,9 +627,10 @@ namespace Legion {
     inline void Serializer::serialize<bool>(const bool &element)
     //--------------------------------------------------------------------------
     {
+      static_assert(sizeof(bool) <= 4, "huge bool");
       while ((index + 4) > total_bytes)
         resize();
-      *((bool*)buffer+index) = element;
+      memcpy(buffer+index, &element, sizeof(bool));
       index += 4;
 #ifdef DEBUG_LEGION
       context_bytes += 4;
@@ -830,11 +833,12 @@ namespace Legion {
     inline void Deserializer::deserialize(T &element)
     //--------------------------------------------------------------------------
     {
+      static_assert(std::is_trivially_copyable<T>::value, "unserializable");
 #ifdef DEBUG_LEGION
       // Check to make sure we don't read past the end
       assert((index+sizeof(T)) <= total_bytes);
 #endif
-      element = *((const T*)(buffer+index));
+      memcpy(&element, buffer+index, sizeof(T));
       index += sizeof(T);
 #ifdef DEBUG_LEGION
       context_bytes += sizeof(T);
@@ -846,11 +850,12 @@ namespace Legion {
     inline void Deserializer::deserialize<bool>(bool &element)
     //--------------------------------------------------------------------------
     {
+      static_assert(sizeof(bool) <= 4, "huge bool");
 #ifdef DEBUG_LEGION
       // Check to make sure we don't read past the end
       assert((index+4) <= total_bytes);
 #endif
-      element = *((const bool *)(buffer+index));
+      memcpy(&element, buffer+index, sizeof(bool));
       index += 4;
 #ifdef DEBUG_LEGION
       context_bytes += 4;
