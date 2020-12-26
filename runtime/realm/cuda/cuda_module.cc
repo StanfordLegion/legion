@@ -2548,10 +2548,14 @@ namespace Realm {
     // class GPU
 
     GPUFBMemory::GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size)
-      : MemoryImpl(_me, _size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM)
+      : LocalManagedMemory(_me, _size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM, 0)
       , gpu(_gpu), base(_base)
     {
-      free_blocks[0] = size;
+      // advertise for potential gpudirect support
+      local_segment.assign(NetworkSegmentInfo::CudaDeviceMem,
+			   reinterpret_cast<void *>(base), size,
+			   reinterpret_cast<uintptr_t>(gpu));
+      segment = &local_segment;
     }
 
     GPUFBMemory::~GPUFBMemory(void) {}
@@ -2578,11 +2582,6 @@ namespace Realm {
       return (void *)(base + offset);
     }
 
-    int GPUFBMemory::get_home_node(off_t offset, size_t size)
-    {
-      return -1;
-    }
-
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -2590,10 +2589,12 @@ namespace Realm {
 
     GPUZCMemory::GPUZCMemory(Memory _me,
 			     CUdeviceptr _gpu_base, void *_cpu_base, size_t _size)
-      : MemoryImpl(_me, _size, MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM)
+      : LocalManagedMemory(_me, _size, MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM, 0)
       , gpu_base(_gpu_base), cpu_base((char *)_cpu_base)
     {
-      free_blocks[0] = size;
+      // advertise ourselves as a host memory
+      local_segment.assign(NetworkSegmentInfo::HostMem, cpu_base, size);
+      segment = &local_segment;
     }
 
     GPUZCMemory::~GPUZCMemory(void) {}
@@ -2611,11 +2612,6 @@ namespace Realm {
     void *GPUZCMemory::get_direct_ptr(off_t offset, size_t size)
     {
       return (cpu_base + offset);
-    }
-
-    int GPUZCMemory::get_home_node(off_t offset, size_t size)
-    {
-      return ID(me).memory_owner_node();
     }
 
     // Helper methods for emulating the cuda runtime
@@ -3666,9 +3662,10 @@ namespace Realm {
           assert(zcib_cpu_base == (void *)zcib_gpu_base); 
         }
         Memory m = runtime->next_local_ib_memory_id();
-        GPUZCMemory* ib_mem;
-        ib_mem = new GPUZCMemory(m, zcib_gpu_base, zcib_cpu_base,
-                                 cfg_zc_ib_size);
+        IBMemory* ib_mem;
+        ib_mem = new IBMemory(m, cfg_zc_ib_size,
+			      MemoryImpl::MKIND_ZEROCOPY, Memory::Z_COPY_MEM,
+			      zcib_cpu_base, 0);
         runtime->add_ib_memory(ib_mem);
         // add the ZC memory as a pinned memory to all GPUs
         for (unsigned i = 0; i < gpus.size(); i++) {
@@ -3709,9 +3706,9 @@ namespace Realm {
       // before we create dma channels, see how many of the system memory ranges
       //  we can register with CUDA
       if(cfg_pin_sysmem && !gpus.empty()) {
-	std::vector<MemoryImpl *>& local_mems = runtime->nodes[Network::my_node_id].memories;
+	const std::vector<MemoryImpl *>& local_mems = runtime->nodes[Network::my_node_id].memories;
 	// <NEW_DMA> also add intermediate buffers into local_mems
-	std::vector<MemoryImpl *>& local_ib_mems = runtime->nodes[Network::my_node_id].ib_memories;
+	const std::vector<IBMemory *>& local_ib_mems = runtime->nodes[Network::my_node_id].ib_memories;
 	std::vector<MemoryImpl *> all_local_mems;
 	all_local_mems.insert(all_local_mems.end(), local_mems.begin(), local_mems.end());
 	all_local_mems.insert(all_local_mems.end(), local_ib_mems.begin(), local_ib_mems.end());

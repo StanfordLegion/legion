@@ -46,7 +46,7 @@ namespace Realm {
       //int idx;
       //ID::IDType src_inst_id, dst_inst_id;
       off_t offset;
-      size_t size;
+      //size_t size;
 
       static void handle_message(NodeID sender, const RemoteIBAllocResponseAsync &args,
 				 const void *data, size_t msglen);
@@ -477,8 +477,6 @@ namespace Realm {
 
       template<int DIM>
       void perform_dma_rect(MemoryImpl *mem_impl);
-
-      size_t optimize_fill_buffer(RegionInstanceImpl *impl, int &fill_elmts);
 
       TransferDomain *domain;
       //Domain domain;

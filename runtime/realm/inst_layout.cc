@@ -73,6 +73,53 @@ namespace Realm {
     }
   }
 
+  InstanceLayoutConstraints::InstanceLayoutConstraints(const std::vector<FieldID>& field_ids,
+						       const std::vector<size_t>& field_sizes,
+						       size_t block_size)
+  {
+    switch(block_size) {
+    case 0:
+      {
+	// SOA - each field is its own "group"
+	field_groups.resize(field_sizes.size());
+	size_t offset = 0;
+	for(size_t i = 0; i < field_sizes.size(); i++) {
+	  field_groups[i].resize(1);
+	  field_groups[i][0].field_id = field_ids[i];
+	  field_groups[i][0].fixed_offset = false;
+	  field_groups[i][0].offset = 0;
+	  field_groups[i][0].size = field_sizes[i];
+	  field_groups[i][0].alignment = field_sizes[i]; // natural alignment 
+	  offset += field_sizes[i];
+	}
+	break;
+      }
+
+    case 1:
+      {
+	// AOS - all field_groups in same group
+	field_groups.resize(1);
+	field_groups[0].resize(field_sizes.size());
+	size_t offset = 0;
+	for(size_t i = 0; i < field_sizes.size(); i++) {
+	  field_groups[0][i].field_id = field_ids[i];
+	  field_groups[0][i].fixed_offset = false;
+	  field_groups[0][i].offset = 0;
+	  field_groups[0][i].size = field_sizes[i];
+	  field_groups[0][i].alignment = field_sizes[i]; // natural alignment 
+	  offset += field_sizes[i];
+	}
+	break;
+      }
+
+    default:
+      {
+	// hybrid - blech
+	assert(0);
+      }
+    }
+  }
+
   InstanceLayoutConstraints::InstanceLayoutConstraints(const std::vector<size_t>& field_sizes,
 						       size_t block_size)
   {

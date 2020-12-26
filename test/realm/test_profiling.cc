@@ -112,8 +112,10 @@ void response_task(const void *args, size_t arglen,
 
   Realm::ProfilingResponse pr(args, arglen);
 
+  OperationStatus::Result result = OperationStatus::COMPLETED_SUCCESSFULLY;
   if(pr.has_measurement<OperationStatus>()) {
     OperationStatus *op_status = pr.get_measurement<OperationStatus>();
+    result = op_status->result;
     printf("op status = %d (code = %d, details = %zd bytes)\n",
 	   (int)(op_status->result),
 	   op_status->error_code,
@@ -124,7 +126,7 @@ void response_task(const void *args, size_t arglen,
 
   if(pr.has_measurement<OperationTimeline>()) {
     OperationTimeline *op_timeline = pr.get_measurement<OperationTimeline>();
-    printf("op timeline = %llu %llu %llu %llu (%lld %lld %lld)\n",
+    printf("op timeline = %lld %lld %lld %lld (%lld %lld %lld)\n",
 	   op_timeline->ready_time,
 	   op_timeline->start_time,
 	   op_timeline->end_time,
@@ -132,9 +134,34 @@ void response_task(const void *args, size_t arglen,
 	   op_timeline->start_time - op_timeline->ready_time,
 	   op_timeline->end_time - op_timeline->start_time,
 	   op_timeline->complete_time - op_timeline->end_time);
+    // ready/start/end/complete should at least be ordered (if they exist)
+    if(result != OperationStatus::CANCELLED) {
+      assert(op_timeline->ready_time >= 0);
+      assert(op_timeline->start_time >= op_timeline->ready_time);
+    } else
+      assert(op_timeline->start_time == OperationTimeline::INVALID_TIMESTAMP);
+    if(result == OperationStatus::TERMINATED_EARLY)
+      assert(op_timeline->end_time == OperationTimeline::INVALID_TIMESTAMP);
+    else
+      assert(op_timeline->end_time >= op_timeline->start_time);
+    assert(op_timeline->complete_time >= op_timeline->end_time);
     delete op_timeline;
   } else
     printf("no timeline\n");
+
+  if(pr.has_measurement<OperationTimelineGPU>()) {
+    OperationTimelineGPU *op_timeline = pr.get_measurement<OperationTimelineGPU>();
+    printf("op gpu timeline = %lld %lld (%lld)\n",
+	   op_timeline->start_time,
+	   op_timeline->end_time,
+	   op_timeline->end_time - op_timeline->start_time);
+    // start and end should at least be ordered
+    if(result != OperationStatus::CANCELLED)
+      assert(op_timeline->start_time >= 0);
+    assert(op_timeline->end_time >= op_timeline->start_time);
+    delete op_timeline;
+  } else
+    printf("no gpu timeline\n");
 
   if(pr.has_measurement<OperationEventWaits>()) {
     OperationEventWaits *op_waits = pr.get_measurement<OperationEventWaits>();
@@ -188,7 +215,7 @@ void response_task(const void *args, size_t arglen,
 
   if(pr.has_measurement<InstanceTimeline>()) {
     InstanceTimeline *inst_timeline = pr.get_measurement<InstanceTimeline>();
-    printf("inst timeline = %llu %llu %llu (%lld %lld)\n",
+    printf("inst timeline = %lld %lld %lld (%lld %lld)\n",
 	   inst_timeline->create_time,
 	   inst_timeline->ready_time,
 	   inst_timeline->delete_time,
@@ -223,15 +250,20 @@ void top_level_task(const void *args, size_t arglen,
 
   Machine machine = Machine::get_machine();
   std::vector<Processor> all_cpus;
+  std::vector<Processor> all_gpus;
   {
     std::set<Processor> all_processors;
     machine.get_all_processors(all_processors);
     for(std::set<Processor>::const_iterator it = all_processors.begin();
 	it != all_processors.end();
-	it++)
+	it++) {
       if(it->kind() == Processor::LOC_PROC)
 	all_cpus.push_back(*it);
+      if(it->kind() == Processor::TOC_PROC)
+	all_gpus.push_back(*it);
+    }
   }
+  bool has_gpus = !all_gpus.empty();
 
 #ifdef TEST_FAULTS
   // touch all of the new resilience-based calls (just to test linking)
@@ -253,18 +285,22 @@ void top_level_task(const void *args, size_t arglen,
 #endif
   
   // launch a child task and perform some measurements on it
-  // choose the last cpu, which is likely to be on a different node
+  // choose the last cpu/gpu, which is likely to be on a different node
   Processor profile_cpu = all_cpus.front();
-  Processor first_cpu = all_cpus.back();
+  Processor task_proc = (has_gpus ? all_gpus.back() : all_cpus.back());
   ProfilingRequestSet prs;
-  prs.add_request(profile_cpu, RESPONSE_TASK, &first_cpu, sizeof(first_cpu))
-    .add_measurement<OperationStatus>()
+  ProfilingRequest& pr = prs.add_request(profile_cpu, RESPONSE_TASK,
+					 &task_proc, sizeof(task_proc));
+  pr.add_measurement<OperationStatus>()
     .add_measurement<OperationTimeline>()
     .add_measurement<OperationEventWaits>()
     .add_measurement<OperationBacktrace>();
+  if(has_gpus)
+    pr.add_measurement<OperationTimelineGPU>();
 
   // we expect (exactly) 7 responses for tasks + 2 for instances
-  expected_responses_remaining = 9;
+  // exception: gpu doesn't do the interrupt-during-wait task yet
+  expected_responses_remaining = (has_gpus ? 6 : 7) + 2;
   response_counter = Barrier::create_barrier(expected_responses_remaining);
 
 #ifndef _MSC_VER
@@ -277,12 +313,12 @@ void top_level_task(const void *args, size_t arglen,
   cargs.sleep_useconds = 100000;
   cargs.hang = false;
   cargs.wait_on = Event::NO_EVENT;
-  Event e1 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+  Event e1 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
 
   cargs.inject_fault = true;
-  Event e2 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs, e1);
+  Event e2 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs, e1);
   cargs.inject_fault = false;
-  Event e3 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs, e2);
+  Event e3 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs, e2);
 
   {
     bool poisoned = false;
@@ -294,10 +330,10 @@ void top_level_task(const void *args, size_t arglen,
   {
     UserEvent u = UserEvent::create_user_event();
     cargs.wait_on = u;
-    Event e4 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    Event e4 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
     cargs.wait_on = Event::NO_EVENT;
     cargs.sleep_useconds = 500000;
-    Event e5 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    Event e5 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
     u.trigger(e5);
     e4.wait();
   }
@@ -305,7 +341,7 @@ void top_level_task(const void *args, size_t arglen,
   // test cancellation - first of a task that is "running"
   {
     cargs.sleep_useconds = 5000000;
-    Event e4 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    Event e4 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
     sleep(2);
     int info = 111;
     e4.cancel_operation(&info, sizeof(info));
@@ -315,9 +351,9 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   // now cancellation of an event that is blocked on some event
-  {
+  if(!has_gpus) {
     cargs.hang = true;
-    Event e5 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    Event e5 = task_proc.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
     sleep(2);
     int info = 112;
     e5.cancel_operation(&info, sizeof(info));

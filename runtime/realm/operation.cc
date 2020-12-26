@@ -584,7 +584,7 @@ namespace Realm {
       log_optable.info() << "event " << finish_event << " - requesting remote cancellation on node " << remote_node;
       ActiveMessage<CancelOperationMessage> amsg(remote_node, reason_size);
       amsg->finish_event = finish_event;
-      amsg << ByteArrayRef(reason_data, reason_size);
+      amsg.add_payload(reason_data, reason_size);
       amsg.commit();
     }
 

@@ -3830,8 +3830,10 @@ namespace Legion {
         Realm::RegionInstance instance;
         Realm::ProfilingRequestSet no_requests;
         ExternalInstanceInfo &info = it->second;
-        RtEvent wait_on(Realm::RegionInstance::create_external(
-          instance, manager->get_memory(), info.ptr, layout, no_requests));
+        const Realm::ExternalMemoryResource resource(info.ptr, 
+                      layout->bytes_used, false/*read only*/);
+        RtEvent wait_on(Realm::RegionInstance::create_external_instance(
+          instance, manager->get_memory(), layout, resource, no_requests));
         if (wait_on.exists())
           wait_on.wait();
 #ifdef DEBUG_LEGION
@@ -5633,7 +5635,11 @@ namespace Legion {
         local_gpu = finder.first();
       }
 #endif
-      if (!is_owner) return;
+      // We do not make eager pool instances if we are not the owner or if the
+      // memory has capacity zero (e.g. disk memory) where the creation of any 
+      // instances that are not external instances are disallowed
+      if (!is_owner || (capacity == 0)) 
+        return;
 
       // Allocate eager pool
       const coord_t eager_pool_size = 
@@ -8762,8 +8768,10 @@ namespace Legion {
         eager_remaining_capacity -= size;
         uintptr_t ptr = eager_pool + offset;
         Realm::ProfilingRequestSet no_requests;
-        wait_on = RtEvent(Realm::RegionInstance::create_external(
-              instance, memory, ptr, layout, no_requests));
+        const Realm::ExternalMemoryResource resource(ptr, 
+                    layout->bytes_used, false/*read only*/);
+        wait_on = RtEvent(Realm::RegionInstance::create_external_instance(
+              instance, memory, layout, resource, no_requests));
 #ifdef DEBUG_LEGION
         assert(eager_instances.find(instance) == eager_instances.end());
 #endif

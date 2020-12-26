@@ -8039,7 +8039,7 @@ namespace Legion {
         rez.serialize(handle);
         rez.serialize(c);
         if (defer == NULL)
-          rez.serialize(handle_ptr);
+          rez.serialize(const_cast<IndexPartition*>(handle_ptr));
         else
           rez.serialize<IndexPartition*>(NULL);
         rez.serialize(ready_event);
@@ -9464,7 +9464,7 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize(c);
           if (defer == NULL)
-            rez.serialize(handle_ptr);
+            rez.serialize(const_cast<IndexSpace*>(handle_ptr));
           else
             rez.serialize<IndexSpace*>(NULL);
           rez.serialize(ready_event);

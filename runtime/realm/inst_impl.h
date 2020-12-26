@@ -49,14 +49,14 @@ namespace Realm {
     protected:
       // RegionInstanceImpl creation/deletion is handled by MemoryImpl
       friend class MemoryImpl;
+      friend class LocalManagedMemory;
       RegionInstanceImpl(RegionInstance _me, Memory _memory);
       ~RegionInstanceImpl(void);
 
       class DeferredCreate : public EventWaiter {
       public:
 	void defer(RegionInstanceImpl *_inst, MemoryImpl *_mem,
-		   size_t _bytes, size_t _align, bool _need_alloc_result,
-		   Event wait_on);
+		   bool _need_alloc_result, Event wait_on);
 	virtual void event_triggered(bool poisoned, TimeLimit work_until);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
@@ -64,7 +64,6 @@ namespace Realm {
       protected:
 	RegionInstanceImpl *inst;
 	MemoryImpl *mem;
-	size_t bytes, align;
 	bool need_alloc_result;
       };
       DeferredCreate deferred_create;
@@ -83,6 +82,14 @@ namespace Realm {
       DeferredDestroy deferred_destroy;
 
     public:
+      // entry point for both create_instance and create_external_instance
+      static Event create_instance(RegionInstance& inst,
+				   Memory memory,
+				   InstanceLayoutGeneric *ilg,
+				   const ExternalInstanceResource *res,
+				   const ProfilingRequestSet& prs,
+				   Event wait_on);
+      
       // the life cycle of an instance is defined in part by when the
       //  allocation and deallocation of storage occurs, but that is managed
       //  by the memory, which uses these callbacks to notify us
@@ -122,7 +129,12 @@ namespace Realm {
 	void *serialize(size_t& out_size) const;
 
 	template<typename T>
-	  void serialize_msg(T &fbd) const;
+	void serialize_msg(T &s) const
+	{
+	  bool ok = ((s << inst_offset) &&
+		     (s << *layout));
+	  assert(ok);
+	}
 
 	void deserialize(const void *in_data, size_t in_size);
 
@@ -130,21 +142,12 @@ namespace Realm {
 	virtual void do_invalidate(void);
 
       public:
-	off_t alloc_offset;
-	size_t size;
-	ReductionOpID redopid;
-	off_t count_offset;
-	off_t red_list_size;
-	size_t block_size, elmt_size;
-	std::vector<size_t> field_sizes;
-	RegionInstance parent_inst;
-
 	size_t inst_offset;
 	Event ready_event;
 	bool need_alloc_result, need_notify_dealloc;
 	InstanceLayoutGeneric *layout;
-	std::string filename; // temp hack for attached files
-
+	ExternalInstanceResource *ext_resource;
+	void *mem_specific;  // a place for memory's to hang info
 	CompiledInstanceLayout lookup_program;
       };
 

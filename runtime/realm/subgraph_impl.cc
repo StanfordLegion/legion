@@ -97,23 +97,28 @@ namespace Realm {
 			wait_on, finish_event,
 			priority_adjust);
     } else {
-      // TODO: more graceful way of computing alignment-related padding
-      size_t msglen = (((arglen + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1)) +
-		       (2 * sizeof(size_t)) +
-		       (prs.empty() ? 0 : 512 /*guess*/));
+      Serialization::ByteCountSerializer bcs;
+      {
+	bool ok = (bcs.append_bytes(args, arglen) &&
+		   (bcs << span<const Event>()) &&
+		   (bcs << span<const Event>()) &&
+		   (bcs << prs));
+	assert(ok);
+      }
+      size_t msglen = bcs.bytes_used();
       ActiveMessage<SubgraphInstantiateMessage> amsg(target_node, msglen);
       amsg->subgraph = *this;
       amsg->wait_on = wait_on;
       amsg->finish_event = finish_event;
       amsg->arglen = arglen;
       amsg->priority_adjust = priority_adjust;
-      amsg.add_payload(args, arglen);
-      bool ok = ((amsg << span<const Event>() /*preconditions*/) &&
-		 (amsg << span<const Event>() /*postconditions*/));
-      if(ok && !prs.empty())
-	ok = (amsg << prs);
-      assert(ok);
-
+      {
+	amsg.add_payload(args, arglen);
+	bool ok = ((amsg << span<const Event>()) &&
+		   (amsg << span<const Event>()) &&
+		   (amsg << prs));
+	assert(ok);
+      }
       amsg.commit();
     }
     return finish_event;
@@ -147,25 +152,28 @@ namespace Realm {
 			wait_on, finish_event,
 			priority_adjust);
     } else {
-      // TODO: more graceful way of computing alignment-related padding
-      size_t msglen = (((arglen + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1)) +
-		       (2 * sizeof(size_t)) +
-		       ((preconditions.size() +
-			 postconditions.size()) * sizeof(Event)) +
-		       (prs.empty() ? 0 : 512 /*guess*/));
+      Serialization::ByteCountSerializer bcs;
+      {
+	bool ok = (bcs.append_bytes(args, arglen) &&
+		   (bcs << preconditions) &&
+		   (bcs << postconditions) &&
+		   (bcs << prs));
+	assert(ok);
+      }
+      size_t msglen = bcs.bytes_used();
       ActiveMessage<SubgraphInstantiateMessage> amsg(target_node, msglen);
       amsg->subgraph = *this;
       amsg->wait_on = wait_on;
       amsg->finish_event = finish_event;
       amsg->arglen = arglen;
       amsg->priority_adjust = priority_adjust;
-      amsg.add_payload(args, arglen);
-      bool ok = ((amsg << preconditions) &&
-		 (amsg << span<const Event>(postconditions)));
-      if(ok && !prs.empty())
-	ok = (amsg << prs);
-      assert(ok);
-
+      {
+	amsg.add_payload(args, arglen);
+	bool ok = ((amsg << preconditions) &&
+		   (amsg << postconditions) &&
+		   (amsg << prs));
+	assert(ok);
+      }
       amsg.commit();
     }
     return finish_event;

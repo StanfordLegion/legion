@@ -2779,11 +2779,6 @@ namespace Realm {
 		_max_req_size, _priority,
                 _complete_fence)
       {
-        // make sure dst buffer is registered memory
-	for(std::vector<XferPort>::const_iterator it = output_ports.begin();
-	    it != output_ports.end();
-	    ++it)
-	  assert(it->mem->kind == MemoryImpl::MKIND_RDMA);
         channel = channel_manager->get_remote_write_channel();
 	kind = XFER_REMOTE_WRITE;
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
@@ -2807,9 +2802,9 @@ namespace Realm {
 	  reqs[i]->src_base = input_ports[reqs[i]->src_port_idx].mem->get_direct_ptr(reqs[i]->src_off,
 										     reqs[i]->nbytes);
 	  assert(reqs[i]->src_base != 0);
-	  RemoteMemory *remote = checked_cast<RemoteMemory *>(output_ports[reqs[i]->dst_port_idx].mem);
-	  reqs[i]->dst_base = static_cast<char *>(remote->get_remote_addr(reqs[i]->dst_off));
-	  assert(reqs[i]->dst_base != 0);
+	  //RemoteMemory *remote = checked_cast<RemoteMemory *>(output_ports[reqs[i]->dst_port_idx].mem);
+	  //reqs[i]->dst_base = static_cast<char *>(remote->get_remote_addr(reqs[i]->dst_off));
+	  //assert(reqs[i]->dst_base != 0);
         }
 	xd_lock.unlock();
         return new_nr;
@@ -2938,34 +2933,55 @@ namespace Realm {
 		   (dst_1d_maxbytes >= dst_sc_maxbytes)) {
 		  // 1D target
 		  NodeID dst_node = ID(out_port->mem->me).memory_owner_node();
-		  RemoteMemory *remote = checked_cast<RemoteMemory *>(out_port->mem);
-		  void *dst_buf = remote->get_remote_addr(out_alc.get_offset());
+		  RemoteAddress dst_buf;
+		  bool ok = out_port->mem->get_remote_addr(out_alc.get_offset(),
+							   dst_buf);
+		  assert(ok);
 
 		  // now look at the input
-		  size_t src_1d_maxbytes = ((in_dim > 0) ?
-					      std::min(dst_1d_maxbytes, icount) :
-					      0);
-		  // TODO: remove MAX_ASSEMBLY_SIZE limit if we can get an
-		  //  actual "2d source" limit from the network code
-		  size_t src_2d_maxbytes = (((in_dim > 1) &&
-					     ((icount * 2) <= dst_1d_maxbytes)) ?
-					      (icount * std::min(std::min(dst_1d_maxbytes,
-									  MAX_ASSEMBLY_SIZE) / icount,
-								 in_alc.remaining(1))) :
-					      0);
-		  size_t src_ga_maxbytes = std::min(dst_1d_maxbytes,
-						    MAX_ASSEMBLY_SIZE);
+		  const void *src_buf = in_port->mem->get_direct_ptr(in_alc.get_offset(), icount);
+		  size_t src_1d_maxbytes = 0;
+		  if(in_dim > 0) {
+		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
+											      src_buf, icount, 1, 0,
+											      dst_buf,
+											      true /*w/ congestion*/);
+		    src_1d_maxbytes = std::min({ dst_1d_maxbytes,
+					         icount,
+					         rec_bytes });
+		  }
+
+		  size_t src_2d_maxbytes = 0;
+		  if(in_dim > 1) {
+		    size_t lines = in_alc.remaining(1);
+		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
+											      src_buf, icount,
+											      lines,
+											      in_alc.get_stride(1),
+											      dst_buf,
+											      true /*w/ congestion*/);
+		    // round the recommendation down to a multiple of the line size
+		    rec_bytes -= (rec_bytes % icount);
+		    src_2d_maxbytes = std::min({ dst_1d_maxbytes,
+			                         icount * lines,
+			                         rec_bytes });
+		  }
+		  size_t src_ga_maxbytes = 0;
+		  {
+		    // a gather will assemble into a buffer provided by the network
+		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
+											      dst_buf,
+											      true /*w/ congestion*/);
+		    src_ga_maxbytes = std::min({ dst_1d_maxbytes,
+					         bytes_left,
+					         rec_bytes });
+		  }
 
 		  // source also favors 1d >> 2d >> gather
 		  if((src_1d_maxbytes >= src_2d_maxbytes) &&
 		     (src_1d_maxbytes >= src_ga_maxbytes)) {
 		    // 1D source
 		    bytes = src_1d_maxbytes;
-		    // TODO: get soft/hard limits from network code and unroll
-		    //  here
-		    bytes = std::min(size_t(1 << 20),
-				     bytes);
-		    const void *src_buf = in_port->mem->get_direct_ptr(in_alc.get_offset(), bytes);
 		    //log_xd.info() << "remote write 1d: guid=" << guid
 		    //              << " src=" << src_buf << " dst=" << dst_buf
 		    //              << " bytes=" << bytes;
@@ -3005,7 +3021,6 @@ namespace Realm {
 		    size_t lines = src_2d_maxbytes / icount;
 		    bytes = bytes_per_line * lines;
 		    assert(bytes == src_2d_maxbytes);
-		    const void *src_buf = in_port->mem->get_direct_ptr(in_alc.get_offset(), bytes);
 		    size_t src_stride = in_alc.get_stride(1);
 		    //log_xd.info() << "remote write 2d: guid=" << guid
 		    //              << " src=" << src_buf << " dst=" << dst_buf
@@ -3538,8 +3553,8 @@ namespace Realm {
 	  TransferIterator::AddressInfoHDF5 hdf5_info;
 
 	  // always ask the HDF5 size for a step first
-	  size_t hdf5_bytes = hdf5_iter->step(max_bytes, hdf5_info,
-					      true /*tentative*/);
+	  size_t hdf5_bytes = hdf5_iter->step_hdf5(max_bytes, hdf5_info,
+						   true /*tentative*/);
           if(hdf5_bytes == 0) {
             // not enough space for even a single element - try again later
             break;
@@ -3555,7 +3570,7 @@ namespace Realm {
 	    // cancel the hdf5 step and try to just step by mem_bytes
 	    assert(mem_bytes < hdf5_bytes);  // should never be larger
 	    hdf5_iter->cancel_step();
-	    hdf5_bytes = hdf5_iter->step(mem_bytes, hdf5_info);
+	    hdf5_bytes = hdf5_iter->step_hdf5(mem_bytes, hdf5_info);
 	    // multi-dimensional hdf5 iterators may round down the size,
 	    //  so re-check the mem bytes
 	    if(hdf5_bytes == mem_bytes) {
@@ -3692,6 +3707,10 @@ namespace Realm {
 	  { os << "src=" << p.src_kind << "(lcl)"; break; }
 	case Channel::SupportedPath::GLOBAL_KIND:
 	  { os << "src=" << p.src_kind << "(gbl)"; break; }
+	case Channel::SupportedPath::LOCAL_RDMA:
+	  { os << "src=rdma(lcl)"; break; }
+	case Channel::SupportedPath::REMOTE_RDMA:
+	  { os << "src=rdma(rem)"; break; }
 	default:
 	  assert(0);
 	}
@@ -3702,6 +3721,10 @@ namespace Realm {
 	  { os << " dst=" << p.dst_kind << "(lcl)"; break; }
 	case Channel::SupportedPath::GLOBAL_KIND:
 	  { os << " dst=" << p.dst_kind << "(gbl)"; break; }
+	case Channel::SupportedPath::LOCAL_RDMA:
+	  { os << " dst=rdma(lcl)"; break; }
+	case Channel::SupportedPath::REMOTE_RDMA:
+	  { os << " dst=rdma(rem)"; break; }
 	default:
 	  assert(0);
 	}
@@ -3748,28 +3771,100 @@ namespace Realm {
 	  if(!it->redops_allowed && (redop_id != 0))
 	    continue;
 
-	  if(it->src_type == SupportedPath::SPECIFIC_MEMORY) {
-	    if(src_mem != it->src_mem)
-	      continue;
-	  } else {
-	    if(src_mem.kind() != it->src_kind)
-	      continue;
-	    if((it->src_type == SupportedPath::LOCAL_KIND) &&
-	       (NodeID(ID(src_mem).memory_owner_node()) != node))
-	      continue;
+	  bool src_ok = false;
+	  switch(it->src_type) {
+	    case SupportedPath::SPECIFIC_MEMORY: {
+	      src_ok = (src_mem == it->src_mem);
+	      break;
+	    }
+	    case SupportedPath::LOCAL_KIND: {
+	      src_ok = ((src_mem.kind() == it->src_kind) &&
+			(NodeID(ID(src_mem).memory_owner_node()) == node));
+	      break;
+	    }
+	    case SupportedPath::GLOBAL_KIND: {
+	      src_ok = (src_mem.kind() == it->src_kind) ;
+	      break;
+	    }
+	    case SupportedPath::LOCAL_RDMA: {
+	      if(NodeID(ID(src_mem).memory_owner_node()) == node) {
+		MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+		// detection of rdma-ness depends on whether memory is
+		//  local/remote to us, not the channel
+		if(NodeID(ID(src_mem).memory_owner_node()) == Network::my_node_id) {
+		  src_ok = (src_impl->get_rdma_info(Network::single_network) != nullptr);
+		} else {
+		  RemoteAddress dummy;
+		  src_ok = src_impl->get_remote_addr(0, dummy);
+		}
+	      }
+	      break;
+	    }
+	    case SupportedPath::REMOTE_RDMA: {
+	      if(NodeID(ID(src_mem).memory_owner_node()) != node) {
+		MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+		// detection of rdma-ness depends on whether memory is
+		//  local/remote to us, not the channel
+		if(NodeID(ID(src_mem).memory_owner_node()) == Network::my_node_id) {
+		  src_ok = (src_impl->get_rdma_info(Network::single_network) != nullptr);
+		} else {
+		  RemoteAddress dummy;
+		  src_ok = src_impl->get_remote_addr(0, dummy);
+		}
+	      }
+	      break;
+	    }
 	  }
+	  if(!src_ok)
+	    continue;
 
-	  if(it->dst_type == SupportedPath::SPECIFIC_MEMORY) {
-	    if(dst_mem != it->dst_mem)
-	      continue;
-	  } else {
-	    if(dst_mem.kind() != it->dst_kind)
-	      continue;
-	    if((it->dst_type == SupportedPath::LOCAL_KIND) &&
-	       (NodeID(ID(dst_mem).memory_owner_node()) != node))
-	      continue;
+	  bool dst_ok = false;
+	  switch(it->dst_type) {
+	    case SupportedPath::SPECIFIC_MEMORY: {
+	      dst_ok = (dst_mem == it->dst_mem);
+	      break;
+	    }
+	    case SupportedPath::LOCAL_KIND: {
+	      dst_ok = ((dst_mem.kind() == it->dst_kind) &&
+			(NodeID(ID(dst_mem).memory_owner_node()) == node));
+	      break;
+	    }
+	    case SupportedPath::GLOBAL_KIND: {
+	      dst_ok = (dst_mem.kind() == it->dst_kind) ;
+	      break;
+	    }
+	    case SupportedPath::LOCAL_RDMA: {
+	      if(NodeID(ID(dst_mem).memory_owner_node()) == node) {
+		MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+		// detection of rdma-ness depends on whether memory is
+		//  local/remote to us, not the channel
+		if(NodeID(ID(dst_mem).memory_owner_node()) == Network::my_node_id) {
+		  dst_ok = (dst_impl->get_rdma_info(Network::single_network) != nullptr);
+		} else {
+		  RemoteAddress dummy;
+		  dst_ok = dst_impl->get_remote_addr(0, dummy);
+		}
+	      }
+	      break;
+	    }
+	    case SupportedPath::REMOTE_RDMA: {
+	      if(NodeID(ID(dst_mem).memory_owner_node()) != node) {
+		MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+		// detection of rdma-ness depends on whether memory is
+		//  local/remote to us, not the channel
+		if(NodeID(ID(dst_mem).memory_owner_node()) == Network::my_node_id) {
+		  dst_ok = (dst_impl->get_rdma_info(Network::single_network) != nullptr);
+		} else {
+		  RemoteAddress dummy;
+		  dst_ok = dst_impl->get_remote_addr(0, dummy);
+		}
+	      }
+	      break;
+	    }
 	  }
-	  
+	  if(!dst_ok)
+	    continue;
+
 	  // match
 	  if(kind_ret) *kind_ret = it->xd_kind;
 	  if(bw_ret) *bw_ret = it->bandwidth;
@@ -3834,6 +3929,25 @@ namespace Realm {
 	p.dst_type = (dst_global ? SupportedPath::GLOBAL_KIND :
 		                   SupportedPath::LOCAL_KIND);
 	p.dst_kind = dst_kind;
+	p.bandwidth = bandwidth;
+	p.latency = latency;
+	p.redops_allowed = redops_allowed;
+	p.serdez_allowed = serdez_allowed;
+	p.xd_kind = xd_kind;
+      }
+
+      // TODO: allow rdma path to limit by kind?
+      void Channel::add_path(bool local_loopback,
+			     unsigned bandwidth, unsigned latency,
+			     bool redops_allowed, bool serdez_allowed,
+			     XferDesKind xd_kind)
+      {
+	size_t idx = paths.size();
+	paths.resize(idx + 1);
+	SupportedPath &p = paths[idx];
+	p.src_type = SupportedPath::LOCAL_RDMA;
+	p.dst_type = (local_loopback ? SupportedPath::LOCAL_RDMA :
+		                       SupportedPath::REMOTE_RDMA);
 	p.bandwidth = bandwidth;
 	p.latency = latency;
 	p.redops_allowed = redops_allowed;
@@ -4467,10 +4581,14 @@ namespace Realm {
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
 	// any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
-	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
-	  add_path(cpu_mem_kinds[i], false,
-		   Memory::REGDMA_MEM, true,
-		   bw, latency, false, false, XFER_REMOTE_WRITE);
+	// for(size_t i = 0; i < num_cpu_mem_kinds; i++)
+	//   add_path(cpu_mem_kinds[i], false,
+	// 	   Memory::REGDMA_MEM, true,
+	// 	   bw, latency, false, false, XFER_REMOTE_WRITE);
+	add_path(false /*!local_loopback*/,
+		 bw, latency,
+		 false /*!redops*/, false /*!serdez*/,
+		 XFER_REMOTE_WRITE);
       }
 
       RemoteWriteChannel::~RemoteWriteChannel() {}
@@ -4492,12 +4610,15 @@ namespace Realm {
 	    out_port->needs_pbt_update.store(false);
 	    write_bytes_total = out_port->local_bytes_total;
 	  }
+	  RemoteAddress dst_buf;
+	  bool ok = out_port->mem->get_remote_addr(req->dst_off, dst_buf);
+	  assert(ok);
 	  // send a request if there's data or if there's a next XD to update
 	  if((req->nbytes > 0) ||
 	     (out_port->peer_guid != XferDes::XFERDES_NO_GUID)) {
 	    if (req->dim == Request::DIM_1D) {
 	      XferDesRemoteWriteMessage::send_request(
-                dst_node, req->dst_base, req->src_base, req->nbytes, req,
+                dst_node, dst_buf, req->src_base, req->nbytes, req,
 		out_port->peer_guid, out_port->peer_port_idx,
 		req->write_seq_pos, req->write_seq_count, 
 		write_bytes_total);
@@ -4506,7 +4627,7 @@ namespace Realm {
 	      // dest MUST be continuous
 	      assert(req->nlines <= 1 || ((size_t)req->dst_str) == req->nbytes);
 	      XferDesRemoteWriteMessage::send_request(
-                dst_node, req->dst_base, req->src_base, req->nbytes,
+                dst_node, dst_buf, req->src_base, req->nbytes,
                 req->src_str, req->nlines, req,
 		out_port->peer_guid, out_port->peer_port_idx,
 		req->write_seq_pos, req->write_seq_count, 

@@ -24,8 +24,10 @@
 #include "realm/indexspace.h"
 #include "realm/inst_layout.h"
 #include "realm/serialize.h"
+#include "realm/machine.h"
 
 TYPE_IS_SERIALIZABLE(Realm::RegionInstance);
+TYPE_IS_SERIALIZABLE(realm_file_mode_t);
 
 namespace Realm {
 
@@ -192,6 +194,44 @@ namespace Realm {
 						wait_on);
   }
 
+  /*static*/ inline Event RegionInstance::create_external(RegionInstance& inst,
+							  Memory memory, uintptr_t base,
+							  InstanceLayoutGeneric *ilg,
+							  const ProfilingRequestSet& prs,
+							  Event wait_on /*= Event::NO_EVENT*/)
+  {
+    // this interface doesn't give us a size or read-only ness, so get the size
+    //  from the layout and assume it's read/write
+    ExternalMemoryResource res(reinterpret_cast<void *>(base),
+			       ilg->bytes_used);
+    return create_external_instance(inst, memory, ilg, res, prs, wait_on);
+  }
+
+  template <int N, typename T>
+  /*static*/ Event RegionInstance::create_file_instance(RegionInstance& inst,
+							const char *file_name,
+							const IndexSpace<N,T>& space,
+							const std::vector<FieldID> &field_ids,
+							const std::vector<size_t> &field_sizes,
+							realm_file_mode_t file_mode,
+							const ProfilingRequestSet& prs,
+							Event wait_on /*= Event::NO_EVENT*/)
+  {
+    // this old interface assumes an SOA layout of fields in memory, starting at
+    //  the beginning of the file
+    InstanceLayoutConstraints ilc(field_ids, field_sizes, 0 /*SOA*/);
+    int dim_order[N];
+    for (int i = 0; i < N; i++)
+      dim_order[i] = i;
+    InstanceLayoutGeneric *ilg;
+    ilg = InstanceLayoutGeneric::choose_instance_layout(space, ilc, dim_order);
+
+    ExternalFileResource res(file_name, file_mode);
+    return create_external_instance(inst,
+				    res.suggested_memory(),
+				    ilg, res, prs, wait_on);
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -205,6 +245,83 @@ namespace Realm {
   inline RegionInstance::DestroyedField::DestroyedField(FieldID fid, unsigned s, CustomSerdezID sid)
     : field_id(fid), size(s), serdez_id(sid)
   { }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ExternalInstanceResource
+
+  template <typename S>
+  inline bool serialize(S& serializer, const ExternalInstanceResource& res)
+  {
+    return Serialization::PolymorphicSerdezHelper<ExternalInstanceResource>::serialize(serializer, res);
+  }
+
+  template <typename S>
+  /*static*/ inline ExternalInstanceResource *ExternalInstanceResource::deserialize_new(S& deserializer)
+  {
+    return Serialization::PolymorphicSerdezHelper<ExternalInstanceResource>::deserialize_new(deserializer);
+  }
+
+  inline std::ostream& operator<<(std::ostream& os, const ExternalInstanceResource& res)
+  {
+    res.print(os);
+    return os;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ExternalMemoryResource
+
+  template <typename S>
+  bool ExternalMemoryResource::serialize(S& s) const
+  {
+    return ((s << base) &&
+	    (s << size_in_bytes) &&
+	    (s << read_only));
+  }
+
+  template <typename S>
+  /*static*/ ExternalInstanceResource *ExternalMemoryResource::deserialize_new(S& s)
+  {
+    ExternalMemoryResource *res = new ExternalMemoryResource;
+    if((s >> res->base) &&
+       (s >> res->size_in_bytes) &&
+       (s >> res->read_only)) {
+      return res;
+    } else {
+      delete res;
+      return 0;
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ExternalFileResource
+
+  template <typename S>
+  bool ExternalFileResource::serialize(S& s) const
+  {
+    return ((s << filename) &&
+	    (s << mode) &&
+	    (s << offset));
+  }
+
+  template <typename S>
+  /*static*/ ExternalInstanceResource *ExternalFileResource::deserialize_new(S& s)
+  {
+    ExternalFileResource *res = new ExternalFileResource;
+    if((s >> res->filename) &&
+       (s >> res->mode) &&
+       (s >> res->offset)) {
+      return res;
+    } else {
+      delete res;
+      return 0;
+    }
+  }
 
 
 }; // namespace Realm  

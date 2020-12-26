@@ -50,7 +50,6 @@ namespace Realm {
 		_mark_start,
 		_max_req_size, _priority,
                 _complete_fence)
-      , fd(-1) // defer file open
     {
       RegionInstance inst;
       if((inputs_info.size() == 1) &&
@@ -69,9 +68,8 @@ namespace Realm {
 	assert(0 && "neither source nor dest of FileXferDes is file!?");
       }
 	
-      // grab the file's name from the instance metadata - TODO: defer!
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
-      filename = impl->metadata.filename;
+      file_info = static_cast<FileMemory::OpenFileInfo *>(impl->metadata.mem_specific);
 
       file_reqs = (FileRequest*) calloc(max_nr, sizeof(DiskRequest));
       for (int i = 0; i < max_nr; i++) {
@@ -88,24 +86,12 @@ namespace Realm {
         case XFER_FILE_READ:
         {
           for (long i = 0; i < new_nr; i++) {
-            reqs[i]->file_off = reqs[i]->src_off;
+	    reqs[i]->fd = file_info->fd;
+            reqs[i]->file_off = reqs[i]->src_off + file_info->offset;
             //reqs[i]->mem_base = (char*)(buf_base + reqs[i]->dst_off);
 	    reqs[i]->mem_base = output_ports[reqs[i]->dst_port_idx].mem->get_direct_ptr(reqs[i]->dst_off,
 											reqs[i]->nbytes);
 	    assert(reqs[i]->mem_base != 0);
-
-	    // have we opened the file yet?
-	    if(fd == -1) {
-#ifdef REALM_USE_KERNEL_AIO
-	      int direct_flag = O_DIRECT;
-#else
-	      int direct_flag = 0;
-#endif
-	      fd = open(filename.c_str(),
-			O_RDONLY | direct_flag, 0777);
-	      assert(fd >= 0);
-	    }
-	    reqs[i]->fd = fd;
           }
           break;
         }
@@ -116,20 +102,8 @@ namespace Realm {
 	    reqs[i]->mem_base = input_ports[reqs[i]->src_port_idx].mem->get_direct_ptr(reqs[i]->src_off,
 										       reqs[i]->nbytes);
 	    assert(reqs[i]->mem_base != 0);
-            reqs[i]->file_off = reqs[i]->dst_off;
-
-	    // have we opened the file yet?
-	    if(fd == -1) {
-#ifdef REALM_USE_KERNEL_AIO
-	      int direct_flag = O_DIRECT;
-#else
-	      int direct_flag = 0;
-#endif
-	      fd = open(filename.c_str(),
-			O_RDWR | direct_flag, 0777);
-	      assert(fd >= 0);
-	    }
-	    reqs[i]->fd = fd;
+	    reqs[i]->fd = file_info->fd;
+            reqs[i]->file_off = reqs[i]->dst_off + file_info->offset;
           }
           break;
         }
@@ -168,10 +142,7 @@ namespace Realm {
 
     void FileXferDes::flush()
     {
-      if(fd >= 0) {
-	close(fd);
-	fd = -1;
-      }
+      fsync(file_info->fd);
     }
 
     DiskXferDes::DiskXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,

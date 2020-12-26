@@ -5518,11 +5518,20 @@ namespace Legion {
       // Have to wait for the index space to be ready if necessary
       Realm::IndexSpace<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
+      Realm::InstanceLayoutConstraints ilc(field_ids, field_sizes, 0 /*SOA*/);
+      int dim_order[DIM];
+      for (int i = 0; i < DIM; i++)
+	dim_order[i] = i;
+      Realm::InstanceLayoutGeneric *ilg;
+      ilg = Realm::InstanceLayoutGeneric::choose_instance_layout(local_space,
+							       ilc, dim_order);
+
+      Realm::ExternalFileResource res(file_name, file_mode);
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
       PhysicalInstance result;
-      ready_event = ApEvent(PhysicalInstance::create_file_instance(result, 
-          file_name, local_space, field_ids, field_sizes, file_mode, requests));
+      ready_event = ApEvent(PhysicalInstance::create_external_instance(result, 
+          res.suggested_memory(), ilg, res, requests));
       return result;
     }
 
@@ -5550,25 +5559,38 @@ namespace Legion {
       PhysicalInstance result = PhysicalInstance::NO_INST;
 
 #ifdef LEGION_USE_HDF5
-      std::vector<PhysicalInstance::HDF5FieldInfo<DIM,T> >
-	field_infos(field_ids.size());
+      Realm::InstanceLayout<DIM,T> *layout = new Realm::InstanceLayout<DIM,T>;
+      layout->bytes_used = 0;
+      layout->alignment_reqd = 0;  // no allocation being made
+      layout->space = local_space;
+      layout->piece_lists.resize(field_ids.size());
       for (size_t i = 0; i < field_ids.size(); i++)
       {
-	field_infos[i].field_id = field_ids[i];
-	field_infos[i].field_size = field_sizes[i];
-	field_infos[i].dataset_name = field_files[i];
-	for (int j = 0; j < DIM; j++)
-	  field_infos[i].offset[j] = 0;
-        // Legion ordering constraints are listed from fastest to 
-        // slowest like fortran order, hdf5 is the opposite though
-        // so we want to list dimensions in order from slowest to fastest
-        for (unsigned idx = 0; idx < DIM; idx++)
-          field_infos[i].dim_order[idx] = 
-            dimension_order.ordering[DIM - 1 - idx];
+	Realm::InstanceLayoutGeneric::FieldLayout& fl =
+	  layout->fields[field_ids[i]];
+	fl.list_idx = i;
+	fl.rel_offset = 0;
+	fl.size_in_bytes = field_sizes[i];
+
+	// create a single piece (for non-empty index spaces)
+	if(!local_space.empty()) {
+	  Realm::HDF5LayoutPiece<DIM,T> *hlp = new Realm::HDF5LayoutPiece<DIM,T>;
+	  hlp->bounds = local_space.bounds;
+	  hlp->dsetname = field_files[i];
+	  for (int j = 0; j < DIM; j++)	    
+	    hlp->offset[j] = 0;
+	  // Legion ordering constraints are listed from fastest to 
+	  // slowest like fortran order, hdf5 is the opposite though
+	  // so we want to list dimensions in order from slowest to fastest
+	  for (unsigned idx = 0; idx < DIM; idx++)
+	    hlp->dim_order[idx] = dimension_order.ordering[DIM - 1 - idx];
+	  layout->piece_lists[i].pieces.push_back(hlp);
+	}
       }
-      ready_event = ApEvent(PhysicalInstance::create_hdf5_instance(result, 
-                            file_name, local_space, field_infos,
-		            read_only, requests));
+
+      Realm::ExternalHDF5Resource res(file_name, read_only);
+      ready_event = ApEvent(PhysicalInstance::create_external_instance(result,
+		            res.suggested_memory(), layout, res, requests));
 #else
       assert(false); // should never get here
 #endif
@@ -5590,8 +5612,10 @@ namespace Legion {
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
       PhysicalInstance result;
-      ready_event = ApEvent(PhysicalInstance::create_external(result,
-                                        memory, base, ilg, requests));
+      Realm::ExternalMemoryResource res(base, ilg->bytes_used,
+					false /*!read_only*/);
+      ready_event = ApEvent(PhysicalInstance::create_external_instance(result,
+                                        memory, ilg, res, requests));
       return result;
     }
 

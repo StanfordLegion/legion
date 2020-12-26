@@ -13,24 +13,24 @@
  * limitations under the License.
  */
 
-// GASNet-1 network module implementation for Realm
+// GASNet-EX network module implementation for Realm
 
-// NOTE: this should work with GASNet-EX's backward-compatibility interfaces,
-//  but it is not recommended - there are known performance regressions compared
-//  to using an actual GASNet-1 implementation
-
-#ifndef GASNET1_MODULE_H
-#define GASNET1_MODULE_H
+#ifndef GASNETEX_MODULE_H
+#define GASNETEX_MODULE_H
 
 #include "realm/network.h"
 
 namespace Realm {
 
-  class GASNet1Module : public NetworkModule {
+  class GASNetEXInternal;
+
+  class GASNetEXModule : public NetworkModule {
   protected:
-    GASNet1Module(void);
+    GASNetEXModule();
 
   public:
+    virtual ~GASNetEXModule();
+
     // all subclasses should define this (static) method - its responsibilities
     // are:
     // 1) determine if the network module should even be loaded
@@ -128,14 +128,27 @@ namespace Realm {
 					   bool with_congestion,
 					   size_t header_size);
 
+  public:
+    bool cfg_use_immediate;
+    bool cfg_use_negotiated;
+    long long cfg_crit_timeout;
+    size_t cfg_max_long;
+    bool cfg_bind_hostmem;
+#ifdef REALM_USE_CUDA
+    bool cfg_bind_cudamem;
+#endif
+    bool cfg_do_checksums;
+    bool cfg_batch_messages;
+    // number and size of "outbufs", used to put pkt header and/or data in
+    //  registered memory for RDMA goodness
+    size_t cfg_outbuf_count, cfg_outbuf_size;
+
   protected:
-    bool active_msg_worker_bgwork;
-    int active_msg_worker_threads;
-    size_t gasnet_mem_size, amsg_stack_size;
+    GASNetEXInternal *internal;
   };
 
-  REGISTER_REALM_NETWORK_MODULE(GASNet1Module);
-  
+  REGISTER_REALM_NETWORK_MODULE(GASNetEXModule);
+
 }; // namespace Realm
 
 #endif

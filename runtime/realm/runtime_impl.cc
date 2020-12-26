@@ -763,7 +763,7 @@ namespace Realm {
       nodes[Network::my_node_id].memories.push_back(m);
     }
 
-    void RuntimeImpl::add_ib_memory(MemoryImpl *m)
+    void RuntimeImpl::add_ib_memory(IBMemory *m)
     {
       // right now expect this to always be for the current node and the next memory ID
       ID id(m->me);
@@ -1145,11 +1145,13 @@ namespace Realm {
 
       // form requests for network-registered memory
       if(reg_ib_mem_size > 0) {
-	reg_ib_mem_segment.request(reg_ib_mem_size, 64);
+	reg_ib_mem_segment.request(NetworkSegmentInfo::HostMem,
+				   reg_ib_mem_size, 64);
 	network_segments.push_back(&reg_ib_mem_segment);
       }
       if(reg_mem_size > 0) {
-	reg_mem_segment.request(reg_mem_size, 64);
+	reg_mem_segment.request(NetworkSegmentInfo::HostMem,
+				reg_mem_size, 64);
 	network_segments.push_back(&reg_mem_segment);
       }
 
@@ -1164,6 +1166,31 @@ namespace Realm {
 	message_manager->add_to_manager(&bgwork);
       else
 	assert(active_msg_handler_threads > 0);
+
+      // initialize modules and create memories before we do network attach
+      //  so that we have a chance to register these other memories for
+      //  RDMA transfers
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->initialize(this);
+
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->create_memories(this);
+
+      Node *n = &nodes[Network::my_node_id];
+      for(MemoryImpl *mem : n->memories) {
+	NetworkSegment *seg = mem->get_network_segment();
+	if(seg)
+	  network_segments.push_back(seg);
+      }
+      for(IBMemory *ibm : n->ib_memories) {
+	NetworkSegment *seg = ibm->get_network_segment();
+	if(seg)
+	  network_segments.push_back(seg);
+      }
 
       // attach to the network
       for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
@@ -1247,23 +1274,12 @@ namespace Realm {
                                         lock_trace_exp_arrv_rate);
 #endif
 	
-      for(std::vector<Module *>::const_iterator it = modules.begin();
-	  it != modules.end();
-	  it++)
-	(*it)->initialize(this);
-
       //gasnet_seginfo_t seginfos = new gasnet_seginfo_t[num_nodes];
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
-      Node *n = &nodes[Network::my_node_id];
-
-      // create memories and processors for all loaded modules
+      // network-specific memories are created after attachment
       for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
 	  it != network_modules.end();
-	  it++)
-	(*it)->create_memories(this);
-      for(std::vector<Module *>::const_iterator it = modules.begin();
-	  it != modules.end();
 	  it++)
 	(*it)->create_memories(this);
 
@@ -1287,17 +1303,17 @@ namespace Realm {
 	  it++)
 	(*it)->create_processors(this);
 
-      LocalCPUMemory *reg_ib_mem;
+      IBMemory *reg_ib_mem;
       if(reg_ib_mem_size > 0) {
 	void *reg_ib_mem_base = reg_ib_mem_segment.base;
 	assert(reg_ib_mem_base != 0);
 	Memory m = get_runtime()->next_local_ib_memory_id();
-	reg_ib_mem = new LocalCPUMemory(m,
-				        reg_ib_mem_size,
-                                        -1/*don't care numa domain*/,
-                                        Memory::REGDMA_MEM,
-				        reg_ib_mem_base,
-					&reg_ib_mem_segment);
+	reg_ib_mem = new IBMemory(m,
+				  reg_ib_mem_size,
+				  MemoryImpl::MKIND_SYSMEM,
+				  Memory::REGDMA_MEM,
+				  reg_ib_mem_base,
+				  &reg_ib_mem_segment);
 	get_runtime()->add_ib_memory(reg_ib_mem);
       } else
         reg_ib_mem = 0;
@@ -1524,7 +1540,7 @@ namespace Realm {
 	      ok = ok && (dbs << *rdma_info);
 	  }
 
-        for (std::vector<MemoryImpl *>::const_iterator it = n->ib_memories.begin();
+        for (std::vector<IBMemory *>::const_iterator it = n->ib_memories.begin();
              it != n->ib_memories.end();
              it++)
           if(*it) {
@@ -2364,6 +2380,17 @@ namespace Realm {
 
       log_runtime.fatal() << "invalid memory handle: id=" << id;
       assert(0 && "invalid memory handle");
+      return 0;
+    }
+
+    IBMemory *RuntimeImpl::get_ib_memory_impl(ID id)
+    {
+      if(id.is_ib_memory()) {
+        return null_check(nodes[id.memory_owner_node()].ib_memories[id.memory_mem_idx()]);
+      }
+
+      log_runtime.fatal() << "invalid ib memory handle: id=" << id;
+      assert(0 && "invalid ib memory handle");
       return 0;
     }
 

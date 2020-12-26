@@ -66,6 +66,13 @@
 #endif
 
 namespace Realm {
+
+  namespace NetworkSegmentInfo {
+    // CUDA device memory - extra is a uintptr_t'd pointer to the GPU
+    //  object
+    static const MemoryType CudaDeviceMem = 2;
+  };
+
   namespace Cuda {
 
     class GPU;
@@ -774,7 +781,7 @@ namespace Realm {
       Realm::CoreReservation *core_rsrv;
     };
 
-    class GPUFBMemory : public MemoryImpl {
+    class GPUFBMemory : public LocalManagedMemory {
     public:
       GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size);
 
@@ -786,14 +793,13 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
-      virtual int get_home_node(off_t offset, size_t size);
-
     public:
       GPU *gpu;
       CUdeviceptr base;
+      NetworkSegment local_segment;
     };
 
-    class GPUZCMemory : public MemoryImpl {
+    class GPUZCMemory : public LocalManagedMemory {
     public:
       GPUZCMemory(Memory _me, CUdeviceptr _gpu_base, void *_cpu_base, size_t _size);
 
@@ -805,11 +811,10 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
-      virtual int get_home_node(off_t offset, size_t size);
-
     public:
       CUdeviceptr gpu_base;
       char *cpu_base;
+      NetworkSegment local_segment;
     };
 
   }; // namespace Cuda

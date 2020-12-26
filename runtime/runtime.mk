@@ -518,8 +518,8 @@ NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gencode arch=compute_
 NVCC_FLAGS += -Xcudafe --diag_suppress=boolean_controlling_expr_is_constant
 endif
 
-# Realm uses GASNet if requested
-ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
+# Realm uses GASNet if requested (detect both gasnet1 and gasnetex here)
+ifneq ($(findstring gasnet,$(REALM_NETWORKS)),)
   ifeq ($(GASNET),)
     $(error GASNET variable is not defined, aborting build)
   endif
@@ -546,7 +546,15 @@ ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
   else
     LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
   endif
-  REALM_CC_FLAGS	+= -DREALM_USE_GASNET1
+  ifneq ($(findstring gasnetex,$(REALM_NETWORKS)),)
+    REALM_CC_FLAGS	+= -DREALM_USE_GASNETEX
+  else
+    ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
+      REALM_CC_FLAGS	+= -DREALM_USE_GASNET1
+    else
+      $(error REALM_NETWORKS must be gasnet1 or gasnetex)
+    endif
+  endif
   # newer versions of gasnet seem to need this
   CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
 
@@ -774,6 +782,11 @@ ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/gasnet1/gasnet1_module.cc \
                    $(LG_RT_DIR)/realm/gasnet1/gasnetmsg.cc
 endif
+ifneq ($(findstring gasnetex,$(REALM_NETWORKS)),)
+REALM_SRC 	+= $(LG_RT_DIR)/realm/gasnetex/gasnetex_module.cc \
+	           $(LG_RT_DIR)/realm/gasnetex/gasnetex_internal.cc \
+	           $(LG_RT_DIR)/realm/gasnetex/gasnetex_handlers.cc
+endif
 ifneq ($(findstring mpi,$(REALM_NETWORKS)),)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/mpi/mpi_module.cc \
                    $(LG_RT_DIR)/realm/mpi/am_mpi.cc
@@ -811,7 +824,8 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/logging.cc \
 	           $(LG_RT_DIR)/realm/cmdline.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
 	           $(LG_RT_DIR)/realm/codedesc.cc \
-		   $(LG_RT_DIR)/realm/timers.cc
+		   $(LG_RT_DIR)/realm/timers.cc \
+		   $(LG_RT_DIR)/realm/utils.cc
 
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
 		   $(LG_RT_DIR)/mappers/mapping_utilities.cc \
