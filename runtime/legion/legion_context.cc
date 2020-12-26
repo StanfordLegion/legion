@@ -17606,7 +17606,10 @@ namespace Legion {
       std::vector<std::pair<IndexSpace,bool> > 
           deleted_is(num_deleted_index_spaces);
       for (unsigned idx = 0; idx < num_deleted_index_spaces; idx++)
-        derez.deserialize(deleted_is[idx]);
+      {
+        derez.deserialize(deleted_is[idx].first);
+        derez.deserialize(deleted_is[idx].second);
+      }
       size_t num_created_index_partitions;
       derez.deserialize(num_created_index_partitions);
       std::map<IndexPartition,unsigned> created_partitions;
@@ -17621,7 +17624,10 @@ namespace Legion {
       std::vector<std::pair<IndexPartition,bool> > 
           deleted_partitions(num_deleted_index_partitions);
       for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
-        derez.deserialize(deleted_partitions[idx]);
+      {
+        derez.deserialize(deleted_partitions[idx].first);
+        derez.deserialize(deleted_partitions[idx].second);
+      }
       // Send this down to the base class to avoid re-broadcasting
       receive_replicate_resources(return_index, created_regs, deleted_regs,
           created_fids, deleted_fids, created_fs, latent_fs, deleted_fs,
@@ -17874,7 +17880,10 @@ namespace Legion {
       {
         for (std::vector<std::pair<IndexSpace,bool> >::const_iterator it = 
               deleted_is.begin(); it != deleted_is.end(); it++)
-          rez.serialize(*it);
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
       }
       rez.serialize<size_t>(created_partitions.size());
       if (!created_partitions.empty())
@@ -17892,7 +17901,10 @@ namespace Legion {
       {
         for (std::vector<std::pair<IndexPartition,bool> >::const_iterator it = 
               deleted_partitions.begin(); it != deleted_partitions.end(); it++)
-          rez.serialize(*it);
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
       }
       shard_manager->broadcast_resource_update(owner_shard, rez, preconditions);
       // Now we can handle this for ourselves

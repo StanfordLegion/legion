@@ -12892,13 +12892,59 @@ namespace Legion {
       {
         T key;
         derez.deserialize(key);
-        unsigned count;
-        derez.deserialize(count);
         typename std::map<T,unsigned>::iterator finder = counts.find(key);
-        if (finder == counts.end())
-          counts[key] = count;
-        else
+        if (finder != counts.end())
+        {
+          unsigned count;
+          derez.deserialize(count);
           finder->second += count;
+        }
+        else
+          derez.deserialize(counts[key]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void UnorderedExchange::pack_field_counts(Serializer &rez,
+                          const std::map<std::pair<T,FieldID>,unsigned> &counts)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(counts.size());
+      for (typename std::map<std::pair<T,FieldID>,unsigned>::const_iterator it =
+            counts.begin(); it != counts.end(); it++)
+      {
+        rez.serialize(it->first.first);
+        rez.serialize(it->first.second);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void UnorderedExchange::unpack_field_counts(const int stage,
+        Deserializer &derez, std::map<std::pair<T,FieldID>,unsigned> &counts)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_counts;
+      derez.deserialize(num_counts);
+      if (num_counts == 0)
+        return;
+      for (unsigned idx = 0; idx < num_counts; idx++)
+      {
+        std::pair<T,FieldID> key;
+        derez.deserialize(key.first);
+        derez.deserialize(key.second);
+        typename std::map<std::pair<T,FieldID>,unsigned>::iterator finder =
+          counts.find(key);
+        if (finder != counts.end())
+        {
+          unsigned count;
+          derez.deserialize(count);
+          finder->second += count;
+        }
+        else
+          derez.deserialize(counts[key]);
       }
     }
 
@@ -12944,9 +12990,9 @@ namespace Legion {
       pack_counts(rez, index_space_counts);
       pack_counts(rez, index_partition_counts);
       pack_counts(rez, field_space_counts);
-      pack_counts(rez, field_counts);
+      pack_field_counts(rez, field_counts);
       pack_counts(rez, logical_region_counts);
-      pack_counts(rez, detach_counts); 
+      pack_field_counts(rez, detach_counts);
     }
 
     //--------------------------------------------------------------------------
@@ -12968,9 +13014,9 @@ namespace Legion {
       unpack_counts(stage, derez, index_space_counts);
       unpack_counts(stage, derez, index_partition_counts);
       unpack_counts(stage, derez, field_space_counts);
-      unpack_counts(stage, derez, field_counts);
+      unpack_field_counts(stage, derez, field_counts);
       unpack_counts(stage, derez, logical_region_counts);
-      unpack_counts(stage, derez, detach_counts); 
+      unpack_field_counts(stage, derez, detach_counts);
     }
 
     //--------------------------------------------------------------------------

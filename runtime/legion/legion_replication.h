@@ -924,6 +924,12 @@ namespace Legion {
       template<typename T>
       void unpack_counts(const int stage, Deserializer &derez, 
                          std::map<T,unsigned> &future_counts);
+      template<typename T>
+      void pack_field_counts(Serializer &rez, 
+          const std::map<std::pair<T,FieldID>,unsigned> &counts);
+      template<typename T>
+      void unpack_field_counts(const int stage, Deserializer &derez, 
+          std::map<std::pair<T,FieldID>,unsigned> &future_counts);
       template<typename T, typename OP>
       void initialize_counts(const std::map<T,OP*> &ops,
                              std::map<T,unsigned> &counts);
