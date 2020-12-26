@@ -47,6 +47,7 @@ namespace Realm {
   class LinearizedIndexSpaceIntfc;
   class InstanceLayoutGeneric;
   class ProfilingRequestSet;
+  class ExternalInstanceResource;
 
   namespace PieceLookup {
     struct Instruction;
@@ -121,6 +122,16 @@ namespace Realm {
 				 const ProfilingRequestSet& prs,
 				 Event wait_on = Event::NO_EVENT);
 
+    // creates an instance that is backed by an external resource - Realm
+    //  performs no allocation, but allows access and copies as with normal
+    //  instances
+    static Event create_external_instance(RegionInstance& inst,
+					  Memory memory,
+					  InstanceLayoutGeneric *ilg,
+					  const ExternalInstanceResource& resource,
+					  const ProfilingRequestSet& prs,
+					  Event wait_on = Event::NO_EVENT);
+
     template <int N, typename T>
     static Event create_instance(RegionInstance& inst,
 				 Memory memory,
@@ -161,6 +172,7 @@ namespace Realm {
 				 const ProfilingRequestSet& prs,
 				 Event wait_on = Event::NO_EVENT);
 
+    REALM_ATTR_DEPRECATED2("use RegionInstance::create_external_instance instead",
     template <int N, typename T>
     static Event create_file_instance(RegionInstance& inst,
 				      const char *file_name,
@@ -169,7 +181,7 @@ namespace Realm {
 				      const std::vector<size_t> &field_sizes,
 				      realm_file_mode_t file_mode,
 				      const ProfilingRequestSet& prs,
-				      Event wait_on = Event::NO_EVENT);
+				      Event wait_on = Event::NO_EVENT));
 
 #ifdef REALM_USE_HDF5
     template <int N, typename T>
@@ -181,6 +193,7 @@ namespace Realm {
       int dim_order[N];
     };
 
+    REALM_ATTR_DEPRECATED2("use RegionInstance::create_external_instance instead",
     template <int N, typename T>
     static Event create_hdf5_instance(RegionInstance& inst,
 				      const char *file_name,
@@ -188,14 +201,15 @@ namespace Realm {
 				      const std::vector<HDF5FieldInfo<N,T> >& field_infos,
 				      bool read_only,
 				      const ProfilingRequestSet& prs,
-				      Event wait_on = Event::NO_EVENT);
+				      Event wait_on = Event::NO_EVENT));
 #endif
               
+    REALM_ATTR_DEPRECATED("use RegionInstance::create_external_instance instead",
     static Event create_external(RegionInstance& inst,
 				 Memory memory, uintptr_t base,
 				 InstanceLayoutGeneric *ilg,
 				 const ProfilingRequestSet& prs,
-				 Event wait_on = Event::NO_EVENT);
+				 Event wait_on = Event::NO_EVENT));
 
     void destroy(Event wait_on = Event::NO_EVENT) const;
 
@@ -249,7 +263,88 @@ namespace Realm {
 
   REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, RegionInstance r);
-		
+
+
+  class REALM_PUBLIC_API ExternalInstanceResource {
+  protected:
+    // only subclasses can be constructed
+    ExternalInstanceResource();
+    
+  public:
+    virtual ~ExternalInstanceResource();
+
+    virtual ExternalInstanceResource *clone(void) const = 0;
+
+    template <typename S>
+    static ExternalInstanceResource *deserialize_new(S& deserializer);
+
+    // pretty-printing
+    friend std::ostream& operator<<(std::ostream& os, const ExternalInstanceResource& res);
+
+  protected:
+    virtual void print(std::ostream& os) const = 0;
+  };
+
+  template <typename S>
+  bool serialize(S& serializer, const ExternalInstanceResource& res);
+
+
+  class REALM_PUBLIC_API ExternalMemoryResource : public ExternalInstanceResource {
+  public:
+    ExternalMemoryResource(uintptr_t _base, size_t _size_in_bytes, bool _read_only);
+    ExternalMemoryResource(void *_base, size_t _size_in_bytes);
+    ExternalMemoryResource(const void *_base, size_t _size_in_bytes);
+
+    virtual ExternalInstanceResource *clone(void) const;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
+
+    template <typename S>
+    static ExternalInstanceResource *deserialize_new(S& deserializer);
+
+  protected:
+    ExternalMemoryResource();
+
+    static Serialization::PolymorphicSerdezSubclass<ExternalInstanceResource, ExternalMemoryResource> serdez_subclass;
+
+    virtual void print(std::ostream& os) const;
+
+  public:
+    uintptr_t base;
+    size_t size_in_bytes;
+    bool read_only;
+  };
+
+  class REALM_PUBLIC_API ExternalFileResource : public ExternalInstanceResource {
+  public:
+    ExternalFileResource(const std::string& _filename, realm_file_mode_t _mode,
+			 size_t _offset = 0);
+
+    // returns the suggested memory in which this resource should be created
+    Memory suggested_memory() const;
+
+    virtual ExternalInstanceResource *clone(void) const;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
+
+    template <typename S>
+    static ExternalInstanceResource *deserialize_new(S& deserializer);
+
+  protected:
+    ExternalFileResource();
+
+    static Serialization::PolymorphicSerdezSubclass<ExternalInstanceResource, ExternalFileResource> serdez_subclass;
+
+    virtual void print(std::ostream& os) const;
+
+  public:
+    std::string filename;
+    size_t offset;
+    realm_file_mode_t mode;
+  };
+
 }; // namespace Realm
 #endif // ifndef REALM_INSTANCE_H
 

@@ -2301,11 +2301,10 @@ namespace Legion {
       static const LgEvent NO_LG_EVENT;
     public:
       LgEvent(void) { id = 0; }
-      LgEvent(const LgEvent &rhs) { id = rhs.id; }
+      LgEvent(const LgEvent &rhs) = default;
       explicit LgEvent(const Realm::Event e) { id = e.id; }
     public:
-      inline LgEvent& operator=(const LgEvent &rhs)
-        { id = rhs.id; return *this; }
+      inline LgEvent& operator=(const LgEvent &rhs) = default;
     public:
       // Override the wait method so we can have our own implementation
       inline void wait(void) const;
@@ -2316,11 +2315,10 @@ namespace Legion {
       static const PredEvent NO_PRED_EVENT;
     public:
       PredEvent(void) : LgEvent() { } 
-      PredEvent(const PredEvent &rhs) { id = rhs.id; }
+      PredEvent(const PredEvent &rhs) = default;
       explicit PredEvent(const Realm::UserEvent &e) : LgEvent(e) { }
     public:
-      inline PredEvent& operator=(const PredEvent &rhs)
-        { id = rhs.id; return *this; }
+      inline PredEvent& operator=(const PredEvent &rhs) = default;
       inline operator Realm::UserEvent() const
         { Realm::UserEvent e; e.id = id; return e; }
     };
@@ -2330,12 +2328,11 @@ namespace Legion {
       static const ApEvent NO_AP_EVENT;
     public:
       ApEvent(void) : LgEvent() { }
-      ApEvent(const ApEvent &rhs) { id = rhs.id; }
+      ApEvent(const ApEvent &rhs) = default;
       explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
       explicit ApEvent(const PredEvent &e) { id = e.id; }
     public:
-      inline ApEvent& operator=(const ApEvent &rhs)
-        { id = rhs.id; return *this; }
+      inline ApEvent& operator=(const ApEvent &rhs) = default;
       inline bool has_triggered_faultignorant(void) const
         { bool poisoned; return has_triggered_faultaware(poisoned); }
     };
@@ -2345,11 +2342,10 @@ namespace Legion {
       static const ApUserEvent NO_AP_USER_EVENT;
     public:
       ApUserEvent(void) : ApEvent() { }
-      ApUserEvent(const ApUserEvent &rhs) : ApEvent(rhs) { }
+      ApUserEvent(const ApUserEvent &rhs) = default;
       explicit ApUserEvent(const Realm::UserEvent &e) : ApEvent(e) { }
     public:
-      inline ApUserEvent& operator=(const ApUserEvent &rhs)
-        { id = rhs.id; return *this; }
+      inline ApUserEvent& operator=(const ApUserEvent &rhs) = default;
       inline operator Realm::UserEvent() const
         { Realm::UserEvent e; e.id = id; return e; }
     };
@@ -2359,13 +2355,11 @@ namespace Legion {
       static const ApBarrier NO_AP_BARRIER;
     public:
       ApBarrier(void) : ApEvent(), timestamp(0) { }
-      ApBarrier(const ApBarrier &rhs) 
-        : ApEvent(rhs), timestamp(rhs.timestamp) { }
+      ApBarrier(const ApBarrier &rhs) = default; 
       explicit ApBarrier(const Realm::Barrier &b) 
         : ApEvent(b), timestamp(b.timestamp) { }
     public:
-      inline ApBarrier& operator=(const ApBarrier &rhs)
-        { id = rhs.id; timestamp = rhs.timestamp; return *this; }
+      inline ApBarrier& operator=(const ApBarrier &rhs) = default;
       inline operator Realm::Barrier() const
         { Realm::Barrier b; b.id = id; 
           b.timestamp = timestamp; return b; }
@@ -2385,12 +2379,11 @@ namespace Legion {
       static const RtEvent NO_RT_EVENT;
     public:
       RtEvent(void) : LgEvent() { }
-      RtEvent(const RtEvent &rhs) { id = rhs.id; }
+      RtEvent(const RtEvent &rhs) = default;
       explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
       explicit RtEvent(const PredEvent &e) { id = e.id; }
     public:
-      inline RtEvent& operator=(const RtEvent &rhs)
-        { id = rhs.id; return *this; }
+      inline RtEvent& operator=(const RtEvent &rhs) = default;
     };
 
     class RtUserEvent : public RtEvent {
@@ -2398,11 +2391,10 @@ namespace Legion {
       static const RtUserEvent NO_RT_USER_EVENT;
     public:
       RtUserEvent(void) : RtEvent() { }
-      RtUserEvent(const RtUserEvent &rhs) : RtEvent(rhs) { }
+      RtUserEvent(const RtUserEvent &rhs) = default;
       explicit RtUserEvent(const Realm::UserEvent &e) : RtEvent(e) { }
     public:
-      inline RtUserEvent& operator=(const RtUserEvent &rhs)
-        { id = rhs.id; return *this; }
+      inline RtUserEvent& operator=(const RtUserEvent &rhs) = default;
       inline operator Realm::UserEvent() const
         { Realm::UserEvent e; e.id = id; return e; }
     };
@@ -2412,13 +2404,11 @@ namespace Legion {
       static const RtBarrier NO_RT_BARRIER;
     public:
       RtBarrier(void) : RtEvent(), timestamp(0) { }
-      RtBarrier(const RtBarrier &rhs)
-        : RtEvent(rhs), timestamp(rhs.timestamp) { }
+      RtBarrier(const RtBarrier &rhs) = default;
       explicit RtBarrier(const Realm::Barrier &b)
         : RtEvent(b), timestamp(b.timestamp) { }
     public:
-      inline RtBarrier& operator=(const RtBarrier &rhs)
-        { id = rhs.id; timestamp = rhs.timestamp; return *this; }
+      inline RtBarrier& operator=(const RtBarrier &rhs) = default;
       inline operator Realm::Barrier() const
         { Realm::Barrier b; b.id = id; 
           b.timestamp = timestamp; return b; } 

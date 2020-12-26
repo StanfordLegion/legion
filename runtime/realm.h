@@ -53,6 +53,10 @@
 #include "realm/codedesc.h"
 #include "realm/subgraph.h"
 
+#ifdef REALM_USE_HDF5
+#include "realm/hdf5/hdf5_access.h"
+#endif
+
 #endif // ifndef REALM_H
 #endif // ifdef REALM_ENABLE_CXX_BINDINGS
 

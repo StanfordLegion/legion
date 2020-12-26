@@ -56,9 +56,7 @@ namespace Realm {
 
     private:
       FileRequest* file_reqs;
-      std::string filename;
-      int fd; // The file that stores the physical instance
-      //const char *buf_base;
+      FileMemory::OpenFileInfo *file_info;
     };
 
     class DiskXferDes : public XferDes {

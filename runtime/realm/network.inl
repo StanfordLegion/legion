@@ -100,7 +100,32 @@ namespace Realm {
 							 const void *src_payload_addr,
 							 size_t src_payload_lines,
 							 size_t src_payload_line_stride,
-							 void *dest_payload_addr,
+							 void *storage_base,
+							 size_t storage_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->create_active_message_impl(target,
+							  msgid,
+							  header_size,
+							  max_payload_size,
+							  src_payload_addr,
+							  src_payload_lines,
+							  src_payload_line_stride,
+							  storage_base,
+							  storage_size);
+    }
+
+    inline ActiveMessageImpl *create_active_message_impl(NodeID target,
+							 unsigned short msgid,
+							 size_t header_size,
+							 size_t max_payload_size,
+							 const void *src_payload_addr,
+							 size_t src_payload_lines,
+							 size_t src_payload_line_stride,
+							 const RemoteAddress& dest_payload_addr,
 							 void *storage_base,
 							 size_t storage_size)
     {
@@ -145,41 +170,101 @@ namespace Realm {
 							  storage_size);
     }
     
+    inline size_t recommended_max_payload(NodeID target,
+					  bool with_congestion,
+					  size_t header_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->recommended_max_payload(target,
+						       with_congestion,
+						       header_size);
+    }
+
+    inline size_t recommended_max_payload(const NodeSet& targets,
+					  bool with_congestion,
+					  size_t header_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->recommended_max_payload(targets,
+						       with_congestion,
+						       header_size);
+    }
+
+    inline size_t recommended_max_payload(NodeID target,
+					  const RemoteAddress& dest_payload_addr,
+					  bool with_congestion,
+					  size_t header_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->recommended_max_payload(target,
+						       dest_payload_addr,
+						       with_congestion,
+						       header_size);
+    }
+
+    inline size_t recommended_max_payload(NodeID target,
+					  const void *data, size_t bytes_per_line,
+					  size_t lines, size_t line_stride,
+					  bool with_congestion,
+					  size_t header_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->recommended_max_payload(target,
+						       data, bytes_per_line,
+						       lines, line_stride,
+						       with_congestion,
+						       header_size);
+    }
+
+    inline size_t recommended_max_payload(const NodeSet& targets,
+					  const void *data, size_t bytes_per_line,
+					  size_t lines, size_t line_stride,
+					  bool with_congestion,
+					  size_t header_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->recommended_max_payload(targets,
+						       data, bytes_per_line,
+						       lines, line_stride,
+						       with_congestion,
+						       header_size);
+    }
+
+    inline size_t recommended_max_payload(NodeID target,
+					  const void *data, size_t bytes_per_line,
+					  size_t lines, size_t line_stride,
+					  const RemoteAddress& dest_payload_addr,
+					  bool with_congestion,
+					  size_t header_size)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+      } else
+#endif
+	return single_network->recommended_max_payload(target,
+						       data, bytes_per_line,
+						       lines, line_stride,
+						       dest_payload_addr,
+						       with_congestion,
+						       header_size);
+    }
+
   };
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class NetworkSegment
-  //
-
-  inline NetworkSegment::NetworkSegment()
-    : base(0), bytes(0), alignment(0)
-    , single_network(0), single_network_data(0)
-  {}
-    
-  // normally a request will just be for a particular size
-  inline NetworkSegment::NetworkSegment(size_t _bytes, size_t _alignment)
-    : base(0), bytes(_bytes), alignment(_alignment)
-    , single_network(0), single_network_data(0)
-  {}
-
-  // but it can also be for a pre-allocated chunk of memory with a fixed address
-  inline NetworkSegment::NetworkSegment(void *_base, size_t _bytes)
-    : base(_base), bytes(_bytes), alignment(0)
-    , single_network(0), single_network_data(0)
-  {}
-  
-  inline void NetworkSegment::request(size_t _bytes, size_t _alignment)
-  {
-    bytes = _bytes;
-    alignment = _alignment;
-  }
-
-  inline void NetworkSegment::assign(void *_base, size_t _bytes)
-  {
-    base = _base;
-    bytes = _bytes;
-  }
 
 
 };

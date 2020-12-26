@@ -129,6 +129,7 @@ set(CMAKE_ENABLE_EXPORTS ON)
 # builds so we override the cmake defaults here for release, this changes 
 # -O3 to -O2 and removes -DNDEBUG
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
 
 # Legion can't handle certain optimizations. See:
 # https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
@@ -289,7 +290,7 @@ endif()
 #------------------------------------------------------------------------------#
 # GASNet configuration
 #------------------------------------------------------------------------------#
-if("${Legion_NETWORKS}" MATCHES .*gasnet1.*)
+if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
   set(GASNet_THREADING par)
   set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
   find_package(GASNet REQUIRED)
@@ -301,7 +302,11 @@ if("${Legion_NETWORKS}" MATCHES .*gasnet1.*)
   )
 
   # define variable for realm_defines.h
-  set(REALM_USE_GASNET1 ON)
+  if("${Legion_NETWORKS}" MATCHES .*gasnetex.*)
+    set(REALM_USE_GASNETEX ON)
+  else()
+    set(REALM_USE_GASNET1 ON)
+  endif()
   string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
   set(GASNET_CONDUIT_${CONDUIT} ON)
   # conduits other than udp support MPI interop

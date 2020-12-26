@@ -26,7 +26,7 @@ namespace Realm {
 
   template <int N, typename T>
   inline HDF5LayoutPiece<N,T>::HDF5LayoutPiece(void)
-    : InstanceLayoutPiece<N,T>(InstanceLayoutPiece<N,T>::HDF5LayoutType)
+    : InstanceLayoutPiece<N,T>(PieceLayoutTypes::HDF5LayoutType)
   {}
 
   template <int N, typename T>
@@ -35,7 +35,6 @@ namespace Realm {
   {
     HDF5LayoutPiece<N,T> *hlp = new HDF5LayoutPiece<N,T>;
     if((s >> hlp->bounds) &&
-       (s >> hlp->filename) &&
        (s >> hlp->dsetname) &&
        (s >> hlp->offset) &&
        (s >> hlp->dim_order) &&
@@ -52,7 +51,6 @@ namespace Realm {
   {
     HDF5LayoutPiece<N,T> *copy = new HDF5LayoutPiece<N,T>;
     copy->bounds = this->bounds;
-    copy->filename = this->filename;
     copy->dsetname = this->dsetname;
     copy->offset = this->offset;
     for(int i = 0; i < N; i++)
@@ -76,7 +74,31 @@ namespace Realm {
   template <int N, typename T>
   void HDF5LayoutPiece<N,T>::print(std::ostream& os) const
   {
-    os << this->bounds << "->hdf5(" << filename << "," << dsetname << "+" << offset << ")";
+    os << this->bounds << "->hdf5(" << dsetname << "+" << offset << ")";
+  }
+
+  template <int N, typename T>
+  size_t HDF5LayoutPiece<N,T>::lookup_inst_size() const
+  {
+    return (sizeof(PieceLookup::HDF5Piece<N,T>) +
+	    dsetname.size() + 1);
+  }
+
+  template <int N, typename T>
+  PieceLookup::Instruction *HDF5LayoutPiece<N,T>::create_lookup_inst(void *ptr, unsigned next_delta) const
+  {
+    PieceLookup::HDF5Piece<N,T> *hp = new(ptr) PieceLookup::HDF5Piece<N,T>(next_delta);
+    hp->bounds = this->bounds;
+    hp->offset = offset;
+    for(int i = 0; i < N; i++)
+      hp->dim_order[i] = dim_order[i];
+    hp->read_only = read_only;
+    size_t ofs = sizeof(PieceLookup::HDF5Piece<N,T>);
+    hp->dsetname_len = dsetname.size();
+    memcpy(static_cast<char *>(ptr) + ofs, dsetname.c_str(),
+	   hp->dsetname_len + 1);
+
+    return hp;
   }
 
   template <int N, typename T>
@@ -84,11 +106,35 @@ namespace Realm {
   inline bool HDF5LayoutPiece<N,T>::serialize(S& s) const
   {
     return ((s << this->bounds) &&
-	    (s << filename) &&
 	    (s << dsetname) &&
 	    (s << offset) &&
 	    (s << dim_order) &&
 	    (s << read_only));
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ExternalHDF5Resource
+
+  template <typename S>
+  bool ExternalHDF5Resource::serialize(S& s) const
+  {
+    return ((s << filename) &&
+	    (s << read_only));
+  }
+
+  template <typename S>
+  /*static*/ ExternalInstanceResource *ExternalHDF5Resource::deserialize_new(S& s)
+  {
+    ExternalHDF5Resource *res = new ExternalHDF5Resource;
+    if((s >> res->filename) &&
+       (s >> res->read_only)) {
+      return res;
+    } else {
+      delete res;
+      return 0;
+    }
   }
 
 
@@ -99,32 +145,28 @@ namespace Realm {
     // class PieceLookup::HDF5Piece<N,T>
 
     template <int N, typename T>
+    HDF5Piece<N,T>::HDF5Piece(unsigned next_delta)
+      : Instruction(PieceLookup::Opcodes::OP_HDF5_PIECE + (next_delta << 8))
+    {}
+
+    template <int N, typename T>
     unsigned HDF5Piece<N,T>::delta() const
     {
       return (data >> 8);
     }
 
     template <int N, typename T>
-    const char *HDF5Piece<N,T>::filename() const
+    const char *HDF5Piece<N,T>::dsetname() const
     {
       return (reinterpret_cast<const char *>(this) +
 	      sizeof(HDF5Piece<N,T>));
     }
 
     template <int N, typename T>
-    const char *HDF5Piece<N,T>::dsetname() const
-    {
-      return (reinterpret_cast<const char *>(this) +
-	      sizeof(HDF5Piece<N,T>) +
-	      this->filename_len + 1);
-    }
-
-    template <int N, typename T>
     const Instruction *HDF5Piece<N,T>::next() const
     {
       return this->skip(sizeof(HDF5Piece<N,T>) +
-			this->filename_len +
-			this->dsetname_len + 2);
+			this->dsetname_len + 1);
     }
 
   }; // namespace PieceLookup

@@ -29,30 +29,34 @@ namespace Realm {
 
   extern Logger log_hdf5;
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ExternalHDF5Resource
+  //
 
-  template <int N, typename T>
-  /*static*/ Event RegionInstance::create_hdf5_instance(RegionInstance& inst,
-							const char *file_name,
-							const IndexSpace<N,T>& space,
-							const std::vector<RegionInstance::HDF5FieldInfo<N,T> >& field_infos,
-							bool read_only,
-							const ProfilingRequestSet& prs,
-							Event wait_on /*= Event::NO_EVENT*/)
+  ExternalHDF5Resource::ExternalHDF5Resource()
+  {}
+
+  ExternalHDF5Resource::ExternalHDF5Resource(const std::string& _filename,
+					     bool _read_only)
+    : filename(_filename)
+    , read_only(_read_only)
+  {}
+
+  // returns the suggested memory in which this resource should be created
+  Memory ExternalHDF5Resource::suggested_memory() const
   {
-    // TODO: put this somewhere more general so that e.g. POSIX file attach can
-    //  use it too
     NodeID target_node = Network::my_node_id;
 
-    if(!strncmp(file_name, "rank=", 5)) {
+    const char *name = filename.c_str();
+    if(!strncmp(name, "rank=", 5)) {
       const char *pos;
       errno = 0;
-      long val = strtol(file_name+5, (char **)&pos, 10);
+      long val = strtol(name+5, (char **)&pos, 10);
       if((errno == 0) && (val >= 0) && (val <= Network::max_node_id) && (*pos == ':')) {
 	target_node = val;
-	file_name = pos + 1;
       } else {
-	log_hdf5.fatal() << "ill-formed rank prefix in filename: \"" << file_name << "\"";
-	abort();
+	log_hdf5.warning() << "ill-formed rank prefix in filename: \"" << filename << "\"";
       }
     }
 
@@ -63,8 +67,40 @@ namespace Realm {
       .same_address_space_as(proxy)
       .only_kind(Memory::HDF_MEM)
       .first();
-    assert(memory.exists());
-    
+
+    return memory;
+  }
+
+  ExternalInstanceResource *ExternalHDF5Resource::clone(void) const
+  {
+    return new ExternalHDF5Resource(filename, read_only);
+  }
+
+  void ExternalHDF5Resource::print(std::ostream& os) const
+  {
+    os << "hdf5(filename='" << filename << "'";
+    if(read_only)
+      os << ", readonly";
+    os << ")";
+  }
+
+  /*static*/ Serialization::PolymorphicSerdezSubclass<ExternalInstanceResource, ExternalHDF5Resource> ExternalHDF5Resource::serdez_subclass;
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RegionInstance
+  //
+
+  template <int N, typename T>
+  /*static*/ Event RegionInstance::create_hdf5_instance(RegionInstance& inst,
+							const char *file_name,
+							const IndexSpace<N,T>& space,
+							const std::vector<HDF5FieldInfo<N,T> >& field_infos,
+							bool read_only,
+							const ProfilingRequestSet& prs,
+							Event wait_on /*= Event::NO_EVENT*/)
+  {
     // construct an instance layout for the new instance
     InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
     layout->bytes_used = 0;
@@ -86,19 +122,19 @@ namespace Realm {
       if(!space.empty()) {
 	HDF5LayoutPiece<N,T> *hlp = new HDF5LayoutPiece<N,T>;
 	hlp->bounds = space.bounds;
-	hlp->filename = file_name;
 	hlp->dsetname = it->dataset_name;
 	hlp->offset = it->offset;
 	for(int j = 0; j < N; j++)
 	  hlp->dim_order[j] = it->dim_order[j];
-	hlp->read_only = read_only;
 	layout->piece_lists[idx].pieces.push_back(hlp);
       }
       idx++;
     }
 
-    // and now create the instance using this layout
-    return create_instance(inst, memory, layout, prs, wait_on);
+    ExternalHDF5Resource res(file_name, read_only);
+    return create_external_instance(inst,
+				    res.suggested_memory(),
+				    layout, res, prs, wait_on);
   }
 
 #define DOIT(N,T) \

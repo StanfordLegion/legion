@@ -20,6 +20,8 @@
 #ifndef REALM_UTILS_H
 #define REALM_UTILS_H
 
+#include "realm/realm_config.h"
+
 #include <string>
 #include <ostream>
 #include <vector>
@@ -338,6 +340,11 @@ namespace Realm {
   {
     return span<T, dynamic_extent>(base, length);
   }
+
+  // accumulates a crc32c checksum
+  //   initialization (traditionally to 0xFFFFFFFF) and finalization (by
+  //   inverting) the accumulator is left to the caller
+  uint32_t crc32c_accumulate(uint32_t accum_in, const void *data, size_t len);
 
 
 }; // namespace Realm

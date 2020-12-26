@@ -53,6 +53,9 @@
 #ifdef REALM_USE_GASNET1
 #include "realm/gasnet1/gasnet1_module.h"
 #endif
+#ifdef REALM_USE_GASNETEX
+#include "realm/gasnetex/gasnetex_module.h"
+#endif
 #if defined REALM_USE_MPI
 #include "realm/mpi/mpi_module.h"
 #endif

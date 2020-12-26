@@ -56,8 +56,8 @@ namespace Realm {
   }
   
 #ifdef REALM_USE_HDF5
-  size_t TransferIterator::step(size_t max_bytes, AddressInfoHDF5& info,
-				bool tentative /*= false*/)
+  size_t TransferIterator::step_hdf5(size_t max_bytes, AddressInfoHDF5& info,
+				     bool tentative /*= false*/)
   {
     // should never be called
     return 0;
@@ -86,8 +86,8 @@ namespace Realm {
 			unsigned flags,
 			bool tentative = false);
 #ifdef REALM_USE_HDF5
-    virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
-			bool tentative = false);
+    virtual size_t step_hdf5(size_t max_bytes, AddressInfoHDF5& info,
+			     bool tentative = false);
 #endif
     virtual void confirm_step(void);
     virtual void cancel_step(void);
@@ -216,7 +216,7 @@ namespace Realm {
     // the subrectangle we give always starts with the current point
     Rect<N,T> target_subrect;
     target_subrect.lo = cur_point;
-    if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType) {
+    if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
       const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
 
       // using the current point, find the biggest subrectangle we want to try
@@ -321,8 +321,9 @@ namespace Realm {
 
 #ifdef REALM_USE_HDF5
   template <int N, typename T>
-  size_t TransferIteratorBase<N,T>::step(size_t max_bytes, AddressInfoHDF5& info,
-						bool tentative /*= false*/)
+  size_t TransferIteratorBase<N,T>::step_hdf5(size_t max_bytes,
+					      AddressInfoHDF5& info,
+					      bool tentative /*= false*/)
   {
     // check to see if we're done - if not, we'll have a valid rectangle
     if(done() || !have_rect)
@@ -351,6 +352,9 @@ namespace Realm {
     if(max_elems == 0)
       return 0;
 
+    // filename comes from the external resource info
+    const ExternalHDF5Resource *res = checked_cast<ExternalHDF5Resource *>(inst_impl->metadata.ext_resource);
+
     // std::cout << "step " << this << " " << r << " " << p << " " << field_idx
     // 	      << " " << max_bytes << ":";
 
@@ -360,11 +364,11 @@ namespace Realm {
     Rect<N,T> target_subrect;
     size_t cur_bytes = 0;
     target_subrect.lo = cur_point;
-    if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::HDF5LayoutType) {
+    if(layout_piece->layout_type == PieceLayoutTypes::HDF5LayoutType) {
       const HDF5LayoutPiece<N,T> *hlp = static_cast<const HDF5LayoutPiece<N,T> *>(layout_piece);
 
       info.field_id = cur_field_id;
-      info.filename = &hlp->filename;
+      info.filename = &res->filename;
       info.dsetname = &hlp->dsetname;
 
       bool grow = true;
@@ -551,7 +555,7 @@ namespace Realm {
       assert(layout_piece->bounds.contains(target_subrect));
 #endif
 
-      if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType) {
+      if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
 	const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
 
 	// offset of initial entry is easy to compute
@@ -1452,7 +1456,7 @@ namespace Realm {
 	for(typename std::vector<InstanceLayoutPiece<N,T> *>::const_iterator it2 = it->pieces.begin();
 	    it2 != it->pieces.end();
 	    ++it2) {
-	  if((*it2)->layout_type != InstanceLayoutPiece<N,T>::AffineLayoutType) {
+	  if((*it2)->layout_type != PieceLayoutTypes::AffineLayoutType) {
 	    force_fortran_order = true;
 	    break;
 	  }
@@ -2258,7 +2262,8 @@ namespace Realm {
 
       // control information has to get to the merge at the end
       // HACK!
-      Memory dst_ib_mem = ID::make_ib_memory(ID(dst_mem).memory_owner_node(), 0).convert<Memory>();
+      NodeID dst_node = ID(dst_mem).memory_owner_node();
+      Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
       if(dst_ib_mem != addr_ib_mem) {
 	MemPathInfo path;
 	bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
@@ -2272,14 +2277,21 @@ namespace Realm {
 
       // next complication: if all the data paths don't use the same final
       //  step, we need to force them to go through an intermediate
+      // also insist that the final step be owned by the destination node
+      //  (i.e. the merging should not be done via rdma)
       XferDesKind last_kind = path_infos[0].xd_kinds[path_infos[0].xd_kinds.size() - 1];
       bool same_last_kind = true;
-      for(size_t i = 1; i < path_infos.size(); i++)
+      for(size_t i = 0; i < path_infos.size(); i++) {
 	if(path_infos[i].xd_kinds[path_infos[i].xd_kinds.size() - 1] !=
 	   last_kind) {
 	  same_last_kind = false;
 	  break;
 	}
+	if(path_infos[i].xd_target_nodes[path_infos[i].xd_kinds.size() - 1] != dst_node) {
+	  same_last_kind = false;
+	  break;
+	}
+      }
       if(!same_last_kind) {
 	// figure out what the final kind will be (might not be the same as
 	//  any of the current paths)
@@ -2503,10 +2515,11 @@ namespace Realm {
       }
 
       // next, see what work we need to get the addresses to where the
-      //  target data instances live
+      //  last step of each path is running
       for(size_t i = 0; i < spaces.size(); i++) {
 	// HACK!
-	Memory dst_ib_mem = ID::make_ib_memory(ID(insts[i]).instance_owner_node(), 0).convert<Memory>();
+	NodeID dst_node = path_infos[path_idx[i]].xd_target_nodes[path_infos[path_idx[i]].xd_target_nodes.size() - 1];
+	Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
 	if(dst_ib_mem != addr_ib_mem) {
 	  MemPathInfo path;
 	  bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,

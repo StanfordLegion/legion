@@ -189,7 +189,7 @@ namespace Realm {
       AutoLock<> al(queue_mutex);
       assert(NodeID(ID(tgt_mem).memory_owner_node()) == Network::my_node_id);
       // If we can allocate in target memory, no need to pend the request
-      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
+      off_t ib_offset = get_runtime()->get_ib_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
       if (ib_offset >= 0) {
         if (req->owner == Network::my_node_id) {
           // local ib alloc request
@@ -241,7 +241,7 @@ namespace Realm {
       if (it == queues.end()) return;
       while (!it->second->empty()) {
         IBAllocRequest* req = it->second->front();
-        off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
+        off_t ib_offset = get_runtime()->get_ib_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
         if (ib_offset < 0) break;
         //printf("req: src_inst_id(%llx) dst_inst_id(%llx) ib_size(%lu) idx(%d)\n", req->src_inst_id, req->dst_inst_id, req->ib_size, req->idx);
         // deal with the completed ib alloc request
@@ -590,7 +590,7 @@ namespace Realm {
 							     const void *data, size_t msglen)
     {
       assert(NodeID(ID(args.memory).memory_owner_node()) == Network::my_node_id);
-      get_runtime()->get_memory_impl(args.memory)->free_bytes_local(args.ib_offset, args.ib_size);
+      get_runtime()->get_ib_memory_impl(args.memory)->free_bytes_local(args.ib_offset, args.ib_size);
       ib_req_queue->dequeue_request(args.memory);
     }
 
@@ -601,7 +601,7 @@ namespace Realm {
       //CopyRequest* cr = (CopyRequest*) req;
       //AutoLock<> al(cr->ib_mutex);
       if(NodeID(ID(mem).memory_owner_node()) == Network::my_node_id) {
-        get_runtime()->get_memory_impl(mem)->free_bytes_local(offset, size);
+        get_runtime()->get_ib_memory_impl(mem)->free_bytes_local(offset, size);
         ib_req_queue->dequeue_request(mem);
       } else {
 	ActiveMessage<RemoteIBFreeRequestAsync> amsg(ID(mem).memory_owner_node());
@@ -1843,6 +1843,8 @@ namespace Realm {
 	}
       }
 
+      //define CHECK_DMA_PATHS
+#ifdef CHECK_DMA_PATHS
       // check against old version
       // exceptions:
       //  1) old code didn't allow nodes other than 0 to
@@ -1858,6 +1860,7 @@ namespace Realm {
 	  assert(0);
 	}
       }
+#endif
       return kind;
     }
 
@@ -1884,13 +1887,13 @@ namespace Realm {
 	std::list<Memory> mems_left;
 	std::queue<Memory> active_nodes;
 	Node* node = &(get_runtime()->nodes[ID(src_mem).memory_owner_node()]);
-	for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
+	for (std::vector<IBMemory*>::const_iterator it = node->ib_memories.begin();
            it != node->ib_memories.end(); it++) {
 	  mems_left.push_back((*it)->me);
 	}
 	if(ID(dst_mem).memory_owner_node() != ID(src_mem).memory_owner_node()) {
 	  node = &(get_runtime()->nodes[ID(dst_mem).memory_owner_node()]);
-	  for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
+	  for (std::vector<IBMemory*>::const_iterator it = node->ib_memories.begin();
 	       it != node->ib_memories.end(); it++) {
 	    mems_left.push_back((*it)->me);
 	  }
@@ -3036,8 +3039,8 @@ namespace Realm {
 	const std::string *prev_dsetname = 0;
 	while(!iter->done()) {
 	  TransferIterator::AddressInfoHDF5 info;
-	  size_t act_bytes = iter->step(size_t(-1), // max_bytes
-					info);
+	  size_t act_bytes = iter->step_hdf5(size_t(-1), // max_bytes
+					     info);
 	  assert(act_bytes >= 0);
 
 	  // compare the pointers, not the string contents...
@@ -3195,35 +3198,6 @@ namespace Realm {
 		     << *domain << " fill dst=" << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size="
 		     << fill_size << " before=" << before_fill << " after=" << get_finish_event();
       Operation::mark_completed();
-    }
-
-    size_t FillRequest::optimize_fill_buffer(RegionInstanceImpl *inst_impl, int &fill_elmts)
-    {
-      const size_t max_size = 1024; 
-      // Only do this optimization for "small" fields
-      // which are less than half a page
-      if (fill_size <= max_size)
-      {
-        // If we have a single-field instance or we have a set 
-        // of contiguous elmts then make a bulk buffer to use
-        if ((inst_impl->metadata.elmt_size == fill_size) ||
-            (inst_impl->metadata.block_size > 1)) 
-        {
-          fill_elmts = std::min(inst_impl->metadata.block_size,2*max_size/fill_size);
-          size_t fill_elmts_size = fill_elmts * fill_size;
-          char *next_buffer = (char*)malloc(fill_elmts_size);
-          char *next_ptr = next_buffer;
-          for (int idx = 0; idx < fill_elmts; idx++) {
-            memcpy(next_ptr, fill_buffer, fill_size);
-            next_ptr += fill_size;
-          }
-          // Free the old buffer and replace it
-          free(fill_buffer);
-          fill_buffer = next_buffer;
-          return fill_elmts_size;
-        }
-      }
-      return fill_size;
     }
 
     bool CopyProfile::check_readiness(void)

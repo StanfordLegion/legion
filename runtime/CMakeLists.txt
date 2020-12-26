@@ -131,6 +131,17 @@ if(REALM_USE_GASNET1)
   )
 endif()
 
+if(REALM_USE_GASNETEX)
+  list(APPEND REALM_SRC
+    realm/gasnetex/gasnetex_module.h
+    realm/gasnetex/gasnetex_module.cc
+    realm/gasnetex/gasnetex_internal.h
+    realm/gasnetex/gasnetex_internal.cc
+    realm/gasnetex/gasnetex_handlers.h
+    realm/gasnetex/gasnetex_handlers.cc
+  )
+endif()
+
 if(REALM_USE_MPI)
   list(APPEND REALM_SRC
     realm/mpi/mpi_module.h
@@ -186,7 +197,7 @@ list(APPEND REALM_SRC
   realm/subgraph.inl
   realm/timers.h           realm/timers.cc
   realm/timers.inl
-  realm/utils.h
+  realm/utils.h            realm/utils.cc
 )
 
 # generate per-dimension object files for deppart stuff
@@ -209,6 +220,13 @@ find_package(Threads REQUIRED)
 cmake_policy(SET CMP0063 NEW) # visibility controls in all builds
 add_library(RealmRuntime ${REALM_SRC})
 target_compile_options(RealmRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
+
+# turn on warnings about partially-overloaded methods, if supported
+check_cxx_compiler_flag("-Woverloaded-virtual" COMPILER_SUPORTS_OVERLOADED_VIRTUAL_WARNING)
+if(COMPILER_SUPORTS_OVERLOADED_VIRTUAL_WARNING)
+  target_compile_options(RealmRuntime PRIVATE "-Woverloaded-virtual")
+endif()
+
 if(COMPILER_SUPPORTS_DEFCHECK)
   # use the cxx_defcheck wrapper to make sure realm_defines.h is included
   #  any place it needs to be
@@ -238,7 +256,7 @@ if(Legion_USE_HWLOC)
   target_link_libraries(RealmRuntime PRIVATE HWLOC::HWLOC)
 endif()
 
-if(REALM_USE_GASNET1)
+if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
   target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
 endif()
 
