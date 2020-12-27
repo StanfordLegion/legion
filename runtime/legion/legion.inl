@@ -15392,7 +15392,7 @@ namespace Legion {
       REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
     }
 
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
     // DeferredBuffer without bounds checks
     template<typename FT, int N, typename T> 
     class DeferredBuffer<FT,N,T,false> {
@@ -15527,12 +15527,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
            false
 #else
             CB
@@ -15545,12 +15545,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
            false
 #else
             CB
@@ -15622,12 +15622,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
            false
 #else
             CB
@@ -15700,12 +15700,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
            false
 #else
             CB
@@ -15777,12 +15777,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
            false
 #else
             CB
@@ -15854,12 +15854,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
            false
 #else
             CB
@@ -15913,12 +15913,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
            false
 #else
             CB
@@ -15973,12 +15973,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
            false
 #else
             CB
@@ -16032,12 +16032,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
            false
 #else
             CB
@@ -16091,12 +16091,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               > __CUDA_HD__
     inline FT DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               false 
 #else
               CB
@@ -16109,12 +16109,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB 
 #endif
               > __CUDA_HD__
     inline void DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               false 
 #else
               CB
@@ -16128,12 +16128,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB 
 #endif
               > __CUDA_HD__
     inline FT* DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               false 
 #else
               CB
@@ -16146,12 +16146,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB 
 #endif
               > __CUDA_HD__
     inline FT* DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               false 
 #else
               CB
@@ -16178,12 +16178,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB 
 #endif
             > __CUDA_HD__
     inline FT* DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               false 
 #else
               CB
@@ -16198,12 +16198,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifndef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
               , bool CB 
 #endif
               > __CUDA_HD__
     inline FT& DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               false 
 #else
               CB
@@ -16216,12 +16216,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
             CB 
 #else
             true
@@ -16234,12 +16234,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
             CB 
 #else
             true
@@ -16311,12 +16311,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
             CB
 #else
             true
@@ -16388,12 +16388,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
             CB
 #else
             true
@@ -16465,12 +16465,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
             CB 
 #else
             true
@@ -16542,12 +16542,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
             CB 
 #else
             true
@@ -16601,12 +16601,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
             CB
 #else
             true
@@ -16660,12 +16660,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
             CB
 #else
             true
@@ -16719,12 +16719,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               >
     inline DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
             CB 
 #else
             true
@@ -16778,12 +16778,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB
 #endif
               > __CUDA_HD__
     inline FT DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               CB
 #else
               true 
@@ -16802,12 +16802,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB 
 #endif
               > __CUDA_HD__
     inline void DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               CB 
 #else
               true
@@ -16826,12 +16826,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB 
 #endif
               > __CUDA_HD__
     inline FT* DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               CB 
 #else
               true
@@ -16850,12 +16850,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB 
 #endif
               > __CUDA_HD__
     inline FT* DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               CB 
 #else
               true
@@ -16885,12 +16885,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB 
 #endif
             > __CUDA_HD__
     inline FT* DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               CB 
 #else
               true
@@ -16911,12 +16911,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               , bool CB 
 #endif
               > __CUDA_HD__
     inline FT& DeferredBuffer<FT,N,T,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
               CB 
 #else
               true

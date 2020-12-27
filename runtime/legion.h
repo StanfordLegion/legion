@@ -58,9 +58,6 @@
 #include "legion/legion_constraint.h"
 #include "legion/legion_redop.h"
 
-// temporary helper macro to turn link errors into runtime errors
-#define UNIMPLEMENTED_METHOD(retval) do { assert(0); return retval; } while(0)
-
 #define LEGION_PRINT_ONCE(runtime, ctx, file, fmt, ...)   \
 {                                                         \
   char message[4096];                                     \
@@ -1051,7 +1048,7 @@ namespace Legion {
       const void* get_projection_args(size_t *size) const;
       void set_projection_args(const void *args, size_t size, bool own = false);
     public:
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
       unsigned get_accessor_privilege(void) const;
 #endif
       bool has_field_privilege(FieldID fid) const;
@@ -2327,7 +2324,7 @@ namespace Legion {
      */
     template<PrivilegeMode MODE, typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<FT,N,COORD_T>,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
              bool CHECK_BOUNDS = true>
 #else
              bool CHECK_BOUNDS = false>
@@ -2418,7 +2415,7 @@ namespace Legion {
      */
     template<typename REDOP, bool EXCLUSIVE, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<typename REDOP::RHS,N,COORD_T>,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
              bool CHECK_BOUNDS = true>
 #else
              bool CHECK_BOUNDS = false>
@@ -2497,12 +2494,12 @@ namespace Legion {
      */
     template<typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<FT,N,COORD_T>,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
              bool CHECK_BOUNDS = true,
 #else
              bool CHECK_BOUNDS = false,
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
              bool CHECK_PRIVILEGES = true,
 #else
              bool CHECK_PRIVILEGES = false,
@@ -2838,7 +2835,7 @@ namespace Legion {
      * fastest), but can be switched to fortran order (e.g. first fastest).
      */
     template<typename T, int DIM, typename COORD_T = coord_t, 
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
              bool CHECK_BOUNDS = true>
 #else
              bool CHECK_BOUNDS = false>
@@ -2904,7 +2901,7 @@ namespace Legion {
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
       DomainT<DIM,COORD_T> bounds;
 #endif
     };

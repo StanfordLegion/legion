@@ -1952,12 +1952,12 @@ namespace Legion {
                       "a single physical instance.", context->get_task_name(),
                       context->get_unique_id())
       made_accessor = true;
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           result = references[0].get_accessor();
       result.set_region_untyped(this);
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
       result.set_privileges_untyped(
           (LegionRuntime::AccessorPrivilege)req.get_accessor_privilege()); 
 #endif
@@ -2022,12 +2022,12 @@ namespace Legion {
             "Requested field accessor for field %d without privileges!", fid)
 #endif
       made_accessor = true;
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           result = references.get_field_accessor(fid);
       result.set_region_untyped(this);
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
       result.set_privileges_untyped(
           (LegionRuntime::AccessorPrivilege)req.get_accessor_privilege());
 #endif
@@ -2163,7 +2163,7 @@ namespace Legion {
     }
 
 
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
     //--------------------------------------------------------------------------
     const char* PhysicalRegionImpl::get_task_name(void) const
     //--------------------------------------------------------------------------
@@ -2172,7 +2172,7 @@ namespace Legion {
     }
 #endif
 
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
     //--------------------------------------------------------------------------
     bool PhysicalRegionImpl::contains_ptr(ptr_t ptr)
     //--------------------------------------------------------------------------
@@ -11463,11 +11463,11 @@ namespace Legion {
       outstanding_counts.resize(LG_LAST_TASK_ID, 0);
 #endif
       // Attach any accessor debug hooks for privilege or bounds checks
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
       LegionRuntime::Accessor::DebugHooks::find_privilege_task_name =
 	&Legion::Internal::Runtime::find_privilege_task_name;
 #endif
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
       LegionRuntime::Accessor::DebugHooks::check_bounds_ptr =
 	&Legion::Internal::Runtime::check_bounds;
       LegionRuntime::Accessor::DebugHooks::check_bounds_dpoint =
@@ -23092,7 +23092,7 @@ namespace Legion {
         sleep(5);
       }
 #endif
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
       if (config.num_profiling_nodes > 0)
       {
         // Give a massive warning about profiling with Legion Spy enabled
@@ -23102,9 +23102,9 @@ namespace Legion {
           fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-        fprintf(stderr,"!!! YOU ARE PROFILING WITH BOUNDS_CHECKS      !!!\n");
-        fprintf(stderr,"!!! SERIOUS PERFORMANCE DEGRADATION WILL OCCUR!!!\n");
-        fprintf(stderr,"!!! PLEASE COMPILE WITHOUT BOUNDS_CHECKS      !!!\n");
+        fprintf(stderr,"!!! YOU ARE PROFILING WITH LEGION_BOUNDS_CHECKS!!!\n");
+        fprintf(stderr,"!!! SERIOUS PERFORMANCE DEGRADATION WILL OCCUR !!!\n");
+        fprintf(stderr,"!!! PLEASE COMPILE WITHOUT LEGION_BOUNDS_CHECKS!!!\n");
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         for (int i = 0; i < 4; i++)
@@ -23117,7 +23117,7 @@ namespace Legion {
         sleep(5);
       }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
       if (config.num_profiling_nodes > 0)
       {
         // Give a massive warning about profiling with Legion Spy enabled
@@ -23127,9 +23127,9 @@ namespace Legion {
           fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-        fprintf(stderr,"!!! YOU ARE PROFILING WITH PRIVILEGE_CHECKS    !!\n");
-        fprintf(stderr,"!!! SERIOUS PERFORMANCE DEGRADATION WILL OCCUR!!!\n");
-        fprintf(stderr,"!!! PLEASE COMPILE WITHOUT PRIVILEGE_CHECKS   !!!\n");
+        fprintf(stderr,"!!!YOU ARE PROFILING WITH LEGION_PRIVILEGE_CHECKS!!\n");
+        fprintf(stderr,"!!!SERIOUS PERFORMANCE DEGRADATION WILL OCCUR!!!\n");
+        fprintf(stderr,"!!!PLEASE COMPILE WITHOUT LEGION_PRIVILEGE_CHECKS!!\n");
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         for (int i = 0; i < 4; i++)
@@ -24081,7 +24081,7 @@ namespace Legion {
 #endif
     }
 
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
     //--------------------------------------------------------------------------
     /*static*/ const char* Runtime::find_privilege_task_name(void *impl)
     //--------------------------------------------------------------------------
@@ -24091,7 +24091,7 @@ namespace Legion {
     }
 #endif
 
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::check_bounds(void *impl, ptr_t ptr)
     //--------------------------------------------------------------------------

@@ -430,11 +430,11 @@ namespace Legion {
       void get_references(InstanceSet &instances) const;
       void get_memories(std::set<Memory>& memories) const;
       void get_fields(std::vector<FieldID>& fields) const;
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
     public:
       const char* get_task_name(void) const;
 #endif
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
     public:
       bool contains_ptr(ptr_t ptr);
       bool contains_point(const DomainPoint &dp);
@@ -484,7 +484,7 @@ namespace Legion {
       bool made_accessor;
       ApUserEvent termination_event;
       ApEvent wait_for_unmap;
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
     private:
       Domain bounds;
 #endif
@@ -3468,11 +3468,11 @@ namespace Legion {
                                          const char *file_name, 
                                          const int line_number,
                                          const char *message);
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
     public:
       static const char* find_privilege_task_name(void *impl);
 #endif
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
     public:
       static void check_bounds(void *impl, ptr_t ptr);
       static void check_bounds(void *impl, const DomainPoint &dp);
