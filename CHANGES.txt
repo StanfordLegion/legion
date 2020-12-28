@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 20.12.0 (December ??, 2020)
+Version 20.12.0 (December 28, 2020)
   * Build
     - Legion and Realm now require a compiler with (at least) c++11 support
     - Python scripts (e.g. legion_prof and legion_spy) require Python 3.5
@@ -13,6 +13,10 @@ Version 20.12.0 (December ??, 2020)
     - Experimental support for building on Windows with MSVC
     - Improved performance (and correctness) when running CUDA tasks without
         the runtime hijack enabled
+    - Added `gasnetex` network layer that uses GASNet-EX's native API (instead
+        of the legacy GASNet-1 API support).  Requires GASNet version 2020.11.0
+	or newer.  For more details, see:
+	https://github.com/StanfordLegion/legion/issues/986
   * Legion
     - The mapping interface no longer requires the runtime to return valid
       instances for empty regions (e.g. regions with no points their index space)
