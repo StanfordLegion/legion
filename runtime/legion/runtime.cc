@@ -22608,17 +22608,17 @@ namespace Legion {
           "LEGION_DEFAULT_MAX_MESSAGE_SIZE"); 
 #ifdef LEGION_SPY
       LEGION_STATIC_ASSERT(
-          Realm::Logger::COMPILE_TIME_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
+          Realm::Logger::REALM_LOGGING_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
         "Legion Spy requires a COMPILE_TIME_MIN_LEVEL of at most LEVEL_INFO.");
 #endif
 #ifdef LEGION_GC
       LEGION_STATIC_ASSERT(
-          Realm::Logger::COMPILE_TIME_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
+          Realm::Logger::REALM_LOGGING_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
           "Legion GC requires a COMPILE_TIME_MIN_LEVEL of at most LEVEL_INFO.");
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
       LEGION_STATIC_ASSERT(
-          Realm::Logger::COMPILE_TIME_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
+          Realm::Logger::REALM_LOGGING_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
           "DEBUG_SHUTDOWN_HANG requires a COMPILE_TIME_MIN_LEVEL "
           "of at most LEVEL_INFO.");
 #endif
@@ -22867,7 +22867,7 @@ namespace Legion {
             "value of LEGION_MAX_FIELDS (%d).", config.max_local_fields,
             LEGION_MAX_FIELDS)
       const Realm::Logger::LoggingLevel compile_time_min_level =
-            Realm::Logger::COMPILE_TIME_MIN_LEVEL;
+            Realm::Logger::REALM_LOGGING_MIN_LEVEL;
       if (config.legion_spy_enabled && 
           (Realm::Logger::LEVEL_INFO < compile_time_min_level))
         REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
