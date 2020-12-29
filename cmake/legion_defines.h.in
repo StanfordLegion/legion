@@ -13,15 +13,13 @@
 
 #cmakedefine DEBUG_LEGION
 
-#cmakedefine PRIVILEGE_CHECKS
+#cmakedefine LEGION_PRIVILEGE_CHECKS
 
-#cmakedefine BOUNDS_CHECKS
+#cmakedefine LEGION_BOUNDS_CHECKS
 
 #cmakedefine LEGION_MAX_DIM @LEGION_MAX_DIM@
 
 #cmakedefine LEGION_MAX_FIELDS @LEGION_MAX_FIELDS@
-
-#cmakedefine ENABLE_LEGION_TLS
 
 #cmakedefine LEGION_USE_CUDA
 

@@ -250,7 +250,7 @@ LegionPyMapper::~LegionPyMapper(void)
 /*static*/ size_t LegionPyMapper::get_total_nodes(Machine m)
 {
   Machine::ProcessorQuery query(m);
-  query.only_kind(Processor::LOC_PROC);
+  query.only_kind(Processor::PY_PROC);
   std::set<AddressSpace> spaces;
   for (Machine::ProcessorQuery::iterator it = query.begin(); 
         it != query.end(); it++)

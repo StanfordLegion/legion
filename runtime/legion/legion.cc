@@ -1206,7 +1206,7 @@ namespace Legion {
       }
     }
 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
     //--------------------------------------------------------------------------
     unsigned RegionRequirement::get_accessor_privilege(void) const
     //--------------------------------------------------------------------------
