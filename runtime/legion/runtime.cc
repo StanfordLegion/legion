@@ -22606,6 +22606,22 @@ namespace Legion {
       LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0,
           "Need a positive and non-zero value for "
           "LEGION_DEFAULT_MAX_MESSAGE_SIZE"); 
+#ifdef LEGION_SPY
+      LEGION_STATIC_ASSERT(
+          Realm::Logger::COMPILE_TIME_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
+        "Legion Spy requires a COMPILE_TIME_MIN_LEVEL of at most LEVEL_INFO.");
+#endif
+#ifdef LEGION_GC
+      LEGION_STATIC_ASSERT(
+          Realm::Logger::COMPILE_TIME_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
+          "Legion GC requires a COMPILE_TIME_MIN_LEVEL of at most LEVEL_INFO.");
+#endif
+#ifdef DEBUG_SHUTDOWN_HANG
+      LEGION_STATIC_ASSERT(
+          Realm::Logger::COMPILE_TIME_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
+          "DEBUG_SHUTDOWN_HANG requires a COMPILE_TIME_MIN_LEVEL "
+          "of at most LEVEL_INFO.");
+#endif
 
       // Register builtin reduction operators
       register_builtin_reduction_operators();
@@ -22850,6 +22866,59 @@ namespace Legion {
             "Illegal max local fields value %d which is larger than the "
             "value of LEGION_MAX_FIELDS (%d).", config.max_local_fields,
             LEGION_MAX_FIELDS)
+      const Realm::Logger::LoggingLevel compile_time_min_level =
+            Realm::Logger::COMPILE_TIME_MIN_LEVEL;
+      if (config.legion_spy_enabled && 
+          (Realm::Logger::LEVEL_INFO < compile_time_min_level))
+        REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
+            "Legion Spy logging requires a COMPILE_TIME_MIN_LEVEL "
+            "of at most LEVEL_INFO, but current setting is %s",
+            (compile_time_min_level == Realm::Logger::LEVEL_PRINT) ? 
+              "LEVEL_PRINT" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_WARNING) ?
+              "LEVEL_WARNING" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_ERROR) ?
+              "LEVEL_ERROR" :
+            (compile_time_min_level == Realm::Logger::LEVEL_FATAL) ?
+              "LEVEL_FATAL" : "LEVEL_NONE")
+      if ((config.num_profiling_nodes > 0) &&
+          (strcmp(config.serializer_type.c_str(), "ascii") == 0) &&
+          (Realm::Logger::LEVEL_INFO < compile_time_min_level))
+        REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
+            "Legion Prof 'ascii' logging requires a COMPILE_TIME_MIN_LEVEL "
+            "of at most LEVEL_INFO, but current setting is %s",
+            (compile_time_min_level == Realm::Logger::LEVEL_PRINT) ? 
+              "LEVEL_PRINT" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_WARNING) ?
+              "LEVEL_WARNING" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_ERROR) ?
+              "LEVEL_ERROR" :
+            (compile_time_min_level == Realm::Logger::LEVEL_FATAL) ?
+              "LEVEL_FATAL" : "LEVEL_NONE")
+      if (config.record_registration &&
+          (Realm::Logger::LEVEL_PRINT < compile_time_min_level))
+        REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
+            "Legion registration logging requires a COMPILE_TIME_MIN_LEVEL "
+            "of at most LEVEL_PRINT, but current setting is %s",
+            (compile_time_min_level == Realm::Logger::LEVEL_WARNING) ?
+              "LEVEL_WARNING" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_ERROR) ?
+              "LEVEL_ERROR" :
+            (compile_time_min_level == Realm::Logger::LEVEL_FATAL) ?
+              "LEVEL_FATAL" : "LEVEL_NONE")
+      if (config.dump_physical_traces &&
+          (Realm::Logger::LEVEL_INFO < compile_time_min_level))
+        REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
+            "Legion physical trace logging requires a COMPILE_TIME_MIN_LEVEL "
+            "of at most LEVEL_INFO, but current setting is %s",
+            (compile_time_min_level == Realm::Logger::LEVEL_PRINT) ? 
+              "LEVEL_PRINT" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_WARNING) ?
+              "LEVEL_WARNING" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_ERROR) ?
+              "LEVEL_ERROR" :
+            (compile_time_min_level == Realm::Logger::LEVEL_FATAL) ?
+              "LEVEL_FATAL" : "LEVEL_NONE")
       runtime_initialized = true;
       return config;
     } 
