@@ -65,7 +65,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionTrace::LegionTrace(InnerContext *c, TraceID t, bool logical_only)
       : ctx(c), tid(t), state(LOGICAL_ONLY), last_memoized(0),
-        blocking_call_observed(false), fixed(false)
+        physical_op_count(0), blocking_call_observed(false), fixed(false)
     //--------------------------------------------------------------------------
     {
       physical_trace = logical_only ? NULL
@@ -92,22 +92,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::register_physical_only(Operation *op, GenerationID gen)
+    void LegionTrace::register_physical_only(Operation *op)
     //--------------------------------------------------------------------------
     {
-      if (has_blocking_call())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
-            "Physical tracing violation! The trace has a blocking API call "
-            "that was unseen when it was recorded. Please make sure that "
-            "the trace does not change its behavior.");
-      std::pair<Operation*,GenerationID> key(op,gen);
-      const unsigned index = operations.size();
-      op->set_trace_local_id(index);
-      op->add_mapping_reference(gen);
-      operations.push_back(key);
-#ifdef LEGION_SPY
-      current_uids[key] = op->get_unique_op_id();
-#endif
+      op->set_trace_local_id(physical_op_count++);
     }
 
     //--------------------------------------------------------------------------
@@ -137,13 +125,11 @@ namespace Legion {
     {
       if (is_replaying())
       {
-        for (unsigned idx = 0; idx < operations.size(); ++idx)
-          operations[idx].first->remove_mapping_reference(
-              operations[idx].second);
-        operations.clear();
-#ifdef LEGION_SPY
-        current_uids.clear();
+#ifdef DEBUG_LEGION
+        assert(operations.empty());
 #endif
+        // Reset the physical op count for the next replay
+        physical_op_count = 0;
         return;
       }
 
@@ -1288,10 +1274,10 @@ namespace Legion {
         assert(current_template != NULL);
         assert(physical_trace != NULL);
 #endif
-        RtEvent pending_deletion =
-          physical_trace->fix_trace(current_template, this, has_blocking_call);
+        ApEvent pending_deletion = physical_trace->fix_trace(current_template, 
+                              this, map_applied_conditions, has_blocking_call);
         if (pending_deletion.exists())
-          execution_preconditions.insert(ApEvent(pending_deletion));
+          execution_preconditions.insert(pending_deletion);
         local_trace->initialize_tracing_state();
       }
       if (remove_trace_reference && local_trace->remove_reference())
@@ -1347,7 +1333,6 @@ namespace Legion {
       trace = NULL;
       tracing = false;
       current_template = NULL;
-      template_completion = ApEvent::NO_AP_EVENT;
       replayed = false;
       has_blocking_call = has_block;
     }
@@ -1394,23 +1379,23 @@ namespace Legion {
 
       if (local_trace->is_replaying())
       {
+        if (has_blocking_call)
+          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+            "Physical tracing violation! Trace %d in task %s (UID %lld) "
+            "encountered a blocking API call that was unseen when it was "
+            "recorded. It is required that traces do not change their "
+            "behavior.", local_trace->get_trace_id(),
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
-#endif
-        PhysicalTemplate *to_replay = physical_trace->get_current_template();
+#endif 
+        current_template = physical_trace->get_current_template();
 #ifdef DEBUG_LEGION
-        assert(to_replay != NULL);
+        assert(current_template != NULL);
 #endif
-#ifdef LEGION_SPY
-        local_trace->perform_logging(to_replay->get_fence_uid(), unique_op_id);
-#endif
-        to_replay->execute_all();
-        template_completion = to_replay->get_completion();
-        Runtime::trigger_event(NULL, completion_event, template_completion);
         parent_ctx->update_current_fence(this, true, true);
-        physical_trace->record_previous_template_completion(
-            template_completion);
+        physical_trace->record_previous_template_completion(completion_event);
         local_trace->initialize_tracing_state();
         replayed = true;
         return;
@@ -1421,13 +1406,30 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
 #endif
-        physical_trace->record_previous_template_completion(
-            get_completion_event());
+        physical_trace->record_previous_template_completion(completion_event);
         current_template = physical_trace->get_current_template();
         physical_trace->clear_cached_template();
-
       }
       FenceOp::trigger_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceCompleteOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (replayed)
+      {
+        // Having all our mapping dependences satisfied means that the previous 
+        // replay of this template is done so we can start ours now
+        std::set<RtEvent> replayed_events;
+        current_template->perform_replay(runtime, replayed_events);
+        if (!replayed_events.empty())
+        {
+          enqueue_ready_operation(Runtime::merge_events(replayed_events));
+          return;
+        }
+      }
+      enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -1441,31 +1443,28 @@ namespace Legion {
         assert(current_template != NULL);
         assert(local_trace->get_physical_trace() != NULL);
 #endif
-        RtEvent pending_deletion =
-          local_trace->get_physical_trace()->fix_trace(current_template, this,
-              has_blocking_call);
+        const ApEvent pending_deletion =
+          local_trace->get_physical_trace()->fix_trace(current_template, 
+              this, map_applied_conditions, has_blocking_call);
         if (pending_deletion.exists())
-          execution_preconditions.insert(ApEvent(pending_deletion));
+          execution_preconditions.insert(pending_deletion);
         local_trace->initialize_tracing_state();
       }
       else if (replayed)
       {
-        if (has_blocking_call)
-          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
-            "Physical tracing violation! Trace %d in task %s (UID %lld) "
-            "encountered a blocking API call that was unseen when it was "
-            "recorded. It is required that traces do not change their "
-            "behavior.", local_trace->get_trace_id(),
-            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+#ifdef DEBUG_LEGION
+        assert(current_template != NULL);
+#endif
+        std::set<ApEvent> template_postconditions;
+        current_template->finish_replay(template_postconditions);
         complete_mapping();
-        need_completion_trigger = false;
-        if (!template_completion.has_triggered())
-        {
-          RtEvent wait_on = Runtime::protect_event(template_completion);
-          complete_execution(wait_on);
-        }
+        if (!template_postconditions.empty())
+          Runtime::trigger_event(NULL, completion_event, 
+              Runtime::merge_events(NULL, template_postconditions));
         else
-          complete_execution();
+          Runtime::trigger_event(NULL, completion_event);
+        need_completion_trigger = false;
+        complete_execution();
         return;
       }
       FenceOp::trigger_mapping();
@@ -1599,9 +1598,6 @@ namespace Legion {
                     : get_completion_event();
         physical_trace->initialize_template(fence_completion, recurrent);
         local_trace->set_state_replay();
-#ifdef LEGION_SPY
-        physical_trace->get_current_template()->set_fence_uid(unique_op_id);
-#endif
       }
       else if (!fence_registered)
       {
@@ -1876,18 +1872,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PhysicalTrace::fix_trace(
-                   PhysicalTemplate *tpl, Operation *op, bool has_blocking_call)
+    ApEvent PhysicalTrace::fix_trace(PhysicalTemplate *tpl, Operation *op, 
+                      std::set<RtEvent> &applied_events, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(tpl->is_recording());
 #endif
       tpl->finalize(op, has_blocking_call);
-      RtEvent pending_deletion = RtEvent::NO_RT_EVENT;
+      ApEvent pending_deletion = ApEvent::NO_AP_EVENT;
       if (!tpl->is_replayable())
       {
-        pending_deletion = tpl->defer_template_deletion();
+        if (!tpl->defer_template_deletion(pending_deletion, applied_events))
+          delete tpl;
         if (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
         {
           const std::string &message = tpl->get_replayable_message();
@@ -1979,7 +1976,7 @@ namespace Legion {
 #endif
       // If we had an intermeidate execution fence between replays then
       // we should no longer be considered recurrent when we replay the trace
-      current_template->initialize(runtime, fence_completion, 
+      current_template->initialize_replay(fence_completion, 
                                    recurrent && !intermediate_execution_fence);
       // Reset this for the next replay
       intermediate_execution_fence = false;
@@ -2344,6 +2341,8 @@ namespace Legion {
       event_map[fence_event] = fence_completion_id;
       instructions.push_back(
          new AssignFenceCompletion(*this, fence_completion_id, TraceLocalID()));
+      // always want at least one set of operations ready for recording
+      operations.emplace_back(std::map<TraceLocalID,Memoizable*>());
     }
 
     //--------------------------------------------------------------------------
@@ -2395,70 +2394,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::initialize(
-                           Runtime *runtime, ApEvent completion, bool recurrent)
+    void PhysicalTemplate::initialize_replay(ApEvent completion, bool recurrent)
     //--------------------------------------------------------------------------
     {
-      // We have to make sure that the previous trace replay is done before
-      // we start changing these data structures for the next replay
-      if (replay_done.exists() && !replay_done.has_triggered())
-        replay_done.wait();
-      fence_completion = completion;
-      if (recurrent)
-        for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
-            it != frontiers.end(); ++it)
-          events[it->second] = events[it->first];
-      else
-        for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
-            it != frontiers.end(); ++it)
-          events[it->second] = completion;
-
-      events[fence_completion_id] = fence_completion;
-
-      for (std::map<unsigned, unsigned>::iterator it = crossing_events.begin();
-           it != crossing_events.end(); ++it)
-      {
-        ApUserEvent ev = Runtime::create_ap_user_event(NULL);
-        events[it->second] = ev;
-        user_events[it->second] = ev;
-      }
-
-      replay_ready = Runtime::create_rt_user_event();
-      std::set<RtEvent> replay_done_events;
-      const std::vector<Processor> &replay_targets =
-        trace->get_replay_targets();
-      for (unsigned idx = 0; idx < replay_parallelism; ++idx)
-      {
-        ReplaySliceArgs args(this, idx);
-        RtEvent done = runtime->replay_on_cpus ?
-          runtime->issue_application_processor_task(args, LG_LOW_PRIORITY,
-            replay_targets[idx % replay_targets.size()], replay_ready) :
-          runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY,
-            replay_ready, replay_targets[idx % replay_targets.size()]);
-        replay_done_events.insert(done);
-      }
-      replay_done = Runtime::merge_events(replay_done_events);
-
-#ifdef DEBUG_LEGION
-      for (std::map<TraceLocalID, Memoizable*>::iterator it =
-           operations.begin(); it != operations.end(); ++it)
-        it->second = NULL;
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent PhysicalTemplate::get_completion(void) const
-    //--------------------------------------------------------------------------
-    {
-      std::set<ApEvent> to_merge;
-      for (ViewUsers::const_iterator it = view_users.begin();
-           it != view_users.end(); ++it)
-        for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
-             uit != it->second.end(); ++uit)
-          to_merge.insert(events[uit->first->user]);
-      if (last_fence != NULL)
-        to_merge.insert(events[last_fence->lhs]);
-      return Runtime::merge_events(NULL, to_merge);
+      AutoLock t_lock(template_lock);
+      operations.emplace_back(std::map<TraceLocalID,Memoizable*>());
+      pending_replays.emplace_back(std::make_pair(completion, recurrent));
     }
 
     //--------------------------------------------------------------------------
@@ -2563,21 +2504,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
-      std::map<TraceLocalID, Memoizable*>::iterator op_finder =
-        operations.find(memoizable->get_trace_local_id());
+      const TraceLocalID tid = memoizable->get_trace_local_id();
+      // Should be able to call back() without the lock even when
+      // operations are being removed from the front
+      std::map<TraceLocalID,Memoizable*> &ops = operations.back();
 #ifdef DEBUG_LEGION
-      assert(op_finder != operations.end());
-      assert(op_finder->second == NULL);
+      assert(ops.find(tid) == ops.end());
+      assert(memo_entries.find(tid) != memo_entries.end());
 #endif
-      op_finder->second = memoizable;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::execute_all(void)
-    //--------------------------------------------------------------------------
-    {
-      Runtime::trigger_event(replay_ready);
-      replay_done.wait();
+      ops[tid] = memoizable;
     }
 
     //--------------------------------------------------------------------------
@@ -2589,13 +2524,15 @@ namespace Legion {
 #endif
       ApUserEvent fence = Runtime::create_ap_user_event(NULL);
       const std::vector<TraceLocalID> &tasks = slice_tasks[slice_idx];
+      // should be able to read front() even while new maps for operations 
+      // are begin appended to the back of 'operations'
+      std::map<TraceLocalID,Memoizable*> &ops = operations.front();
       for (unsigned idx = 0; idx < tasks.size(); ++idx)
-        operations[tasks[idx]]
-          ->get_operation()->set_execution_fence_event(fence);
+        ops[tasks[idx]]->get_operation()->set_execution_fence_event(fence);
       std::vector<Instruction*> &instructions = slices[slice_idx];
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
-        (*it)->execute();
+        (*it)->execute(events, user_events, ops);
       Runtime::trigger_event(NULL, fence);
     }
 
@@ -2640,6 +2577,7 @@ namespace Legion {
       events.clear();
       events.resize(num_events);
       event_map.clear();
+      operations.pop_front();
       if (!remote_memos.empty())
         release_remote_memos();
     }
@@ -3818,7 +3756,7 @@ namespace Legion {
     {
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
-        log_tracing.info() << "  " << (*it)->to_string();
+        log_tracing.info() << "  " << (*it)->to_string(operations.front());
     }
 
     //--------------------------------------------------------------------------
@@ -4543,13 +4481,92 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PhysicalTemplate::defer_template_deletion(void)
+    void PhysicalTemplate::perform_replay(Runtime *runtime, 
+                                          std::set<RtEvent> &replayed_events)
     //--------------------------------------------------------------------------
     {
-      ApEvent wait_on = get_completion_for_deletion();
-      DeleteTemplateArgs args(this);
-      return trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
-          Runtime::protect_event(wait_on));
+      ApEvent completion;
+      bool recurrent;
+      {
+        AutoLock t_lock(template_lock);
+#ifdef DEBUG_LEGION
+        assert(!pending_replays.empty());
+#endif
+        completion = pending_replays.front().first;
+        recurrent = pending_replays.front().second;
+        pending_replays.pop_front();
+      }
+      fence_completion = completion;
+      if (recurrent)
+        for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+            it != frontiers.end(); ++it)
+          events[it->second] = events[it->first];
+      else
+        for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+            it != frontiers.end(); ++it)
+          events[it->second] = completion;
+
+      events[fence_completion_id] = fence_completion;
+
+      for (std::map<unsigned, unsigned>::iterator it = crossing_events.begin();
+           it != crossing_events.end(); ++it)
+      {
+        ApUserEvent ev = Runtime::create_ap_user_event(NULL);
+        events[it->second] = ev;
+        user_events[it->second] = ev;
+      }
+
+      const std::vector<Processor> &replay_targets = 
+        trace->get_replay_targets();
+      for (unsigned idx = 0; idx < replay_parallelism; ++idx)
+      {
+        ReplaySliceArgs args(this, idx);
+        const RtEvent done = runtime->replay_on_cpus ?
+          runtime->issue_application_processor_task(args, LG_LOW_PRIORITY,
+            replay_targets[idx % replay_targets.size()]) :
+          runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY,
+            RtEvent::NO_RT_EVENT, replay_targets[idx % replay_targets.size()]);
+        replayed_events.insert(done);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::finish_replay(std::set<ApEvent> &postconditions)
+    //--------------------------------------------------------------------------
+    {
+      for (ViewUsers::const_iterator it = view_users.begin();
+            it != view_users.end(); ++it)
+        for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
+              uit != it->second.end(); ++uit)
+          postconditions.insert(events[uit->first->user]);
+      if (last_fence != NULL)
+        postconditions.insert(events[last_fence->lhs]);
+      // Now we can remove the operations as well
+      AutoLock t_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(!operations.empty());
+#endif
+      operations.pop_front();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalTemplate::defer_template_deletion(ApEvent &pending_deletion,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      pending_deletion = get_completion_for_deletion();
+      if (!pending_deletion.exists())
+        return false;
+      const RtEvent precondition = Runtime::protect_event(pending_deletion);
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        DeleteTemplateArgs args(this);
+        applied_events.insert(trace->runtime->issue_runtime_meta_task(args, 
+                                            LG_LOW_PRIORITY, precondition));
+        return true;
+      }
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -4584,7 +4601,7 @@ namespace Legion {
     {
       TraceLocalID op_key = memo->get_trace_local_id();
 #ifdef DEBUG_LEGION
-      assert(operations.find(op_key) != operations.end());
+      assert(operations.front().find(op_key) != operations.front().end());
 #endif
       return op_key;
     }
@@ -4609,10 +4626,10 @@ namespace Legion {
     {
       TraceLocalID key = memo->get_trace_local_id();
 #ifdef DEBUG_LEGION
-      assert(operations.find(key) == operations.end());
+      assert(operations.front().find(key) == operations.front().end());
       assert(memo_entries.find(key) == memo_entries.end());
 #endif
-      operations[key] = memo;
+      operations.front()[key] = memo;
       const bool is_task = memo->is_memoizable_task();
       memo_entries[key] = std::pair<unsigned,bool>(entry,is_task);
       return key;
@@ -4750,8 +4767,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Instruction::Instruction(PhysicalTemplate& tpl, const TraceLocalID &o)
-      : operations(tpl.operations), events(tpl.events),
-        user_events(tpl.user_events), owner(o)
+      : owner(o)
     //--------------------------------------------------------------------------
     {
     }
@@ -4767,15 +4783,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(lhs < events.size());
-      assert(operations.find(owner) != operations.end());
+      assert(lhs < tpl.events.size());
+      assert(tpl.operations.front().find(owner) != 
+              tpl.operations.front().end());
 #endif
       if (fence)
         tpl.update_last_fence(this);
     }
 
     //--------------------------------------------------------------------------
-    void GetTermEvent::execute(void)
+    void GetTermEvent::execute(std::vector<ApEvent> &events,
+                                 std::map<unsigned,ApUserEvent> &user_events,
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4787,13 +4806,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string GetTermEvent::to_string(void)
+    std::string GetTermEvent::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
       ss << "events[" << lhs << "] = operations[" << owner
          << "].get_completion_event()    (op kind: "
-         << Operation::op_names[operations[owner]->get_memoizable_kind()] 
+         << Operation::op_names[operations[owner]->get_memoizable_kind()]
          << ")";
       return ss.str();
     }
@@ -4809,13 +4829,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(lhs < events.size());
-      assert(user_events.find(lhs) != user_events.end());
+      assert(lhs < tpl.events.size());
+      assert(tpl.user_events.find(lhs) != tpl.user_events.end());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void CreateApUserEvent::execute(void)
+    void CreateApUserEvent::execute(std::vector<ApEvent> &events,
+                                 std::map<unsigned,ApUserEvent> &user_events,
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       ApUserEvent ev = Runtime::create_ap_user_event(NULL);
@@ -4824,7 +4846,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string CreateApUserEvent::to_string(void)
+    std::string CreateApUserEvent::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -4844,13 +4867,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(lhs < events.size());
-      assert(rhs < events.size());
+      assert(lhs < tpl.events.size());
+      assert(rhs < tpl.events.size());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void TriggerEvent::execute(void)
+    void TriggerEvent::execute(std::vector<ApEvent> &events,
+                               std::map<unsigned,ApUserEvent> &user_events,
+                               std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4862,7 +4887,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string TriggerEvent::to_string(void)
+    std::string TriggerEvent::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -4882,16 +4908,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(lhs < events.size());
+      assert(lhs < tpl.events.size());
       assert(rhs.size() > 0);
       for (std::set<unsigned>::iterator it = rhs.begin(); it != rhs.end();
            ++it)
-        assert(*it < events.size());
+        assert(*it < tpl.events.size());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void MergeEvent::execute(void)
+    void MergeEvent::execute(std::vector<ApEvent> &events,
+                             std::map<unsigned,ApUserEvent> &user_events,
+                             std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> to_merge;
@@ -4908,7 +4936,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string MergeEvent::to_string(void)
+    std::string MergeEvent::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -4935,19 +4964,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(lhs < events.size());
+      assert(lhs < tpl.events.size());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void AssignFenceCompletion::execute(void)
+    void AssignFenceCompletion::execute(std::vector<ApEvent> &events,
+                                 std::map<unsigned,ApUserEvent> &user_events,
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       events[lhs] = tpl.get_fence_completion();
     }
 
     //--------------------------------------------------------------------------
-    std::string AssignFenceCompletion::to_string(void)
+    std::string AssignFenceCompletion::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -4977,11 +5009,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(lhs < events.size());
-      assert(operations.find(owner) != operations.end());
+      assert(lhs < tpl.events.size());
+      assert(tpl.operations.front().find(owner) != 
+              tpl.operations.front().end());
       assert(src_fields.size() > 0);
       assert(dst_fields.size() > 0);
-      assert(precondition_idx < events.size());
+      assert(precondition_idx < tpl.events.size());
       assert(expr != NULL);
 #endif
       expr->add_expression_reference();
@@ -4996,7 +5029,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IssueCopy::execute(void)
+    void IssueCopy::execute(std::vector<ApEvent> &events,
+                            std::map<unsigned,ApUserEvent> &user_events,
+                            std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5015,7 +5050,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string IssueCopy::to_string(void)
+    std::string IssueCopy::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -5068,11 +5104,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(lhs < events.size());
-      assert(operations.find(owner) != operations.end());
+      assert(lhs < tpl.events.size());
+      assert(tpl.operations.front().find(owner) != 
+              tpl.operations.front().end());
       assert(src_fields.size() > 0);
       assert(dst_fields.size() > 0);
-      assert(precondition_idx < events.size());
+      assert(precondition_idx < tpl.events.size());
       assert(expr != NULL);
 #endif
       expr->add_expression_reference();
@@ -5093,7 +5130,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void GPUReduction::execute(void)
+    void GPUReduction::execute(std::vector<ApEvent> &events,
+                               std::map<unsigned,ApUserEvent> &user_events,
+                               std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5110,7 +5149,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string GPUReduction::to_string(void)
+    std::string GPUReduction::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -5165,10 +5205,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(lhs < events.size());
-      assert(operations.find(owner) != operations.end());
+      assert(lhs < tpl.events.size());
+      assert(tpl.operations.front().find(owner) != 
+              tpl.operations.front().end());
       assert(fields.size() > 0);
-      assert(precondition_idx < events.size());
+      assert(precondition_idx < tpl.events.size());
 #endif
       expr->add_expression_reference();
       fill_value = malloc(fill_size);
@@ -5185,7 +5226,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IssueFill::execute(void)
+    void IssueFill::execute(std::vector<ApEvent> &events,
+                            std::map<unsigned,ApUserEvent> &user_events,
+                            std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5205,7 +5248,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string IssueFill::to_string(void)
+    std::string IssueFill::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -5236,13 +5280,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(lhs < events.size());
-      assert(operations.find(owner) != operations.end());
+      assert(lhs < tpl.events.size());
+      assert(tpl.operations.front().find(owner) != 
+              tpl.operations.front().end());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void SetOpSyncEvent::execute(void)
+    void SetOpSyncEvent::execute(std::vector<ApEvent> &events,
+                                 std::map<unsigned,ApUserEvent> &user_events,
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5258,7 +5305,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string SetOpSyncEvent::to_string(void)
+    std::string SetOpSyncEvent::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -5280,13 +5328,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(rhs < events.size());
-      assert(operations.find(owner) != operations.end());
+      assert(rhs < tpl.events.size());
+      assert(tpl.operations.front().find(owner) != 
+              tpl.operations.front().end());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void SetEffects::execute(void)
+    void SetEffects::execute(std::vector<ApEvent> &events,
+                             std::map<unsigned,ApUserEvent> &user_events,
+                             std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5301,7 +5352,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string SetEffects::to_string(void)
+    std::string SetEffects::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -5323,13 +5375,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(operations.find(owner) != operations.end());
-      assert(rhs < events.size());
+      assert(tpl.operations.front().find(owner) != 
+              tpl.operations.front().end());
+      assert(rhs < tpl.events.size());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void CompleteReplay::execute(void)
+    void CompleteReplay::execute(std::vector<ApEvent> &events,
+                                 std::map<unsigned,ApUserEvent> &user_events,
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5344,7 +5399,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string CompleteReplay::to_string(void)
+    std::string CompleteReplay::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -5368,15 +5424,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(operations.find(owner) != operations.end());
-      assert(lhs < events.size());
-      assert(rhs < events.size());
+      assert(tpl.operations.front().find(owner) != 
+              tpl.operations.front().end());
+      assert(lhs < tpl.events.size());
+      assert(rhs < tpl.events.size());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void AcquireReplay::execute(void)
-    //--------------------------------------------------------------------------
+    void AcquireReplay::execute(std::vector<ApEvent> &events,
+                                std::map<unsigned,ApUserEvent> &user_events,
+                                std::map<TraceLocalID,Memoizable*> &operations)
+      //--------------------------------------------------------------------------
     {
       ApEvent precondition = events[rhs];
       for (std::map<Reservation,bool>::const_iterator it = 
@@ -5387,7 +5446,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string AcquireReplay::to_string(void)
+    std::string AcquireReplay::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -5408,13 +5468,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(operations.find(owner) != operations.end());
-      assert(rhs < events.size());
+      assert(tpl.operations.front().find(owner) != 
+              tpl.operations.front().end());
+      assert(rhs < tpl.events.size());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseReplay::execute(void)
+    void ReleaseReplay::execute(std::vector<ApEvent> &events,
+                                std::map<unsigned,ApUserEvent> &user_events,
+                                std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       const ApEvent precondition = events[rhs];
@@ -5424,7 +5487,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string ReleaseReplay::to_string(void)
+    std::string ReleaseReplay::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
