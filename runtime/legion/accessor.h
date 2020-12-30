@@ -144,7 +144,7 @@ public:
 };
 
 namespace LegionRuntime {
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
   enum AccessorPrivilege {
     ACCESSOR_NONE   = 0x00000000,
     ACCESSOR_READ   = 0x00000001,
@@ -283,7 +283,7 @@ namespace LegionRuntime {
       template <typename REDOP> struct ReductionFold;
       template <typename REDOP> struct ReductionList;
 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
       // TODO: Make these functions work for GPUs
       static inline const char* get_privilege_string(AccessorPrivilege priv)
       {
@@ -327,7 +327,7 @@ namespace LegionRuntime {
 	  Untyped() 
 	    : inst(Realm::RegionInstance::NO_INST)
 	    , field_id(0)
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS) 
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS) 
 	    , region(0)
 #endif
 	  {}
@@ -336,7 +336,7 @@ namespace LegionRuntime {
 	  Untyped(Realm::RegionInstance _inst, Realm::FieldID _field_id = 0)
 	    : inst(_inst)
 	    , field_id(_field_id)
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS) 
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS) 
 	    , region(0)
 #endif
 	  {}
@@ -344,10 +344,10 @@ namespace LegionRuntime {
 	  template <typename ET>
 	  RegionAccessor<Generic, ET, ET> typeify(void) const {
 	    RegionAccessor<Generic, ET, ET> result(Typed<ET, ET>(inst, field_id));
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
             result.set_region(region);
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             result.set_privileges(priv);
 #endif
             return result;
@@ -984,13 +984,13 @@ namespace LegionRuntime {
 
 	  Realm::RegionInstance inst;
 	  Realm::FieldID field_id;
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS) 
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS) 
         protected:
           void *region;
         public:
           inline void set_region_untyped(void *r) { region = r; }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
         protected:
           AccessorPrivilege priv;
         public:
@@ -1051,10 +1051,10 @@ namespace LegionRuntime {
 
           bool valid(void) const { return inst.exists(); }
 
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
           inline void set_region(void *r) { region = r; }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
           inline void set_privileges(AccessorPrivilege p) { priv = p; }
 #endif
 	  template <typename PTRTYPE>
@@ -1063,10 +1063,10 @@ namespace LegionRuntime {
 #ifdef __OPTIMIZE__
             issue_performance_warning(); 
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_READ>(priv, region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(region, ptr);
 #endif
             T val; read_untyped(ptr, &val, sizeof(val)); return val; 
@@ -1078,10 +1078,10 @@ namespace LegionRuntime {
 #ifdef __OPTIMIZE__
             issue_performance_warning(); 
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_WRITE>(priv, region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(region, ptr);
 #endif
             write_untyped(ptr, &newval, sizeof(newval)); 
@@ -1092,7 +1092,7 @@ namespace LegionRuntime {
 #ifdef __OPTIMIZE__
             issue_performance_warning(); 
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_REDUCE>(priv, region);
 #endif
 #ifdef CHECK_BOUNDS 
@@ -1167,10 +1167,10 @@ namespace LegionRuntime {
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(aos_base, aos_stride);
             RegionAccessor<AT, T> result(t);
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS) 
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS) 
             result.set_region(region);
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             result.set_privileges(priv);
 #endif
             return result;
@@ -1197,10 +1197,10 @@ namespace LegionRuntime {
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(soa_base, soa_stride);
             RegionAccessor<AT,T> result(t);
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS) 
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS) 
             result.set_region(region);
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             result.set_privileges(priv);
 #endif
             return result;
@@ -1234,10 +1234,10 @@ namespace LegionRuntime {
 	    typename AT::template Typed<T, T> t(hybrid_soa_base, hybrid_soa_stride,
 						hybrid_soa_block_size, hybrid_soa_block_stride);
             RegionAccessor<AT, T> result(t);
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
             result.set_region(region);
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             result.set_privileges(priv);
 #endif
             return result;
@@ -1278,10 +1278,10 @@ namespace LegionRuntime {
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(redfold_base);
             RegionAccessor<AT, T> result(t);
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
             result.set_region(region);
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             result.set_privileges(priv);
 #endif
             return result;
@@ -1306,10 +1306,10 @@ namespace LegionRuntime {
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(redlist_base, redlist_next_ptr);
             RegionAccessor<AT, T> result(t);
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS) 
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS) 
             result.set_region(region);
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             result.set_privileges(priv);
 #endif
             return result;
@@ -1356,7 +1356,7 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(region, ptr);
 #endif
 	    return(base + (ptr.value * Stride<STRIDE>::value));
@@ -1365,13 +1365,13 @@ namespace LegionRuntime {
 	  //char *elem_ptr_linear(const Legion::Domain& d, Legion::Domain& subrect, ByteOffset *offsets);
 
 	  char *base;
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
         protected:
           void *region;
         public:
           inline void set_region_untyped(void *r) { region = r; }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
         protected:
           AccessorPrivilege priv;
         public:
@@ -1386,20 +1386,20 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  Typed(void *_base, size_t _stride) : Untyped(_base, _stride) {}
 
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS) 
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS) 
           inline void set_region(void *r) { this->region = r; }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
           inline void set_privileges(AccessorPrivilege p) { this->priv = p; }
 #endif
 
           CUDAPREFIX
 	  inline T read(ptr_t ptr) const 
           { 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_READ>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
             return *(const T *)(Untyped::elem_ptr(ptr)); 
@@ -1407,10 +1407,10 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline void write(ptr_t ptr, const T& newval) const 
           { 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
             *(T *)(Untyped::elem_ptr(ptr)) = newval; 
@@ -1418,11 +1418,11 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline T *ptr(ptr_t ptr) const 
           { 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             // Don't check privileges when getting pointers
             //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
             return (T *)Untyped::elem_ptr(ptr); 
@@ -1430,11 +1430,11 @@ namespace LegionRuntime {
           CUDAPREFIX
           inline T& ref(ptr_t ptr) const 
           { 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             // Don't check privileges when getting references
             //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
             return *((T*)Untyped::elem_ptr(ptr)); 
@@ -1443,10 +1443,10 @@ namespace LegionRuntime {
 	  template<typename REDOP> CUDAPREFIX
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
@@ -1473,14 +1473,14 @@ namespace LegionRuntime {
 	  }
 
 	  char *base;
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
         protected:
           // TODO: Make pointer checks work on the GPU
           void *region;
         public:
           inline void set_region_untyped(void *r) { region = r; }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
         protected:
           AccessorPrivilege priv;
         public:
@@ -1496,10 +1496,10 @@ namespace LegionRuntime {
 	  Typed(void *_base, size_t _stride) : Untyped(_base, _stride) {}
 	  CUDAPREFIX
 	  Typed(const Typed& other): Untyped(other.base, other.Stride<STRIDE>::value) {
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
             this->set_region(other.region);
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             this->set_privileges(other.priv);
 #endif
           }
@@ -1509,20 +1509,20 @@ namespace LegionRuntime {
 	    return *this;
 	  }
 
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS) 
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS) 
           inline void set_region(void *r) { this->region = r; }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
           inline void set_privileges(AccessorPrivilege p) { this->priv = p; }
 #endif
 
           CUDAPREFIX
 	  inline T read(ptr_t ptr) const 
           { 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_READ>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
             return *(const T *)(Untyped::elem_ptr(ptr)); 
@@ -1530,10 +1530,10 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline void write(ptr_t ptr, const T& newval) const 
           { 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
             *(T *)(Untyped::elem_ptr(ptr)) = newval; 
@@ -1541,11 +1541,11 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline T *ptr(ptr_t ptr) const 
           { 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             // Don't check privileges on pointers 
             //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
             return (T *)Untyped::elem_ptr(ptr); 
@@ -1553,11 +1553,11 @@ namespace LegionRuntime {
           CUDAPREFIX
           inline T& ref(ptr_t ptr) const 
           { 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             // Don't check privileges on references
             //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
             return *((T*)Untyped::elem_ptr(ptr)); 
@@ -1566,10 +1566,10 @@ namespace LegionRuntime {
 	  template<typename REDOP> CUDAPREFIX
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
@@ -1590,21 +1590,21 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(region, ptr);
 #endif
 	    return(base + (ptr.value * Stride<STRIDE>::value));
 	  }
 
 	  char *base;
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
         protected:
           void *region;
           // TODO: Make this work for GPUs
         public:
           inline void set_region_untyped(void *r) { region = r; }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
         protected:
           AccessorPrivilege priv;
         public:
@@ -1620,20 +1620,20 @@ namespace LegionRuntime {
 	  Typed(void *_base, size_t _stride, size_t _block_size, size_t _block_stride)
 	    : Untyped(_base, _stride, _block_size, _block_stride) {}
 
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
           inline void set_region(void *r) { this->region = r; }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
           inline void set_privileges(AccessorPrivilege p) { this->priv = p; }
 #endif
 
           CUDAPREFIX
 	  inline T read(ptr_t ptr) const 
           { 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_READ>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
             return *(const T *)(Untyped::elem_ptr(ptr)); 
@@ -1641,10 +1641,10 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline void write(ptr_t ptr, const T& newval) const 
           { 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
             *(T *)(Untyped::elem_ptr(ptr)) = newval; 
@@ -1652,11 +1652,11 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline T *ptr(ptr_t ptr) const 
           { 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             // Don't check privileges on pointers
             //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
             return (T *)Untyped::elem_ptr(ptr); 
@@ -1664,11 +1664,11 @@ namespace LegionRuntime {
           CUDAPREFIX
           inline T& ref(ptr_t ptr) const 
           { 
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             // Don't check privileges on references
             //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
             return *((T*)Untyped::elem_ptr(ptr)); 
@@ -1677,10 +1677,10 @@ namespace LegionRuntime {
 	  template<typename REDOP> CUDAPREFIX
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
@@ -1755,20 +1755,20 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    return(base + (ptr.value * sizeof(typename REDOP::RHS)));
 	  }
 
 	  char *base;
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS) 
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS) 
         protected:
           void *region;
         public:
           inline void set_region_untyped(void *r) { region = r; }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
         protected:
           AccessorPrivilege priv;
         public:
@@ -1787,10 +1787,10 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  Typed(void *_base) : Untyped(_base) {}
 
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
           inline void set_region(void *r) { this->region = r; }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
           inline void set_privileges(AccessorPrivilege p) 
           { 
             assert((p == ACCESSOR_NONE) || (p == ACCESSOR_REDUCE));
@@ -1802,10 +1802,10 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    REDOP::template fold<false>(*(typename REDOP::RHS *)Untyped::elem_ptr(ptr), newval);
@@ -1826,7 +1826,7 @@ namespace LegionRuntime {
 	  
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    return(base + (ptr.value * sizeof(ReductionListEntry)));
@@ -1845,13 +1845,13 @@ namespace LegionRuntime {
 
 	  char *base;
 	  ptr_t *next_entry;
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
         protected:
           void *region;
         public:
           inline void set_region_untpyed(void *r) { region = r; }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
         protected:
           AccessorPrivilege priv;
         public:
@@ -1868,10 +1868,10 @@ namespace LegionRuntime {
 	  Typed(void) : Untyped() {}
 	  Typed(void *_base, ptr_t *_next_entry) : Untyped(_base, _next_entry) {}
 
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
         inline void set_region(void *r) { this->region = r; } 
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
         inline void set_privileges(AccessorPrivilege p) 
         { 
           assert((p == ACCESSOR_NONE) || (p == ACCESSOR_REDUCE));
@@ -1882,10 +1882,10 @@ namespace LegionRuntime {
 	  // only allowed operation on a reduction list instance is a reduce
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
             DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    ptr_t listptr = Untyped::get_next();

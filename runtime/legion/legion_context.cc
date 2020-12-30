@@ -10131,6 +10131,17 @@ namespace Legion {
     }
 #endif
 
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    void InnerContext::register_implicit_replay_dependence(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_mapping_dependence(get_unique_id(), 
+          current_fence_uid, 0/*idx*/, op->get_unique_op_id(),
+          0/*idx*/, LEGION_TRUE_DEPENDENCE);
+    }
+#endif
+
     /////////////////////////////////////////////////////////////
     // Top Level Context 
     /////////////////////////////////////////////////////////////

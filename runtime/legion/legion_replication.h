@@ -1102,7 +1102,7 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual void shard_off(RtEvent mapped_precondition);
     public:
@@ -1147,7 +1147,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     protected:
       virtual RtEvent prepare_index_task_complete(void);
     public:
@@ -1282,7 +1282,7 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
     protected:
       ShardingID sharding_functor;
@@ -1319,7 +1319,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
     public:
       void initialize_replication(ReplicateContext *ctx);
@@ -1356,7 +1356,7 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
     protected:
       ShardingID sharding_functor;
@@ -1392,7 +1392,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual ApEvent exchange_indirect_records(const unsigned index,
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
@@ -1777,7 +1777,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent complete_event);
     protected:
       void initialize_fence_barriers(ReplicateContext *repl_ctx = NULL);

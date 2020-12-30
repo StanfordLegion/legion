@@ -443,12 +443,6 @@ mark_as_advanced(Legion_MAX_FIELDS)
 # define variable for legion_defines.h
 set(LEGION_MAX_FIELDS ${Legion_MAX_FIELDS})
 
-option(Legion_ENABLE_TLS "Enable support for TLS storage of Legion context" OFF)
-mark_as_advanced(Legion_ENABLE_TLS)
-
-# define variable for legion_defines.h
-set(ENABLE_LEGION_TLS ${Legion_ENABLE_TLS})
-
 option(Legion_WARNINGS_FATAL "Make all runtime warnings fatal" OFF)
 set(LEGION_WARNINGS_FATAL ${Legion_WARNINGS_FATAL})
 
@@ -456,10 +450,10 @@ option(Legion_SPY "Enable detailed logging for Legion Spy" OFF)
 set(LEGION_SPY ${Legion_SPY})
 
 option(Legion_BOUNDS_CHECKS "Enable bounds checking in Legion accessors" OFF)
-set(BOUNDS_CHECKS ${Legion_BOUNDS_CHECKS})
+set(LEGION_BOUNDS_CHECKS ${Legion_BOUNDS_CHECKS})
 
 option(Legion_PRIVILEGE_CHECKS "Enable privilege checking in Legion accessors" OFF)
-set(PRIVILEGE_CHECKS ${Legion_PRIVILEGE_CHECKS})
+set(LEGION_PRIVILEGE_CHECKS ${Legion_PRIVILEGE_CHECKS})
 
 #------------------------------------------------------------------------------#
 # Runtime library targets

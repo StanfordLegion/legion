@@ -100,6 +100,20 @@
 #define GC_NEVER_PRIORITY  LEGION_GC_NEVER_PRIORITY
 #endif
 #endif
+// This is for backwards compatibility
+// Try to be nice in case someone else defined this
+#ifdef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
+#define LEGION_BOUNDS_CHECKS
+#endif
+#endif
+// This is for backwards compatibility
+// Try to be nice in case someone else defined this
+#ifdef PRIVILEGE_CHECKS
+#ifndef LEGION_PRIVILEGE_CHECKS
+#define LEGION_PRIVILEGE_CHECKS
+#endif
+#endif
 
 #ifndef LEGION_GC_FIRST_PRIORITY
 #define LEGION_GC_FIRST_PRIORITY  LEGION_GC_MAX_PRIORITY

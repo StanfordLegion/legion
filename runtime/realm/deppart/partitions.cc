@@ -206,8 +206,17 @@ namespace Realm {
 	    split_dim = i;
 	  }
 	}
-      U rel_span_start = (total * index / count);
-      U rel_span_size = (total * (index + 1) / count) - rel_span_start;
+      // have to divide before multiplying to avoid overflow
+      U base_span_size = total / count;
+      U base_span_rem = total - (base_span_size * count);
+      U rel_span_start = index * base_span_size;
+      U rel_span_size = base_span_size;
+      if(base_span_rem != 0) {
+	U start_adj = index * base_span_rem / count;
+	U end_adj = (index + 1) * base_span_rem / count;
+	rel_span_start += start_adj;
+	rel_span_size += (end_adj - start_adj);
+      }
       if(rel_span_size > 0) {
 	subspace = *this;
 	subspace.bounds.lo[split_dim] = bounds.lo[split_dim] + rel_span_start;
@@ -271,13 +280,24 @@ namespace Realm {
 	  }
 	}
       T px = bounds.lo[split_dim];
+      // have to divide before multiplying to avoid overflow
+      T base_span_size = total / count;
+      T base_span_rem = total - (base_span_size * count);
+      T leftover = 0;
       for(size_t i = 0; i < count; i++) {
 	IndexSpace<N,T> ss(*this);
-	T nx = bounds.lo[split_dim] + (total * (i + 1) / count);
+	T nx = px + (base_span_size - 1);
+	if(base_span_rem != 0) {
+	  leftover += base_span_rem;
+	  if(leftover >= T(count)) {
+	    nx += 1;
+	    leftover -= count;
+	  }
+	}
 	ss.bounds.lo[split_dim] = px;
-	ss.bounds.hi[split_dim] = nx - 1;
+	ss.bounds.hi[split_dim] = nx;
 	subspaces.push_back(ss);
-	px = nx;
+	px = nx + 1;
       }
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
       return wait_on;
