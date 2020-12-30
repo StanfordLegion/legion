@@ -5847,7 +5847,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::replay_analysis(void)
+    void CopyOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
       if (runtime->legion_spy_enabled && !need_prepipeline_stage)
@@ -5857,6 +5857,7 @@ namespace Legion {
 #endif
       tpl->register_operation(this);
       complete_mapping();
+      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -6789,7 +6790,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexCopyOp::replay_analysis(void)
+    void IndexCopyOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6805,12 +6806,10 @@ namespace Legion {
       // Then call replay analysis on all of them
       for (std::vector<PointCopyOp*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
-      {
-        (*it)->resolve_speculation();
-        (*it)->replay_analysis();
-      }
+        (*it)->trigger_replay();
       complete_mapping();
       complete_execution();
+      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -7695,7 +7694,7 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void FenceOp::replay_analysis(void)
+    void FenceOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
@@ -7703,6 +7702,7 @@ namespace Legion {
 #endif
       tpl->register_operation(this);
       complete_mapping();
+      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -10118,7 +10118,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::replay_analysis(void)
+    void AcquireOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
       if (runtime->legion_spy_enabled && !need_prepipeline_stage)
@@ -10128,6 +10128,7 @@ namespace Legion {
 #endif
       tpl->register_operation(this);
       complete_mapping();
+      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -11022,7 +11023,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::replay_analysis(void)
+    void ReleaseOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
       if (runtime->legion_spy_enabled && !need_prepipeline_stage)
@@ -11032,6 +11033,7 @@ namespace Legion {
 #endif
       tpl->register_operation(this);
       complete_mapping();
+      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -11453,13 +11455,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DynamicCollectiveOp::replay_analysis(void)
+    void DynamicCollectiveOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       trigger_mapping();
+      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -16260,7 +16263,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::replay_analysis(void)
+    void FillOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
       if (runtime->legion_spy_enabled && !need_prepipeline_stage)
@@ -16271,6 +16274,7 @@ namespace Legion {
       tpl->register_operation(this);
       complete_mapping();
       complete_execution();
+      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -16548,7 +16552,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexFillOp::replay_analysis(void)
+    void IndexFillOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -16564,12 +16568,10 @@ namespace Legion {
       // Then call replay analysis on all of them
       for (std::vector<PointFillOp*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
-      {
-        (*it)->resolve_speculation();
-        (*it)->replay_analysis();
-      }
+        (*it)->trigger_replay();
       complete_mapping();
       complete_execution();
+      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------

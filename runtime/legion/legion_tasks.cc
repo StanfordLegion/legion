@@ -6569,7 +6569,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::replay_analysis(void)
+    void IndividualTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
@@ -6582,6 +6582,7 @@ namespace Legion {
       }
       tpl->register_operation(this);
       complete_mapping();
+      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -7366,7 +7367,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void PointTask::replay_analysis(void)
+    void PointTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
@@ -7599,7 +7600,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::replay_analysis(void)
+    void ShardTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -10126,7 +10127,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::replay_analysis(void)
+    void IndexTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10158,7 +10159,8 @@ namespace Legion {
       // Then do the replay on all the slices
       for (std::list<SliceTask*>::const_iterator it = 
             slices.begin(); it != slices.end(); it++)
-        (*it)->replay_analysis();
+        (*it)->trigger_replay();
+      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -11806,14 +11808,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::replay_analysis(void)
+    void SliceTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < points.size(); idx++)
-      {
-        PointTask *point = points[idx];
-        point->replay_analysis();
-      }
+        points[idx]->trigger_replay();
     }
 
     //--------------------------------------------------------------------------

@@ -380,7 +380,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::replay_analysis(void)
+    void ReplIndividualTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
       // Figure out if we're the one to do the replay
@@ -408,9 +408,10 @@ namespace Legion {
         LegionSpy::log_replay_operation(unique_op_id);
 #endif
         shard_off(RtEvent::NO_RT_EVENT);
+        resolve_speculation();
       }
       else
-        IndividualTask::replay_analysis();
+        IndividualTask::trigger_replay();
     }
 
     //--------------------------------------------------------------------------
@@ -707,7 +708,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexTask::replay_analysis(void)
+    void ReplIndexTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -748,11 +749,12 @@ namespace Legion {
         // We have no local points, so we can just trigger
         complete_mapping();
         complete_execution(prepare_index_task_complete());
+        resolve_speculation();
         trigger_children_complete();
         trigger_children_committed();
       }
       else
-        IndexTask::replay_analysis();
+        IndexTask::trigger_replay();
     }
 
     //--------------------------------------------------------------------------
@@ -1374,7 +1376,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFillOp::replay_analysis(void)
+    void ReplFillOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1401,9 +1403,10 @@ namespace Legion {
 #endif
         complete_mapping();
         complete_execution();
+        resolve_speculation();
       }
       else // We own it, so do the base call
-        FillOp::replay_analysis();
+        FillOp::trigger_replay();
     }
 
     //--------------------------------------------------------------------------
@@ -1587,7 +1590,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexFillOp::replay_analysis(void)
+    void ReplIndexFillOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1610,6 +1613,7 @@ namespace Legion {
         // We have no local points, so we can just trigger
         complete_mapping();
         complete_execution();
+        resolve_speculation();
       }
       else
       {
@@ -1617,7 +1621,7 @@ namespace Legion {
           delete launch_space;
         launch_space = runtime->forest->get_node(local_space);
         add_launch_space_reference(launch_space);
-        IndexFillOp::replay_analysis();
+        IndexFillOp::trigger_replay();
       }
     }
 
@@ -1815,7 +1819,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplCopyOp::replay_analysis(void)
+    void ReplCopyOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1842,9 +1846,10 @@ namespace Legion {
 #endif
         complete_mapping();
         complete_execution();
+        resolve_speculation();
       }
       else // We own it, so do the base call
-        CopyOp::replay_analysis();
+        CopyOp::trigger_replay();
     }
 
     //--------------------------------------------------------------------------
@@ -2116,7 +2121,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexCopyOp::replay_analysis(void)
+    void ReplIndexCopyOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2139,6 +2144,7 @@ namespace Legion {
         // We have no local points, so we can just trigger
         complete_mapping();
         complete_execution();
+        resolve_speculation();
       }
       else
       {
@@ -2146,7 +2152,7 @@ namespace Legion {
           delete launch_space;
         launch_space = runtime->forest->get_node(local_space);
         add_launch_space_reference(launch_space);
-        IndexCopyOp::replay_analysis();
+        IndexCopyOp::trigger_replay();
       }
     }
 
@@ -4631,12 +4637,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFenceOp::replay_analysis(void)
+    void ReplFenceOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
       // free up these barriers since we didn't use them
       Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
-      FenceOp::replay_analysis();
+      FenceOp::trigger_replay();
     }
 
     //--------------------------------------------------------------------------
@@ -5879,11 +5885,13 @@ namespace Legion {
         current_template->finalize(has_blocking_call, this);
         if (!current_template->is_replayable())
         {
-          const RtEvent pending_deletion = 
-            current_template->defer_template_deletion();
-          if (pending_deletion.exists())
-            execution_preconditions.insert(ApEvent(pending_deletion));
           physical_trace->record_failed_capture(current_template);
+          ApEvent pending_deletion;
+          if (!current_template->defer_template_deletion(pending_deletion,
+                                                  map_applied_conditions))
+            delete current_template;
+          if (pending_deletion.exists())
+            execution_preconditions.insert(pending_deletion);
         }
         else
           physical_trace->record_replayable_capture(current_template);
@@ -6062,31 +6070,28 @@ namespace Legion {
 
       if (local_trace->is_replaying())
       {
+        if (has_blocking_call)
+          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+            "Physical tracing violation! Trace %d in task %s (UID %lld) "
+            "encountered a blocking API call that was unseen when it was "
+            "recorded. It is required that traces do not change their "
+            "behavior.", local_trace->get_trace_id(),
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
 #endif
-        PhysicalTemplate *current_template =
-          physical_trace->get_current_template();
+        current_template = physical_trace->get_current_template();
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
 #endif
-#ifdef LEGION_SPY
-        local_trace->perform_logging(
-            current_template->get_fence_uid(), unique_op_id);
-#endif
-        current_template->execute_all();
-        template_completion = current_template->get_completion();
+#if 0
         // Trigger the execution fence barrier with this event
         Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
                                       template_completion);
-        need_completion_trigger = false;
-        Runtime::trigger_event(NULL, completion_event, execution_fence_barrier);
-        local_trace->end_trace_execution(this);
+#endif
         parent_ctx->update_current_fence(this, true, true);
-        parent_ctx->record_previous_trace(local_trace);
-        physical_trace->record_previous_template_completion(
-            execution_fence_barrier);
+        physical_trace->record_previous_template_completion(completion_event);
         local_trace->initialize_tracing_state();
         replayed = true;
         return;
@@ -6098,8 +6103,7 @@ namespace Legion {
         assert(physical_trace != NULL);
 #endif
         current_template = physical_trace->get_current_template();
-        physical_trace->record_previous_template_completion(
-            get_completion_event());
+        physical_trace->record_previous_template_completion(completion_event);
         physical_trace->clear_cached_template();
       } 
 
@@ -6130,35 +6134,36 @@ namespace Legion {
         current_template->finalize(has_blocking_call, this);
         if (!current_template->is_replayable())
         {
-          const RtEvent pending_deletion = 
-            current_template->defer_template_deletion();
-          if (pending_deletion.exists())
-            execution_preconditions.insert(ApEvent(pending_deletion));
           physical_trace->record_failed_capture(current_template);
+          ApEvent pending_deletion;
+          if (!current_template->defer_template_deletion(pending_deletion,
+                                                  map_applied_conditions))
+            delete current_template;
+          if (pending_deletion.exists())
+            execution_preconditions.insert(pending_deletion);
         }
         else
           physical_trace->record_replayable_capture(current_template);
         local_trace->initialize_tracing_state();
       }
       else if (replayed)
-      {
-        if (has_blocking_call)
-          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
-            "Physical tracing violation! Trace %d in task %s (UID %lld) "
-            "encountered a blocking API call that was unseen when it was "
-            "recorded. It is required that traces do not change their "
-            "behavior.", local_trace->get_trace_id(),
-            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+      { 
+#ifdef DEBUG_LEGION
+        assert(current_template != NULL);
+#endif
+        std::set<ApEvent> template_postconditions;
+        current_template->finish_replay(template_postconditions);
         // Do our arrival on the mapping fence
         Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
         complete_mapping(mapping_fence_barrier);
-        if (!execution_fence_barrier.has_triggered())
-        {
-          RtEvent wait_on = Runtime::protect_event(execution_fence_barrier);
-          complete_execution(wait_on);
-        }
+        if (!template_postconditions.empty())
+          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
+              Runtime::merge_events(NULL, template_postconditions));
         else
-          complete_execution();
+          Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/);
+        Runtime::trigger_event(NULL, completion_event, execution_fence_barrier);
+        need_completion_trigger = false;
+        complete_execution();
         return;
       }
       ReplFenceOp::trigger_mapping();
@@ -6412,6 +6417,14 @@ namespace Legion {
 
       if (physical_trace->get_current_template() != NULL)
       {
+        // If we're recurrent, then check to see if we had any intermeidate
+        // ops for which we still need to perform the fence analysis
+        if (recurrent && local_trace->has_intermediate_operations())
+        {
+          parent_ctx->perform_fence_analysis(this, execution_preconditions,
+                                       true/*mapping*/, true/*execution*/);
+          local_trace->reset_intermediate_operations();
+        }
         if (!fence_registered)
           execution_preconditions.insert(
               parent_ctx->get_current_execution_fence_event());

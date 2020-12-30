@@ -999,7 +999,7 @@ namespace Legion {
       void activate_memoizable(void);
     public:
       virtual void execute_dependence_analysis(void);
-      virtual void replay_analysis(void) = 0;
+      virtual void trigger_replay(void) = 0;
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
@@ -1300,7 +1300,7 @@ namespace Legion {
       static void handle_deferred_across(const void *args);
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       // From Memoizable
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
@@ -1403,7 +1403,7 @@ namespace Legion {
           LegionVector<IndirectRecord>::aligned &records, const bool sources); 
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode* get_collective_space(void) const 
@@ -1537,7 +1537,7 @@ namespace Legion {
 #ifdef LEGION_SPY
       virtual void trigger_complete(void);
 #endif
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
     protected:
@@ -2032,7 +2032,7 @@ namespace Legion {
       const RegionRequirement& get_requirement(void) const;
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       // From Memoizable
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
@@ -2146,7 +2146,7 @@ namespace Legion {
       const RegionRequirement& get_requirement(void) const;
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       // From Memoizable
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
@@ -2235,7 +2235,7 @@ namespace Legion {
         { assert(false); return *(new RegionRequirement()); }
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -3356,7 +3356,7 @@ namespace Legion {
         { return get_requirement(); }
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -3403,7 +3403,7 @@ namespace Legion {
       virtual void trigger_commit(void);
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode* get_collective_space(void) const 
