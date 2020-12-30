@@ -6433,9 +6433,6 @@ namespace Legion {
           get_completion_event();
         physical_trace->initialize_template(fence_completion, recurrent);
         local_trace->set_state_replay();
-#ifdef LEGION_SPY
-        physical_trace->get_current_template()->set_fence_uid(unique_op_id);
-#endif
       }
       else if (!fence_registered)
       {
