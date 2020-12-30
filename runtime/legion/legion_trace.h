@@ -125,6 +125,10 @@ namespace Legion {
       inline void clear_blocking_call(void) { blocking_call_observed = false; }
       inline void record_blocking_call(void) { blocking_call_observed = true; }
       inline bool has_blocking_call(void) const {return blocking_call_observed;}
+      inline bool has_intermediate_operations(void) const 
+        { return has_intermediate_ops; }
+      inline void reset_intermediate_operations(void)
+        { has_intermediate_ops = false; }
       void invalidate_trace_cache(Operation *invalidator);
 #ifdef LEGION_SPY
     public:
@@ -148,6 +152,7 @@ namespace Legion {
       unsigned last_memoized;
       unsigned physical_op_count;
       bool blocking_call_observed;
+      bool has_intermediate_ops;
       bool fixed;
       std::set<std::pair<Operation*,GenerationID> > frontiers;
 #ifdef LEGION_SPY

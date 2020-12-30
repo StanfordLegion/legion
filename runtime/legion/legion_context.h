@@ -1218,6 +1218,9 @@ namespace Legion {
       // which is especially useful when debugging scheduler hangs
       Operation* get_earliest(void) const;
 #endif
+#ifdef LEGION_SPY
+      void register_implicit_replay_dependence(Operation *op);
+#endif
     public:
       const RegionTreeContext tree_context; 
       const UniqueID context_uid;

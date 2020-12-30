@@ -65,12 +65,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionTrace::LegionTrace(InnerContext *c, TraceID t, bool logical_only)
       : ctx(c), tid(t), state(LOGICAL_ONLY), last_memoized(0),
-        physical_op_count(0), blocking_call_observed(false), fixed(false)
+        physical_op_count(0), blocking_call_observed(false), 
+        has_intermediate_ops(false), fixed(false)
     //--------------------------------------------------------------------------
     {
-      physical_trace = logical_only ? NULL
-                                    : new PhysicalTrace(c->owner_task->runtime,
-                                                        this);
+      physical_trace = logical_only ? NULL : 
+        new PhysicalTrace(c->owner_task->runtime, this);
     }
 
     //--------------------------------------------------------------------------
@@ -96,6 +96,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       op->set_trace_local_id(physical_op_count++);
+#ifdef LEGION_SPY
+      if (!current_uids.empty())
+      {
+        std::map<std::pair<Operation*,GenerationID>,UniqueID>::iterator first =
+          current_uids.begin();
+        LegionSpy::log_mapping_dependence(
+            op->get_context()->get_unique_id(), first->second, 0/*idx*/,
+            op->get_unique_op_id(), 0/*idx*/, LEGION_TRUE_DEPENDENCE);
+        current_uids.erase(first);
+      }
+      else
+        op->get_context()->register_implicit_replay_dependence(op);
+      const std::pair<Operation*,GenerationID> key(op, op->get_generation());
+      current_uids[key] = op->get_unique_op_id();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -130,6 +145,17 @@ namespace Legion {
 #endif
         // Reset the physical op count for the next replay
         physical_op_count = 0;
+#ifdef LEGION_SPY
+        if (!current_uids.empty())
+        {
+          std::map<std::pair<Operation*,GenerationID>,UniqueID>::iterator 
+            first = current_uids.begin();
+          LegionSpy::log_mapping_dependence(
+              op->get_context()->get_unique_id(), first->second, 0/*idx*/,
+              op->get_unique_op_id(), 0/*idx*/, LEGION_TRUE_DEPENDENCE);
+          current_uids.erase(first);
+        }
+#endif
         return;
       }
 
@@ -209,8 +235,11 @@ namespace Legion {
         {
           physical_trace->clear_cached_template();
           current_template->issue_summary_operations(ctx, invalidator);
+          has_intermediate_ops = false;
         }
       }
+      else
+        has_intermediate_ops = true;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1590,6 +1619,14 @@ namespace Legion {
 
       if (physical_trace->get_current_template() != NULL)
       {
+        // If we're recurrent, then check to see if we had any intermeidate
+        // ops for which we still need to perform the fence analysis
+        if (recurrent && local_trace->has_intermediate_operations())
+        {
+          parent_ctx->perform_fence_analysis(this, execution_preconditions,
+                                       true/*mapping*/, true/*execution*/);
+          local_trace->reset_intermediate_operations();
+        }
         if (!fence_registered)
           execution_preconditions.insert(
               parent_ctx->get_current_execution_fence_event());
