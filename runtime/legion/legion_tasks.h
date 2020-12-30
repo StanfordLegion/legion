@@ -773,7 +773,7 @@ namespace Legion {
       void unpack_remote_commit(Deserializer &derez);
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent completion_event);
     public:
       static void process_unpack_remote_complete(Deserializer &derez);
@@ -873,7 +873,7 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent completion_event);
     public:
       // From Memoizable
@@ -1014,7 +1014,7 @@ namespace Legion {
       void unpack_slice_commit(Deserializer &derez);
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode *get_collective_space(void) const
@@ -1173,7 +1173,7 @@ namespace Legion {
               std::set<RtEvent> &preconditions);
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent instance_ready_event);
     public:
       // Methods for supporting intra-index-space mapping dependences

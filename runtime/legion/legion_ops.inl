@@ -370,9 +370,8 @@ namespace Legion {
           assert(tpl->is_replaying());
 #endif
           memo_state = REPLAY;
-          OP::trace->register_physical_only(this, OP::gen);
-          this->resolve_speculation();
-          replay_analysis();
+          OP::trace->register_physical_only(this);
+          trigger_replay();
           return;
         }
         else
