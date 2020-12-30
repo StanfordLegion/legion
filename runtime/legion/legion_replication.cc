@@ -6085,11 +6085,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
 #endif
-#if 0
-        // Trigger the execution fence barrier with this event
-        Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
-                                      template_completion);
-#endif
         parent_ctx->update_current_fence(this, true, true);
         physical_trace->record_previous_template_completion(completion_event);
         local_trace->initialize_tracing_state();
@@ -6105,7 +6100,7 @@ namespace Legion {
         current_template = physical_trace->get_current_template();
         physical_trace->record_previous_template_completion(completion_event);
         physical_trace->clear_cached_template();
-      } 
+      }
 
       // If this is a static trace, then we remove our reference when we're done
       if (local_trace->is_static_trace())
@@ -6115,6 +6110,25 @@ namespace Legion {
           delete static_trace;
       }
       ReplFenceOp::trigger_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCompleteOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (replayed)
+      {
+        // Having all our mapping dependences satisfied means that the previous 
+        // replay of this template is done so we can start ours now
+        std::set<RtEvent> replayed_events;
+        current_template->perform_replay(runtime, replayed_events);
+        if (!replayed_events.empty())
+        {
+          enqueue_ready_operation(Runtime::merge_events(replayed_events));
+          return;
+        }
+      }
+      enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
