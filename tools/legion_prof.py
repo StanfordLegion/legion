@@ -1978,8 +1978,8 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
                     output_str = output_str + "["
                     output_str = output_str + legion_dimension_kind_t[self.dim_order_desc[pos]]
                     output_str = output_str +  "]"
-                    if (pos+1)%4 == 0 and pos != dim_order:
-                        output_str = output_str+ "$"
+                    if (pos+1)%4 == 0 and pos != len(self.dim_order_desc)-1:
+                        output_str = output_str + "$"
             else:
                 if aos == True:
                     output_str = output_str + "[Array-of-structs (AOS)]"
