@@ -953,10 +953,6 @@ namespace Legion {
       std::map<unsigned,unsigned> frontiers;
     protected:
       RtUserEvent recording_done;
-#ifdef LEGION_SPY
-    protected:
-      UniqueID prev_fence_uid;
-#endif
     private:
       std::map<TraceLocalID,ViewExprs> op_views;
       std::map<unsigned,ViewExprs>     copy_views;

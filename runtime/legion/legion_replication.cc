@@ -6062,9 +6062,17 @@ namespace Legion {
       assert(trace == NULL);
       assert(local_trace != NULL);
 #endif
-      // Indicate that this trace is done being captured
-      // This also registers that we have dependences on all operations
-      // in the trace.
+#ifdef LEGION_SPY
+      if (local_trace->is_replaying())
+      {
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+#ifdef DEBUG_LEGION
+        assert(physical_trace != NULL);
+#endif
+        local_trace->perform_logging(
+         physical_trace->get_current_template()->get_fence_uid(), unique_op_id);
+      }
+#endif
       local_trace->end_trace_execution(this);
       parent_ctx->record_previous_trace(local_trace);
 
@@ -6447,6 +6455,9 @@ namespace Legion {
           get_completion_event();
         physical_trace->initialize_template(fence_completion, recurrent);
         local_trace->set_state_replay();
+#ifdef LEGION_SPY
+        physical_trace->get_current_template()->set_fence_uid(unique_op_id);
+#endif
       }
       else if (!fence_registered)
       {
