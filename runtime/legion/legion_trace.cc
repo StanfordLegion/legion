@@ -98,21 +98,15 @@ namespace Legion {
     void LegionTrace::register_physical_only(Operation *op)
     //--------------------------------------------------------------------------
     {
-      op->set_trace_local_id(physical_op_count++);
 #ifdef LEGION_SPY
-      if (!current_uids.empty())
-      {
-        std::map<std::pair<Operation*,GenerationID>,UniqueID>::iterator first =
-          current_uids.begin();
-        LegionSpy::log_mapping_dependence(
-            op->get_context()->get_unique_id(), first->second, 0/*idx*/,
-            op->get_unique_op_id(), 0/*idx*/, LEGION_TRUE_DEPENDENCE);
-        current_uids.erase(first);
-      }
-      else
-        op->get_context()->register_implicit_replay_dependence(op);
-      const std::pair<Operation*,GenerationID> key(op, op->get_generation());
+      std::pair<Operation*,GenerationID> key(op, op->get_generation());
+      const unsigned index = operations.size();
+      op->set_trace_local_id(index);
+      op->add_mapping_reference(key.second);
+      operations.push_back(key);
       current_uids[key] = op->get_unique_op_id();
+#else
+      op->set_trace_local_id(physical_op_count++);
 #endif
     }
 
@@ -143,21 +137,18 @@ namespace Legion {
     {
       if (is_replaying())
       {
+#ifdef LEGION_SPY
+        for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator
+              it = operations.begin(); it != operations.end(); it++)
+          it->first->remove_mapping_reference(it->second);
+        operations.clear();
+        current_uids.clear();
+#else
 #ifdef DEBUG_LEGION
         assert(operations.empty());
 #endif
         // Reset the physical op count for the next replay
         physical_op_count = 0;
-#ifdef LEGION_SPY
-        if (!current_uids.empty())
-        {
-          std::map<std::pair<Operation*,GenerationID>,UniqueID>::iterator 
-            first = current_uids.begin();
-          LegionSpy::log_mapping_dependence(
-              op->get_context()->get_unique_id(), first->second, 0/*idx*/,
-              op->get_unique_op_id(), 0/*idx*/, LEGION_TRUE_DEPENDENCE);
-          current_uids.erase(first);
-        }
 #endif
         return;
       }
@@ -1419,6 +1410,17 @@ namespace Legion {
       assert(trace == NULL);
       assert(local_trace != NULL);
 #endif
+#ifdef LEGION_SPY
+      if (local_trace->is_replaying())
+      {
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+#ifdef DEBUG_LEGION
+        assert(physical_trace != NULL);
+#endif
+        local_trace->perform_logging(
+         physical_trace->get_current_template()->get_fence_uid(), unique_op_id);
+      }
+#endif
       local_trace->end_trace_execution(this);
       parent_ctx->record_previous_trace(local_trace);
 
@@ -1661,6 +1663,9 @@ namespace Legion {
                     : get_completion_event();
         physical_trace->initialize_template(fence_completion, recurrent);
         local_trace->set_state_replay();
+#ifdef LEGION_SPY
+        physical_trace->get_current_template()->set_fence_uid(unique_op_id);
+#endif
       }
       else if (!fence_registered)
       {

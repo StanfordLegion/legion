@@ -836,6 +836,11 @@ namespace Legion {
       virtual void dump_sharded_template(void) { }
     private:
       void dump_instructions(const std::vector<Instruction*> &instructions);
+#ifdef LEGION_SPY
+    public:
+      void set_fence_uid(UniqueID fence_uid) { prev_fence_uid = fence_uid; }
+      UniqueID get_fence_uid(void) const { return prev_fence_uid; }
+#endif
     public:
       inline bool is_replaying(void) const { return !recording; }
       inline bool is_replayable(void) const { return replayable.replayable; }
@@ -1052,10 +1057,6 @@ namespace Legion {
       std::map<unsigned,unsigned> frontiers;
     protected:
       RtUserEvent recording_done;
-#ifdef LEGION_SPY
-    protected:
-      UniqueID prev_fence_uid;
-#endif
     private:
       std::map<TraceLocalID,ViewExprs> op_views;
       std::map<unsigned,ViewExprs>     copy_views;
@@ -1075,6 +1076,10 @@ namespace Legion {
       // THESE ARE SHARDED FOR CONTROL REPLICATION!!!
       FieldMaskSet<RegionNode> trace_regions;
       std::vector<TraceConditionSet*> conditions;
+#ifdef LEGION_SPY
+    private:
+      UniqueID prev_fence_uid;
+#endif
     private:
       friend class PhysicalTrace;
       friend class Instruction;
