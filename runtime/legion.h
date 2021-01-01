@@ -2055,6 +2055,7 @@ namespace Legion {
     public:
       // Data for external instances
       LayoutConstraintSet                           constraints;
+      std::vector<PointerConstraint>                pointers; 
       std::set<FieldID>                             privilege_fields;
     public:
       // Optional footprint of the instance in memory in bytes
