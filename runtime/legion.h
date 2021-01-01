@@ -2010,6 +2010,62 @@ namespace Legion {
     };
 
     /**
+     * \struct IndexAttachLauncher
+     * An index attach launcher allows the application to attach
+     * many external resources concurrently to different subregions
+     * of a common region tree.
+     */
+    struct IndexAttachLauncher {
+    public:
+      IndexAttachLauncher(ExternalResource resource, 
+                          LogicalRegion parent,
+                          const bool restricted = true);
+    public:
+      inline void attach_file(LogicalRegion handle,
+                              const char *file_name,
+                              const std::vector<FieldID> &fields,
+                              LegionFileMode mode);
+      inline void attach_hdf5(LogicalRegion handle,
+                              const char *file_name,
+                              const std::map<FieldID,const char*> &field_map,
+                              LegionFileMode mode);
+      // Helper methods for AOS and SOA arrays, but it is totally 
+      // acceptable to fill in the layout constraint set manually
+      inline void attach_array_aos(LogicalRegion handle, 
+                             void *base, bool column_major,
+                             const std::vector<FieldID> &fields, Memory mem,
+                             const std::map<FieldID,size_t> *alignments = NULL);
+      inline void attach_array_soa(LogicalRegion handle,
+                             void *base, bool column_major,
+                             const std::vector<FieldID> &fields, Memory mem,
+                             const std::map<FieldID,size_t> *alignments = NULL);
+    public:
+      ExternalResource                              resource;
+      std::vector<LogicalRegion>                    handles;
+      LogicalRegion                                 parent;
+      // Whether this instance will be restricted when attached
+      bool                                          restricted /*= true*/;
+    public:
+      // Data for files
+      LegionFileMode                                mode;
+      std::vector<const char*>                      file_names;
+      std::vector<FieldID>                          file_fields; // normal files
+      std::map<FieldID,
+        std::vector</*file name*/const char*> >     field_files; // hdf5 files
+    public:
+      // Data for external instances
+      LayoutConstraintSet                           constraints;
+      std::set<FieldID>                             privilege_fields;
+    public:
+      // Optional footprint of the instance in memory in bytes
+      std::vector<size_t>                           footprint;
+    public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      const std::vector<StaticDependence>           *static_dependences;
+    };
+
+    /**
      * \struct PredicateLauncher
      * Predicate launchers are used for merging several predicates
      * into a new predicate either by an 'AND' or an 'OR' operation.
@@ -6326,6 +6382,44 @@ namespace Legion {
       Future detach_external_resource(Context ctx, PhysicalRegion region,
                                       const bool flush = true,
                                       const bool unordered = false);
+
+      /**
+       * Attach multiple external resources to logical regions using an
+       * index space attach operation. In a control replicated context
+       * this method is an unusual "collective" method meaning that 
+       * different shards are allowed to pass in different arguments
+       * and the runtime will interpret them as different sub-operations
+       * coming from different shards. All the physical regions returned
+       * from this method must be detached together as well using the
+       * 'detach_external_resources' method.
+       * @param ctx enclosing task context
+       * @param launcher the index attach launcher describing the external
+       *        resources to be attached
+       * @param regions a vector where the output physical regions (one
+       *        for each input resource) will be stored
+       * @param deduplicate_across_shards whether the runtime should check
+       *        for duplicate resources across the shards in a control
+       *        replicated context, it is illegal to pass in the same
+       *        resource to different shards if this is set to false
+       */
+      void attach_external_resources(Context ctx,
+                                     const IndexAttachLauncher &launcher,
+                                     std::vector<PhysicalRegion> &regions,
+                                     bool deduplicate_across_shards = false);
+
+      /**
+       * Detach multiple external resources that were all created by 
+       * a common call to 'attach_external_resources'. This method is also
+       * a "collective" method meaning that different shards in control
+       * replicated contexts are allowed to pass in different physical regions
+       * and they will be treated correctly.
+       * @param ctx enclosing task context
+       * @param regions vector of regions representing an external 
+       *        physical resource to detach
+       * @return an empty future indicating when the resources are detached
+       */
+      Future detach_external_resources(Context ctx,
+                                    const std::vector<PhysicalRegion> &regions);
 
       /**
        * Force progress on unordered operations. After performing one
