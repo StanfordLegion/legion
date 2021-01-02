@@ -22864,9 +22864,9 @@ namespace Legion {
       if (invalidate_overlap)
       {
         if (!set_expr->is_empty())
-          invalidate_state(overlap, overlap_covers, mask, RtEvent::NO_RT_EVENT);
+          invalidate_state(overlap, overlap_covers, mask, done_event);
         else
-          invalidate_state(set_expr, true/*cover*/, mask, RtEvent::NO_RT_EVENT);
+          invalidate_state(set_expr, true/*cover*/, mask, done_event);
       }
     }
 
