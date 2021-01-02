@@ -1636,10 +1636,11 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_DISJOINT_COMPLETE_TASK_ID;
       public:
         DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *target,
-                    FieldMaskSet<EquivalenceSet> &sets, RtUserEvent done_event);
+             AddressSpaceID space, VersionInfo *version_info, RtUserEvent done);
       public:
         VersionManager *const target;
-        FieldMaskSet<EquivalenceSet> *const sets;
+        const AddressSpaceID target_space;
+        VersionInfo *const version_info;
         const RtUserEvent done_event;
       };
     public:
@@ -2164,10 +2165,11 @@ namespace Legion {
       void handle_disjoint_complete_request(Deserializer &derez);
       static void handle_disjoint_complete_response(Deserializer &derez, 
                                                     Runtime *runtime);
-      static void handle_defer_disjoint_complete_response(const void *args);
-      static void finalize_disjoint_complete_response(VersionManager *target,
-                                  RtUserEvent done_event,
-                                  const FieldMaskSet<EquivalenceSet> &sets);
+      static void handle_defer_disjoint_complete_response(Runtime *runtime,
+                                                          const void *args);
+      static void finalize_disjoint_complete_response(Runtime *runtime,
+            UniqueID opid, VersionManager *target, AddressSpaceID target_space,
+            VersionInfo *version_info, RtUserEvent done_event);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);

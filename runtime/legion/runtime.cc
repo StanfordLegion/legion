@@ -29154,7 +29154,8 @@ namespace Legion {
           }
         case LG_DEFER_DISJOINT_COMPLETE_TASK_ID:
           {
-            ReplicateContext::handle_defer_disjoint_complete_response(args);
+            ReplicateContext::handle_defer_disjoint_complete_response(runtime,
+                                                                      args);
             break;
           }
         case LG_DEFER_FINALIZE_PENDING_SET_TASK_ID:

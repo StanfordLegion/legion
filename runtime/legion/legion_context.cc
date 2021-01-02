@@ -17457,24 +17457,122 @@ namespace Legion {
       derez.deserialize(done_event);
 
       RegionNode *node = runtime->forest->get_node(handle);
-      VersionInfo result_info;
+      VersionInfo *result_info = new VersionInfo();
       std::set<RtEvent> ready_events;
       node->perform_versioning_analysis(tree_context.get_id(), this,
-          &result_info, request_mask, opid, original_source, ready_events);
+          result_info, request_mask, opid, original_source, ready_events);
       // In general these ready events should be empty because we 
       // are on the shard that owns these eqivalence sets so it should
       // just be able to compute them right away. We wait though just
       // in case it is necessary, but it should be rare.
       if (!ready_events.empty())
       {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
+        const RtEvent ready = Runtime::merge_events(ready_events);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          DeferDisjointCompleteResponseArgs args(opid, target,
+                        target_space, result_info, done_event);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, ready);
+          return;
+        }
       }
-      const FieldMaskSet<EquivalenceSet> &result_sets = 
-          result_info.get_equivalence_sets();
-      if (target_space != runtime->address_space)
+      finalize_disjoint_complete_response(runtime, opid, target, target_space,
+                                          result_info, done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::handle_disjoint_complete_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      VersionManager *target;
+      derez.deserialize(target);
+      size_t num_sets;
+      derez.deserialize(num_sets);
+      VersionInfo *version_info = new VersionInfo();
+      std::set<RtEvent> ready_events;
+      for (unsigned idx = 0; idx < num_sets; idx++)
       {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready_event;
+        EquivalenceSet *set = 
+          runtime->find_or_request_equivalence_set(did, ready_event);
+        if (ready_event.exists())
+          ready_events.insert(ready_event);
+        FieldMask mask;
+        derez.deserialize(mask);
+        version_info->record_equivalence_set(set, mask);
+      }
+      UniqueID opid;
+      derez.deserialize(opid);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      if (!ready_events.empty())
+      {
+        const RtEvent ready = Runtime::merge_events(ready_events);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          DeferDisjointCompleteResponseArgs args(opid, target, 
+              runtime->address_space, version_info, done_event);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, ready);
+          return;
+        }
+      }
+      finalize_disjoint_complete_response(runtime, opid, target, 
+              runtime->address_space, version_info, done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplicateContext::DeferDisjointCompleteResponseArgs::
+      DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *t,
+                      AddressSpaceID s, VersionInfo *info, RtUserEvent d)
+      : LgTaskArgs<DeferDisjointCompleteResponseArgs>(opid), target(t),
+        target_space(s), version_info(info), done_event(d)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::handle_defer_disjoint_complete_response(
+                                             Runtime *runtime, const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferDisjointCompleteResponseArgs *dargs =
+        (const DeferDisjointCompleteResponseArgs*)args;
+      finalize_disjoint_complete_response(runtime, dargs->provenance, 
+       dargs->target,dargs->target_space,dargs->version_info,dargs->done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::finalize_disjoint_complete_response(
+        Runtime *runtime, UniqueID opid, VersionManager *target,
+        AddressSpaceID target_space, VersionInfo *info, RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      const FieldMaskSet<EquivalenceSet> &result_sets =
+        info->get_equivalence_sets();
+      if (target_space == runtime->address_space)
+      {
+        // local case
+        FieldMask dummy_parent;
+        std::set<RtEvent> applied_events;
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              result_sets.begin(); it != result_sets.end(); it++)
+          target->record_refinement(it->first, it->second, 
+                                    dummy_parent, applied_events);
+        if (!applied_events.empty())
+          Runtime::trigger_event(done_event, 
+              Runtime::merge_events(applied_events));
+        else
+          Runtime::trigger_event(done_event);
+      }
+      else
+      {
+        // remote case: send back to the owner
         Serializer rez;
         {
           RezCheck z(rez);
@@ -17492,93 +17590,8 @@ namespace Legion {
         runtime->send_control_replicate_disjoint_complete_response(target_space,
                                                                    rez);
       }
-      else // Local node so can just record them directly
-        finalize_disjoint_complete_response(target, done_event, result_sets);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::handle_disjoint_complete_response(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      VersionManager *target;
-      derez.deserialize(target);
-      size_t num_sets;
-      derez.deserialize(num_sets);
-      FieldMaskSet<EquivalenceSet> sets;
-      std::set<RtEvent> ready_events;
-      for (unsigned idx = 0; idx < num_sets; idx++)
-      {
-        DistributedID did;
-        derez.deserialize(did);
-        RtEvent ready_event;
-        EquivalenceSet *set = 
-          runtime->find_or_request_equivalence_set(did, ready_event);
-        if (ready_event.exists())
-          ready_events.insert(ready_event);
-        FieldMask mask;
-        derez.deserialize(mask);
-        sets.insert(set, mask);
-      }
-      UniqueID opid;
-      derez.deserialize(opid);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      if (!ready_events.empty())
-      {
-        const RtEvent precondition = Runtime::merge_events(ready_events);
-        if (precondition.exists() && !precondition.has_triggered())
-        {
-          DeferDisjointCompleteResponseArgs args(opid, target, sets,done_event);
-          runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, precondition);
-          return;
-        }
-      }
-      finalize_disjoint_complete_response(target, done_event, sets);
-    }
-
-    //--------------------------------------------------------------------------
-    ReplicateContext::DeferDisjointCompleteResponseArgs::
-      DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *t,
-                           FieldMaskSet<EquivalenceSet> &s, RtUserEvent d)
-      : LgTaskArgs<DeferDisjointCompleteResponseArgs>(opid), target(t),
-        sets(new FieldMaskSet<EquivalenceSet>()), done_event(d)
-    //--------------------------------------------------------------------------
-    {
-      sets->swap(s);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::handle_defer_disjoint_complete_response(
-                                                               const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferDisjointCompleteResponseArgs *dargs =
-        (const DeferDisjointCompleteResponseArgs*)args;
-      finalize_disjoint_complete_response(dargs->target, 
-                      dargs->done_event, *(dargs->sets));
-      delete dargs->sets;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::finalize_disjoint_complete_response(
-                                VersionManager *target, RtUserEvent done_event, 
-                                const FieldMaskSet<EquivalenceSet> &result_sets)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask dummy_parent;
-      std::set<RtEvent> applied_events;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            result_sets.begin(); it != result_sets.end(); it++)
-        target->record_refinement(it->first, it->second, 
-                                  dummy_parent, applied_events);
-      if (!applied_events.empty())
-        Runtime::trigger_event(done_event, 
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(done_event);
+      // always delete the version info
+      delete info;
     }
 
     //--------------------------------------------------------------------------
