@@ -23779,38 +23779,10 @@ namespace Legion {
         if (!has_waiter)
         {
           // Get any fields that are already ready
-          if (version_info != NULL)
-          {
-            if (!(version_mask * equivalence_sets.get_valid_mask()))
-            {
-              for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                   equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-              {
-                const FieldMask overlap = it->second & version_mask;
-                if (!overlap)
-                  continue;
-                if (!expr_covers)
-                {
-                  IndexSpaceExpression *expr_overlap = 
-                    runtime->forest->intersect_index_spaces(expr, 
-                                            it->first->set_expr);
-                  if (expr_overlap->is_empty())
-                    continue;
-                }
-                version_info->record_equivalence_set(it->first, overlap);
-              }
-            }
-            // If we have any disjoint complete events we need to record 
-            // precondition events from them as well since they are not ready
-            if (!disjoint_complete_ready.empty())
-            {
-              for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
-                    disjoint_complete_ready.begin(); it !=
-                    disjoint_complete_ready.end(); it++)
-                if (!(version_mask * it->second))
-                  ready_events.insert(it->first);
-            }
-          }
+          if ((version_info != NULL) &&
+              !(version_mask * equivalence_sets.get_valid_mask()))
+            record_equivalence_sets(version_info, version_mask,
+                                    expr, expr_covers, ready_events);
           remaining_mask -= equivalence_sets.get_valid_mask();
           // If we got all our fields then we are done
           if (!remaining_mask)
@@ -23843,34 +23815,8 @@ namespace Legion {
         if (!(remaining_mask * equivalence_sets.get_valid_mask()))
         {
           if (version_info != NULL)
-          {
-            for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                  equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-            {
-              const FieldMask overlap = it->second & remaining_mask;
-              if (!overlap)
-                continue;
-              if (!expr_covers)
-              {
-                IndexSpaceExpression *expr_overlap = 
-                  runtime->forest->intersect_index_spaces(expr, 
-                                          it->first->set_expr);
-                if (expr_overlap->is_empty())
-                  continue;
-              }
-              version_info->record_equivalence_set(it->first, overlap);
-            }
-            // If we have any disjoint complete events we need to record 
-            // precondition events from them as well since they are not ready
-            if (!disjoint_complete_ready.empty())
-            {
-              for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
-                    disjoint_complete_ready.begin(); it !=
-                    disjoint_complete_ready.end(); it++)
-                if (!(remaining_mask * it->second))
-                  ready_events.insert(it->first);
-            }
-          }
+            record_equivalence_sets(version_info, remaining_mask,
+                                    expr, expr_covers, ready_events);
           remaining_mask -= equivalence_sets.get_valid_mask();
           // If we got all our fields here and we're not waiting 
           // on any other computations then we're done
@@ -23911,6 +23857,40 @@ namespace Legion {
         }
         else
           finalize_equivalence_sets(compute_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::record_equivalence_sets(VersionInfo *version_info,
+                  const FieldMask &mask, IndexSpaceExpression *expr,
+                  const bool expr_covers, std::set<RtEvent> &ready_events) const
+    //--------------------------------------------------------------------------
+    {
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+           equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+      {
+        const FieldMask overlap = it->second & mask;
+        if (!overlap)
+          continue;
+        if (!expr_covers)
+        {
+          IndexSpaceExpression *expr_overlap = 
+            runtime->forest->intersect_index_spaces(expr, 
+                                    it->first->set_expr);
+          if (expr_overlap->is_empty())
+            continue;
+        }
+        version_info->record_equivalence_set(it->first, overlap);
+      }
+      // If we have any disjoint complete events we need to record 
+      // precondition events from them as well since they are not ready
+      if (!disjoint_complete_ready.empty())
+      {
+        for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
+              disjoint_complete_ready.begin(); it !=
+              disjoint_complete_ready.end(); it++)
+          if (!(mask * it->second))
+            ready_events.insert(it->first);
       }
     }
 
@@ -24047,22 +24027,8 @@ namespace Legion {
               wit++;
               continue;
             }
-            for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                  equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-            {
-              const FieldMask overlap = info_overlap & it->second;
-              if (!overlap)
-                continue;
-              if (!wit->expr_covers)
-              {
-                IndexSpaceExpression *expr_overlap = 
-                  runtime->forest->intersect_index_spaces(wit->expr, 
-                                                it->first->set_expr);
-                if (expr_overlap->is_empty())
-                  continue;         
-              }
-              wit->version_info->record_equivalence_set(it->first, overlap);
-            }
+            record_equivalence_sets(wit->version_info, info_overlap,
+                    wit->expr, wit->expr_covers, done_preconditions);
             wit->waiting_mask -= info_overlap;
             if (!wit->waiting_mask)
               wit = waiting_infos.erase(wit);

@@ -3404,6 +3404,13 @@ namespace Legion {
                                        const UniqueID opid,
                                        const AddressSpaceID source,
                                        std::set<RtEvent> &ready);
+    protected:
+      void record_equivalence_sets(VersionInfo *version_info,
+                                   const FieldMask &mask,
+                                   IndexSpaceExpression *expr,
+                                   const bool expr_covers,
+                                   std::set<RtEvent> &ready_events) const;
+    public:
       virtual void add_tracker_reference(unsigned cnt = 1);
       virtual bool remove_tracker_reference(unsigned cnt = 1);
       virtual void record_equivalence_set(EquivalenceSet *set, 
