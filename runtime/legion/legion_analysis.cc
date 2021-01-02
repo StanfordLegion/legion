@@ -23804,6 +23804,16 @@ namespace Legion {
                 version_info->record_equivalence_set(it->first, overlap);
               }
             }
+            // If we have any disjoint complete events we need to record 
+            // precondition events from them as well since they are not ready
+            if (!disjoint_complete_ready.empty())
+            {
+              for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
+                    disjoint_complete_ready.begin(); it !=
+                    disjoint_complete_ready.end(); it++)
+                if (!(version_mask * it->second))
+                  ready_events.insert(it->first);
+            }
           }
           remaining_mask -= equivalence_sets.get_valid_mask();
           // If we got all our fields then we are done
@@ -23853,6 +23863,16 @@ namespace Legion {
                   continue;
               }
               version_info->record_equivalence_set(it->first, overlap);
+            }
+            // If we have any disjoint complete events we need to record 
+            // precondition events from them as well since they are not ready
+            if (!disjoint_complete_ready.empty())
+            {
+              for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
+                    disjoint_complete_ready.begin(); it !=
+                    disjoint_complete_ready.end(); it++)
+                if (!(remaining_mask * it->second))
+                  ready_events.insert(it->first);
             }
           }
           remaining_mask -= equivalence_sets.get_valid_mask();
@@ -24200,6 +24220,13 @@ namespace Legion {
         assert(request_ready.exists());
         assert(region_node->parent != NULL);
 #endif
+        // Record that this is now a disjoint complete child for invalidation
+        // We propagate once when we make the pending refinement object and
+        // again here because this might be a pending refinement from a remote
+        // shard in a control replication context, so we have to do it again
+        // in order to be sure that the parent knows about it
+        region_node->parent->propagate_refinement(ctx, region_node, 
+                                                  request_mask, ready_events);
         // Ask the context to fill in the disjoint complete sets here
         if (context->finalize_disjoint_complete_sets(region_node, this,
                     request_mask, opid, original_source, request_ready) &&
@@ -24211,13 +24238,6 @@ namespace Legion {
           mask |= request_mask;
           deferral_events.erase(request_ready);
         }
-        // Record that this is now a disjoint complete child for invalidation
-        // We propagate once when we make the pending refinement object and
-        // again here because this might be a pending refinement from a remote
-        // shard in a control replication context, so we have to do it again
-        // in order to be sure that the parent knows about it
-        region_node->parent->propagate_refinement(ctx, region_node, 
-                                                  request_mask, ready_events);
         // If we don't have any local fields remaining then we are done
         if (!mask)
           return;
@@ -24275,6 +24295,16 @@ namespace Legion {
       assert(!equivalence_sets.empty());
       assert(!(mask - equivalence_sets.get_valid_mask()));
 #endif
+      // If we have any pending disjoint complete ready events then 
+      // we need to record dependences on them as well
+      if (!disjoint_complete_ready.empty())
+      {
+        for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
+              disjoint_complete_ready.begin(); it !=
+              disjoint_complete_ready.end(); it++)
+          if (!(mask * it->second))
+            ready_events.insert(it->first); 
+      }
       if (target_space != runtime->address_space)
       {
         FieldMaskSet<EquivalenceSet> to_send;
