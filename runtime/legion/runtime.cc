@@ -20156,10 +20156,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T, MessageKind MK, VirtualChannelKind VC>
     DistributedCollectable* Runtime::find_or_request_distributed_collectable(
-                                              DistributedID did, RtEvent &ready)
+                                          DistributedID to_find, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
-      did &= LEGION_DISTRIBUTED_ID_MASK;
+      const DistributedID did = LEGION_DISTRIBUTED_ID_FILTER(to_find);
       DistributedCollectable *result = NULL;
       {
         AutoLock d_lock(distributed_collectable_lock);
@@ -20195,7 +20195,7 @@ namespace Legion {
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(did);
+        rez.serialize(to_find);
       }
       find_messenger(target)->send_message(rez, MK, VC, true/*flush*/);
       return result;
