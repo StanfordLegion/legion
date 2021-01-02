@@ -10594,7 +10594,7 @@ namespace Legion {
       PendingEquivalenceSet *pending = new PendingEquivalenceSet(node);
       initialize_pending(pending, mask, map_applied_conditions);
       // Parent context takes ownership here
-      parent_ctx->record_pending_disjoint_complete_set(pending);
+      parent_ctx->record_pending_disjoint_complete_set(pending, mask);
       std::vector<RegionNode*> &children = refinement_regions[node->parent];
       if (children.size() < node->parent->get_num_children())
       {
@@ -10640,7 +10640,7 @@ namespace Legion {
           PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
           initialize_pending(pending, mask, map_applied_conditions);
           // Parent context takes ownership here
-          parent_ctx->record_pending_disjoint_complete_set(pending);
+          parent_ctx->record_pending_disjoint_complete_set(pending, mask);
           if (add_children)
           {
             bool found = false;
@@ -10667,7 +10667,7 @@ namespace Legion {
           PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
           initialize_pending(pending, mask, map_applied_conditions);
           // Parent context takes ownership here
-          parent_ctx->record_pending_disjoint_complete_set(pending);
+          parent_ctx->record_pending_disjoint_complete_set(pending, mask);
           if (add_children)
           {
             bool found = false;
@@ -10716,7 +10716,6 @@ namespace Legion {
           pending->record_previous(it->first, overlap, applied_events);
         }
       }
-      pending->relax_valid_mask(set_mask);
     }
 
     //--------------------------------------------------------------------------

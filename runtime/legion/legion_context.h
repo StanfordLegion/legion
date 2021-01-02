@@ -947,7 +947,8 @@ namespace Legion {
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask, const UniqueID opid, 
                       const AddressSpaceID original_source);
-      void record_pending_disjoint_complete_set(PendingEquivalenceSet *set);
+      void record_pending_disjoint_complete_set(PendingEquivalenceSet *set,
+                                                const FieldMask &mask);
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
           VersionManager *target, FieldMask mask, const UniqueID opid,
           const AddressSpaceID source, RtUserEvent ready_event);
@@ -1500,8 +1501,8 @@ namespace Legion {
       std::map<PhysicalManager*,RtUserEvent>    pending_top_views;
     protected:
       mutable LocalLock                         pending_set_lock;
-      std::map<RegionNode*,
-         std::list<PendingEquivalenceSet*> >    pending_equivalence_sets;
+      LegionMap<RegionNode*,
+        FieldMaskSet<PendingEquivalenceSet> >::aligned pending_equivalence_sets;
     protected:
       mutable LocalLock                       remote_lock;
       std::map<AddressSpaceID,RemoteContext*> remote_instances;

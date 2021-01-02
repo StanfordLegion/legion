@@ -868,7 +868,9 @@ namespace Legion {
       // For partitions only, we record the counts of the numbers of
       // children that we've observed for all fields to see when we're 
       // close enough to be counted as being considered refined
-      LegionMap<size_t,FieldMask>::aligned disjoint_complete_child_counts;
+      typedef LegionMap<size_t,FieldMask,
+              LAST_ALLOC,std::greater<size_t> >::aligned FieldSizeMap;
+      FieldSizeMap                 disjoint_complete_child_counts;
       // If we have non-zero depth projection functions then we can get
       // these at the bottom of the disjoint complete access trees to say
       // how to project from a given node in the region tree
@@ -985,6 +987,7 @@ namespace Legion {
       RefinementOp* create_refinement(const LogicalUser &user,
           PartitionNode *partition, const FieldMask &refinement_mask,
           const LogicalTraceInfo &trace_info);
+      bool deduplicate(PartitionNode *child, FieldMask &refinement_mask);
     public:
       Operation *const op;
       InnerContext *const context;
@@ -3331,13 +3334,9 @@ namespace Legion {
       void record_all(VersionInfo &version_info, 
                       std::set<RtEvent> &applied_events);
     public:
-      inline void relax_valid_mask(const FieldMask &mask)
-        { previous_sets.relax_valid_mask(mask); }
-      inline const FieldMask& get_valid_mask(void) const
-        { return previous_sets.get_valid_mask(); }
       EquivalenceSet* compute_refinement(AddressSpaceID suggested_owner,
                       Runtime *runtime, std::set<RtEvent> &ready_events);
-      bool finalize(const FieldMask &done_mask, bool &delete_now);
+      bool finalize(void);
       static void handle_defer_finalize(const void *args);
     public:
       RegionNode *const region_node;

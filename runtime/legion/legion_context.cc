@@ -3004,11 +3004,12 @@ namespace Legion {
       }
       while (!pending_equivalence_sets.empty())
       {
-        std::map<RegionNode*,std::list<PendingEquivalenceSet*> >::iterator 
-          next = pending_equivalence_sets.begin();
-        for (std::list<PendingEquivalenceSet*>::const_iterator it =
+        LegionMap<RegionNode*,FieldMaskSet<PendingEquivalenceSet> >::aligned::
+          iterator next = pending_equivalence_sets.begin();
+        for (FieldMaskSet<PendingEquivalenceSet>::const_iterator it =
               next->second.begin(); it != next->second.end(); it++)
-          delete (*it);
+          if (it->first->finalize())
+            delete it->first;
         pending_equivalence_sets.erase(next);
       }
 #ifdef DEBUG_LEGION
@@ -3824,18 +3825,36 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::record_pending_disjoint_complete_set(
-                                                     PendingEquivalenceSet *set)
+                              PendingEquivalenceSet *set, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(pending_set_lock);
-      std::list<PendingEquivalenceSet*> &pending_sets = 
+      FieldMaskSet<PendingEquivalenceSet> &pending_sets =
         pending_equivalence_sets[set->region_node];
+      if (!(mask * pending_sets.get_valid_mask()))
+      {
 #ifdef DEBUG_LEGION
-      for (std::list<PendingEquivalenceSet*>::const_iterator it = 
-            pending_sets.begin(); it != pending_sets.end(); it++)
-        assert((*it)->get_valid_mask() * set->get_valid_mask());
+        // This should only happen for empty index spaces when there is
+        // nothing else that will prune them out prior to this
+        assert(set->region_node->row_source->is_empty());
 #endif
-      pending_sets.push_back(set);
+        std::vector<PendingEquivalenceSet*> to_delete;
+        for (FieldMaskSet<PendingEquivalenceSet>::iterator it =
+              pending_sets.begin(); it != pending_sets.end(); it++)
+        {
+          it.filter(mask);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        for (std::vector<PendingEquivalenceSet*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          pending_sets.erase(*it);
+          if ((*it)->finalize())
+            delete (*it);
+        }
+      }
+      pending_sets.insert(set, mask);
     }
 
     //--------------------------------------------------------------------------
@@ -3846,33 +3865,32 @@ namespace Legion {
     {
       std::set<RtEvent> applied_events;
       AutoLock p_lock(pending_set_lock);
-      std::map<RegionNode*,std::list<PendingEquivalenceSet*> >::iterator
-        finder = pending_equivalence_sets.find(region);
-#ifdef DEBUG_LEGION
-      assert(finder != pending_equivalence_sets.end());
-#endif
-      for (std::list<PendingEquivalenceSet*>::iterator it = 
-            finder->second.begin(); it != finder->second.end(); /*nothing*/)
+      LegionMap<RegionNode*,FieldMaskSet<PendingEquivalenceSet> >::aligned
+        ::iterator finder = pending_equivalence_sets.find(region);
+      if (finder == pending_equivalence_sets.end())
       {
-        const FieldMask overlap = request_mask & (*it)->get_valid_mask();
+#ifdef DEBUG_LEGION
+        assert(region->row_source->is_empty());
+#endif
+        Runtime::trigger_event(ready_event);
+        return true;
+      }
+      std::vector<PendingEquivalenceSet*> to_delete;
+      for (FieldMaskSet<PendingEquivalenceSet>::iterator it =
+            finder->second.begin(); it != finder->second.end(); it++) 
+      {
+        const FieldMask overlap = request_mask & it->second;
         if (!overlap)
-        {
-          it++;
           continue;
-        }
         EquivalenceSet *new_set = 
-          (*it)->compute_refinement(source, runtime, applied_events);
+          it->first->compute_refinement(source, runtime, applied_events);
         FieldMask dummy_parent;
         target->record_refinement(new_set,overlap,dummy_parent,applied_events);
-        bool delete_now = false;
-        if ((*it)->finalize(overlap, delete_now))
-        {
-          if (delete_now)
-            delete (*it);
-          it = finder->second.erase(it);
-        }
-        else
-          it++;
+        it.filter(overlap);
+        // Filter the valid mask too
+        finder->second.filter_valid_mask(overlap);
+        if (!it->second)
+          to_delete.push_back(it->first);
         request_mask -= overlap;
         if (!request_mask)
           break;
@@ -3880,8 +3898,27 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!request_mask); // should have seen all the fields
 #endif
-      if (finder->second.empty())
-        pending_equivalence_sets.erase(finder);
+      if (!to_delete.empty())
+      {
+        if (to_delete.size() != finder->second.size())
+        {
+          for (std::vector<PendingEquivalenceSet*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            finder->second.erase(*it);
+            if ((*it)->finalize())
+              delete (*it);
+          }
+        }
+        else
+        {
+          for (std::vector<PendingEquivalenceSet*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+            if ((*it)->finalize())
+              delete (*it);
+          pending_equivalence_sets.erase(finder);
+        }
+      }
       // We're done now so trigger the ready event and tell the caller too
       if (!applied_events.empty())
         Runtime::trigger_event(ready_event, 
@@ -3897,25 +3934,41 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(pending_set_lock);
-      std::map<RegionNode*,std::list<PendingEquivalenceSet*> >::iterator
-        finder = pending_equivalence_sets.find(region);
-      if (finder == pending_equivalence_sets.end())
+      LegionMap<RegionNode*,FieldMaskSet<PendingEquivalenceSet> >::aligned
+        ::iterator finder = pending_equivalence_sets.find(region);
+      if ((finder == pending_equivalence_sets.end()) ||
+          (finder->second.get_valid_mask() * mask))
         return;
-      for (std::list<PendingEquivalenceSet*>::iterator it = 
-            finder->second.begin(); it != finder->second.end(); /*nothing*/)
+      std::vector<PendingEquivalenceSet*> to_delete;
+      for (FieldMaskSet<PendingEquivalenceSet>::iterator it =
+            finder->second.begin(); it != finder->second.end(); it++)
       {
-        bool delete_now = false;
-        if ((*it)->finalize(mask, delete_now))
-        {
-          if (delete_now)
-            delete (*it);
-          it = finder->second.erase(it);
-        }
-        else
-          it++;
+        it.filter(mask);
+        if (!it->second)
+          to_delete.push_back(it->first);
       }
-      if (finder->second.empty())
+#ifdef DEBUG_LEGION
+      assert(!to_delete.empty());
+#endif
+      if (to_delete.size() != finder->second.size())
+      {
+        for (std::vector<PendingEquivalenceSet*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          finder->second.erase(*it);
+          if ((*it)->finalize())
+            delete (*it);
+        }
+        finder->second.filter_valid_mask(mask);
+      }
+      else
+      {
+        for (std::vector<PendingEquivalenceSet*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+          if ((*it)->finalize())
+            delete (*it);
         pending_equivalence_sets.erase(finder);
+      }
     }
 
     //--------------------------------------------------------------------------

@@ -1706,13 +1706,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(finder != sharded_region_version_infos.end());
 #endif
-            // If we had unintialized fields or this is an empy region, 
-            // relax the valid mask for any of them
-            finder->second.relax_valid_mask(pit->second);
             PendingEquivalenceSet *pending = new PendingEquivalenceSet(*rit);
             pending->record_all(finder->second, map_applied_conditions);
             // Context takes ownership at this point
-            parent_ctx->record_pending_disjoint_complete_set(pending);
+            parent_ctx->record_pending_disjoint_complete_set(pending, 
+                                                             pit->second);
           }
         }
       }

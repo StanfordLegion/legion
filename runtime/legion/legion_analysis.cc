@@ -3972,6 +3972,37 @@ namespace Legion {
       return refinement_op;
     }
 
+    //--------------------------------------------------------------------------
+    bool RefinementTracker::deduplicate(PartitionNode *child, FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionVector<PendingRefinement>::aligned::iterator it =
+            pending_refinements.begin(); it != pending_refinements.end(); it++)
+      {
+        if (it->partition->parent != child->parent)
+          continue;
+        const FieldMask overlap = it->refinement_mask & mask;
+        if (!overlap)
+          continue;
+        if (it->partition != child)
+        {
+          if (overlap != it->refinement_mask)
+          {
+            // Filter off the fields we'll do later
+            it->refinement_mask -= overlap;
+            continue;
+          }
+          else
+            // We can co-opt this refinement op to do this child instead
+            it->partition = child;
+        }
+        mask -= overlap;
+        if (!mask)
+          return false;
+      }
+      return true;
+    }
+
 #ifdef NEWEQ
     /////////////////////////////////////////////////////////////
     // KDNode
@@ -23632,57 +23663,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PendingEquivalenceSet::finalize(const FieldMask &done_mask, 
-                                         bool &delete_now)
+    bool PendingEquivalenceSet::finalize(void)
     //--------------------------------------------------------------------------
     {
-      if (!!(previous_sets.get_valid_mask() - done_mask))
+      if (!clone_event.exists() || clone_event.has_triggered())
       {
-        std::vector<EquivalenceSet*> to_delete;
-        for (FieldMaskSet<EquivalenceSet>::iterator it =
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               previous_sets.begin(); it != previous_sets.end(); it++)
-        {
-          it.filter(done_mask);
-          if (!it->second)
-            to_delete.push_back(it->first);
-        }
-        // We can't actually remove these until the clone event has triggered
-        if (!clone_event.exists() || clone_event.has_triggered())
-        {
-          for (std::vector<EquivalenceSet*>::const_iterator it =
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            previous_sets.erase(*it);
-            if ((*it)->remove_base_valid_ref(PENDING_REFINEMENT_REF))
-              delete (*it);
-          }
-        }
-        previous_sets.filter_valid_mask(done_mask);
-        delete_now = false;
-        return false;
+          if (it->first->remove_base_valid_ref(PENDING_REFINEMENT_REF))
+            delete it->first;
+        previous_sets.clear();
+        // Indicate that we can delete this now
+        return true;
       }
       else
       {
-        if (!clone_event.exists() || clone_event.has_triggered())
-        {
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                previous_sets.begin(); it != previous_sets.end(); it++)
-            if (it->first->remove_base_valid_ref(PENDING_REFINEMENT_REF))
-              delete it->first;
-          previous_sets.clear();
-          delete_now = true;
-        }
-        else
-        {
-          // Launch a meta-task to remove these references and delete
-          // the object once we know that the clone event has triggered
-          DeferFinalizePendingSetArgs args(this);
-          region_node->context->runtime->issue_runtime_meta_task(args,
-              LG_LATENCY_DEFERRED_PRIORITY, clone_event);
-          delete_now = false;
-        }
-        // Safe to remove this from the list since it is finalized
-        return true;
+        // Launch a meta-task to remove these references and delete
+        // the object once we know that the clone event has triggered
+        DeferFinalizePendingSetArgs args(this);
+        region_node->context->runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY, clone_event);
+        // Do no delete this now
+        return false;
       }
     }
 
@@ -23693,12 +23695,6 @@ namespace Legion {
     {
       const DeferFinalizePendingSetArgs *dargs = 
         (const DeferFinalizePendingSetArgs*)args;
-      bool delete_now = false;
-      const FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      dargs->pending->finalize(all_ones, delete_now);
-#ifdef DEBUG_LEGION
-      assert(delete_now);
-#endif
       delete dargs->pending;
     }
 
@@ -24292,8 +24288,9 @@ namespace Legion {
       // If we make it here then we should have equivalence sets for
       // all these remaining fields
 #ifdef DEBUG_LEGION
-      assert(!equivalence_sets.empty());
-      assert(!(mask - equivalence_sets.get_valid_mask()));
+      assert(!equivalence_sets.empty() || region_node->row_source->is_empty());
+      assert(!(mask - equivalence_sets.get_valid_mask()) ||
+              region_node->row_source->is_empty());
 #endif
       // If we have any pending disjoint complete ready events then 
       // we need to record dependences on them as well

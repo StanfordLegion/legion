@@ -15612,45 +15612,68 @@ namespace Legion {
                 // equivalence sets going down the region tree.
                 child_disjoint_complete -= refinement_mask;
                 PartitionNode *part_child = next_child->as_partition_node();
-                // Create a refinement operation
-                RefinementOp *refinement_op = 
-                  refinement_tracker.create_refinement(user, part_child, 
-                                            refinement_mask, trace_info);
-                // We can't modify the disjoint complete tree yet because
-                // we need to wait for all the region requirements to be
-                // traversed before that to see if any other ones want
-                // to contribute to this refineemnt. We can do the logical
-                // dependence analysis though because we know that all later
-                // region requirements are going to ignore this refinement
-                // Perform the dependence analysis for all open sub-trees
-                // to make sure we record dependences on any operations
-                // we need to before performing this refinement
-                const LogicalUser refinement_user(refinement_op, 0/*index*/,
-                  RegionUsage(READ_WRITE,EXCLUSIVE,0/*redop*/),refinement_mask);
-                // Start the dependence analysis here, the initial caller of
-                // register_logical_user will be the function that finishes
-                // it for each of the reginement operations
-                perform_tree_dominance_analysis(ctx, refinement_user, 
-                      refinement_mask, user.op/*skip op*/, user.gen);
-                // Register the refinement as an operation here
-                register_local_user(state, refinement_user, trace_info); 
+                // Check to see if we have already have a refinement
+                if (refinement_tracker.deduplicate(part_child, refinement_mask))
+                {
+                  // Create a refinement operation
+                  RefinementOp *refinement_op = 
+                    refinement_tracker.create_refinement(user, part_child, 
+                                              refinement_mask, trace_info);
+                  // We can't modify the disjoint complete tree yet because
+                  // we need to wait for all the region requirements to be
+                  // traversed before that to see if any other ones want
+                  // to contribute to this refineemnt. We can do the logical
+                  // dependence analysis though because we know that all later
+                  // region requirements are going to ignore this refinement
+                  // Perform the dependence analysis for all open sub-trees
+                  // to make sure we record dependences on any operations
+                  // we need to before performing this refinement
+                  const LogicalUser refinement_user(refinement_op, 0/*index*/,
+                    RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/),
+                    refinement_mask);
+                  // Start the dependence analysis here, the initial caller of
+                  // register_logical_user will be the function that finishes
+                  // it for each of the reginement operations
+                  perform_tree_dominance_analysis(ctx, refinement_user, 
+                        refinement_mask, user.op/*skip op*/, user.gen);
+                  // Register the refinement as an operation here
+                  register_local_user(state, refinement_user, trace_info); 
 #ifdef DEBUG_LEGION
-                assert(refinement_mask * refinements.get_valid_mask()); 
+                  assert(refinement_mask * refinements.get_valid_mask()); 
 #endif
-                // Record this for going up the tree to catch dependences
-                // on anything above us
-                refinements.insert(refinement_op, refinement_mask);
+                  // Record this for going up the tree to catch dependences
+                  // on anything above us
+                  refinements.insert(refinement_op, refinement_mask);
+                }
               }
             }
             if (!!child_disjoint_complete)
             {
-              // Only remember the most-recent access for a disjoint complete
-              // child for a region node
+#ifdef DEBUG_LEGION
+              assert(child_disjoint_complete * state.disjoint_complete_tree);
+#endif
+              // There's no point in remembering anything here, just keep
+              // passing it up the tree where the state is stored once we
+              // get back to the disjoint complete tree
+              disjoint_complete_below = child_disjoint_complete;
               FieldMaskSet<RegionTreeNode> &access_disjoint_complete_children =
                 state.disjoint_complete_accesses;
-              if (!(child_disjoint_complete * 
-                    access_disjoint_complete_children.get_valid_mask()))
+              // We do need to remember what was the most recent child though
+              // to propagate this information up the tree
+              FieldMaskSet<RegionTreeNode>::iterator finder = 
+                access_disjoint_complete_children.find(next_child);
+              if (finder != access_disjoint_complete_children.end())
               {
+                child_disjoint_complete -= finder->second;
+                if (!!child_disjoint_complete)
+                  finder.merge(child_disjoint_complete);
+              }
+              else
+                access_disjoint_complete_children.insert(next_child, 
+                                            child_disjoint_complete);
+              if (!!child_disjoint_complete)
+              {
+                // Filter out any other children for the fields we added
                 std::vector<RegionTreeNode*> to_delete;
                 for (FieldMaskSet<RegionTreeNode>::iterator it =
                       access_disjoint_complete_children.begin(); it !=
@@ -15667,21 +15690,6 @@ namespace Legion {
                         to_delete.begin(); it != to_delete.end(); it++)
                     access_disjoint_complete_children.erase(*it);
               }
-              FieldMaskSet<RegionTreeNode>::iterator finder = 
-                access_disjoint_complete_children.find(next_child);
-              if (finder != access_disjoint_complete_children.end())
-              {
-                disjoint_complete_below = 
-                  child_disjoint_complete - finder->second;
-                if (!!disjoint_complete_below)
-                  finder.merge(disjoint_complete_below);
-              }
-              else
-              {
-                access_disjoint_complete_children.insert(next_child,
-                                            child_disjoint_complete);
-                disjoint_complete_below = child_disjoint_complete;
-              }
             }
           }
           else if (!!child_disjoint_complete)
@@ -15692,9 +15700,6 @@ namespace Legion {
             // we can just ignore this child being complete
             if (part_node->is_disjoint() && part_node->is_complete())
             {
-#ifdef DEBUG_LEGION
-              assert(state.disjoint_complete_accesses.empty());
-#endif
               // Filter out any additional fields for which we are
               // already disjoint and complete but just didn't refine
               // for the children because we were the lowest level partition
@@ -15702,19 +15707,26 @@ namespace Legion {
                 child_disjoint_complete -= state.disjoint_complete_tree;
               if (!!child_disjoint_complete)
               {
-                // Remove any fields that have already been passed up
-                const FieldMask &handled = 
-                  state.disjoint_complete_accesses.get_valid_mask();
-                if (!!handled)
-                  child_disjoint_complete -= handled;
+                // Check to see if we've already been counted
+                FieldMaskSet<RegionTreeNode>::iterator finder =
+                  state.disjoint_complete_accesses.find(next_child);
+                if (finder != state.disjoint_complete_accesses.end())
+                {
+                  child_disjoint_complete -= finder->second;
+                  if (!!child_disjoint_complete)
+                    finder.merge(child_disjoint_complete);
+                }
+                else
+                  state.disjoint_complete_accesses.insert(next_child,
+                                            child_disjoint_complete);
               }
               if (!!child_disjoint_complete)
               {
                 // Scan through and update the counts, if we hit
                 // the thresholds then we can count this as refined
-                for (LegionMap<size_t,FieldMask>::aligned::reverse_iterator it =
-                      state.disjoint_complete_child_counts.rbegin(); it !=
-                      state.disjoint_complete_child_counts.rend(); /*nothing*/)
+                for (LogicalState::FieldSizeMap::iterator it =
+                      state.disjoint_complete_child_counts.begin(); it !=
+                      state.disjoint_complete_child_counts.end(); /*nothing*/)
                 {
                   const FieldMask overlap = 
                     child_disjoint_complete & it->second;
@@ -15729,16 +15741,14 @@ namespace Legion {
                   if (!it->second)
                   {
                     // Remove it from the set
-                    // This is a reverse iterator, so we have to increment
-                    // first and then delete the base
-                    it++;
-                    state.disjoint_complete_child_counts.erase(it.base());
+                    LogicalState::FieldSizeMap::iterator to_delete = it++;
+                    state.disjoint_complete_child_counts.erase(to_delete);
                   }
                   else
                     it++;
                   // Add one for the overlap fields, will not break iterator
                   // since it is going to be behind our traversal
-                  LegionMap<size_t,FieldMask>::aligned::iterator finder = 
+                  LogicalState::FieldSizeMap::iterator finder =
                     state.disjoint_complete_child_counts.find(next_count);
                   if (finder != state.disjoint_complete_child_counts.end())
                     finder->second |= overlap;
@@ -15751,21 +15761,32 @@ namespace Legion {
                 if (!!child_disjoint_complete)
                   state.disjoint_complete_child_counts[1] = 
                                               child_disjoint_complete;
-                // Only the last count can be big enough to exceed the
+                // Only the first count can be big enough to exceed the
                 // threshold so check to see if it is big enough
-                LegionMap<size_t,FieldMask>::aligned::reverse_iterator last =
-                  state.disjoint_complete_child_counts.rbegin();
+                LogicalState::FieldSizeMap::iterator first =
+                  state.disjoint_complete_child_counts.begin();
                 // This is a heuristic here!
                 // We're looking for the count to grow to be at least as
                 // big as half of the children, we could change this later
-                if (last->first >= ((part_node->get_num_children() + 1) / 2))
+                if (first->first >= ((part_node->get_num_children() + 1) / 2))
                 {
-                  disjoint_complete_below = last->second;
-                  state.disjoint_complete_accesses.relax_valid_mask(
-                                                        last->second);
+                  disjoint_complete_below = first->second;
                   // Same deal with deleting a reverse iterator
                   // increment first and then get the base
-                  state.disjoint_complete_child_counts.erase((++last).base());
+                  state.disjoint_complete_child_counts.erase(first);
+                  // Go through and filter out any child counts for these fields
+                  std::vector<RegionTreeNode*> to_delete;
+                  for (FieldMaskSet<RegionTreeNode>::iterator it =
+                        state.disjoint_complete_accesses.begin(); it !=
+                        state.disjoint_complete_accesses.end(); it++)
+                  {
+                    it.filter(disjoint_complete_below);
+                    if (!it->second)
+                      to_delete.push_back(it->first);
+                  }
+                  for (std::vector<RegionTreeNode*>::const_iterator it =
+                        to_delete.begin(); it != to_delete.end(); it++)
+                    state.disjoint_complete_accesses.erase(*it);
                 }
               }
             }
@@ -17176,7 +17197,7 @@ namespace Legion {
       }
       if (!state.disjoint_complete_child_counts.empty())
       {
-        for (LegionMap<size_t,FieldMask>::aligned::iterator it =
+        for (LogicalState::FieldSizeMap::iterator it =
               state.disjoint_complete_child_counts.begin(); it !=
               state.disjoint_complete_child_counts.end(); /*nothing*/)
         {
@@ -17362,9 +17383,8 @@ namespace Legion {
       }
       else
       {
-        assert(state.disjoint_complete_accesses.empty());
         FieldMask count_previous;
-        for (LegionMap<size_t,FieldMask>::aligned::const_iterator it =
+        for (LogicalState::FieldSizeMap::const_iterator it =
               state.disjoint_complete_child_counts.begin(); it !=
               state.disjoint_complete_child_counts.end(); it++)
         {
@@ -17921,7 +17941,7 @@ namespace Legion {
 #endif
       }
       rez.serialize<size_t>(state.disjoint_complete_child_counts.size());
-      for (LegionMap<size_t,FieldMask>::aligned::const_iterator it =
+      for (LogicalState::FieldSizeMap::const_iterator it =
             state.disjoint_complete_child_counts.begin(); it !=
             state.disjoint_complete_child_counts.end(); it++)
       {
@@ -18041,7 +18061,7 @@ namespace Legion {
         derez.deserialize(count);
         if (!inline_counts)
         {
-          LegionMap<size_t,FieldMask>::aligned::iterator finder =
+          LogicalState::FieldSizeMap::iterator finder =
             state.disjoint_complete_child_counts.find(count);
           if (finder != state.disjoint_complete_child_counts.end())
           {
@@ -20711,7 +20731,6 @@ namespace Legion {
       assert(refinement_mask * state.disjoint_complete_tree);
       assert(row_source->is_disjoint(false/*from app*/));
       assert(row_source->is_complete(false/*from app*/));
-      assert(state.disjoint_complete_accesses.empty());
 #endif
       state.disjoint_complete_tree |= refinement_mask;
       // The fields in the disjoint_complete_accesses valid mask 
@@ -20870,6 +20889,23 @@ namespace Legion {
       }
       if (!unrefined_children.empty())
         refinement_op->record_refinements(unrefined_children);
+      // Clean up the disjoint complete accesses data structure, remove
+      // any children present and filter the valid mask appropriately
+      if (!state.disjoint_complete_accesses.empty())
+      {
+        std::vector<RegionTreeNode*> to_delete;
+        for (FieldMaskSet<RegionTreeNode>::iterator it =
+              state.disjoint_complete_accesses.begin(); it !=
+              state.disjoint_complete_accesses.end(); it++)
+        {
+          it.filter(child_overlap);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        for (std::vector<RegionTreeNode*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+          state.disjoint_complete_accesses.erase(*it);
+      }
       state.disjoint_complete_accesses.filter_valid_mask(child_overlap);
     }
 
