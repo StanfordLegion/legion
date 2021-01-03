@@ -512,6 +512,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // TODO: Implement this if someone wants to memoize static traces
+      assert(false);
     }
 #endif
 
@@ -1061,7 +1062,7 @@ namespace Legion {
       UniqueID context_uid = ctx->get_unique_id();
       for (unsigned idx = 0; idx < operations.size(); ++idx)
       {
-        UniqueID uid = get_current_uid_by_index(idx);
+        const UniqueID uid = get_current_uid_by_index(idx);
         const LegionVector<DependenceRecord>::aligned &deps = dependences[idx];
         for (LegionVector<DependenceRecord>::aligned::const_iterator it =
              deps.begin(); it != deps.end(); it++)
@@ -1069,8 +1070,7 @@ namespace Legion {
           if ((it->prev_idx == -1) || (it->next_idx == -1))
           {
             LegionSpy::log_mapping_dependence(
-               context_uid,
-               operations[it->operation_idx].first->get_unique_op_id(),
+               context_uid, get_current_uid_by_index(it->operation_idx),
                (it->prev_idx == -1) ? 0 : it->prev_idx,
                uid,
                (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
@@ -1078,8 +1078,7 @@ namespace Legion {
           else
           {
             LegionSpy::log_mapping_dependence(
-                context_uid,
-                operations[it->operation_idx].first->get_unique_op_id(),
+                context_uid, get_current_uid_by_index(it->operation_idx),
                 it->prev_idx, uid, it->next_idx, it->dtype);
           }
         }
