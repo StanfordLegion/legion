@@ -10384,6 +10384,9 @@ namespace Legion {
     const FieldMask& RefinementOp::get_internal_mask(void) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!!make_from.get_valid_mask());
+#endif
       return make_from.get_valid_mask();
     }
 
@@ -10398,6 +10401,10 @@ namespace Legion {
 #endif
       initialize_internal(creator, index, trace_info);
       to_refine = root;
+      // Initialize the mask for make_from for now in case
+      // get_internal_mask is called before recording any
+      // entries in make_from (e.g. logical tracing)
+      make_from.relax_valid_mask(mask);
       MustEpochOp *must = creator->get_must_epoch_op();
       if (must != NULL)
         set_must_epoch(must, false/*do registration*/);
@@ -10425,6 +10432,10 @@ namespace Legion {
                            const FieldMask &mask, RefProjectionSummary *summary)
     //--------------------------------------------------------------------------
     {
+      // clear any residual fields before recording in make_from
+      // they were just there until we recorded refinements
+      if (make_from.empty())
+        make_from.clear();
       make_from.insert(node, mask);
       if (summary != NULL)
       {

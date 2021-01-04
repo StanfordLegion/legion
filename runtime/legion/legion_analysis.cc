@@ -3812,6 +3812,7 @@ namespace Legion {
               if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
                 delete (*it);
             }
+            state.disjoint_complete_children.tighten_valid_mask();
           }
         }
       }
