@@ -3090,12 +3090,11 @@ namespace Legion {
                                                           acquired_instances);
       complete_mapping(mapping_applied);
       
-      if (!map_complete_event.has_triggered())
+      if (!request_early_complete(map_complete_event))
       {
         // Issue a deferred trigger on our completion event
         // and mark that we are no longer responsible for 
         // triggering our completion event
-        request_early_complete(map_complete_event);
         DeferredExecuteArgs deferred_execute_args(this);
         runtime->issue_runtime_meta_task(deferred_execute_args,
                                          LG_THROUGHPUT_DEFERRED_PRIORITY,
@@ -4992,8 +4991,10 @@ namespace Legion {
                                                           acquired_instances);
       complete_mapping(mapping_applied);
       // Handle the case for marking when the copy completes
-      request_early_complete(copy_complete_event);
-      complete_execution(Runtime::protect_event(copy_complete_event));
+      if (!request_early_complete(copy_complete_event))
+        complete_execution(Runtime::protect_event(copy_complete_event));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -6716,8 +6717,10 @@ namespace Legion {
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
       ApEvent done = Runtime::merge_events(NULL, executed_preconditions);
-      request_early_complete(done);
-      complete_execution(Runtime::protect_event(done));
+      if (!request_early_complete(done))
+        complete_execution(Runtime::protect_event(done));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -7567,12 +7570,9 @@ namespace Legion {
               complete_mapping(Runtime::merge_events(map_applied_conditions));
             else
               complete_mapping();
-            request_early_complete(execution_precondition);
-            if (!execution_precondition.has_triggered())
-            {
-              RtEvent wait_on = Runtime::protect_event(execution_precondition);
-              complete_execution(wait_on);
-            }
+            if (!request_early_complete(execution_precondition))
+              complete_execution(
+                  Runtime::protect_event(execution_precondition));
             else
               complete_execution();
             break;
@@ -9155,8 +9155,10 @@ namespace Legion {
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
       complete_mapping(mapping_applied);
-      request_early_complete(close_event);
-      complete_execution(Runtime::protect_event(close_event));
+      if (!request_early_complete(close_event))
+        complete_execution(Runtime::protect_event(close_event));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -9898,8 +9900,10 @@ namespace Legion {
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
       complete_mapping(mapping_applied);
-      request_early_complete(acquire_complete);
-      complete_execution(Runtime::protect_event(acquire_complete));
+      if (!request_early_complete(acquire_complete))
+        complete_execution(Runtime::protect_event(acquire_complete));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -10780,8 +10784,10 @@ namespace Legion {
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
       complete_mapping(mapping_applied);
-      request_early_complete(release_complete);
-      complete_execution(Runtime::protect_event(release_complete));
+      if (!request_early_complete(release_complete))
+        complete_execution(Runtime::protect_event(release_complete));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -14151,8 +14157,10 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id, done_event,
                                         completion_event);
 #endif
-      request_early_complete(done_event);
-      complete_execution(Runtime::protect_event(done_event));
+      if (!request_early_complete(done_event))
+        complete_execution(Runtime::protect_event(done_event));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -14191,11 +14199,13 @@ namespace Legion {
         {
           ApEvent done_event = thunk->perform(this, runtime->forest,
               Runtime::merge_events(&info, index_preconditions), instances);
-          request_early_complete(done_event);
 #ifdef LEGION_SPY
           Runtime::trigger_event(NULL, intermediate_index_event, done_event);
 #endif
-          complete_execution(Runtime::protect_event(done_event));
+          if (!request_early_complete(done_event))
+            complete_execution(Runtime::protect_event(done_event));
+          else
+            complete_execution();
         }
 #ifdef LEGION_SPY
         return intermediate_index_event;
@@ -16268,8 +16278,10 @@ namespace Legion {
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
       ApEvent done = Runtime::merge_events(NULL, executed_preconditions);
-      request_early_complete(done);
-      complete_execution(Runtime::protect_event(done));
+      if (!request_early_complete(done))
+        complete_execution(Runtime::protect_event(done));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -17545,8 +17557,10 @@ namespace Legion {
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping(); 
-      request_early_complete(detach_event);
-      complete_execution(Runtime::protect_event(detach_event));
+      if (!request_early_complete(detach_event))
+        complete_execution(Runtime::protect_event(detach_event));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
