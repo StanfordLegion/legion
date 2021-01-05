@@ -1726,14 +1726,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalRegionImpl::PhysicalRegionImpl(const RegionRequirement &r, 
-                                   ApEvent mapped, bool m, TaskContext *ctx, 
-                                   MapperID mid, MappingTagID t, 
-                                   bool leaf, bool virt, Runtime *rt)
+                RtEvent mapped, ApEvent ready, bool m, TaskContext *ctx, 
+                MapperID mid, MappingTagID t, bool leaf, bool virt, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
         leaf_region(leaf), virtual_mapped(virt), 
         replaying((ctx != NULL) ? ctx->owner_task->is_replaying() : false),
-        mapped_event(mapped), req(r), mapped(m), valid(false), 
-        trigger_on_unmap(false), made_accessor(false)
+        mapped_event(mapped), ready_event(ready), req(r), mapped(m), 
+        valid(false), trigger_on_unmap(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1742,8 +1741,8 @@ namespace Legion {
     PhysicalRegionImpl::PhysicalRegionImpl(const PhysicalRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL), map_id(0), tag(0),
         leaf_region(false), virtual_mapped(false), replaying(false),
-        mapped_event(ApEvent::NO_AP_EVENT), mapped(false), valid(false), 
-        trigger_on_unmap(false), made_accessor(false)
+        mapped_event(RtEvent::NO_RT_EVENT), ready_event(ApEvent::NO_AP_EVENT),
+        mapped(false),valid(false),trigger_on_unmap(false),made_accessor(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1815,7 +1814,8 @@ namespace Legion {
               (warning_string == NULL) ? "" : warning_string)
         if (context != NULL)
           context->begin_task_wait(false/*from runtime*/);
-        mapped_event.wait();
+        if (!mapped_event.has_triggered())
+          mapped_event.wait();
         if (context != NULL)
           context->end_task_wait();
       }
@@ -1823,19 +1823,14 @@ namespace Legion {
       if (valid)
         return;
       // Now wait for the reference to be ready
-      std::set<ApEvent> wait_on;
-      references.update_wait_on_events(wait_on);
-      ApEvent ref_ready;
-      if (!wait_on.empty())
-        ref_ready = Runtime::merge_events(NULL, wait_on);
       bool poisoned;
-      if (!ref_ready.has_triggered_faultaware(poisoned))
+      if (!ready_event.has_triggered_faultaware(poisoned))
       {
         if (!poisoned)
         {
           if (context != NULL)
             context->begin_task_wait(false/*from runtime*/);
-          ref_ready.wait_faultaware(poisoned);
+          ready_event.wait_faultaware(poisoned);
           if (context != NULL)
             context->end_task_wait();
         }
@@ -1851,12 +1846,8 @@ namespace Legion {
         return true;
       if (mapped_event.has_triggered())
       {
-        std::set<ApEvent> wait_on;
-        references.update_wait_on_events(wait_on);
-        if (wait_on.empty())
-          return true;
-        ApEvent ref_ready = Runtime::merge_events(NULL, wait_on);
-        return ref_ready.has_triggered();
+        bool poisoned = false;
+        return ready_event.has_triggered_faultaware(poisoned) || poisoned;
       }
       return false;
     }
@@ -2043,21 +2034,14 @@ namespace Legion {
     {
       if (!mapped)
         return;
-      wait_until_valid(true/*silence warnings*/, NULL);
+      // wait until we actually have everything set
+      if (!ready_event.has_triggered())
+        ready_event.wait();
       if (trigger_on_unmap)
       {
         trigger_on_unmap = false;
         // Can only do the trigger when we have actually ready
-        std::set<ApEvent> wait_on;
-        references.update_wait_on_events(wait_on);
-        if (!wait_on.empty())
-        {
-          wait_on.insert(mapped_event);
-          Runtime::trigger_event(NULL, termination_event,
-                                 Runtime::merge_events(NULL, wait_on));
-        }
-        else
-          Runtime::trigger_event(NULL, termination_event, mapped_event);
+        Runtime::trigger_event(NULL, termination_event, ready_event);
       }
       valid = false;
       mapped = false;
@@ -2081,13 +2065,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::remap_region(ApEvent new_mapped)
+    void PhysicalRegionImpl::remap_region(RtEvent new_mapped, ApEvent new_ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!mapped);
 #endif
       mapped_event = new_mapped;
+      ready_event = new_ready;
       mapped = true;
     }
 
@@ -2125,10 +2110,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent PhysicalRegionImpl::get_mapped_event(void) const
+    RtEvent PhysicalRegionImpl::get_mapped_event(void) const
     //--------------------------------------------------------------------------
     {
       return mapped_event;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PhysicalRegionImpl::get_ready_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ready_event;
     }
 
     //--------------------------------------------------------------------------

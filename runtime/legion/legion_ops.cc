@@ -2793,9 +2793,8 @@ namespace Legion {
       tag = launcher.tag;
       layout_constraint_id = launcher.layout_constraint_id;
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-                              completion_event, true/*mapped*/, ctx, 
-                              map_id, tag, false/*leaf*/, 
-                              false/*virtual mapped*/, runtime));
+            mapped_event, completion_event, true/*mapped*/, ctx, map_id, tag, 
+            false/*leaf*/, false/*virtual mapped*/, runtime));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
@@ -2817,10 +2816,8 @@ namespace Legion {
       tag = reg.impl->tag;
       region = reg;
       termination_event = Runtime::create_ap_user_event(NULL);
-      region.impl->remap_region(completion_event);
-      // We're only really remapping it if it already had a physical
-      // instance that we can use to make a valid value
-      remap_region = region.impl->has_references();
+      region.impl->remap_region(mapped_event, completion_event);
+      remap_region = true;
       // No need to check the privileges here since we know that we have
       // them from the first time that we made this physical region
       if (runtime->legion_spy_enabled)
@@ -2985,7 +2982,8 @@ namespace Legion {
       ApEvent effects_done;
       const bool track_effects = 
         (!atomic_locks.empty() || !arrive_barriers.empty());
-      if (remap_region)
+      // Check that we actually have references for this physical region
+      if (remap_region && region.impl->has_references())
       {
         region.impl->get_references(mapped_instances);
         effects_done = 
@@ -16813,9 +16811,8 @@ namespace Legion {
           assert(false); // should never get here
       }
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-                              completion_event, launcher.mapped, ctx,
-                              0/*map id*/, 0/*tag*/, false/*leaf*/, 
-                              false/*virtual mapped*/, runtime)); 
+            mapped_event, completion_event, launcher.mapped, ctx, 0/*map id*/,
+            0/*tag*/, false/*leaf*/, false/*virtual mapped*/, runtime)); 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
@@ -17340,32 +17337,13 @@ namespace Legion {
     {
       initialize_operation(ctx, !unordered/*track*/);
       flush = flsh;
+      // Get a reference to the region to keep it alive
+      this->region = region; 
       requirement = region.impl->get_requirement();
       // Make sure that the privileges are read-write so that we wait for
       // all prior users of this particular region
       requirement.privilege = LEGION_READ_WRITE;
       requirement.prop = LEGION_EXCLUSIVE;
-      // Delay getting a reference until trigger_mapping().  This means we
-      //  have to keep region
-      if (!region.is_valid())
-        region.wait_until_valid();
-      this->region = region; 
-      // Make sure that we have privileges on all the fields for the 
-      // physical region regardless of whether they where valid or 
-      // not when we attached since we need to filter them all
-      // Now we can get the reference we need for the detach operation
-      InstanceSet references;
-      this->region.impl->get_references(references);
-      FieldMask all_allocated_fields;
-      for (unsigned idx = 0; idx < references.size(); idx++)
-      {
-        InstanceManager *manager = references[idx].get_manager();
-        all_allocated_fields |= manager->layout->allocated_fields;
-      }
-      FieldSpaceNode *field_space = 
-        runtime->forest->get_node(requirement.region.get_field_space());
-      field_space->get_field_set(all_allocated_fields, parent_ctx, 
-                                 requirement.privilege_fields);
       // Check to see if this is a valid detach operation
       if (!region.impl->is_external_region())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
@@ -17472,18 +17450,6 @@ namespace Legion {
                                                    requirement, 
                                                    version_info,
                                                    preconditions);
-      // Add a valid reference to the instances to act as an acquire to keep
-      // them valid through the end of mapping them, we'll release the valid
-      // references when we are done mapping
-      InstanceSet references;
-      region.impl->get_references(references);
-#ifdef DEBUG_LEGION
-      assert(references.size() == 1);
-#endif
-      const InstanceRef &reference = references[0];
-      WrapperReferenceMutator mutator(preconditions);
-      PhysicalManager *manager = reference.get_instance_manager();
-      manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -17494,6 +17460,12 @@ namespace Legion {
     void DetachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      // Logical dependence analysis should guarantee that we are valid
+      // by the time we get here because the inline mapping/attach op
+      // that made the physical region should have mapped before us
+#ifdef DEBGU_LEGION
+      assert(region.impl->get_mapped_event().has_triggered());
+#endif
       // Actual unmap of an inline mapped region was deferred to here
       if (region.impl->is_mapped())
         region.impl->unmap_region();
@@ -17504,8 +17476,16 @@ namespace Legion {
       assert(references.size() == 1);
 #endif
       const InstanceRef &reference = references[0]; 
+      // Add a valid reference to the instances to act as an acquire to keep
+      // them valid through the end of mapping them, we'll release the valid
+      // references when we are done mapping
+      WrapperReferenceMutator mutator(map_applied_conditions);
+      PhysicalManager *manager = reference.get_instance_manager();
+#ifdef DEBUG_LEGION
+      assert(!manager->is_reduction_manager()); 
+#endif
+      manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
       const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
-      std::set<ApEvent> detach_events;
       // If we need to flush then register this operation to bring the
       // data that it has up to date, use READ-ONLY privileges since we're
       // not going to invalidate the existing data. Don't register ourselves
@@ -17557,10 +17537,6 @@ namespace Legion {
                                         completion_event);
 #endif
       }
-      PhysicalManager *manager = reference.get_instance_manager();
-#ifdef DEBUG_LEGION
-      assert(!manager->is_reduction_manager()); 
-#endif
       // Also tell the runtime to detach the external instance from memory
       // This has to be done before we can consider this mapped
       RtEvent detached_event = manager->detach_external_instance();

@@ -683,7 +683,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
-          ApEvent::NO_AP_EVENT, mapped, this, mid, tag, 
+          RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, mapped, this, mid, tag, 
           is_leaf_context(), virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
       if (mapped)
@@ -6063,9 +6063,6 @@ namespace Legion {
       // if it is then we are done
       if (region.is_mapped())
         return ApEvent::NO_AP_EVENT;
-      // Make sure this region is valid before trying to remap it
-      if (!region.is_valid())
-        region.wait_until_valid(true/*silence warnings*/);
       MapOp *map_op = runtime->get_available_map_op();
       map_op->initialize(this, region);
       register_inline_mapped_region(region);
@@ -6386,17 +6383,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      // Make sure this region is valid before we try to detach it
-      if (!region.is_valid())
-        region.wait_until_valid(true/*silence warnings*/);
       DetachOp *op = runtime->get_available_detach_op();
-      Future result = op->initialize_detach(this,region,flush,unordered);
+      Future result = op->initialize_detach(this, region, flush, unordered);
       // If the region is still mapped, then unmap it
       if (region.is_mapped())
-      {
         unregister_inline_mapped_region(region);
-        region.impl->unmap_region();
-      }
       add_to_dependence_queue(op, unordered);
       return result;
     }
