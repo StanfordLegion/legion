@@ -15491,6 +15491,44 @@ namespace Legion {
                   it->second, false/*validates*/, skip_op, skip_gen);
           }
         }
+        // If we're a region and next_child is the current refinement then prune
+        // out any disjoint_complete_accesses and disjoint_complete_child_counts
+        // because we saw the current refinement again
+        // Do this before changing any refinements below to avoid doing this
+        // again even though we just refined
+        if (is_region() && !!state.disjoint_complete_tree &&
+            !state.disjoint_complete_accesses.empty())
+        {
+          FieldMaskSet<RegionTreeNode>::const_iterator finder =
+            state.disjoint_complete_children.find(next_child);
+          if (finder != state.disjoint_complete_children.end())
+          {
+            const FieldMask reset_mask = user.field_mask & finder->second & 
+                          state.disjoint_complete_accesses.get_valid_mask();
+            if (!!reset_mask)
+            {
+#ifdef DEBUG_LEGION
+              assert(reset_mask * child_disjoint_complete); 
+#endif
+              // Prune the counts
+              for (LogicalState::FieldSizeMap::iterator it = 
+                    state.disjoint_complete_child_counts.begin(); it !=
+                    state.disjoint_complete_child_counts.end(); /*nothing*/)
+              {
+                it->second -= reset_mask;
+                if (!it->second)
+                {
+                  LogicalState::FieldSizeMap::iterator to_delete = it++;
+                  state.disjoint_complete_child_counts.erase(to_delete);
+                }
+                else
+                  it++;
+              }
+              // And the previous accesses
+              state.disjoint_complete_accesses.filter(reset_mask);
+            }
+          }
+        }
         // Everything in this block of code is for computing any
         // refinements that need to be performed because we wrote
         // to a disjoint complete sub-tree
@@ -15508,6 +15546,8 @@ namespace Legion {
                 state.disjoint_complete_tree;
               if (!!refinement_mask)
               {
+                // these do no need to keep going up the tree
+                child_disjoint_complete -= refinement_mask;
                 // If we're refined for any overlapping fields with 
                 // the disjoint+complete child, then there are two cases:
                 // 1. We don't overlap with any existing disjoint+complete
@@ -15518,9 +15558,20 @@ namespace Legion {
                 if (!!previously_refined)
                 {
                   // 2. We overlap with some existing children that are refined
-                  //    in which case we need to see two consecutive accesses
-                  //    to this new child partition without any interference
-                  //    before we decide to continue with the refinement
+                  //    in which case we need to decide if we want to switch to
+                  //    a new child for the refinement. Switching refinements
+                  //    is expensive, so we only want to switch once we've seen
+                  //    some compelling evidence that it is worth it to do so
+                  //    Right now we have two criteria for deciding to switch
+                  //    a. If we see LEGION_REFINEMENT_SAME_CHILD consecutive
+                  //       accesses to the same child we switch
+                  //    b. If we see LEGION_REFINEMENT_DIFF_CHILD consecutive
+                  //       accesses to any child but the current refinement
+                  //       child then we also switch to this child
+                  static_assert(LEGION_REFINEMENT_SAME_CHILD > 0,
+                      "LEGION_REFINEMENT_SAME_CHILD must be positive");
+                  static_assert(LEGION_REFINEMENT_DIFF_CHILD > 0,
+                      "LEGION_REFINEMENT_DIFF_CHILD must be positive");
 #ifdef DEBUG_LEGION
                   // The child should not already be considered refined for
                   // any of these fields
@@ -15529,77 +15580,215 @@ namespace Legion {
                          (state.disjoint_complete_children[next_child] * 
                           previously_refined));
 #endif
-                  FieldMask perform_refinement;
+                  // First check to see if we have enough consecutive accesses
+                  // to the next_child which will allow us to switch now, if
+                  // not update the counts for ourselves
                   FieldMaskSet<RegionTreeNode>::iterator finder = 
                     state.disjoint_complete_accesses.find(next_child);
                   if (finder != state.disjoint_complete_accesses.end())
                   {
-                    perform_refinement = finder->second & previously_refined;
-                    if (!!perform_refinement)
+                    FieldMask consecutive = previously_refined & finder->second;
+                    if (!!consecutive)
                     {
-                      finder.filter(perform_refinement);
-                      if (!finder->second)
+                      // we've handled these fields now from previously refined
+                      previously_refined -= consecutive;
+                      FieldMask perform_mask;
+                      for (LogicalState::FieldSizeMap::iterator it = 
+                            state.disjoint_complete_child_counts.begin(); it !=
+                            state.disjoint_complete_child_counts.end();/*none*/)
                       {
-                        state.disjoint_complete_accesses.erase(finder);
-                        if (!state.disjoint_complete_accesses.empty())
-                          state.disjoint_complete_accesses.clear();
+                        const FieldMask overlap = consecutive & it->second;
+                        if (!overlap)
+                        {
+                          it++;
+                          continue;
+                        }
+                        size_t count = it->first / 2;
+                        const bool same_child = ((it->first % 2) == 0);
+                        if ((same_child &&
+                              ((count + 1) == LEGION_REFINEMENT_SAME_CHILD)) ||
+                            (!same_child &&
+                              ((count + 1) == LEGION_REFINEMENT_DIFF_CHILD)))
+                        {
+                          // We're doing the refinement now
+                          perform_mask |= overlap; 
+                          // Don't care about these fields anymore since
+                          // we've already decided at this point to refine them
+                          consecutive -= overlap;
+                        }
+                        else
+                        {
+                          // Not refining yet if this is the same child count
+                          // If this is the diff child count we're still going
+                          // to see the same child count later so we can't
+                          // say we're not doing the refinement yet or not
+                          if (same_child)
+                            refinement_mask -= overlap;
+                          // Increment the count and rescale
+                          count = (count + 1) * 2 + (it->first % 2);
+                          LogicalState::FieldSizeMap::iterator count_finder =
+                            state.disjoint_complete_child_counts.find(count);
+                          if (count_finder != 
+                              state.disjoint_complete_child_counts.end())
+                            count_finder->second |= overlap;
+                          else
+                            state.disjoint_complete_child_counts.insert(
+                                std::make_pair(count, overlap));
+                        }
+                        it->second -= overlap;
+                        if (!it->second)
+                        {
+                          LogicalState::FieldSizeMap::iterator to_delete = it++;
+                          state.disjoint_complete_child_counts.erase(to_delete);
+                        }
+                        else
+                          it++;
+                        // diff child count > same child count
+                        // therefore once we've seen the same child
+                        // count for some fields we know we won't see
+                        // any counts for those fields again
+                        if (same_child)
+                          consecutive -= overlap;
+                        if (!consecutive)
+                          break;
+                      }
+                      if (!!perform_mask)
+                      {
+                        // These are fields for which we are performing
+                        // the refinements so clean out all meta-data
+                        // Remove ourselves from disjoint_complete_accesses
+                        finder.filter(perform_mask);
+                        state.disjoint_complete_accesses.filter_valid_mask(
+                                                              perform_mask);
+                        if (!finder->second)
+                          state.disjoint_complete_accesses.erase(finder);
+                        for (LogicalState::FieldSizeMap::iterator it =
+                             state.disjoint_complete_child_counts.begin(); it !=
+                             state.disjoint_complete_child_counts.end(); /*no*/)
+                        {
+                          it->second -= perform_mask;
+                          if (!it->second)
+                          {
+                            LogicalState::FieldSizeMap::iterator 
+                              to_delete = it++;
+                            state.disjoint_complete_child_counts.erase(
+                                                              to_delete);
+                          }
+                          else
+                            it++;
+                        }
                       }
                     }
                   }
-                  if (perform_refinement != previously_refined)
+                  // We've handled all the fields for which next_child was
+                  // already in disjoint_complete_accesses, now see if there
+                  // are any remaming fields for which next_child is not
+                  // the most recent access and update accordingly
+                  if (!!previously_refined)
                   {
-                    // Filter all the fields that overlap that are not 
-                    // the same as our target next child
-                    std::vector<RegionTreeNode*> to_delete;
-                    for (FieldMaskSet<RegionTreeNode>::iterator it =
-                         state.disjoint_complete_accesses.begin(); it !=
-                         state.disjoint_complete_accesses.end(); it++)
+                    // First we can remove all disjoint complete accesses
+                    // that do not agree with next_child
+                    state.disjoint_complete_accesses.filter(previously_refined);
+                    // Now we can go through and update the counts
+                    FieldMask unrefined, perform_refinement;
+                    for (LogicalState::FieldSizeMap::iterator it =
+                          state.disjoint_complete_child_counts.begin(); it !=
+                          state.disjoint_complete_child_counts.end(); /*none*/)
                     {
-                      // Case handled above
-                      if (it->first == next_child)
-                        continue;
-                      const FieldMask overlap = it->second & previously_refined;
+                      const FieldMask overlap = previously_refined & it->second;
                       if (!overlap)
-                        continue;
-                      it.filter(overlap);
-                      if (!it->second)
-                        to_delete.push_back(it->first);
-                    }
-                    if (!to_delete.empty())
-                    {
-                      if (to_delete.size() != 
-                          state.disjoint_complete_accesses.size())
                       {
-                        for (std::vector<RegionTreeNode*>::const_iterator it =
-                              to_delete.begin(); it != to_delete.end(); it++)
-                          state.disjoint_complete_accesses.erase(*it);
+                        it++;
+                        continue;
+                      }
+                      size_t count = it->first / 2;
+                      const bool same_child = ((it->first % 2) == 0);
+                      if (same_child)
+                      {
+                        // see if we've already seen a diff child count
+                        // if not, then we can increment this and make
+                        // this the new consecutive diff child count
+                        FieldMask no_diff = overlap - unrefined;
+                        // do no update counts if we're refining these fields
+                        if (!!perform_refinement)
+                          no_diff -= perform_refinement;
+                        if (!!no_diff)
+                        {
+                          // switch to diff child count with odd numbers
+                          count = (count + 1) * 2 + 1;
+                          LogicalState::FieldSizeMap::iterator count_finder =
+                            state.disjoint_complete_child_counts.find(count);
+                          if (count_finder !=
+                              state.disjoint_complete_child_counts.end())
+                            count_finder->second |= no_diff;
+                          else
+                            state.disjoint_complete_child_counts.insert(
+                                std::make_pair(count, no_diff));
+                          unrefined |= no_diff;
+                        }
+                        // we know there will be no more counts for these fields
+                        previously_refined -= overlap;
                       }
                       else
-                        state.disjoint_complete_accesses.clear();
+                      {
+                        // Check to see if we can perform a refinement
+                        if ((count + 1) != LEGION_REFINEMENT_DIFF_CHILD)
+                        {
+                          // No refinement yet
+                          // update the count for the future
+                          // switch to diff child count with odd numbers
+                          count = (count + 1) * 2 + 1; 
+                          LogicalState::FieldSizeMap::iterator count_finder =
+                            state.disjoint_complete_child_counts.find(count);
+                          if (count_finder !=
+                              state.disjoint_complete_child_counts.end())
+                            count_finder->second |= overlap;
+                          else
+                            state.disjoint_complete_child_counts.insert(
+                                std::make_pair(count, overlap));
+                          unrefined |= overlap;
+                        }
+                        else 
+                          // doing the refinement
+                          // keep going to prune out the other counts
+                          perform_refinement |= overlap;
+                      }
+                      it->second -= overlap;
+                      if (!it->second)
+                      {
+                        LogicalState::FieldSizeMap::iterator to_delete = it++;
+                        state.disjoint_complete_child_counts.erase(to_delete);
+                      }
+                      else
+                        it++; 
+                      if (!previously_refined)
+                        break;
                     }
-                  }
-                  if (!!perform_refinement)
-                  {
-                    const FieldMask first_access =
-                      previously_refined - perform_refinement;
-                    if (!!first_access)
+                    // Any fields we didn't observe before need to go into
+                    // the initial unrefined case
+                    if (!!previously_refined)
+                      unrefined |= previously_refined;
+#ifdef DEBUG_LEGION
+                    assert(perform_refinement * unrefined);
+#endif
+                    if (!!unrefined)
                     {
-                      // Record the first access for these fields
+                      // Not performing refinements for these fields
+                      refinement_mask -= unrefined;
+                      // update disjoint_complete_accesses and
+                      // disjoint_complete_counts with next_child
                       state.disjoint_complete_accesses.insert(
-                                            next_child, first_access);
-                      // Not refining these fields yet
-                      refinement_mask -= first_access;
-                      child_disjoint_complete -= first_access;
+                          next_child, unrefined);
+                      const size_t count = 2; // (count=1 * 2)
+                      LogicalState::FieldSizeMap::iterator count_finder =
+                        state.disjoint_complete_child_counts.find(count);
+                      if (count_finder !=
+                          state.disjoint_complete_child_counts.end())
+                        count_finder->second |= unrefined;
+                      else
+                        state.disjoint_complete_child_counts.insert(
+                            std::make_pair(count, unrefined));
                     }
-                  }
-                  else
-                  {
-                    // Record the first access for these fields
-                    state.disjoint_complete_accesses.insert(next_child, 
-                                                            previously_refined);
-                    // Not refining these fields yet
-                    refinement_mask -= previously_refined;
-                    child_disjoint_complete -= previously_refined;
                   }
                 }
               }
@@ -15768,25 +15957,21 @@ namespace Legion {
                 // This is a heuristic here!
                 // We're looking for the count to grow to be at least as
                 // big as half of the children, we could change this later
-                if (first->first >= ((part_node->get_num_children() + 1) / 2))
+                static_assert(LEGION_REFINEMENT_PARTITION_PERCENTAGE > 0,
+                    "LEGION_REFINEMENT_PARTITION_PCT must be positive");
+                static_assert(LEGION_REFINEMENT_PARTITION_PERCENTAGE <= 100,
+                    "LEGION_REFINEMENT_PARTITION_PCT must be a percentage");
+                // x/y >= w/z is the same as xz >= wy when all positive
+                if ((100 * first->first) >= (part_node->get_num_children() * 
+                      LEGION_REFINEMENT_PARTITION_PERCENTAGE))
                 {
                   disjoint_complete_below = first->second;
                   // Same deal with deleting a reverse iterator
                   // increment first and then get the base
                   state.disjoint_complete_child_counts.erase(first);
                   // Go through and filter out any child counts for these fields
-                  std::vector<RegionTreeNode*> to_delete;
-                  for (FieldMaskSet<RegionTreeNode>::iterator it =
-                        state.disjoint_complete_accesses.begin(); it !=
-                        state.disjoint_complete_accesses.end(); it++)
-                  {
-                    it.filter(disjoint_complete_below);
-                    if (!it->second)
-                      to_delete.push_back(it->first);
-                  }
-                  for (std::vector<RegionTreeNode*>::const_iterator it =
-                        to_delete.begin(); it != to_delete.end(); it++)
-                    state.disjoint_complete_accesses.erase(*it);
+                  state.disjoint_complete_accesses.filter(
+                                  disjoint_complete_below);
                 }
               }
             }
@@ -17379,7 +17564,22 @@ namespace Legion {
           assert(access_previous * it->second);
           access_previous |= it->second;
         }
-        assert(state.disjoint_complete_child_counts.empty());
+        FieldMask odd_counts, even_counts;
+        for (LogicalState::FieldSizeMap::const_iterator it =
+              state.disjoint_complete_child_counts.begin(); it !=
+              state.disjoint_complete_child_counts.end(); it++)
+        {
+          if ((it->first % 2) == 0)
+          {
+            assert(even_counts * it->second);
+            even_counts |= it->second;
+          }
+          else
+          {
+            assert(odd_counts * it->second);
+            odd_counts |= it->second;
+          }
+        }
       }
       else
       {

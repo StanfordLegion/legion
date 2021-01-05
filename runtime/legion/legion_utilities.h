@@ -2851,7 +2851,7 @@ namespace Legion {
     public:
       // Return true if we actually added the entry, false if it already existed
       inline bool insert(T *entry, const FieldMask &mask); 
-      inline void filter(const FieldMask &filter);
+      inline void filter(const FieldMask &filter, bool tighten = true);
       inline void erase(T *to_erase);
       inline void clear(void);
       inline size_t size(void) const;
@@ -3105,22 +3105,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline void FieldMaskSet<T>::filter(const FieldMask &filter)
+    inline void FieldMaskSet<T>::filter(const FieldMask &filter, bool tighten)
     //--------------------------------------------------------------------------
     {
       if (single)
       {
         if (entries.single_entry != NULL)
         {
-          valid_fields -= filter;
+          if (tighten)
+            valid_fields -= filter;
           if (!valid_fields)
             entries.single_entry = NULL;
         }
       }
       else
       {
-        valid_fields -= filter;
-        if (!valid_fields)
+        if (tighten)
+          valid_fields -= filter;
+        if (!valid_fields || (!tighten && (filter == valid_fields)))
         {
           // No fields left so just clean everything up
           delete entries.multi_entries;
@@ -3141,23 +3143,32 @@ namespace Legion {
           }
           if (!to_delete.empty())
           {
-            for (typename std::vector<T*>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-              entries.multi_entries->erase(*it);
-            if (entries.multi_entries->empty())
+            if (to_delete.size() < entries.multi_entries->size())
+            {
+              for (typename std::vector<T*>::const_iterator it = 
+                    to_delete.begin(); it != to_delete.end(); it++)
+                entries.multi_entries->erase(*it);
+              if (entries.multi_entries->empty())
+              {
+                delete entries.multi_entries;
+                entries.multi_entries = NULL;
+                single = true;
+              }
+              else if ((entries.multi_entries->size() == 1) &&
+                  (entries.multi_entries->begin()->second == valid_fields))
+              {
+                typename LegionMap<T*,FieldMask>::aligned::iterator last = 
+                  entries.multi_entries->begin();     
+                T *temp = last->first; 
+                delete entries.multi_entries;
+                entries.single_entry = temp;
+                single = true;
+              }
+            }
+            else
             {
               delete entries.multi_entries;
               entries.multi_entries = NULL;
-              single = true;
-            }
-            else if (entries.multi_entries->size() == 1)
-            {
-              typename LegionMap<T*,FieldMask>::aligned::iterator last = 
-                entries.multi_entries->begin();     
-              T *temp = last->first; 
-              valid_fields = last->second;
-              delete entries.multi_entries;
-              entries.single_entry = temp;
               single = true;
             }
           }

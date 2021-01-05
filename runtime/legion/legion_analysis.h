@@ -868,8 +868,14 @@ namespace Legion {
       // For partitions only, we record the counts of the numbers of
       // children that we've observed for all fields to see when we're 
       // close enough to be counted as being considered refined
-      typedef LegionMap<size_t,FieldMask,
-              LAST_ALLOC,std::greater<size_t> >::aligned FieldSizeMap;
+      // For regions, we keep two counts, one of the number of
+      // consecutive accesses to the most recent child in 
+      // disjoint_complete_accesses (expressed as an even number 2*count)
+      // and a second number the number of accesses to any child that
+      // is not the current one in disjoint_complete_children
+      // (expressed as an odd number 2*count+1)
+      typedef LegionMap<size_t,FieldMask,LAST_ALLOC,
+                        std::greater<size_t> >::aligned FieldSizeMap;
       FieldSizeMap                 disjoint_complete_child_counts;
       // If we have non-zero depth projection functions then we can get
       // these at the bottom of the disjoint complete access trees to say
