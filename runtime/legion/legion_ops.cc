@@ -16997,8 +16997,10 @@ namespace Legion {
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
-      request_early_complete(attach_event);
-      complete_execution(Runtime::protect_event(attach_event));
+      if (!request_early_complete(attach_event))
+        complete_execution(Runtime::protect_event(attach_event));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -17466,9 +17468,6 @@ namespace Legion {
 #ifdef DEBGU_LEGION
       assert(region.impl->get_mapped_event().has_triggered());
 #endif
-      // Actual unmap of an inline mapped region was deferred to here
-      if (region.impl->is_mapped())
-        region.impl->unmap_region();
       // Now we can get the reference we need for the detach operation
       InstanceSet references;
       region.impl->get_references(references);

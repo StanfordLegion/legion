@@ -5966,6 +5966,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      // Unmap the region here so that it is safe for re-use
+      if (region.impl->is_mapped())
+        region.impl->unmap_region();
       DetachOp *op = runtime->get_available_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
       // Remove this region from the list of unmapped regions
