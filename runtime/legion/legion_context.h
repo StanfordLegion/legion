@@ -355,6 +355,9 @@ namespace Legion {
                                        const std::set<unsigned> &indexes,
                                        std::vector<FieldID> &to_set) const = 0;
     public:
+      virtual void add_physical_region(const RegionRequirement &req, 
+          bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
+          bool virtual_mapped, const InstanceSet &physical_instances) = 0;
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs) = 0;
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
@@ -371,6 +374,7 @@ namespace Legion {
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual ApEvent remap_region(PhysicalRegion region) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
+      virtual void unmap_all_regions(bool external) = 0;
       virtual void fill_fields(const FillLauncher &launcher) = 0;
       virtual void fill_fields(const IndexFillLauncher &launcher) = 0;
       virtual void issue_copy(const CopyLauncher &launcher) = 0;
@@ -566,36 +570,7 @@ namespace Legion {
       void remove_deleted_fields(const std::set<FieldID> &to_free,
                                  const std::vector<unsigned> &indexes);
       virtual void remove_deleted_local_fields(FieldSpace space,
-                                 const std::vector<FieldID> &to_remove);
-    public:
-      int has_conflicting_regions(MapOp *map, bool &parent_conflict,
-                                  bool &inline_conflict);
-      int has_conflicting_regions(AttachOp *attach, bool &parent_conflict,
-                                  bool &inline_conflict);
-      int has_conflicting_internal(const RegionRequirement &req, 
-                                   bool &parent_conflict,
-                                   bool &inline_conflict);
-      void find_conflicting_regions(TaskOp *task,
-                                    std::vector<PhysicalRegion> &conflicting);
-      void find_conflicting_regions(CopyOp *copy,
-                                    std::vector<PhysicalRegion> &conflicting);
-      void find_conflicting_regions(AcquireOp *acquire,
-                                    std::vector<PhysicalRegion> &conflicting);
-      void find_conflicting_regions(ReleaseOp *release,
-                                    std::vector<PhysicalRegion> &conflicting);
-      void find_conflicting_regions(DependentPartitionOp *partition,
-                                    std::vector<PhysicalRegion> &conflicting);
-      void find_conflicting_internal(const RegionRequirement &req,
-                                    std::vector<PhysicalRegion> &conflicting);
-      void find_conflicting_regions(FillOp *fill,
-                                    std::vector<PhysicalRegion> &conflicting);
-      bool check_region_dependence(RegionTreeID tid, IndexSpace space,
-                                  const RegionRequirement &our_req,
-                                  const RegionUsage &our_usage,
-                                  const RegionRequirement &req,
-                                  bool check_privileges = true) const;
-      void register_inline_mapped_region(PhysicalRegion &region);
-      void unregister_inline_mapped_region(PhysicalRegion &region);
+                                 const std::vector<FieldID> &to_remove); 
     public:
       bool safe_cast(RegionTreeForest *forest, IndexSpace handle, 
                      const void *realm_point, TypeTag type_tag);
@@ -615,15 +590,11 @@ namespace Legion {
                                       FieldID &bad_field, int local, int &bad,
                                       bool skip_privileges) const;
     public:
-      void add_physical_region(const RegionRequirement &req, bool mapped,
-          MapperID mid, MappingTagID tag, ApUserEvent unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances);
       void add_output_region(const OutputRequirement &req,
                              InstanceSet instances,
                              bool global_indexing, bool valid);
       void finalize_output_regions(void);
       void initialize_overhead_tracker(void);
-      void unmap_all_regions(void); 
       inline void begin_runtime_call(void);
       inline void end_runtime_call(void);
       inline void begin_task_wait(bool from_runtime);
@@ -672,13 +643,9 @@ namespace Legion {
       // the requirement and the logical region
       std::map<unsigned,unsigned>               deletion_counts;
     protected:
-      // These next two data structure don't need a lock becaue
-      // they are only mutated by the application task 
-      std::vector<PhysicalRegion>               physical_regions;
-      // Keep track of inline mapping regions for this task
-      // so we can see when there are conflicts
-      LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::tracked
-                                                inline_regions; 
+      // This data structure doesn't need a lock becaue
+      // it is only mutated by the application task 
+      std::vector<PhysicalRegion>               physical_regions; 
     protected:
       std::vector<OutputRegion>                 output_regions;
     protected:
@@ -903,6 +870,35 @@ namespace Legion {
                           std::set<RtEvent> &preconditions);
       ApEvent compute_return_deletion_dependences(size_t return_index,
                           std::map<Operation*,GenerationID> &dependences);
+    public:
+      int has_conflicting_regions(MapOp *map, bool &parent_conflict,
+                                  bool &inline_conflict);
+      int has_conflicting_regions(AttachOp *attach, bool &parent_conflict,
+                                  bool &inline_conflict);
+      int has_conflicting_internal(const RegionRequirement &req, 
+                                   bool &parent_conflict,
+                                   bool &inline_conflict);
+      void find_conflicting_regions(TaskOp *task,
+                                    std::vector<PhysicalRegion> &conflicting);
+      void find_conflicting_regions(CopyOp *copy,
+                                    std::vector<PhysicalRegion> &conflicting);
+      void find_conflicting_regions(AcquireOp *acquire,
+                                    std::vector<PhysicalRegion> &conflicting);
+      void find_conflicting_regions(ReleaseOp *release,
+                                    std::vector<PhysicalRegion> &conflicting);
+      void find_conflicting_regions(DependentPartitionOp *partition,
+                                    std::vector<PhysicalRegion> &conflicting);
+      void find_conflicting_internal(const RegionRequirement &req,
+                                    std::vector<PhysicalRegion> &conflicting);
+      void find_conflicting_regions(FillOp *fill,
+                                    std::vector<PhysicalRegion> &conflicting);
+      bool check_region_dependence(RegionTreeID tid, IndexSpace space,
+                                  const RegionRequirement &our_req,
+                                  const RegionUsage &our_usage,
+                                  const RegionRequirement &req,
+                                  bool check_privileges = true) const;
+      void register_inline_mapped_region(PhysicalRegion &region);
+      void unregister_inline_mapped_region(PhysicalRegion &region);
     public:
       void print_children(void);
       void perform_window_wait(void);
@@ -1135,7 +1131,9 @@ namespace Legion {
                                        const std::set<unsigned> &indexes,
                                        std::vector<FieldID> &to_set) const;
     public:
-      // Find an index space name for a concrete launch domain
+      virtual void add_physical_region(const RegionRequirement &req, 
+          bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
+          bool virtual_mapped, const InstanceSet &physical_instances);
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
@@ -1152,6 +1150,7 @@ namespace Legion {
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
+      virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
@@ -1305,7 +1304,7 @@ namespace Legion {
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
     public:
       virtual TaskPriority get_current_priority(void) const;
-      virtual void set_current_priority(TaskPriority priority);
+      virtual void set_current_priority(TaskPriority priority); 
     public:
       static void handle_compute_equivalence_sets_request(Deserializer &derez,
                                      Runtime *runtime, AddressSpaceID source);
@@ -1354,6 +1353,14 @@ namespace Legion {
     protected:
       const std::vector<unsigned>           &parent_req_indexes;
       const std::vector<bool>               &virtual_mapped;
+      // Keep track of inline mapping regions for this task
+      // so we can see when there are conflicts, note that accessing
+      // this data structure requires the inline lock because
+      // unordered detach operations can touch it without synchronizing
+      // with the executing task
+      mutable LocalLock inline_lock;
+      LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::tracked
+                                                inline_regions;
     protected:
       mutable LocalLock                     child_op_lock;
       // Track whether this task has finished executing
@@ -2652,6 +2659,9 @@ namespace Legion {
                                        const std::set<unsigned> &indexes,
                                        std::vector<FieldID> &to_set) const;
     public:
+      virtual void add_physical_region(const RegionRequirement &req, 
+          bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
+          bool virtual_mapped, const InstanceSet &physical_instances);
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
@@ -2668,6 +2678,7 @@ namespace Legion {
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
+      virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
@@ -3069,6 +3080,9 @@ namespace Legion {
                                        const std::set<unsigned> &indexes,
                                        std::vector<FieldID> &to_set) const;
     public:
+      virtual void add_physical_region(const RegionRequirement &req, 
+          bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
+          bool virtual_mapped, const InstanceSet &physical_instances);
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
@@ -3085,6 +3099,7 @@ namespace Legion {
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
+      virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);

@@ -28,6 +28,7 @@
 #define STATIC_MAX_SCHEDULE_COUNT     8
 #define STATIC_MEMOIZE                false
 #define STATIC_MAP_LOCALLY            false
+#define STATIC_EXACT_REGION           false
 #define STATIC_REPLICATION_ENABLED    true
 #define STATIC_SAME_ADDRESS_SPACE     false
 
@@ -73,6 +74,7 @@ namespace Legion {
         max_schedule_count(STATIC_MAX_SCHEDULE_COUNT),
         memoize(STATIC_MEMOIZE),
         map_locally(STATIC_MAP_LOCALLY),
+        exact_region(STATIC_EXACT_REGION),
         replication_enabled(STATIC_REPLICATION_ENABLED),
         same_address_space(STATIC_SAME_ADDRESS_SPACE)
     //--------------------------------------------------------------------------
@@ -104,6 +106,7 @@ namespace Legion {
           INT_ARG("-dm:sched", max_schedule_count);
           BOOL_ARG("-dm:memoize", memoize);
           BOOL_ARG("-dm:map_locally", map_locally);
+          BOOL_ARG("-dm:exact_region", exact_region);
           BOOL_ARG("-dm:replicate", replication_enabled);
           BOOL_ARG("-dm:same_address_space", same_address_space);
 #undef BOOL_ARG
@@ -2474,7 +2477,8 @@ namespace Legion {
 
       // If the application requested that we use the exact region requested,
       // honor that
-      if (layout_constraints.specialized_constraint.is_exact() ||
+      if (exact_region ||
+          layout_constraints.specialized_constraint.is_exact() ||
           (req.tag & DefaultMapper::EXACT_REGION) != 0)
         return result;
 

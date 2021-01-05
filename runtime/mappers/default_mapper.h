@@ -584,6 +584,9 @@ namespace Legion {
       // Whether to map tasks locally
       // Controlled by -dm:map_locally (false by default)
       bool map_locally;
+      // Whether to map regions to instances of the exact sizes
+      // Controlled by -dm:exact_region (false by default)
+      bool exact_region;
       // Whether to enable control replication
       // Controlled by -dm:replicate (true by default)
       bool replication_enabled;

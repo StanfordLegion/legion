@@ -549,9 +549,9 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PHYSICAL_REGION_ALLOC;
     public:
-      PhysicalRegionImpl(const RegionRequirement &req, ApEvent mapped_event,
-                         bool mapped, TaskContext *ctx, MapperID mid,
-                         MappingTagID tag, bool leaf, bool virt, Runtime *rt);
+      PhysicalRegionImpl(const RegionRequirement &req, RtEvent mapped_event,
+            ApEvent ready_event, bool mapped, TaskContext *ctx, MapperID mid,
+            MappingTagID tag, bool leaf, bool virt, Runtime *rt);
       PhysicalRegionImpl(const PhysicalRegionImpl &rhs);
       ~PhysicalRegionImpl(void);
     public:
@@ -577,12 +577,13 @@ namespace Legion {
           get_field_accessor(FieldID field, bool silence_warnings = true);
     public:
       void unmap_region(void);
-      void remap_region(ApEvent new_mapped_event);
+      void remap_region(RtEvent new_mapped_event, ApEvent new_ready_event);
       const RegionRequirement& get_requirement(void) const;
       void set_reference(const InstanceRef &references);
       void reset_references(const InstanceSet &instances,ApUserEvent term_event,
                             ApEvent wait_for = ApEvent::NO_AP_EVENT);
-      ApEvent get_mapped_event(void) const;
+      RtEvent get_mapped_event(void) const;
+      ApEvent get_ready_event(void) const;
       bool has_references(void) const;
       void get_references(InstanceSet &instances) const;
       void get_memories(std::set<Memory>& memories) const;
@@ -628,17 +629,18 @@ namespace Legion {
       const bool virtual_mapped;
       const bool replaying;
     private:
-      // Event for when the instance ref is ready
-      ApEvent mapped_event;
-      // Instance ref
+      // Event for when the 'references' are set by the producer op
+      RtEvent mapped_event;
+      // Event for when it is safe to use the physical instances
+      ApEvent ready_event;
+      // Physical instances for this mapping
       InstanceSet references;
       RegionRequirement req;
       // Only used for control replication
       ShardedView *sharded_view;
       bool mapped; // whether it is currently mapped
       bool valid; // whether it is currently valid
-      // whether to trigger the termination event
-      // upon unmap
+      // whether to trigger the termination event upon unmap
       bool trigger_on_unmap;
       bool made_accessor;
       ApUserEvent termination_event;
@@ -2482,7 +2484,6 @@ namespace Legion {
                                 MapperID id = 0, MappingTagID tag = 0);
       void remap_region(Context ctx, PhysicalRegion region);
       void unmap_region(Context ctx, PhysicalRegion region);
-      void unmap_all_regions(Context ctx);
     public:
       void fill_fields(Context ctx, const FillLauncher &launcher);
       void fill_fields(Context ctx, const IndexFillLauncher &launcher);
