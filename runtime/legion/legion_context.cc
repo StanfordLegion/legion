@@ -673,22 +673,7 @@ namespace Legion {
         finder->second++;
       else
         created_regions[handle] = 1;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::add_physical_region(const RegionRequirement &req,
-                                   bool mapped, MapperID mid, MappingTagID tag,
-                                   ApUserEvent unmap_event, bool virtual_mapped,
-                                   const InstanceSet &physical_instances)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
-          RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, mapped, this, mid, tag, 
-          is_leaf_context(), virtual_mapped, runtime);
-      physical_regions.push_back(PhysicalRegion(impl));
-      if (mapped)
-        impl->reset_references(physical_instances, unmap_event);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     PhysicalRegion TaskContext::get_physical_region(unsigned idx)
@@ -1446,435 +1431,7 @@ namespace Legion {
     {
       // Should only be implemented by derived classes
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    int TaskContext::has_conflicting_regions(MapOp *op, bool &parent_conflict,
-                                             bool &inline_conflict)
-    //--------------------------------------------------------------------------
-    {
-      const RegionRequirement &req = op->get_requirement(); 
-      return has_conflicting_internal(req, parent_conflict, inline_conflict);
-    }
-
-    //--------------------------------------------------------------------------
-    int TaskContext::has_conflicting_regions(AttachOp *attach,
-                                             bool &parent_conflict,
-                                             bool &inline_conflict)
-    //--------------------------------------------------------------------------
-    {
-      const RegionRequirement &req = attach->get_requirement();
-      return has_conflicting_internal(req, parent_conflict, inline_conflict);
-    }
-
-    //--------------------------------------------------------------------------
-    int TaskContext::has_conflicting_internal(const RegionRequirement &req,
-                                              bool &parent_conflict,
-                                              bool &inline_conflict)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, HAS_CONFLICTING_INTERNAL_CALL);
-      parent_conflict = false;
-      inline_conflict = false;
-      // No need to hold our lock here because we are the only ones who
-      // could possibly be doing any mutating of the physical_regions data 
-      // structure but we are here so we aren't mutating
-      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
-      {
-        // skip any regions which are not mapped
-        if (!physical_regions[our_idx].is_mapped())
-          continue;
-        const RegionRequirement &our_req = 
-          physical_regions[our_idx].impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-        {
-          parent_conflict = true;
-          return our_idx;
-        }
-      }
-      for (std::list<PhysicalRegion>::const_iterator it = 
-            inline_regions.begin(); it != inline_regions.end(); it++)
-      {
-        if (!it->is_mapped())
-          continue;
-        const RegionRequirement &our_req = it->impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-        {
-          inline_conflict = true;
-          // No index for inline conflicts
-          return -1;
-        }
-      }
-      return -1;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_regions(TaskOp *task,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      // No need to hold our lock here because we are the only ones who
-      // could possibly be doing any mutating of the physical_regions data 
-      // structure but we are here so we aren't mutating
-      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
-      {
-        // Skip any regions which are not mapped
-        if (!physical_regions[our_idx].is_mapped())
-          continue;
-        const RegionRequirement &our_req = 
-          physical_regions[our_idx].impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        // Check to see if any region requirements from the child have
-        // a dependence on our region at location our_idx
-        for (unsigned idx = 0; idx < task->regions.size(); idx++)
-        {
-          const RegionRequirement &req = task->regions[idx];  
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-          {
-            conflicting.push_back(physical_regions[our_idx]);
-            // Once we find a conflict, we don't need to check
-            // against it anymore, so go onto our next region
-            break;
-          }
-        }
-      }
-      for (std::list<PhysicalRegion>::const_iterator it = 
-            inline_regions.begin(); it != inline_regions.end(); it++)
-      {
-        if (!it->is_mapped())
-          continue;
-        const RegionRequirement &our_req = it->impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        // Check to see if any region requirements from the child have
-        // a dependence on our region at location our_idx
-        for (unsigned idx = 0; idx < task->regions.size(); idx++)
-        {
-          const RegionRequirement &req = task->regions[idx];  
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-          {
-            conflicting.push_back(*it);
-            // Once we find a conflict, we don't need to check
-            // against it anymore, so go onto our next region
-            break;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_regions(CopyOp *copy,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      // No need to hold our lock here because we are the only ones who
-      // could possibly be doing any mutating of the physical_regions data 
-      // structure but we are here so we aren't mutating
-      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
-      {
-        // skip any regions which are not mapped
-        if (!physical_regions[our_idx].is_mapped())
-          continue;
-        const RegionRequirement &our_req = 
-          physical_regions[our_idx].impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        bool has_conflict = false;
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->src_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->src_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->dst_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->dst_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->src_indirect_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->src_indirect_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->dst_indirect_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->dst_indirect_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        if (has_conflict)
-          conflicting.push_back(physical_regions[our_idx]);
-      }
-      for (std::list<PhysicalRegion>::const_iterator it = 
-            inline_regions.begin(); it != inline_regions.end(); it++)
-      {
-        if (!it->is_mapped())
-          continue;
-        const RegionRequirement &our_req = it->impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        bool has_conflict = false;
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->src_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->src_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->dst_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->dst_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->src_indirect_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->src_indirect_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->dst_indirect_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->dst_indirect_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        if (has_conflict)
-          conflicting.push_back(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_regions(AcquireOp *acquire,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      const RegionRequirement &req = acquire->get_requirement();
-      find_conflicting_internal(req, conflicting); 
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_regions(ReleaseOp *release,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      const RegionRequirement &req = release->get_requirement();
-      find_conflicting_internal(req, conflicting);      
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_regions(DependentPartitionOp *partition,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      const RegionRequirement &req = partition->get_requirement();
-      find_conflicting_internal(req, conflicting);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_internal(const RegionRequirement &req,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      // No need to hold our lock here because we are the only ones who
-      // could possibly be doing any mutating of the physical_regions data 
-      // structure but we are here so we aren't mutating
-      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
-      {
-        // skip any regions which are not mapped
-        if (!physical_regions[our_idx].is_mapped())
-          continue;
-        const RegionRequirement &our_req = 
-          physical_regions[our_idx].impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-          conflicting.push_back(physical_regions[our_idx]);
-      }
-      for (std::list<PhysicalRegion>::const_iterator it = 
-            inline_regions.begin(); it != inline_regions.end(); it++)
-      {
-        if (!it->is_mapped())
-          continue;
-        const RegionRequirement &our_req = it->impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-          conflicting.push_back(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_regions(FillOp *fill,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      const RegionRequirement &req = fill->get_requirement();
-      find_conflicting_internal(req, conflicting);
-    }
-
-    //--------------------------------------------------------------------------
-    bool TaskContext::check_region_dependence(RegionTreeID our_tid,
-                                             IndexSpace our_space,
-                                             const RegionRequirement &our_req,
-                                             const RegionUsage &our_usage,
-                                             const RegionRequirement &req,
-                                             bool check_privileges) const
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, CHECK_REGION_DEPENDENCE_CALL);
-      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
-          (req.handle_type == LEGION_REGION_PROJECTION))
-      {
-        // If the trees are different we're done 
-        if (our_tid != req.region.get_tree_id())
-          return false;
-        // Check to see if there is a path between
-        // the index spaces
-        std::vector<LegionColor> path;
-        if (!runtime->forest->compute_index_path(our_space,
-                         req.region.get_index_space(),path))
-          return false;
-      }
-      else
-      {
-        // Check if the trees are different
-        if (our_tid != req.partition.get_tree_id())
-          return false;
-        std::vector<LegionColor> path;
-        if (!runtime->forest->compute_partition_path(our_space,
-                     req.partition.get_index_partition(), path))
-          return false;
-      }
-      // Check to see if any privilege fields overlap
-      std::vector<FieldID> intersection(our_req.privilege_fields.size());
-      std::vector<FieldID>::iterator intersect_it = 
-        std::set_intersection(our_req.privilege_fields.begin(),
-                              our_req.privilege_fields.end(),
-                              req.privilege_fields.begin(),
-                              req.privilege_fields.end(),
-                              intersection.begin());
-      intersection.resize(intersect_it - intersection.begin());
-      if (intersection.empty())
-        return false;
-      // If we aren't supposed to check privileges then we're done
-      if (!check_privileges)
-        return true;
-      // Finally if everything has overlapped, do a dependence analysis
-      // on the privileges and coherence
-      RegionUsage usage(req);
-      switch (check_dependence_type<true>(our_usage,usage))
-      {
-        // Only allow no-dependence, or simultaneous dependence through
-        case LEGION_NO_DEPENDENCE:
-        case LEGION_SIMULTANEOUS_DEPENDENCE:
-          {
-            return false;
-          }
-        default:
-          break;
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_inline_mapped_region(PhysicalRegion &region)
-    //--------------------------------------------------------------------------
-    {
-      // Don't need the lock because this is only accessed from 
-      // the executing task context
-      //
-      // Because of 'remap_region', this method can be called
-      // both for inline regions as well as regions which were
-      // initally mapped for the task.  Do a quick check to see
-      // if it was an original region.  If it was then we're done.
-      for (unsigned idx = 0; idx < physical_regions.size(); idx++)
-      {
-        if (physical_regions[idx].impl == region.impl)
-          return;
-      }
-      inline_regions.push_back(region);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::unregister_inline_mapped_region(PhysicalRegion &region)
-    //--------------------------------------------------------------------------
-    {
-      // Don't need the lock because this is only accessed from the
-      // executed task context
-      for (std::list<PhysicalRegion>::iterator it = 
-            inline_regions.begin(); it != inline_regions.end(); it++)
-      {
-        if (it->impl == region.impl)
-        {
-          if (runtime->runtime_warnings && !has_inline_accessor)
-            has_inline_accessor = it->impl->created_accessor();
-          inline_regions.erase(it);
-          return;
-        }
-      }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     bool TaskContext::safe_cast(RegionTreeForest *forest, IndexSpace handle,
@@ -2354,26 +1911,6 @@ namespace Legion {
 #endif
       overhead_tracker = new 
         Mapping::ProfilingMeasurements::RuntimeOverhead();
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::unmap_all_regions(void)
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<PhysicalRegion>::const_iterator it = 
-            physical_regions.begin(); it != physical_regions.end(); it++)
-      {
-        if (it->is_mapped())
-          it->impl->unmap_region();
-      }
-      // Also unmap any of our inline mapped physical regions
-      for (LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::
-            tracked::const_iterator it = inline_regions.begin();
-            it != inline_regions.end(); it++)
-      {
-        if (it->is_mapped())
-          it->impl->unmap_region();
-      }
     } 
 
     //--------------------------------------------------------------------------
@@ -5858,6 +5395,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::add_physical_region(const RegionRequirement &req,
+          bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
+          bool virtual_mapped, const InstanceSet &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!unmap_event.exists());
+#endif
+      if (!virtual_mapped)
+        unmap_event = Runtime::create_ap_user_event(NULL);
+      PhysicalRegionImpl *impl = new PhysicalRegionImpl(req,
+          RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, mapped, this, mid, tag,
+          false/*leaf region*/, virtual_mapped, runtime);
+      physical_regions.push_back(PhysicalRegion(impl));
+      if (!virtual_mapped)
+        impl->reset_references(physical_instances, 
+            mapped ? unmap_event : ApUserEvent::NO_AP_USER_EVENT);
+    }
+
+    //--------------------------------------------------------------------------
     Future InnerContext::execute_task(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -6081,6 +5638,33 @@ namespace Legion {
       // Do this first to make sure it is valid
       region.impl->unmap_region();
       unregister_inline_mapped_region(region);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::unmap_all_regions(bool external)
+    //--------------------------------------------------------------------------
+    {
+      if (external)
+      {
+        AutoRuntimeCall call(this);
+        unmap_all_regions(false);
+        return;
+      }
+      for (std::vector<PhysicalRegion>::const_iterator it = 
+            physical_regions.begin(); it != physical_regions.end(); it++)
+      {
+        if (it->is_mapped())
+          it->impl->unmap_region();
+      }
+      // Also unmap any of our inline mapped physical regions
+      AutoLock i_lock(inline_lock);
+      for (LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::
+            tracked::const_iterator it = inline_regions.begin();
+            it != inline_regions.end(); it++)
+      {
+        if (it->is_mapped())
+          it->impl->unmap_region();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6370,9 +5954,8 @@ namespace Legion {
                       launcher.handle.field_space.id, 
                       launcher.handle.tree_id, get_task_name(), 
                       get_unique_id(), launcher.file_name)
-      // If we're counting this region as mapped we need to register it
-      if (launcher.mapped)
-        register_inline_mapped_region(result);
+      // Add this region to the list of inline mapped regions
+      register_inline_mapped_region(result);
       add_to_dependence_queue(attach_op);
       return result;
     }
@@ -6385,9 +5968,8 @@ namespace Legion {
       AutoRuntimeCall call(this);
       DetachOp *op = runtime->get_available_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
-      // If the region is still mapped, then unmap it
-      if (region.is_mapped())
-        unregister_inline_mapped_region(region);
+      // Remove this region from the list of unmapped regions
+      unregister_inline_mapped_region(region);
       add_to_dependence_queue(op, unordered);
       return result;
     }
@@ -7290,6 +6872,441 @@ namespace Legion {
       }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    int InnerContext::has_conflicting_regions(MapOp *op, bool &parent_conflict,
+                                              bool &inline_conflict)
+    //--------------------------------------------------------------------------
+    {
+      const RegionRequirement &req = op->get_requirement(); 
+      return has_conflicting_internal(req, parent_conflict, inline_conflict);
+    }
+
+    //--------------------------------------------------------------------------
+    int InnerContext::has_conflicting_regions(AttachOp *attach,
+                                              bool &parent_conflict,
+                                              bool &inline_conflict)
+    //--------------------------------------------------------------------------
+    {
+      const RegionRequirement &req = attach->get_requirement();
+      return has_conflicting_internal(req, parent_conflict, inline_conflict);
+    }
+
+    //--------------------------------------------------------------------------
+    int InnerContext::has_conflicting_internal(const RegionRequirement &req,
+                                               bool &parent_conflict,
+                                               bool &inline_conflict)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, HAS_CONFLICTING_INTERNAL_CALL);
+      parent_conflict = false;
+      inline_conflict = false;
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the physical_regions data 
+      // structure but we are here so we aren't mutating
+      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
+      {
+        // skip any regions which are not mapped
+        if (!physical_regions[our_idx].is_mapped())
+          continue;
+        const RegionRequirement &our_req = 
+          physical_regions[our_idx].impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+        {
+          parent_conflict = true;
+          return our_idx;
+        }
+      }
+      // Need lock here because of unordered detach operations
+      AutoLock i_lock(inline_lock,1,false/*exclusive*/);
+      for (std::list<PhysicalRegion>::const_iterator it = 
+            inline_regions.begin(); it != inline_regions.end(); it++)
+      {
+        if (!it->is_mapped())
+          continue;
+        const RegionRequirement &our_req = it->impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+        {
+          inline_conflict = true;
+          // No index for inline conflicts
+          return -1;
+        }
+      }
+      return -1;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(TaskOp *task,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the physical_regions data 
+      // structure but we are here so we aren't mutating
+      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
+      {
+        // Skip any regions which are not mapped
+        if (!physical_regions[our_idx].is_mapped())
+          continue;
+        const RegionRequirement &our_req = 
+          physical_regions[our_idx].impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        // Check to see if any region requirements from the child have
+        // a dependence on our region at location our_idx
+        for (unsigned idx = 0; idx < task->regions.size(); idx++)
+        {
+          const RegionRequirement &req = task->regions[idx];  
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+          {
+            conflicting.push_back(physical_regions[our_idx]);
+            // Once we find a conflict, we don't need to check
+            // against it anymore, so go onto our next region
+            break;
+          }
+        }
+      }
+      // Need lock here because of unordered detach operations
+      AutoLock i_lock(inline_lock,1,false/*exclusive*/);
+      for (std::list<PhysicalRegion>::const_iterator it = 
+            inline_regions.begin(); it != inline_regions.end(); it++)
+      {
+        if (!it->is_mapped())
+          continue;
+        const RegionRequirement &our_req = it->impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        // Check to see if any region requirements from the child have
+        // a dependence on our region at location our_idx
+        for (unsigned idx = 0; idx < task->regions.size(); idx++)
+        {
+          const RegionRequirement &req = task->regions[idx];  
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+          {
+            conflicting.push_back(*it);
+            // Once we find a conflict, we don't need to check
+            // against it anymore, so go onto our next region
+            break;
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(CopyOp *copy,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the physical_regions data 
+      // structure but we are here so we aren't mutating
+      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
+      {
+        // skip any regions which are not mapped
+        if (!physical_regions[our_idx].is_mapped())
+          continue;
+        const RegionRequirement &our_req = 
+          physical_regions[our_idx].impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        bool has_conflict = false;
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->src_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->src_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->dst_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->dst_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->src_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->src_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->dst_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->dst_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        if (has_conflict)
+          conflicting.push_back(physical_regions[our_idx]);
+      }
+      // Need lock here because of unordered detach operations
+      AutoLock i_lock(inline_lock,1,false/*exclusive*/);
+      for (std::list<PhysicalRegion>::const_iterator it = 
+            inline_regions.begin(); it != inline_regions.end(); it++)
+      {
+        if (!it->is_mapped())
+          continue;
+        const RegionRequirement &our_req = it->impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        bool has_conflict = false;
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->src_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->src_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->dst_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->dst_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->src_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->src_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->dst_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->dst_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        if (has_conflict)
+          conflicting.push_back(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(AcquireOp *acquire,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      const RegionRequirement &req = acquire->get_requirement();
+      find_conflicting_internal(req, conflicting); 
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(ReleaseOp *release,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      const RegionRequirement &req = release->get_requirement();
+      find_conflicting_internal(req, conflicting);      
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(DependentPartitionOp *partition,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      const RegionRequirement &req = partition->get_requirement();
+      find_conflicting_internal(req, conflicting);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_internal(const RegionRequirement &req,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the physical_regions data 
+      // structure but we are here so we aren't mutating
+      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
+      {
+        // skip any regions which are not mapped
+        if (!physical_regions[our_idx].is_mapped())
+          continue;
+        const RegionRequirement &our_req = 
+          physical_regions[our_idx].impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+          conflicting.push_back(physical_regions[our_idx]);
+      }
+      // Need lock here because of unordered detach operations
+      AutoLock i_lock(inline_lock,1,false/*exclusive*/);
+      for (std::list<PhysicalRegion>::const_iterator it = 
+            inline_regions.begin(); it != inline_regions.end(); it++)
+      {
+        if (!it->is_mapped())
+          continue;
+        const RegionRequirement &our_req = it->impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+          conflicting.push_back(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(FillOp *fill,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      const RegionRequirement &req = fill->get_requirement();
+      find_conflicting_internal(req, conflicting);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::check_region_dependence(RegionTreeID our_tid,
+                                             IndexSpace our_space,
+                                             const RegionRequirement &our_req,
+                                             const RegionUsage &our_usage,
+                                             const RegionRequirement &req,
+                                             bool check_privileges) const
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, CHECK_REGION_DEPENDENCE_CALL);
+      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+          (req.handle_type == LEGION_REGION_PROJECTION))
+      {
+        // If the trees are different we're done 
+        if (our_tid != req.region.get_tree_id())
+          return false;
+        // Check to see if there is a path between
+        // the index spaces
+        std::vector<LegionColor> path;
+        if (!runtime->forest->compute_index_path(our_space,
+                         req.region.get_index_space(),path))
+          return false;
+      }
+      else
+      {
+        // Check if the trees are different
+        if (our_tid != req.partition.get_tree_id())
+          return false;
+        std::vector<LegionColor> path;
+        if (!runtime->forest->compute_partition_path(our_space,
+                     req.partition.get_index_partition(), path))
+          return false;
+      }
+      // Check to see if any privilege fields overlap
+      std::vector<FieldID> intersection(our_req.privilege_fields.size());
+      std::vector<FieldID>::iterator intersect_it = 
+        std::set_intersection(our_req.privilege_fields.begin(),
+                              our_req.privilege_fields.end(),
+                              req.privilege_fields.begin(),
+                              req.privilege_fields.end(),
+                              intersection.begin());
+      intersection.resize(intersect_it - intersection.begin());
+      if (intersection.empty())
+        return false;
+      // If we aren't supposed to check privileges then we're done
+      if (!check_privileges)
+        return true;
+      // Finally if everything has overlapped, do a dependence analysis
+      // on the privileges and coherence
+      RegionUsage usage(req);
+      switch (check_dependence_type<true>(our_usage,usage))
+      {
+        // Only allow no-dependence, or simultaneous dependence through
+        case LEGION_NO_DEPENDENCE:
+        case LEGION_SIMULTANEOUS_DEPENDENCE:
+          {
+            return false;
+          }
+        default:
+          break;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::register_inline_mapped_region(PhysicalRegion &region)
+    //--------------------------------------------------------------------------
+    {
+      // Because of 'remap_region', this method can be called
+      // both for inline regions as well as regions which were
+      // initally mapped for the task.  Do a quick check to see
+      // if it was an original region.  If it was then we're done.
+      for (unsigned idx = 0; idx < physical_regions.size(); idx++)
+      {
+        if (physical_regions[idx].impl == region.impl)
+          return;
+      }
+      // Need lock because of unordered detach operations
+      AutoLock i_lock(inline_lock);
+      inline_regions.push_back(region);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::unregister_inline_mapped_region(PhysicalRegion &region)
+    //--------------------------------------------------------------------------
+    {
+      // Need lock because of unordered detach operations
+      AutoLock i_lock(inline_lock);
+      for (std::list<PhysicalRegion>::iterator it = 
+            inline_regions.begin(); it != inline_regions.end(); it++)
+      {
+        if (it->impl == region.impl)
+        {
+          if (runtime->runtime_warnings && !has_inline_accessor)
+            has_inline_accessor = it->impl->created_accessor();
+          inline_regions.erase(it);
+          return;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8814,7 +8831,7 @@ namespace Legion {
           "Task %s (UID %lld) failed to end trace before exiting!",
                         get_task_name(), get_unique_id()) 
       // Unmap any of our mapped regions before issuing any close operations
-      unmap_all_regions();
+      unmap_all_regions(false/*external*/);
       const std::deque<InstanceSet> &physical_instances = 
         single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions
@@ -9174,38 +9191,42 @@ namespace Legion {
         }
         const RegionRequirement &child_req = child->regions[idx];
         std::map<FieldID,MappingInstance> mapped_fields;
-        // Next check to see if which overlapping fields are mapped
-        for (std::list<PhysicalRegion>::const_iterator it = 
-              inline_regions.begin(); it != inline_regions.end(); it++)
+        // Next check to see which overlapping fields are mapped
         {
-          if (!it->is_mapped())
-            continue;
-          const RegionRequirement &inline_req = it->impl->get_requirement();
-          const RegionUsage inline_usage(inline_req);
-          // Don't both checking the privilege, we want to know if the
-          // fields and index spaces overlap
-          if (!check_region_dependence(inline_req.region.get_tree_id(),
-                inline_req.region.get_index_space(), inline_req, 
-                inline_usage, child_req, false/*check privileges*/))
-            continue;
-          InstanceSet instances;
-          it->impl->get_references(instances);
-          FieldSpaceNode *fs_node = 
-            runtime->forest->get_node(child_req.parent.get_field_space());
-          // Find all the fields that we can that overlap
-          for (std::set<FieldID>::const_iterator fit = 
-                child_req.privilege_fields.begin(); fit !=
-                child_req.privilege_fields.end(); fit++)
+          // Need inline lock because of unordered detach ops
+          AutoLock i_lock(inline_lock,1,false/*exclusive*/);
+          for (std::list<PhysicalRegion>::const_iterator it = 
+                inline_regions.begin(); it != inline_regions.end(); it++)
           {
-            if (inline_req.privilege_fields.find(*fit) ==
-                inline_req.privilege_fields.end())
+            if (!it->is_mapped())
               continue;
-            const unsigned fidx = fs_node->get_field_index(*fit);
-            for (unsigned inst_idx = 0; inst_idx < instances.size(); inst_idx++)
+            const RegionRequirement &inline_req = it->impl->get_requirement();
+            const RegionUsage inline_usage(inline_req);
+            // Don't both checking the privilege, we want to know if the
+            // fields and index spaces overlap
+            if (!check_region_dependence(inline_req.region.get_tree_id(),
+                  inline_req.region.get_index_space(), inline_req, 
+                  inline_usage, child_req, false/*check privileges*/))
+              continue;
+            InstanceSet instances;
+            it->impl->get_references(instances);
+            FieldSpaceNode *fs_node = 
+              runtime->forest->get_node(child_req.parent.get_field_space());
+            // Find all the fields that we can that overlap
+            for (std::set<FieldID>::const_iterator fit = 
+                  child_req.privilege_fields.begin(); fit !=
+                  child_req.privilege_fields.end(); fit++)
             {
-              const InstanceRef &ref = instances[inst_idx];
-              if (ref.get_valid_fields().is_set(fidx))
-                mapped_fields[*fit] = MappingInstance(ref.get_manager());
+              if (inline_req.privilege_fields.find(*fit) ==
+                  inline_req.privilege_fields.end())
+                continue;
+              const unsigned fidx = fs_node->get_field_index(*fit);
+              for (unsigned instidx = 0; instidx < instances.size(); instidx++)
+              {
+                const InstanceRef &ref = instances[instidx];
+                if (ref.get_valid_fields().is_set(fidx))
+                  mapped_fields[*fit] = MappingInstance(ref.get_manager());
+              }
             }
           }
         }
@@ -11045,6 +11066,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::add_physical_region(const RegionRequirement &req,
+          bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
+          bool virtual_mapped, const InstanceSet &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!unmap_event.exists());
+#endif
+      PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
+          RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, mapped, this, mid, tag, 
+          true/*leaf region*/, virtual_mapped, runtime);
+      physical_regions.push_back(PhysicalRegion(impl));
+      if (mapped)
+        impl->reset_references(physical_instances, unmap_event);
+    }
+
+    //--------------------------------------------------------------------------
     Future LeafContext::execute_task(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -11175,6 +11213,15 @@ namespace Legion {
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_UNMAP_OPERATION,
         "Illegal unmap operation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::unmap_all_regions(bool external)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_UNMAP_OPERATION,
+        "Illegal unmap_all_regions call performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id())
     }
 
@@ -11696,6 +11743,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Nothing to do
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      for (unsigned idx = 0; idx < unmap_events.size(); idx++)
+        assert(!unmap_events[idx].exists());
+#endif
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -11735,13 +11788,7 @@ namespace Legion {
       }
       if (!task_local_instances.empty())
         release_task_local_instances(deferred_result_instance);
-      // Unmap any physical regions that we mapped
-      for (std::vector<PhysicalRegion>::const_iterator it = 
-            physical_regions.begin(); it != physical_regions.end(); it++)
-      {
-        if (it->is_mapped())
-          it->impl->unmap_region();
-      }
+      // No need to unmap the physical regions, they never had events
       if (!execution_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(execution_events);
@@ -12610,6 +12657,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InlineContext::add_physical_region(const RegionRequirement &req,
+          bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
+          bool virtual_mapped, const InstanceSet &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+      // This should never be called directly
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     Future InlineContext::execute_task(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -12667,6 +12724,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->unmap_region(region);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::unmap_all_regions(bool external)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->unmap_all_regions(external);
     }
 
     //--------------------------------------------------------------------------

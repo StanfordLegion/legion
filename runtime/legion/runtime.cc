@@ -2105,7 +2105,7 @@ namespace Legion {
       if (!references.empty())
         references.add_resource_references(PHYSICAL_REGION_REF);
       termination_event = term_event;
-      trigger_on_unmap = true;
+      trigger_on_unmap = termination_event.exists();
       wait_for_unmap = wait_for;
     }
 
@@ -13537,17 +13537,6 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context unmap region!");
       ctx->unmap_region(region); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::unmap_all_regions(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      ctx->unmap_all_regions();
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------

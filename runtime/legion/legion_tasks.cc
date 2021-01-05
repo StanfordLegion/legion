@@ -4008,11 +4008,10 @@ namespace Legion {
             clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
             execution_context->add_physical_region(clone_requirements[idx],
-                false/*mapped*/, map_id, tag, unmap_events[idx],
-                virtual_mapped[idx], physical_instances[idx]);
+                         false/*mapped*/, map_id, tag, unmap_events[idx], 
+                         true/*virtual mapped*/, physical_instances[idx]);
             // Don't switch coherence modes since we virtually
-            // mapped it which means we will map in the parent's
-            // context
+            // mapped it which means we will map in the parent's context
           }
           else if (do_inner_task_optimization)
           {
@@ -4027,10 +4026,12 @@ namespace Legion {
             // people to wait on the value
             if (!IS_REDUCE(regions[idx]))
               clone_requirements[idx].privilege = LEGION_READ_WRITE;
-            unmap_events[idx] = Runtime::create_ap_user_event(NULL);
             execution_context->add_physical_region(clone_requirements[idx],
                     false/*mapped*/, map_id, tag, unmap_events[idx],
                     false/*virtual mapped*/, physical_instances[idx]);
+#ifdef DEBUG_LEGION
+            assert(unmap_events[idx].exists());
+#endif
             // Trigger the user event when the region is 
             // actually ready to be used
             std::set<ApEvent> ready_events;
@@ -4046,7 +4047,6 @@ namespace Legion {
             // context of this task
             clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
-            unmap_events[idx] = Runtime::create_ap_user_event(NULL);
             execution_context->add_physical_region(clone_requirements[idx],
                     true/*mapped*/, map_id, tag, unmap_events[idx],
                     false/*virtual mapped*/, physical_instances[idx]);

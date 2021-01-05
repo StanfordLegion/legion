@@ -1998,7 +1998,6 @@ namespace Legion {
                                 MapperID id = 0, MappingTagID tag = 0);
       void remap_region(Context ctx, PhysicalRegion region);
       void unmap_region(Context ctx, PhysicalRegion region);
-      void unmap_all_regions(Context ctx);
     public:
       void fill_fields(Context ctx, const FillLauncher &launcher);
       void fill_fields(Context ctx, const IndexFillLauncher &launcher);

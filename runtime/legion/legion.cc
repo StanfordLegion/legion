@@ -5389,7 +5389,7 @@ namespace Legion {
     void Runtime::unmap_all_regions(Context ctx)
     //--------------------------------------------------------------------------
     {
-      runtime->unmap_all_regions(ctx);
+      ctx->unmap_all_regions(true/*external*/);
     }
 
     //--------------------------------------------------------------------------
