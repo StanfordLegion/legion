@@ -2771,7 +2771,11 @@ namespace Legion {
                          parent_ctx->get_unique_id());
       }
       requirement = launcher.requirement;
-      termination_event = Runtime::create_ap_user_event(NULL);
+      const ApUserEvent term_event = Runtime::create_ap_user_event(NULL);
+      region = PhysicalRegion(new PhysicalRegionImpl(requirement,
+            mapped_event, completion_event, term_event, true/*mapped*/, ctx,
+            map_id, tag, false/*leaf*/, false/*virtual mapped*/, runtime));
+      termination_event = term_event;
       grants = launcher.grants;
       // Register ourselves with all the grants
       for (unsigned idx = 0; idx < grants.size(); idx++)
@@ -2792,9 +2796,7 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.tag;
       layout_constraint_id = launcher.layout_constraint_id;
-      region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-            mapped_event, completion_event, true/*mapped*/, ctx, map_id, tag, 
-            false/*leaf*/, false/*virtual mapped*/, runtime));
+      
       if (runtime->legion_spy_enabled)
         LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
@@ -2815,8 +2817,7 @@ namespace Legion {
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
       region = reg;
-      termination_event = Runtime::create_ap_user_event(NULL);
-      region.impl->remap_region(mapped_event, completion_event);
+      termination_event = region.impl->remap_region(completion_event);
       remap_region = true;
       // No need to check the privileges here since we know that we have
       // them from the first time that we made this physical region
@@ -2982,8 +2983,7 @@ namespace Legion {
       ApEvent effects_done;
       const bool track_effects = 
         (!atomic_locks.empty() || !arrive_barriers.empty());
-      // Check that we actually have references for this physical region
-      if (remap_region && region.impl->has_references())
+      if (remap_region)
       {
         region.impl->get_references(mapped_instances);
         effects_done = 
@@ -3005,6 +3005,8 @@ namespace Legion {
       { 
         // Now we've got the valid instances so invoke the mapper
         const bool record_valid = invoke_mapper(mapped_instances); 
+        // First mapping so set the references now
+        region.impl->set_references(mapped_instances);
         // Then we can register our mapped instances
         effects_done = 
           runtime->forest->physical_perform_updates_and_registration(
@@ -3028,10 +3030,6 @@ namespace Legion {
         dump_physical_state(&requirement, 0);
       } 
 #endif
-      // Update our physical instance with the newly mapped instances
-      // Have to do this before triggering the mapped event
-      region.impl->reset_references(mapped_instances, termination_event,
-                                    init_precondition);
       ApEvent map_complete_event = ApEvent::NO_AP_EVENT;
       if (mapped_instances.size() > 1)
       {
@@ -16822,9 +16820,19 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
-      region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-            mapped_event, completion_event, launcher.mapped, ctx, 0/*map id*/,
-            0/*tag*/, false/*leaf*/, false/*virtual mapped*/, runtime)); 
+      if (mapping)
+      {
+        const ApUserEvent term_event = Runtime::create_ap_user_event(NULL);
+        region = PhysicalRegion(new PhysicalRegionImpl(requirement,mapped_event,
+              completion_event, term_event, true/*mapped*/, ctx, 0/*map id*/, 
+              0/*tag*/, false/*leaf*/, false/*virtual mapped*/, runtime));
+        termination_event = term_event;
+      }
+      else
+        region = PhysicalRegion(new PhysicalRegionImpl(requirement,
+              mapped_event, completion_event, ApUserEvent::NO_AP_USER_EVENT, 
+              false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
+              false/*virtual mapped*/, runtime)); 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
@@ -16838,6 +16846,7 @@ namespace Legion {
       activate_operation();
       file_name = NULL;
       footprint = 0;
+      termination_event = ApEvent::NO_AP_EVENT;
       restricted = true;
     }
 
@@ -16980,9 +16989,6 @@ namespace Legion {
       assert(external_views.size() == 1);
 #endif
       InstanceView *ext_view = external_views[0];
-      ApUserEvent termination_event;
-      if (mapping)
-        termination_event = Runtime::create_ap_user_event(NULL);
       ApEvent attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
                                                         ext_view, ext_view,
@@ -16997,13 +17003,9 @@ namespace Legion {
       assert(external_instance.has_ref());
 #endif
       if (mapping)
-      {
-        external[0].set_ready_event(attach_event);
-        region.impl->reset_references(external,termination_event,attach_event);
-      }
-      else
-        // This operation is ready once the file is attached
-        region.impl->set_reference(external_instance);
+        external_instance.set_ready_event(attach_event);
+      // This operation is ready once the file is attached
+      region.impl->set_reference(external_instance);
       // Once we have created the instance, then we are done
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -17358,14 +17360,6 @@ namespace Legion {
       // all prior users of this particular region
       requirement.privilege = LEGION_READ_WRITE;
       requirement.prop = LEGION_EXCLUSIVE;
-      // Check to see if this is a valid detach operation
-      if (!region.impl->is_external_region())
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
-          "Illegal detach operation (ID %lld) performed in "
-                      "task %s (ID %lld). Detach was performed on an region "
-                      "that had not previously been attached.",
-                      get_unique_op_id(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id())
       // Create the future result that we will complete when we're done
       result = Future(new FutureImpl(runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
@@ -17492,6 +17486,13 @@ namespace Legion {
       // references when we are done mapping
       WrapperReferenceMutator mutator(map_applied_conditions);
       PhysicalManager *manager = reference.get_instance_manager();
+      if (!manager->is_external_instance())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
+                      "Illegal detach operation (ID %lld) performed in "
+                      "task %s (ID %lld). Detach was performed on an region "
+                      "that had not previously been attached.",
+                      get_unique_op_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif

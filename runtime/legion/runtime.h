@@ -396,8 +396,9 @@ namespace Legion {
       static const AllocationType alloc_type = PHYSICAL_REGION_ALLOC;
     public:
       PhysicalRegionImpl(const RegionRequirement &req, RtEvent mapped_event,
-            ApEvent ready_event, bool mapped, TaskContext *ctx, MapperID mid,
-            MappingTagID tag, bool leaf, bool virt, Runtime *rt);
+            ApEvent ready_event, ApUserEvent term_event, bool mapped, 
+            TaskContext *ctx, MapperID mid, MappingTagID tag, bool leaf, 
+            bool virt, Runtime *rt);
       PhysicalRegionImpl(const PhysicalRegionImpl &rhs);
       ~PhysicalRegionImpl(void);
     public:
@@ -409,7 +410,6 @@ namespace Legion {
                             bool warn = false, const char *src = NULL);
       bool is_valid(void) const;
       bool is_mapped(void) const;
-      bool is_external_region(void) const;
       LogicalRegion get_logical_region(void) const;
       PrivilegeMode get_privilege(void) const;
       LegionRuntime::Accessor::RegionAccessor<
@@ -420,16 +420,14 @@ namespace Legion {
           get_field_accessor(FieldID field, bool silence_warnings = true);
     public:
       void unmap_region(void);
-      void remap_region(RtEvent new_mapped_event, ApEvent new_ready_event);
+      ApEvent remap_region(ApEvent new_ready_event);
       const RegionRequirement& get_requirement(void) const;
-      void set_reference(const InstanceRef &references);
-      void reset_references(const InstanceSet &instances,ApUserEvent term_event,
-                            ApEvent wait_for = ApEvent::NO_AP_EVENT);
-      RtEvent get_mapped_event(void) const;
-      ApEvent get_ready_event(void) const;
+      void set_reference(const InstanceRef &references, bool safe = false);
+      void set_references(const InstanceSet &instances, bool safe = false);
       bool has_references(void) const;
       void get_references(InstanceSet &instances) const;
-      void get_memories(std::set<Memory>& memories) const;
+      void get_memories(std::set<Memory>& memories, 
+          bool silence_warnings, const char *warning_string) const;
       void get_fields(std::vector<FieldID>& fields) const;
 #if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
     public:
@@ -442,7 +440,8 @@ namespace Legion {
 #endif
     public:
       void get_bounds(void *realm_is, TypeTag type_tag);
-      PieceIteratorImpl* get_piece_iterator(FieldID fid, bool privilege_only);
+      PieceIteratorImpl* get_piece_iterator(FieldID fid, bool privilege_only,
+                          bool silence_warnings, const char *warning_string);
       PhysicalInstance get_instance_info(PrivilegeMode mode, 
                                          FieldID fid, size_t field_size, 
                                          void *realm_is, TypeTag type_tag,
@@ -472,20 +471,29 @@ namespace Legion {
       const bool virtual_mapped;
       const bool replaying;
     private:
+      const RegionRequirement req;
       // Event for when the 'references' are set by the producer op
-      RtEvent mapped_event;
+      // can only be accessed in "application" side code
+      // There should only be one of these triggered by the producer
+      const RtEvent mapped_event;
       // Event for when it is safe to use the physical instances
+      // can only be accessed in "application" side code
+      // triggered by mapping stage code
       ApEvent ready_event;
-      // Physical instances for this mapping
-      InstanceSet references;
-      RegionRequirement req;
-      bool mapped; // whether it is currently mapped
-      bool valid; // whether it is currently valid
-      // whether to trigger the termination event upon unmap
-      bool trigger_on_unmap;
-      bool made_accessor;
+      // Event for when the mapped application code is done accessing
+      // the physical region, set in "application" side code 
+      // should only be accessed there as well
       ApUserEvent termination_event;
-      ApEvent wait_for_unmap;
+      // Physical instances for this mapping
+      // written by the "mapping stage" code of whatever operation made this
+      // can be accessed in "application" side code after 'mapped' triggers
+      InstanceSet references;
+      // "appliciation side" state
+      // whether it is currently mapped
+      bool mapped; 
+      // whether it is currently valid -> mapped and ready_event has triggered
+      bool valid; 
+      bool made_accessor;
 #ifdef LEGION_BOUNDS_CHECKS
     private:
       Domain bounds;

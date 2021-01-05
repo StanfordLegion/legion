@@ -18707,8 +18707,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline PieceIteratorT<DIM,T>::PieceIteratorT(const PhysicalRegion &region,
-                                               FieldID fid, bool privilege_only)
-      : PieceIterator(region, fid, privilege_only)
+        FieldID fid, bool privilege_only, bool silence_warn, const char *warn)
+      : PieceIterator(region, fid, privilege_only, silence_warn, warn)
     //--------------------------------------------------------------------------
     {
       if (valid())

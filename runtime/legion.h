@@ -2225,7 +2225,9 @@ namespace Legion {
       /**
        * Return the memories where the underlying physical instances locate.
        */
-      void get_memories(std::set<Memory>& memories) const;
+      void get_memories(std::set<Memory>& memories,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL) const;
       /**
        * Return a list of fields that the physical region contains.
        */
@@ -2664,7 +2666,9 @@ namespace Legion {
       PieceIterator(void);
       PieceIterator(const PieceIterator &rhs);
       PieceIterator(const PhysicalRegion &region, FieldID fid,
-                    bool privilege_only);
+                    bool privilege_only,
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL);
       ~PieceIterator(void);
     public:
       PieceIterator& operator=(const PieceIterator &rhs);
@@ -2700,7 +2704,9 @@ namespace Legion {
       PieceIteratorT(void);
       PieceIteratorT(const PieceIteratorT &rhs);
       PieceIteratorT(const PhysicalRegion &region, FieldID fid,
-                     bool privilege_only);
+                     bool privilege_only,
+                     bool silence_warnings = false,
+                     const char *warning_string = NULL);
     public:
       PieceIteratorT<DIM,COORD_T>& operator=(const PieceIteratorT &rhs);
     public:

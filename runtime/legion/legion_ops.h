@@ -1123,7 +1123,7 @@ namespace Legion {
       virtual DomainPoint get_shard_point(void) const;
     protected:
       bool remap_region;
-      ApUserEvent termination_event;
+      ApEvent termination_event;
       PhysicalRegion region;
       RegionTreePath privilege_path;
       unsigned parent_req_index;
@@ -3447,6 +3447,7 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       LayoutConstraintSet layout_constraint_set;
       size_t footprint;
+      ApEvent termination_event;
       bool restricted;
       bool mapping;
     };

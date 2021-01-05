@@ -2339,10 +2339,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegion::get_memories(std::set<Memory>& memories) const
+    void PhysicalRegion::get_memories(std::set<Memory>& memories,
+                        bool silence_warnings, const char *warning_string) const
     //--------------------------------------------------------------------------
     {
-      impl->get_memories(memories);
+      impl->get_memories(memories, silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2439,12 +2440,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PieceIterator::PieceIterator(const PhysicalRegion &region, FieldID fid,
-                                 bool privilege_only)
+                                 bool privilege_only, bool silence_warnings,
+                                 const char *warning_string)
       : impl(NULL), index(-1)
     //--------------------------------------------------------------------------
     {
       if (region.impl != NULL)
-        impl = region.impl->get_piece_iterator(fid, privilege_only);
+        impl = region.impl->get_piece_iterator(fid, privilege_only,
+                                  silence_warnings, warning_string);
       if (impl != NULL)
       {
         impl->add_reference();

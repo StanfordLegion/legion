@@ -5406,12 +5406,12 @@ namespace Legion {
       if (!virtual_mapped)
         unmap_event = Runtime::create_ap_user_event(NULL);
       PhysicalRegionImpl *impl = new PhysicalRegionImpl(req,
-          RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, mapped, this, mid, tag,
-          false/*leaf region*/, virtual_mapped, runtime);
+          RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT,
+          mapped ? unmap_event : ApUserEvent::NO_AP_USER_EVENT, mapped, this,
+          mid, tag, false/*leaf region*/, virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
       if (!virtual_mapped)
-        impl->reset_references(physical_instances, 
-            mapped ? unmap_event : ApUserEvent::NO_AP_USER_EVENT);
+        impl->set_references(physical_instances, true/*safe*/); 
     }
 
     //--------------------------------------------------------------------------
@@ -5961,8 +5961,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::detach_resource(PhysicalRegion region,const bool flush,
-                                         const bool unordered)
+    Future InnerContext::detach_resource(PhysicalRegion region,
+                                         const bool flush, const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -11078,11 +11078,12 @@ namespace Legion {
       assert(!unmap_event.exists());
 #endif
       PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
-          RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, mapped, this, mid, tag, 
+          RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, 
+          ApUserEvent::NO_AP_USER_EVENT, mapped, this, mid, tag, 
           true/*leaf region*/, virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
       if (mapped)
-        impl->reset_references(physical_instances, unmap_event);
+        impl->set_references(physical_instances, true/*safe*/);
     }
 
     //--------------------------------------------------------------------------
