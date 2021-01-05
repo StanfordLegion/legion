@@ -4784,10 +4784,13 @@ namespace Legion {
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
       bool record_valid = true;
-      if (remap_region)
-        region.impl->get_references(mapped_instances);
-      else
+      if (!remap_region)
+      {
         record_valid = invoke_mapper(mapped_instances);
+        region.impl->set_references(mapped_instances);
+      }
+      else
+        region.impl->get_references(mapped_instances);
       // First kick off the exchange to get that in flight
       std::vector<InstanceView*> mapped_views;
       {
@@ -4992,16 +4995,6 @@ namespace Legion {
         dump_physical_state(&requirement, 0);
       } 
 #endif
-      // Update our physical instance with the newly mapped instances
-      // Have to do this before triggering the mapped event
-      if (effects_done.exists())
-      {
-        region.impl->reset_references(mapped_instances, termination_event,
-          Runtime::merge_events(&trace_info, init_precondition, effects_done));
-      }
-      else
-        region.impl->reset_references(mapped_instances, termination_event,
-                                      init_precondition);
       ApEvent map_complete_event = ApEvent::NO_AP_EVENT;
       if (mapped_instances.size() > 1)
       {
@@ -5347,13 +5340,8 @@ namespace Legion {
 #endif
         // This operation is ready once the file is attached
         if (mapping)
-        {
-          attach_instances[0].set_ready_event(broadcast_barrier);
-          region.impl->reset_references(attach_instances, termination_event,
-                                        broadcast_barrier);
-        }
-        else
-          region.impl->set_reference(external_instance);
+          external_instance.set_ready_event(broadcast_barrier);
+        region.impl->set_reference(external_instance);
         // Also set the sharded view in this case
         region.impl->set_sharded_view(sharded_view);
         // Make sure that all the attach operations are done mapping
@@ -5430,13 +5418,8 @@ namespace Legion {
                                         attach_event);
           // Save the instance information out to region
           if (mapping)
-          {
-            attach_instances[0].set_ready_event(broadcast_barrier);
-            region.impl->reset_references(attach_instances, termination_event,
-                                          broadcast_barrier);
-          }
-          else
-            region.impl->set_reference(external_instance);
+            external_instance.set_ready_event(broadcast_barrier);
+          region.impl->set_reference(external_instance);
           // This operation is ready once the file is attached
           // Make sure that all the attach operations are done mapping
           // before we consider this attach operation done
@@ -5466,15 +5449,8 @@ namespace Legion {
           external_instance = InstanceRef(manager, instance_fields);
           // Save the instance information out to region
           if (mapping)
-          {
-            InstanceSet attach_instances(1);
-            attach_instances[0] = external_instance;
-            attach_instances[0].set_ready_event(broadcast_barrier);
-            region.impl->reset_references(attach_instances, termination_event,
-                                          broadcast_barrier);
-          }
-          else
-            region.impl->set_reference(external_instance);
+            external_instance.set_ready_event(broadcast_barrier);
+          region.impl->set_reference(external_instance);
           // Record that we're mapped once everyone else does
           Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
           complete_mapping(resource_barrier);
@@ -5558,9 +5534,6 @@ namespace Legion {
 #endif
       const bool is_owner_shard = (repl_ctx->owner_shard->shard_id == 0);
       const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
-      // Actual unmap of an inline mapped region was deferred to here
-      if (region.impl->is_mapped())
-        region.impl->unmap_region();
       // Now we can get the reference we need for the detach operation
       InstanceSet references;
       region.impl->get_references(references);
@@ -5570,6 +5543,13 @@ namespace Legion {
       InstanceRef reference = references[0];
       // Check that this is actually a file
       PhysicalManager *manager = reference.get_instance_manager();
+      if (!manager->is_external_instance())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
+                      "Illegal detach operation (ID %lld) performed in "
+                      "task %s (ID %lld). Detach was performed on an region "
+                      "that had not previously been attached.",
+                      get_unique_op_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
