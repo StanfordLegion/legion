@@ -28,6 +28,7 @@
 #define STATIC_MAX_SCHEDULE_COUNT     8
 #define STATIC_MEMOIZE                false
 #define STATIC_MAP_LOCALLY            false
+#define STATIC_EXACT_REGION           false
 
 // This is the default implementation of the mapper interface for
 // the general low level runtime
@@ -70,7 +71,8 @@ namespace Legion {
         stealing_enabled(STATIC_STEALING_ENABLED),
         max_schedule_count(STATIC_MAX_SCHEDULE_COUNT),
         memoize(STATIC_MEMOIZE),
-        map_locally(STATIC_MAP_LOCALLY)
+        map_locally(STATIC_MAP_LOCALLY),
+        exact_region(STATIC_EXACT_REGION)
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Initializing the default mapper for "
@@ -100,6 +102,7 @@ namespace Legion {
           INT_ARG("-dm:sched", max_schedule_count);
           BOOL_ARG("-dm:memoize", memoize);
           BOOL_ARG("-dm:map_locally", map_locally);
+          BOOL_ARG("-dm:exact_region", exact_region);
 #undef BOOL_ARG
 #undef INT_ARG
         }
@@ -2282,7 +2285,8 @@ namespace Legion {
 
       // If the application requested that we use the exact region requested,
       // honor that
-      if (layout_constraints.specialized_constraint.is_exact() ||
+      if (exact_region ||
+          layout_constraints.specialized_constraint.is_exact() ||
           (req.tag & DefaultMapper::EXACT_REGION) != 0)
         return result;
 
