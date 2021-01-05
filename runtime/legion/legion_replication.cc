@@ -3307,12 +3307,14 @@ namespace Legion {
           // participate in the collective operations
           const ApEvent done_event = 
             thunk->perform(this,runtime->forest,ApEvent::NO_AP_EVENT,instances);
-          // We can try to early-complete this operation too
-          request_early_complete(done_event);
           // We have no local points, so we can just trigger
           Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
           complete_mapping(mapping_barrier);
-          complete_execution(Runtime::protect_event(done_event));
+          // We can try to early-complete this operation too
+          if (!request_early_complete(done_event))
+            complete_execution(Runtime::protect_event(done_event));
+          else
+            complete_execution();
         }
         else // If we have valid points then we do the base call
         {
@@ -4621,12 +4623,9 @@ namespace Legion {
             Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/, 
                                           execution_fence_precondition);
             // We can always trigger the completion event when these are done
-            request_early_complete(execution_fence_barrier);
-            if (!execution_fence_barrier.has_triggered())
-            {
-              RtEvent wait_on = Runtime::protect_event(execution_fence_barrier);
-              complete_execution(wait_on);
-            }
+            if (!request_early_complete(execution_fence_barrier))
+              complete_execution(
+                  Runtime::protect_event(execution_fence_barrier));
             else
               complete_execution();
             break;
@@ -5057,12 +5056,11 @@ namespace Legion {
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
       complete_mapping(complete_inline_mapping(mapping_applied));
-      if (!map_complete_event.has_triggered())
+      if (!request_early_complete(map_complete_event))
       {
         // Issue a deferred trigger on our completion event
         // and mark that we are no longer responsible for 
         // triggering our completion event
-        request_early_complete(map_complete_event);
         DeferredExecuteArgs deferred_execute_args(this);
         runtime->issue_runtime_meta_task(deferred_execute_args,
                                          LG_THROUGHPUT_DEFERRED_PRIORITY,
@@ -5352,8 +5350,10 @@ namespace Legion {
         else
           Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
         complete_mapping(resource_barrier);
-        request_early_complete(broadcast_barrier);
-        complete_execution(Runtime::protect_event(broadcast_barrier));
+        if (!request_early_complete(broadcast_barrier))
+          complete_execution(Runtime::protect_event(broadcast_barrier));
+        else
+          complete_execution();
       }
       else
       {
@@ -5429,8 +5429,10 @@ namespace Legion {
           else
             Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
           complete_mapping(resource_barrier);
-          request_early_complete(broadcast_barrier);
-          complete_execution(Runtime::protect_event(broadcast_barrier));
+          if (!request_early_complete(broadcast_barrier))
+            complete_execution(Runtime::protect_event(broadcast_barrier));
+          else
+            complete_execution();
         }
         else
         {
@@ -5592,8 +5594,10 @@ namespace Legion {
         Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
       complete_mapping(resource_barrier);
 
-      request_early_complete(detach_event);
-      complete_execution(Runtime::protect_event(detach_event));
+      if (!request_early_complete(detach_event))
+        complete_execution(Runtime::protect_event(detach_event));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
