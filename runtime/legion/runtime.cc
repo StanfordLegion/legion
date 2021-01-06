@@ -2672,7 +2672,7 @@ namespace Legion {
       if (valid)
         return;
       // Now wait for the reference to be ready
-      bool poisoned;
+      bool poisoned = false;
       if (!ready_event.has_triggered_faultaware(poisoned))
       {
         if (!poisoned)
