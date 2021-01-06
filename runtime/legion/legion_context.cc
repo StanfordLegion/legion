@@ -6280,7 +6280,7 @@ namespace Legion {
       if (region.impl->is_mapped())
       {
         region.impl->unmap_region();
-        // Remove this region from the list of unmapped regions if it is mapped
+        // Remove this region from the list of inline regions if it is mapped
         unregister_inline_mapped_region(region);
       }
       DetachOp *op = runtime->get_available_detach_op();
@@ -16307,7 +16307,8 @@ namespace Legion {
                       launcher.handle.tree_id, get_task_name(), 
                       get_unique_id(), launcher.file_name)
       // If we're counting this region as mapped we need to register it
-      register_inline_mapped_region(result);
+      if (result.is_mapped())
+        register_inline_mapped_region(result);
       add_to_dependence_queue(attach_op);
       return result;
     }
@@ -16333,11 +16334,14 @@ namespace Legion {
       }
       // Unmap the region here so that it is safe for re-use
       if (region.impl->is_mapped())
+      {
         region.impl->unmap_region();
+        // Remove this region from the list of inline regions if it is mapped
+        unregister_inline_mapped_region(region);
+      }
       ReplDetachOp *op = runtime->get_available_repl_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
       op->initialize_replication(this, external_resource_barrier); 
-      unregister_inline_mapped_region(region);
       add_to_dependence_queue(op, unordered);
       return result;
     }
