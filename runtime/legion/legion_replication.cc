@@ -5555,6 +5555,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
+      // Add a valid reference to the instances to act as an acquire to keep
+      // them valid through the end of mapping them, we'll release the valid
+      // references when we are done mapping
+      WrapperReferenceMutator mutator(map_applied_conditions);
+      manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
       ShardedView *sharded_view = region.impl->get_sharded_view();
       ApEvent detach_event;
       if ((sharded_view != NULL) || (is_owner_shard))
