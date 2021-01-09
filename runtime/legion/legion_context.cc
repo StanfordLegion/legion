@@ -38,20 +38,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(Runtime *rt, SingleTask *owner, int d,
-                             const std::vector<RegionRequirement> &reqs)
+                      const std::vector<RegionRequirement> &reqs, bool inline_t)
       : runtime(rt), owner_task(owner), regions(reqs), depth(d),
         next_created_index(reqs.size()), 
         executing_processor(Processor::NO_PROC), total_tunable_count(0), 
         overhead_tracker(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
-        children_complete_invoked(false), children_commit_invoked(false)
+        children_complete_invoked(false), children_commit_invoked(false),
+        inline_task(inline_t)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(const TaskContext &rhs)
-      : runtime(NULL), owner_task(NULL), regions(rhs.regions), depth(-1)
+      : runtime(NULL), owner_task(NULL), regions(rhs.regions), depth(-1), 
+        inline_task(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1894,7 +1896,8 @@ namespace Legion {
 #endif
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
-      pending_done = owner_task->get_context()->decrement_pending(owner_task);
+      if (!inline_task)
+        pending_done = find_parent_context()->decrement_pending(owner_task);
       return physical_regions;
     }
 
@@ -2298,7 +2301,7 @@ namespace Legion {
       {
         const RegionRequirement &child_req = child->regions[idx1];
         FieldSpaceNode *space = 
-          runtime->forest->get_node(child_req.region.get_field_space());
+          runtime->forest->get_node(child_req.parent.get_field_space());
         FieldMask mask = space->get_field_mask(child_req.privilege_fields);
         InstanceSet instances;
         parent_regions[idx1].impl->get_references(instances);
@@ -2350,8 +2353,9 @@ namespace Legion {
                                const std::vector<RegionRequirement> &reqs,
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
-                               UniqueID uid, ApEvent exec_fence, bool remote)
-      : TaskContext(rt, owner, d, reqs),
+                               UniqueID uid, ApEvent exec_fence, bool remote,
+                               bool inline_task)
+      : TaskContext(rt, owner, d, reqs, inline_task),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(finner),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
@@ -2408,9 +2412,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(const InnerContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions), tree_context(rhs.tree_context),
-        context_uid(0), remote_context(false), full_inner_context(false),
-        parent_req_indexes(rhs.parent_req_indexes), 
+      : TaskContext(NULL, NULL, 0, rhs.regions, false), 
+        tree_context(rhs.tree_context), context_uid(0), remote_context(false), 
+        full_inner_context(false), parent_req_indexes(rhs.parent_req_indexes), 
         virtual_mapped(rhs.virtual_mapped)
     //--------------------------------------------------------------------------
     {
@@ -8915,7 +8919,7 @@ namespace Legion {
       // Tell the parent context that we are ready for post-end
       // Make a copy of the results if necessary
       TaskContext *parent_ctx = owner_task->get_context();
-      RtEvent effects_done(!external_implicit_task ? 
+      RtEvent effects_done(!external_implicit_task && !inline_task ? 
           Processor::get_current_finish_event() : Realm::Event::NO_EVENT); 
       if (last_registration.exists() && !last_registration.has_triggered())
         effects_done = Runtime::merge_events(effects_done, last_registration);
@@ -8952,11 +8956,12 @@ namespace Legion {
       }
       else
         parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size);
+      if (!inline_task)
 #ifdef DEBUG_LEGION
-      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                     false/*meta*/);
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
 #else
-      runtime_ptr->decrement_total_outstanding_tasks();
+        runtime_ptr->decrement_total_outstanding_tasks();
 #endif
     }
 
@@ -9195,9 +9200,20 @@ namespace Legion {
         // and return because we couldn't find a mapped physical region
         if (!found)
         {
+          REPORT_LEGION_WARNING(LEGION_WARNING_FAILED_INLINING,
+              "Failed to inline task %s (UID %lld) into parent task "
+              "%s (UID %lld) because there was no mapped region for "
+              "region requirement %d to use. Currently all regions "
+              "must be mapped in the parent task in order to allow "
+              "for inlining. If you believe you have a compelling use "
+              "case for inline a task with virtually mapped regions "
+              "then please contact the Legion developers.", 
+              child->get_task_name(), child->get_unique_id(), 
+              owner_task->get_task_name(), owner_task->get_unique_id(),childidx)
           return false;
         }
       }
+      register_executing_child(child);
       const ApEvent child_done = child->get_completion_event();
       // Now select the variant for task based on the regions 
       std::deque<InstanceSet> physical_instances(child_regions.size());
@@ -9205,9 +9221,9 @@ namespace Legion {
         select_inline_variant(child, child_regions, physical_instances); 
       child->perform_inlining(variant, physical_instances);
       // Then wait for the child operation to be finished
-      // TODO: handle resilience fault-aware wait here
-      if (!child_done.has_triggered())
-        child_done.wait();
+      bool poisoned = false;
+      if (!child_done.has_triggered_faultaware(poisoned))
+        child_done.wait_faultaware(poisoned);
       return true;
     } 
 
@@ -10081,15 +10097,15 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LeafContext::LeafContext(Runtime *rt, SingleTask *owner)
-      : TaskContext(rt, owner, owner->get_depth(), owner->regions)
+    LeafContext::LeafContext(Runtime *rt, SingleTask *owner, bool inline_task)
+      : TaskContext(rt, owner, owner->get_depth(), owner->regions, inline_task)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     LeafContext::LeafContext(const LeafContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions)
+      : TaskContext(NULL, NULL, 0, rhs.regions, false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11759,7 +11775,8 @@ namespace Legion {
       // Tell the parent context that we are ready for post-end
       // Make a copy of the results if necessary
       TaskContext *parent_ctx = owner_task->get_context();
-      const RtEvent effects_done(Processor::get_current_finish_event());
+      const RtEvent effects_done(!inline_task ?
+          Processor::get_current_finish_event() : Realm::Event::NO_EVENT);
       if (deferred_result_instance.exists())
         parent_ctx->add_to_post_task_queue(this, effects_done,
                                            res, res_size, 
@@ -11793,11 +11810,12 @@ namespace Legion {
       }
       else
         parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size);
+      if (!inline_task)
 #ifdef DEBUG_LEGION
-      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                     false/*meta*/);
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
 #else
-      runtime_ptr->decrement_total_outstanding_tasks();
+        runtime_ptr->decrement_total_outstanding_tasks();
 #endif
     }
 

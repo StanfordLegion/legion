@@ -10065,9 +10065,14 @@ namespace Legion {
         realm_descriptor.find_impl<Realm::FunctionPointerImplementation>();
 #ifdef DEBUG_LEGION
       assert(fp_impl != NULL);
+      assert(implicit_context != NULL);
 #endif
+      // Save the implicit context here on the stack so we can restore it
+      TaskContext *previous_context = implicit_context;
       RealmFnptr inline_ptr = fp_impl->get_impl<RealmFnptr>();
       (*inline_ptr)(&ctx, sizeof(ctx), user_data, user_data_size, current);
+      // Restore the implicit context back to the previous context
+      implicit_context = previous_context;
     }
 
     //--------------------------------------------------------------------------

@@ -739,6 +739,8 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions);
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);

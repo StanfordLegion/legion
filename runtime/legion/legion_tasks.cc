@@ -2711,6 +2711,7 @@ namespace Legion {
       assert(parent_instances.size() == regions.size());
 #endif
       selected_variant = variant->vid;
+      target_processors.push_back(current_proc);
       physical_instances = parent_instances;
       virtual_mapped.resize(regions.size());
       no_access_regions.resize(regions.size());
@@ -2720,7 +2721,6 @@ namespace Legion {
         no_access_regions[idx] = IS_NO_ACCESS(regions[idx]);
       }
       complete_mapping();
-      resolve_speculation();
       // Now we can launch this task right inline in this thread
       launch_task(true/*inline*/); 
     }
@@ -3997,14 +3997,15 @@ namespace Legion {
         {
           InnerContext *inner_ctx = new InnerContext(runtime, this, 
               get_depth(), variant->is_inner(), regions, parent_req_indexes,
-              virtual_mapped, unique_op_id, execution_fence_event);
+              virtual_mapped, unique_op_id, execution_fence_event, 
+              false/*remote*/, inline_task);
           if (mapper == NULL)
             mapper = runtime->find_mapper(current_proc, map_id);
           inner_ctx->configure_context(mapper, task_priority);
           execution_context = inner_ctx;
         }
         else
-          execution_context = new LeafContext(runtime, this);
+          execution_context = new LeafContext(runtime, this, inline_task);
         // Add a reference to our execution context
         execution_context->add_reference();
         std::vector<ApUserEvent> unmap_events(regions.size());
@@ -4091,7 +4092,8 @@ namespace Legion {
       }
       // STEP 3: Finally we get to launch the task
       // Mark that we have an outstanding task in this context 
-      parent_ctx->increment_pending();
+      if (!inline_task)
+        parent_ctx->increment_pending();
       // If this is a leaf task and we have no virtual instances
       // and the SingleTask sub-type says it is ok
       // we can trigger the task's completion event as soon as
@@ -5454,6 +5456,16 @@ namespace Legion {
                           applied_condition, acquired_instances);
       complete_mapping(applied_condition);
       return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::perform_inlining(VariantImpl *variant,
+                                  const std::deque<InstanceSet> &parent_regions)
+    //--------------------------------------------------------------------------
+    {
+      SingleTask::perform_inlining(variant, parent_regions);
+      // We also need to resolve speculation which PointTasks do not
+      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -7974,7 +7986,6 @@ namespace Legion {
       total_points = launch_space->get_volume();
       SliceTask *slice = clone_as_slice_task(launch_space->handle,
                 current_proc, false/*recurse*/, false/*stealable*/);
-      origin_mapped_slices.insert(slice);
       slice->enumerate_points();
       slice->perform_inlining(variant, parent_regions);
       // Record that we are mapped and had our speculation resolved too
