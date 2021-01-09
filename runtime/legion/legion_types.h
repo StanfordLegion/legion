@@ -1473,7 +1473,6 @@ namespace Legion {
     class TopLevelContext;
     class RemoteContext;
     class LeafContext;
-    class InlineContext;
 
     // Nasty global variable for TLS support of figuring out
     // our context implicitly
@@ -1712,7 +1711,6 @@ namespace Legion {
     friend class Internal::TopLevelContext;                 \
     friend class Internal::RemoteContext;                   \
     friend class Internal::LeafContext;                     \
-    friend class Internal::InlineContext;                   \
     friend class Internal::InstanceBuilder;                 \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  

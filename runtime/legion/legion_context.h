@@ -48,7 +48,7 @@ namespace Legion {
         YieldArgs(UniqueID uid) : LgTaskArgs<YieldArgs>(uid) { }
       };
     public:
-      TaskContext(Runtime *runtime, TaskOp *owner, int depth,
+      TaskContext(Runtime *runtime, SingleTask *owner, int depth,
                   const std::vector<RegionRequirement> &reqs);
       TaskContext(const TaskContext &rhs);
       virtual ~TaskContext(void);
@@ -70,7 +70,7 @@ namespace Legion {
         { return physical_regions; }
       inline bool has_created_requirements(void) const
         { return !created_requirements.empty(); }
-      inline TaskOp* get_owner_task(void) const { return owner_task; }
+      inline SingleTask* get_owner_task(void) const { return owner_task; }
       inline bool is_priority_mutable(void) const { return mutable_priority; }
       inline int get_depth(void) const { return depth; }
     public:
@@ -86,8 +86,9 @@ namespace Legion {
           std::vector<std::pair<size_t,DomainPoint> > &coordinates) = 0;
       virtual bool attempt_children_complete(void) = 0;
       virtual bool attempt_children_commit(void) = 0;
-      virtual void inline_child_task(TaskOp *child) = 0;
-      virtual VariantImpl* select_inline_variant(TaskOp *child) = 0;
+      virtual VariantImpl* select_inline_variant(TaskOp *child,
+                const std::vector<PhysicalRegion> &parent_regions,
+                std::deque<InstanceSet> &physical_instances);
       virtual bool is_leaf_context(void) const;
       virtual bool is_inner_context(void) const;
 #ifdef LEGION_USE_LIBDL
@@ -391,7 +392,6 @@ namespace Legion {
       virtual void register_child_executed(Operation *op) = 0;
       virtual void register_child_complete(Operation *op) = 0;
       virtual void register_child_commit(Operation *op) = 0; 
-      virtual void unregister_child_operation(Operation *op) = 0;
       virtual ApEvent register_implicit_dependences(Operation *op) = 0;
     public:
       virtual RtEvent get_current_mapping_fence_event(void) = 0;
@@ -529,6 +529,11 @@ namespace Legion {
                                       std::set<FieldID>& privilege_fields,
                                       FieldID &bad_field, int local, int &bad,
                                       bool skip_privileges) const;
+      bool check_region_dependence(RegionTreeID tid, IndexSpace space,
+                                  const RegionRequirement &our_req,
+                                  const RegionUsage &our_usage,
+                                  const RegionRequirement &req,
+                                  bool check_privileges = true) const;
     public:
       void initialize_overhead_tracker(void);
       inline void begin_runtime_call(void);
@@ -556,7 +561,7 @@ namespace Legion {
       IndexSpace find_index_launch_space(const Domain &domain);
     public:
       Runtime *const runtime;
-      TaskOp *const owner_task;
+      SingleTask *const owner_task;
       const std::vector<RegionRequirement> &regions;
     protected:
       // For profiling information
@@ -745,8 +750,8 @@ namespace Legion {
         bool ancestor;
       };
     public:
-      InnerContext(Runtime *runtime, TaskOp *owner, int depth, bool full_inner,
-                   const std::vector<RegionRequirement> &reqs,
+      InnerContext(Runtime *runtime, SingleTask *owner, int depth, 
+                   bool full_inner, const std::vector<RegionRequirement> &reqs,
                    const std::vector<unsigned> &parent_indexes,
                    const std::vector<bool> &virt_mapped, UniqueID context_uid, 
                    ApEvent execution_fence, bool remote = false);
@@ -825,12 +830,7 @@ namespace Legion {
       void find_conflicting_internal(const RegionRequirement &req,
                                     std::vector<PhysicalRegion> &conflicting);
       void find_conflicting_regions(FillOp *fill,
-                                    std::vector<PhysicalRegion> &conflicting);
-      bool check_region_dependence(RegionTreeID tid, IndexSpace space,
-                                  const RegionRequirement &our_req,
-                                  const RegionUsage &our_usage,
-                                  const RegionRequirement &req,
-                                  bool check_privileges = true) const;
+                                    std::vector<PhysicalRegion> &conflicting); 
       void register_inline_mapped_region(PhysicalRegion &region);
       void unregister_inline_mapped_region(PhysicalRegion &region);
     public:
@@ -853,8 +853,7 @@ namespace Legion {
                         AddressSpaceID source);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
-      virtual void inline_child_task(TaskOp *child);
-      virtual VariantImpl* select_inline_variant(TaskOp *child);
+      bool inline_child_task(TaskOp *child);
       virtual void handle_registration_callback_effects(RtEvent effects);
       virtual void analyze_free_local_fields(FieldSpace handle,
                                   const std::vector<FieldID> &local_to_free,
@@ -1109,7 +1108,6 @@ namespace Legion {
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
-      virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_implicit_dependences(Operation *op);
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
@@ -1513,7 +1511,7 @@ namespace Legion {
      */
     class LeafContext : public TaskContext {
     public:
-      LeafContext(Runtime *runtime, TaskOp *owner);
+      LeafContext(Runtime *runtime, SingleTask *owner);
       LeafContext(const LeafContext &rhs);
       virtual ~LeafContext(void);
     public:
@@ -1542,8 +1540,10 @@ namespace Legion {
           std::vector<std::pair<size_t,DomainPoint> > &coordinates);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
-      virtual void inline_child_task(TaskOp *child);
-      virtual VariantImpl* select_inline_variant(TaskOp *child);
+      void inline_child_task(TaskOp *child);
+      virtual VariantImpl* select_inline_variant(TaskOp *child,
+                const std::vector<PhysicalRegion> &parent_regions,
+                std::deque<InstanceSet> &physical_instances);
       virtual void handle_registration_callback_effects(RtEvent effects);
       virtual bool is_leaf_context(void) const;
     public:
@@ -1788,7 +1788,6 @@ namespace Legion {
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
-      virtual void unregister_child_operation(Operation *op);
       virtual ApEvent register_implicit_dependences(Operation *op);
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
@@ -1853,390 +1852,6 @@ namespace Legion {
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
-    };
-
-    /**
-     * \class InlineContext
-     * A context for performing the inline execution
-     * of a task inside of a parent task.
-     */
-    class InlineContext : public TaskContext {
-    public:
-      InlineContext(Runtime *runtime, TaskContext *enclosing, TaskOp *child);
-      InlineContext(const InlineContext &rhs);
-      virtual ~InlineContext(void);
-    public:
-      InlineContext& operator=(const InlineContext &rhs);
-    public: // Privilege tracker methods
-      virtual void receive_resources(size_t return_index,
-              std::map<LogicalRegion,unsigned> &created_regions,
-              std::vector<LogicalRegion> &deleted_regions,
-              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
-              std::map<FieldSpace,unsigned> &created_field_spaces,
-              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
-              std::vector<FieldSpace> &deleted_field_spaces,
-              std::map<IndexSpace,unsigned> &created_index_spaces,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
-              std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
-              std::set<RtEvent> &preconditions);
-    public:
-      // Interface for task contexts
-      virtual RegionTreeContext get_context(void) const;
-      virtual ContextID get_context_id(void) const;
-      virtual UniqueID get_context_uid(void) const;
-      virtual void pack_remote_context(Serializer &rez, 
-                                       AddressSpaceID target);
-      virtual void compute_task_tree_coordinates(
-          std::vector<std::pair<size_t,DomainPoint> > &coordinates);
-      virtual bool attempt_children_complete(void);
-      virtual bool attempt_children_commit(void);
-      virtual void inline_child_task(TaskOp *child);
-      virtual VariantImpl* select_inline_variant(TaskOp *child);
-      virtual void handle_registration_callback_effects(RtEvent effects);
-    public:
-      // Interface to operations performed by a context
-      virtual IndexSpace create_index_space(const Domain &domain, TypeTag tag);
-      virtual IndexSpace create_index_space(const Future &future, TypeTag tag);
-      virtual IndexSpace create_index_space(
-                           const std::vector<DomainPoint> &points);
-      virtual IndexSpace create_index_space(
-                           const std::vector<Domain> &rects);
-      virtual IndexSpace union_index_spaces(
-                           const std::vector<IndexSpace> &spaces);
-      virtual IndexSpace intersect_index_spaces(
-                           const std::vector<IndexSpace> &spaces);
-      virtual IndexSpace subtract_index_spaces(
-                           IndexSpace left, IndexSpace right);
-      virtual void create_shared_ownership(IndexSpace handle);
-      virtual void destroy_index_space(IndexSpace handle, 
-                                       const bool unordered,
-                                       const bool recurse);
-      virtual void create_shared_ownership(IndexPartition handle);
-      virtual void destroy_index_partition(IndexPartition handle,
-                                           const bool unordered,
-                                           const bool recurse);
-      virtual IndexPartition create_equal_partition(
-                                            IndexSpace parent,
-                                            IndexSpace color_space,
-                                            size_t granularity,
-                                            Color color);
-      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
-                                            const FutureMap &weights,
-                                            IndexSpace color_space,
-                                            size_t granularity, 
-                                            Color color);
-      virtual IndexPartition create_partition_by_union(
-                                            IndexSpace parent,
-                                            IndexPartition handle1,
-                                            IndexPartition handle2,
-                                            IndexSpace color_space,
-                                            PartitionKind kind,
-                                            Color color);
-      virtual IndexPartition create_partition_by_intersection(
-                                            IndexSpace parent,
-                                            IndexPartition handle1,
-                                            IndexPartition handle2,
-                                            IndexSpace color_space,
-                                            PartitionKind kind,
-                                            Color color);
-      virtual IndexPartition create_partition_by_intersection(
-                                            IndexSpace parent,
-                                            IndexPartition partition,
-                                            PartitionKind kind,
-                                            Color color,
-                                            bool dominates);
-      virtual IndexPartition create_partition_by_difference(
-                                            IndexSpace parent,
-                                            IndexPartition handle1,
-                                            IndexPartition handle2,
-                                            IndexSpace color_space,
-                                            PartitionKind kind,
-                                            Color color);
-      virtual Color create_cross_product_partitions(
-                                            IndexPartition handle1,
-                                            IndexPartition handle2,
-                              std::map<IndexSpace,IndexPartition> &handles,
-                                            PartitionKind kind,
-                                            Color color);
-      virtual void create_association(      LogicalRegion domain,
-                                            LogicalRegion domain_parent,
-                                            FieldID domain_fid,
-                                            IndexSpace range,
-                                            MapperID id, MappingTagID tag);
-      virtual IndexPartition create_restricted_partition(
-                                            IndexSpace parent,
-                                            IndexSpace color_space,
-                                            const void *transform,
-                                            size_t transform_size,
-                                            const void *extent,
-                                            size_t extent_size,
-                                            PartitionKind part_kind,
-                                            Color color);
-      virtual IndexPartition create_partition_by_domain(
-                                            IndexSpace parent,
-                                            const FutureMap &domains,
-                                            IndexSpace color_space,
-                                            bool perform_intersections,
-                                            PartitionKind part_kind,
-                                            Color color);
-      virtual IndexPartition create_partition_by_field(
-                                            LogicalRegion handle,
-                                            LogicalRegion parent_priv,
-                                            FieldID fid,
-                                            IndexSpace color_space,
-                                            Color color,
-                                            MapperID id, MappingTagID tag,
-                                            PartitionKind part_kind);
-      virtual IndexPartition create_partition_by_image(
-                                            IndexSpace handle,
-                                            LogicalPartition projection,
-                                            LogicalRegion parent,
-                                            FieldID fid,
-                                            IndexSpace color_space,
-                                            PartitionKind part_kind,
-                                            Color color,
-                                            MapperID id, MappingTagID tag);
-      virtual IndexPartition create_partition_by_image_range(
-                                            IndexSpace handle,
-                                            LogicalPartition projection,
-                                            LogicalRegion parent,
-                                            FieldID fid,
-                                            IndexSpace color_space,
-                                            PartitionKind part_kind,
-                                            Color color,
-                                            MapperID id, MappingTagID tag);
-      virtual IndexPartition create_partition_by_preimage(
-                                            IndexPartition projection,
-                                            LogicalRegion handle,
-                                            LogicalRegion parent,
-                                            FieldID fid,
-                                            IndexSpace color_space,
-                                            PartitionKind part_kind,
-                                            Color color,
-                                            MapperID id, MappingTagID tag);
-      virtual IndexPartition create_partition_by_preimage_range(
-                                            IndexPartition projection,
-                                            LogicalRegion handle,
-                                            LogicalRegion parent,
-                                            FieldID fid,
-                                            IndexSpace color_space,
-                                            PartitionKind part_kind,
-                                            Color color,
-                                            MapperID id, MappingTagID tag);
-      virtual IndexPartition create_pending_partition(
-                                            IndexSpace parent,
-                                            IndexSpace color_space,
-                                            PartitionKind part_kind,
-                                            Color color);
-      virtual IndexSpace create_index_space_union(
-                                            IndexPartition parent,
-                                            const void *realm_color,
-                                            TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles);
-      virtual IndexSpace create_index_space_union(
-                                            IndexPartition parent,
-                                            const void *realm_color,
-                                            TypeTag type_tag,
-                                            IndexPartition handle);
-      virtual IndexSpace create_index_space_intersection(
-                                            IndexPartition parent,
-                                            const void *realm_color,
-                                            TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles);
-      virtual IndexSpace create_index_space_intersection(
-                                            IndexPartition parent,
-                                            const void *realm_color,
-                                            TypeTag type_tag,
-                                            IndexPartition handle);
-      virtual IndexSpace create_index_space_difference(
-                                            IndexPartition parent,
-                                            const void *realm_color,
-                                            TypeTag type_tag,
-                                            IndexSpace initial,
-                                const std::vector<IndexSpace> &handles);
-      virtual FieldSpace create_field_space(void);
-      virtual FieldSpace create_field_space(const std::vector<size_t> &sizes,
-                                        std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id);
-      virtual void create_shared_ownership(FieldSpace handle);
-      virtual FieldSpace create_field_space(const std::vector<Future> &sizes,
-                                        std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id);
-      virtual void destroy_field_space(FieldSpace handle, const bool unordered);
-      virtual FieldID allocate_field(FieldSpace space, size_t field_size,
-                                     FieldID fid, bool local,
-                                     CustomSerdezID serdez_id);
-      virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
-                                     FieldID fid, bool local,
-                                     CustomSerdezID serdez_id);
-      virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
-                              FieldID fid, const bool unordered);
-      virtual void allocate_fields(FieldSpace space,
-                                   const std::vector<size_t> &sizes,
-                                   std::vector<FieldID> &resuling_fields,
-                                   bool local, CustomSerdezID serdez_id);
-      virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space,
-                               const std::set<FieldID> &to_free,
-                               const bool unordered);
-      virtual void allocate_local_field(FieldSpace space, size_t field_size,
-                                     FieldID fid, CustomSerdezID serdez_id,
-                                     std::set<RtEvent> &done_events);
-      virtual void allocate_fields(FieldSpace space,
-                                   const std::vector<Future> &sizes,
-                                   std::vector<FieldID> &resuling_fields,
-                                   bool local, CustomSerdezID serdez_id);
-      virtual void allocate_local_fields(FieldSpace space,
-                                   const std::vector<size_t> &sizes,
-                                   const std::vector<FieldID> &resuling_fields,
-                                   CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events);
-      virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
-                                            IndexSpace index_space,
-                                            FieldSpace field_space,
-                                            bool task_local);
-      virtual void create_shared_ownership(LogicalRegion handle);
-      virtual void destroy_logical_region(LogicalRegion handle,
-                                          const bool unordered);
-      virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
-      virtual void destroy_field_allocator(FieldSpaceNode *node);
-      virtual void get_local_field_set(const FieldSpace handle,
-                                       const std::set<unsigned> &indexes,
-                                       std::set<FieldID> &to_set) const;
-      virtual void get_local_field_set(const FieldSpace handle,
-                                       const std::set<unsigned> &indexes,
-                                       std::vector<FieldID> &to_set) const;
-    public:
-      virtual void add_physical_region(const RegionRequirement &req, 
-          bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances);
-      virtual Future execute_task(const TaskLauncher &launcher);
-      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
-      virtual Future execute_index_space(const IndexTaskLauncher &launcher,
-                                      ReductionOpID redop, bool deterministic);
-      virtual Future reduce_future_map(const FutureMap &future_map,
-                                       ReductionOpID redop, bool deterministic);
-      virtual FutureMap construct_future_map(const Domain &domain,
-                                   const std::map<DomainPoint,Future> &futures,
-                                             bool internal = false);
-      virtual PhysicalRegion map_region(const InlineLauncher &launcher);
-      virtual ApEvent remap_region(PhysicalRegion region);
-      virtual void unmap_region(PhysicalRegion region);
-      virtual void unmap_all_regions(bool external);
-      virtual void fill_fields(const FillLauncher &launcher);
-      virtual void fill_fields(const IndexFillLauncher &launcher);
-      virtual void issue_copy(const CopyLauncher &launcher);
-      virtual void issue_copy(const IndexCopyLauncher &launcher);
-      virtual void issue_acquire(const AcquireLauncher &launcher);
-      virtual void issue_release(const ReleaseLauncher &launcher);
-      virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
-      virtual Future detach_resource(PhysicalRegion region, const bool flush,
-                                     const bool unordered);
-      virtual void progress_unordered_operations(void);
-      virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
-      virtual Future issue_timing_measurement(const TimingLauncher &launcher);
-      virtual Future issue_mapping_fence(void);
-      virtual Future issue_execution_fence(void);
-      virtual void complete_frame(void);
-      virtual Predicate create_predicate(const Future &f);
-      virtual Predicate predicate_not(const Predicate &p);
-      virtual Predicate create_predicate(const PredicateLauncher &launcher);
-      virtual Future get_predicate_future(const Predicate &p);
-    public:
-      // The following set of operations correspond directly
-      // to the complete_mapping, complete_operation, and
-      // commit_operations performed by an operation.  Every
-      // one of those calls invokes the corresponding one of
-      // these calls to notify the parent context.
-      virtual size_t register_new_child_operation(Operation *op,
-                const std::vector<StaticDependence> *dependences);
-      virtual size_t register_new_close_operation(CloseOp *op);
-      virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual void add_to_dependence_queue(Operation *op, 
-                                           bool unordered = false);
-      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-                                          const void *result, size_t size, 
-                                          PhysicalInstance instance =
-                                            PhysicalInstance::NO_INST,
-                                          FutureFunctor *callback_functor=NULL,
-                                          bool own_functor = false);
-      virtual void register_executing_child(Operation *op);
-      virtual void register_child_executed(Operation *op);
-      virtual void register_child_complete(Operation *op);
-      virtual void register_child_commit(Operation *op); 
-      virtual void unregister_child_operation(Operation *op);
-      virtual ApEvent register_implicit_dependences(Operation *op);
-    public:
-      virtual RtEvent get_current_mapping_fence_event(void);
-      virtual ApEvent get_current_execution_fence_event(void);
-      virtual void perform_fence_analysis(Operation *op,
-          std::set<ApEvent> &preconditions, bool mapping, bool execution);
-      virtual void update_current_fence(FenceOp *op,
-                                        bool mapping, bool execution);
-      virtual void update_current_implicit(Operation *op);
-    public:
-      virtual void begin_trace(TraceID tid, bool logical_only,
-          bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
-      virtual void end_trace(TraceID tid, bool deprecated);
-      virtual void record_previous_trace(LegionTrace *trace);
-      virtual void invalidate_trace_cache(LegionTrace *trace,
-                                          Operation *invalidator);
-      virtual void record_blocking_call(void);
-    public:
-      virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
-      virtual void perform_frame_issue(FrameOp *frame, 
-                                       ApEvent frame_termination);
-      virtual void finish_frame(ApEvent frame_termination);
-    public:
-      virtual void increment_outstanding(void);
-      virtual void decrement_outstanding(void);
-      virtual void increment_pending(void);
-      virtual RtEvent decrement_pending(TaskOp *child);
-      virtual RtEvent decrement_pending(bool need_deferral);
-      virtual void increment_frame(void);
-      virtual void decrement_frame(void);
-    public:
-      virtual InnerContext* find_parent_logical_context(unsigned index);
-      virtual InnerContext* find_parent_physical_context(unsigned index,
-                                                  LogicalRegion parent);
-      // Override by RemoteTask and TopLevelTask
-      virtual InnerContext* find_outermost_local_context(
-                          InnerContext *previous = NULL);
-      virtual InnerContext* find_top_context(InnerContext *context = NULL);
-    public:
-      virtual void initialize_region_tree_contexts(
-          const std::vector<RegionRequirement> &clone_requirements,
-          const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events);
-      virtual void invalidate_region_tree_contexts(void);
-      virtual void send_back_created_state(AddressSpaceID target);
-    public:
-      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
-                             AddressSpaceID source, RtEvent *ready = NULL);
-    public:
-      virtual const std::vector<PhysicalRegion>& begin_task(
-                                                    Legion::Runtime *&runtime);
-      virtual PhysicalInstance create_task_local_instance(Memory memory,
-                                        Realm::InstanceLayoutGeneric *layout);
-      virtual void end_task(const void *res, size_t res_size, bool owned,
-                        PhysicalInstance inst, FutureFunctor *callback_functor);
-      virtual void post_end_task(const void *res, size_t res_size, 
-                                 bool owned, FutureFunctor *callback_functor);
-    public:
-      virtual void record_dynamic_collective_contribution(DynamicCollective dc,
-                                                          const Future &f);
-      virtual void find_collective_contributions(DynamicCollective dc,
-                                             std::vector<Future> &futures);
-      virtual Future get_dynamic_collective_result(DynamicCollective dc);
-    public:
-      virtual TaskPriority get_current_priority(void) const;
-      virtual void set_current_priority(TaskPriority priority);
-    protected:
-      TaskContext *const enclosing;
-      TaskOp *const inline_task;
-    protected:
-      std::vector<unsigned> parent_req_indexes;
     };
 
     //--------------------------------------------------------------------------

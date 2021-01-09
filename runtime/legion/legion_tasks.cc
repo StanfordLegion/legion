@@ -1250,15 +1250,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::end_inline_task(const void *result, size_t result_size, 
-                                 bool owned, FutureFunctor *functor)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent TaskOp::defer_distribute_task(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
@@ -1877,6 +1868,267 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskOp::validate_variant_selection(MapperManager *local_mapper,
+                              VariantImpl *impl, Processor::Kind kind, 
+                              const std::deque<InstanceSet> &physical_instances,
+                              const char *mapper_call_name) const
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, VALIDATE_VARIANT_SELECTION_CALL);
+      // Check the layout constraints first
+      const TaskLayoutConstraintSet &layout_constraints = 
+        impl->get_layout_constraints();
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            layout_constraints.layouts.begin(); it != 
+            layout_constraints.layouts.end(); it++)
+      {
+        // Might have constraints for extra region requirements
+        if (it->first >= physical_instances.size())
+          continue;
+        const InstanceSet &instances = physical_instances[it->first]; 
+        if (IS_NO_ACCESS(regions[it->first]))
+          continue;
+        LayoutConstraints *constraints = 
+          runtime->find_layout_constraints(it->second);
+        // If we don't have any fields then this constraint isn't
+        // going to apply to any actual instances
+        const std::vector<FieldID> &field_vec = 
+          constraints->field_constraint.field_set;
+        FieldMask constraint_mask;
+        if (!field_vec.empty())
+        {
+          FieldSpaceNode *field_node = runtime->forest->get_node(
+                              regions[it->first].region.get_field_space());
+          std::set<FieldID> field_set(field_vec.begin(), field_vec.end());
+          constraint_mask = field_node->get_field_mask(field_set);
+        }
+        else
+          constraint_mask = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+        const LayoutConstraint *conflict_constraint = NULL;
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+        {
+          const InstanceRef &ref = instances[idx];
+          // Check to see if we have any fields which overlap
+          const FieldMask overlap = constraint_mask & ref.get_valid_fields();
+          if (!overlap)
+            continue;
+          InstanceManager *manager = ref.get_manager();
+          if (manager->conflicts(constraints, index_point,&conflict_constraint))
+            break;
+          // Check to see if we need an exact match on the layouts
+          if (constraints->specialized_constraint.is_exact())
+          {
+            std::vector<LogicalRegion> regions_to_check(1, 
+                                regions[it->first].region);
+            if (!manager->meets_regions(regions_to_check,true/*tight*/))
+            {
+              conflict_constraint = &constraints->specialized_constraint;
+              break;
+            }
+          }
+        }
+        if (conflict_constraint != NULL)
+        {
+          const char *constraint_names[] = {
+#define CONSTRAINT_NAMES(name, desc) desc,
+            LEGION_LAYOUT_CONSTRAINT_KINDS(CONSTRAINT_NAMES)
+#undef CONSTRAINT_NAMES
+          };
+          const char *constraint_name = 
+            constraint_names[conflict_constraint->get_constraint_kind()];
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output. Mapper %s selected variant "
+                        "%d for task %s (ID %lld). But instance selected "
+                        "for region requirement %d fails to satisfy the "
+                        "corresponding %s layout constraint.", 
+                        local_mapper->get_mapper_name(), impl->vid,
+                        get_task_name(), get_unique_id(), it->first,
+                        constraint_name)
+        }
+      }
+      // Now we can test against the execution constraints
+      const ExecutionConstraintSet &execution_constraints = 
+        impl->get_execution_constraints();
+      // TODO: Check ISA, resource, and launch constraints
+      // First check the processor constraint
+      if (execution_constraints.processor_constraint.is_valid())
+      {
+        // If the constraint is a no processor constraint we can ignore it
+        if (!execution_constraints.processor_constraint.can_use(kind))
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output. Mapper %s selected variant %d "
+                      "for task %s (ID %lld). However, this variant does not "
+                      "permit running on processors of kind %s.",
+                      local_mapper->get_mapper_name(),
+                      impl->vid, get_task_name(), get_unique_id(),
+                      Processor::get_kind_name(kind))
+      }
+      // Then check the colocation constraints
+      for (std::vector<ColocationConstraint>::const_iterator con_it = 
+            execution_constraints.colocation_constraints.begin(); con_it !=
+            execution_constraints.colocation_constraints.end(); con_it++)
+      {
+        if (con_it->indexes.size() < 2)
+          continue;
+        unsigned idx = 0;
+        bool first = true;
+        RegionTreeID tree_id = 0;
+        FieldSpaceNode *field_space_node = NULL;
+        std::map<unsigned/*field index*/,
+          std::pair<InstanceManager*,unsigned> > colocation_instances;
+        for (std::set<unsigned>::const_iterator iit = con_it->indexes.begin();
+              iit != con_it->indexes.end(); iit++, idx++)
+        {
+          const RegionRequirement &req = regions[*iit];
+          if (first)
+          {
+            first = false;
+            tree_id = req.parent.get_tree_id();
+            field_space_node = runtime->forest->get_node(
+                                req.parent.get_field_space());
+            const InstanceSet &insts = physical_instances[*iit];
+            FieldMask colocation_mask;
+            if (con_it->fields.empty())
+            {
+              // If there are no explicit fields then we are
+              // just going through and checking all of them
+              for (std::set<FieldID>::const_iterator it = 
+                    req.privilege_fields.begin(); it != 
+                    req.privilege_fields.end(); it++)
+              {
+                unsigned index = field_space_node->get_field_index(*it);
+                colocation_instances[index] = 
+                  std::pair<InstanceManager*,unsigned>(NULL, *iit);
+                colocation_mask.set_bit(index);
+              }
+            }
+            else
+            {
+              for (std::set<FieldID>::const_iterator it = 
+                    con_it->fields.begin(); it != con_it->fields.end(); it++)
+              {
+                if (req.privilege_fields.find(*it) == 
+                    req.privilege_fields.end())
+                  continue;
+                unsigned index = field_space_node->get_field_index(*it);
+                colocation_instances[index] = 
+                  std::pair<InstanceManager*,unsigned>(NULL, *iit);
+                colocation_mask.set_bit(index);
+              }
+            }
+            for (unsigned idx = 0; idx < insts.size(); idx++)
+            {
+              const InstanceRef &ref = insts[idx];
+              const FieldMask overlap = 
+                colocation_mask & ref.get_valid_fields();
+              if (!overlap)
+                continue;
+              InstanceManager *manager = ref.get_manager();
+              if (manager->is_virtual_manager())
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                    "Invalid mapper output. Mapper %s selected a virtual "
+                    "instance for region requirement %d of task %s (UID %lld), "
+                    "but also selected variant %d which contains a colocation "
+                    "constraint for this region requirement. It is illegal to "
+                    "request a virtual mapping for a region requirement with a "
+                    "colocation constraint.", local_mapper->get_mapper_name(),
+                    *iit, get_task_name(), get_unique_id(), impl->vid)
+              int index = overlap.find_first_set();
+              while (index >= 0)
+              {
+                std::map<unsigned,
+                  std::pair<InstanceManager*,unsigned> >::iterator finder = 
+                    colocation_instances.find(index);
+#ifdef DEBUG_LEGION
+                assert(finder != colocation_instances.end());
+                assert(finder->second.first == NULL);
+                assert(finder->second.second == *iit);
+#endif
+                finder->second.first = manager;
+                index = overlap.find_next_set(index+1);
+              }
+            }
+          }
+          else
+          {
+            // check to make sure that all these region requirements have
+            // the same region tree ID.
+            if (req.parent.get_tree_id() != tree_id)
+              REPORT_LEGION_ERROR(ERROR_INVALID_LOCATION_CONSTRAINT,
+                            "Invalid location constraint. Location constraint "
+                            "specified on region requirements %d and %d of "
+                            "variant %d of task %s, but region requirements "
+                            "contain regions that from different region trees "
+                            "(%d and %d). Colocation constraints must always "
+                            "be specified on region requirements with regions "
+                            "from the same region tree.", 
+                            *(con_it->indexes.begin()), *iit, impl->vid,
+                            get_task_name(), tree_id, 
+                            req.parent.get_tree_id())
+            const InstanceSet &insts = physical_instances[*iit];
+            for (unsigned idx = 0; idx < insts.size(); idx++)
+            {
+              const InstanceRef &ref = insts[idx];
+              InstanceManager *manager = ref.get_manager();
+              if (manager->is_virtual_manager())
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                    "Invalid mapper output. Mapper %s selected a virtual "
+                    "instance for region requirement %d of task %s (UID %lld), "
+                    "but also selected variant %d which contains a colocation "
+                    "constraint for this region requirement. It is illegal to "
+                    "request a virtual mapping for a region requirement with a "
+                    "colocation constraint.", local_mapper->get_mapper_name(),
+                    *iit, get_task_name(), get_unique_id(), impl->vid)
+              const FieldMask &inst_mask = ref.get_valid_fields();
+              std::vector<FieldID> field_names;
+              field_space_node->get_field_set(inst_mask,parent_ctx,field_names);
+              unsigned name_index = 0;
+              int index = inst_mask.find_first_set();
+              while (index >= 0)
+              {
+                std::map<unsigned,
+                  std::pair<InstanceManager*,unsigned> >::const_iterator
+                    finder = colocation_instances.find(index);
+                if (finder != colocation_instances.end())
+                {
+                  if (finder->second.first->get_instance(index_point) != 
+                      manager->get_instance(index_point))
+                    REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                          "Invalid mapper output. Mapper %s selected variant "
+                          "%d for task %s (ID %lld). However, this variant "
+                          "requires that field %d of region requirements %d be "
+                          "co-located with prior requirement %d but it is not. "
+                          "Requirement %d mapped to instance " IDFMT " while "
+                          "prior requirement %d mapped to instance " IDFMT "",
+                          local_mapper->get_mapper_name(), impl->vid, 
+                          get_task_name(), get_unique_id(), 
+                          field_names[name_index], *iit, finder->second.second,
+                          *iit, manager->get_instance(index_point).id, 
+                          finder->second.second,
+                          finder->second.first->get_instance(index_point).id)
+                }
+                else
+                {
+                  if (!con_it->fields.empty())
+                  {
+                    if (con_it->fields.find(field_names[name_index]) !=
+                        con_it->fields.end())
+                      colocation_instances[index] = 
+                        std::make_pair(manager, *iit);
+                  }
+                  else
+                    colocation_instances[index] = std::make_pair(manager, *iit);
+                }
+                index = inst_mask.find_next_set(index+1);
+                name_index++;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void TaskOp::compute_parent_indexes(TaskContext *alt_context/*= NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -2451,6 +2703,29 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void SingleTask::perform_inlining(VariantImpl *variant,
+                                const std::deque<InstanceSet> &parent_instances)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(parent_instances.size() == regions.size());
+#endif
+      selected_variant = variant->vid;
+      physical_instances = parent_instances;
+      virtual_mapped.resize(regions.size());
+      no_access_regions.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        virtual_mapped[idx] = false;
+        no_access_regions[idx] = IS_NO_ACCESS(regions[idx]);
+      }
+      complete_mapping();
+      resolve_speculation();
+      // Now we can launch this task right inline in this thread
+      launch_task(true/*inline*/); 
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent SingleTask::perform_versioning_analysis(const bool post_mapper)
     //--------------------------------------------------------------------------
     {
@@ -2969,7 +3244,7 @@ namespace Legion {
         assert(!target_processors.empty());
 #endif
         validate_variant_selection(mapper, variant_impl, 
-            target_processors.front().kind(), "map_task");
+            target_processors.front().kind(), physical_instances, "map_task");
       }
       // Record anything else that needs to be recorded 
       selected_variant = output.chosen_variant;
@@ -3095,269 +3370,7 @@ namespace Legion {
                         proc.address_space(), get_task_name(), get_unique_id(), 
                         this->target_proc.id, space)
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::validate_variant_selection(MapperManager *local_mapper,
-    VariantImpl *impl, Processor::Kind kind, const char *mapper_call_name) const
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, VALIDATE_VARIANT_SELECTION_CALL);
-      // Check the layout constraints first
-      const TaskLayoutConstraintSet &layout_constraints = 
-        impl->get_layout_constraints();
-      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
-            layout_constraints.layouts.begin(); it != 
-            layout_constraints.layouts.end(); it++)
-      {
-        // Might have constraints for extra region requirements
-        if (it->first >= physical_instances.size())
-          continue;
-        const InstanceSet &instances = physical_instances[it->first]; 
-        if (no_access_regions[it->first])
-          continue;
-        LayoutConstraints *constraints = 
-          runtime->find_layout_constraints(it->second);
-        // If we don't have any fields then this constraint isn't
-        // going to apply to any actual instances
-        const std::vector<FieldID> &field_vec = 
-          constraints->field_constraint.field_set;
-        FieldMask constraint_mask;
-        if (!field_vec.empty())
-        {
-          FieldSpaceNode *field_node = runtime->forest->get_node(
-                              regions[it->first].region.get_field_space());
-          std::set<FieldID> field_set(field_vec.begin(), field_vec.end());
-          constraint_mask = field_node->get_field_mask(field_set);
-        }
-        else
-          constraint_mask = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-        const LayoutConstraint *conflict_constraint = NULL;
-        for (unsigned idx = 0; idx < instances.size(); idx++)
-        {
-          const InstanceRef &ref = instances[idx];
-          // Check to see if we have any fields which overlap
-          const FieldMask overlap = constraint_mask & ref.get_valid_fields();
-          if (!overlap)
-            continue;
-          InstanceManager *manager = ref.get_manager();
-          if (manager->conflicts(constraints, index_point,&conflict_constraint))
-            break;
-          // Check to see if we need an exact match on the layouts
-          if (constraints->specialized_constraint.is_exact())
-          {
-            std::vector<LogicalRegion> regions_to_check(1, 
-                                regions[it->first].region);
-            if (!manager->meets_regions(regions_to_check,true/*tight*/))
-            {
-              conflict_constraint = &constraints->specialized_constraint;
-              break;
-            }
-          }
-        }
-        if (conflict_constraint != NULL)
-        {
-          const char *constraint_names[] = {
-#define CONSTRAINT_NAMES(name, desc) desc,
-            LEGION_LAYOUT_CONSTRAINT_KINDS(CONSTRAINT_NAMES)
-#undef CONSTRAINT_NAMES
-          };
-          const char *constraint_name = 
-            constraint_names[conflict_constraint->get_constraint_kind()];
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                        "Invalid mapper output. Mapper %s selected variant "
-                        "%d for task %s (ID %lld). But instance selected "
-                        "for region requirement %d fails to satisfy the "
-                        "corresponding %s layout constraint.", 
-                        local_mapper->get_mapper_name(), impl->vid,
-                        get_task_name(), get_unique_id(), it->first,
-                        constraint_name)
-        }
-      }
-      // Now we can test against the execution constraints
-      const ExecutionConstraintSet &execution_constraints = 
-        impl->get_execution_constraints();
-      // TODO: Check ISA, resource, and launch constraints
-      // First check the processor constraint
-      if (execution_constraints.processor_constraint.is_valid())
-      {
-        // If the constraint is a no processor constraint we can ignore it
-        if (!execution_constraints.processor_constraint.can_use(kind))
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output. Mapper %s selected variant %d "
-                      "for task %s (ID %lld). However, this variant does not "
-                      "permit running on processors of kind %s.",
-                      local_mapper->get_mapper_name(),
-                      impl->vid, get_task_name(), get_unique_id(),
-                      Processor::get_kind_name(kind))
-      }
-      // Then check the colocation constraints
-      for (std::vector<ColocationConstraint>::const_iterator con_it = 
-            execution_constraints.colocation_constraints.begin(); con_it !=
-            execution_constraints.colocation_constraints.end(); con_it++)
-      {
-        if (con_it->indexes.size() < 2)
-          continue;
-        unsigned idx = 0;
-        bool first = true;
-        RegionTreeID tree_id = 0;
-        FieldSpaceNode *field_space_node = NULL;
-        std::map<unsigned/*field index*/,
-          std::pair<InstanceManager*,unsigned> > colocation_instances;
-        for (std::set<unsigned>::const_iterator iit = con_it->indexes.begin();
-              iit != con_it->indexes.end(); iit++, idx++)
-        {
-#ifdef DEBUG_LEGION
-          assert(regions[*iit].handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-          const RegionRequirement &req = regions[*iit];
-          if (first)
-          {
-            first = false;
-            tree_id = req.region.get_tree_id();
-            field_space_node = runtime->forest->get_node(
-                                req.region.get_field_space());
-            const InstanceSet &insts = physical_instances[*iit];
-            FieldMask colocation_mask;
-            if (con_it->fields.empty())
-            {
-              // If there are no explicit fields then we are
-              // just going through and checking all of them
-              for (std::set<FieldID>::const_iterator it = 
-                    req.privilege_fields.begin(); it != 
-                    req.privilege_fields.end(); it++)
-              {
-                unsigned index = field_space_node->get_field_index(*it);
-                colocation_instances[index] = 
-                  std::pair<InstanceManager*,unsigned>(NULL, *iit);
-                colocation_mask.set_bit(index);
-              }
-            }
-            else
-            {
-              for (std::set<FieldID>::const_iterator it = 
-                    con_it->fields.begin(); it != con_it->fields.end(); it++)
-              {
-                if (req.privilege_fields.find(*it) == 
-                    req.privilege_fields.end())
-                  continue;
-                unsigned index = field_space_node->get_field_index(*it);
-                colocation_instances[index] = 
-                  std::pair<InstanceManager*,unsigned>(NULL, *iit);
-                colocation_mask.set_bit(index);
-              }
-            }
-            for (unsigned idx = 0; idx < insts.size(); idx++)
-            {
-              const InstanceRef &ref = insts[idx];
-              const FieldMask overlap = 
-                colocation_mask & ref.get_valid_fields();
-              if (!overlap)
-                continue;
-              InstanceManager *manager = ref.get_manager();
-              if (manager->is_virtual_manager())
-                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                    "Invalid mapper output. Mapper %s selected a virtual "
-                    "instance for region requirement %d of task %s (UID %lld), "
-                    "but also selected variant %d which contains a colocation "
-                    "constraint for this region requirement. It is illegal to "
-                    "request a virtual mapping for a region requirement with a "
-                    "colocation constraint.", local_mapper->get_mapper_name(),
-                    *iit, get_task_name(), get_unique_id(), impl->vid)
-              int index = overlap.find_first_set();
-              while (index >= 0)
-              {
-                std::map<unsigned,
-                  std::pair<InstanceManager*,unsigned> >::iterator finder = 
-                    colocation_instances.find(index);
-#ifdef DEBUG_LEGION
-                assert(finder != colocation_instances.end());
-                assert(finder->second.first == NULL);
-                assert(finder->second.second == *iit);
-#endif
-                finder->second.first = manager;
-                index = overlap.find_next_set(index+1);
-              }
-            }
-          }
-          else
-          {
-            // check to make sure that all these region requirements have
-            // the same region tree ID.
-            if (req.region.get_tree_id() != tree_id)
-              REPORT_LEGION_ERROR(ERROR_INVALID_LOCATION_CONSTRAINT,
-                            "Invalid location constraint. Location constraint "
-                            "specified on region requirements %d and %d of "
-                            "variant %d of task %s, but region requirements "
-                            "contain regions that from different region trees "
-                            "(%d and %d). Colocation constraints must always "
-                            "be specified on region requirements with regions "
-                            "from the same region tree.", 
-                            *(con_it->indexes.begin()), *iit, impl->vid,
-                            get_task_name(), tree_id, 
-                            req.region.get_tree_id())
-            const InstanceSet &insts = physical_instances[*iit];
-            for (unsigned idx = 0; idx < insts.size(); idx++)
-            {
-              const InstanceRef &ref = insts[idx];
-              InstanceManager *manager = ref.get_manager();
-              if (manager->is_virtual_manager())
-                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                    "Invalid mapper output. Mapper %s selected a virtual "
-                    "instance for region requirement %d of task %s (UID %lld), "
-                    "but also selected variant %d which contains a colocation "
-                    "constraint for this region requirement. It is illegal to "
-                    "request a virtual mapping for a region requirement with a "
-                    "colocation constraint.", local_mapper->get_mapper_name(),
-                    *iit, get_task_name(), get_unique_id(), impl->vid)
-              const FieldMask &inst_mask = ref.get_valid_fields();
-              std::vector<FieldID> field_names;
-              field_space_node->get_field_set(inst_mask,parent_ctx,field_names);
-              unsigned name_index = 0;
-              int index = inst_mask.find_first_set();
-              while (index >= 0)
-              {
-                std::map<unsigned,
-                  std::pair<InstanceManager*,unsigned> >::const_iterator
-                    finder = colocation_instances.find(index);
-                if (finder != colocation_instances.end())
-                {
-                  if (finder->second.first->get_instance(index_point) != 
-                      manager->get_instance(index_point))
-                    REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                          "Invalid mapper output. Mapper %s selected variant "
-                          "%d for task %s (ID %lld). However, this variant "
-                          "requires that field %d of region requirements %d be "
-                          "co-located with prior requirement %d but it is not. "
-                          "Requirement %d mapped to instance " IDFMT " while "
-                          "prior requirement %d mapped to instance " IDFMT "",
-                          local_mapper->get_mapper_name(), impl->vid, 
-                          get_task_name(), get_unique_id(), 
-                          field_names[name_index], *iit, finder->second.second,
-                          *iit, manager->get_instance(index_point).id, 
-                          finder->second.second,
-                          finder->second.first->get_instance(index_point).id)
-                }
-                else
-                {
-                  if (!con_it->fields.empty())
-                  {
-                    if (con_it->fields.find(field_names[name_index]) !=
-                        con_it->fields.end())
-                      colocation_instances[index] = 
-                        std::make_pair(manager, *iit);
-                  }
-                  else
-                    colocation_instances[index] = std::make_pair(manager, *iit);
-                }
-                index = inst_mask.find_next_set(index+1);
-                name_index++;
-              }
-            }
-          }
-        }
-      }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void SingleTask::invoke_mapper(MustEpochOp *must_epoch_owner)
@@ -3917,7 +3930,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void SingleTask::launch_task(void)
+    void SingleTask::launch_task(bool inline_task)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, LAUNCH_TASK_CALL);
@@ -4163,9 +4176,18 @@ namespace Legion {
             LegionSpy::log_future_use(unique_op_id, impl->get_ready_event());
         }
       }
-      ApEvent task_launch_event = variant->dispatch_task(launch_processor, this,
-                                 execution_context, start_condition, true_guard,
-                                 task_priority, profiling_requests);
+      ApEvent task_launch_event;
+      if (inline_task)
+      {
+        // TODO: resilience support if the event has been poisoned
+        if (start_condition.exists() && !start_condition.has_triggered())
+          start_condition.wait();
+        variant->dispatch_inline(launch_processor, execution_context);
+      }
+      else
+        task_launch_event = variant->dispatch_task(launch_processor, this,
+                            execution_context, start_condition, true_guard,
+                            task_priority, profiling_requests);
       // Finish the chaining optimization if we're doing it
       if (perform_chaining_optimization)
         Runtime::trigger_event(NULL, chain_complete_event, task_launch_event);
@@ -5813,76 +5835,7 @@ namespace Legion {
       resolve_speculation();
       // Return true to add ourselves to the ready queue
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::perform_inlining(TaskContext *enclosing)
-    //--------------------------------------------------------------------------
-    {
-      // See if there is anything that we need to wait on before running
-      std::set<ApEvent> wait_on_events;
-      for (unsigned idx = 0; idx < futures.size(); idx++)
-      {
-        FutureImpl *impl = futures[idx].impl; 
-        wait_on_events.insert(impl->get_ready_event());
-      }
-      for (unsigned idx = 0; idx < grants.size(); idx++)
-      {
-        GrantImpl *impl = grants[idx].impl;
-        wait_on_events.insert(impl->acquire_grant());
-      }
-      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
-      {
-        ApEvent e = 
-          Runtime::get_previous_phase(wait_barriers[idx].phase_barrier);
-        wait_on_events.insert(e);
-      }
-      // Merge together all the events for the start condition 
-      ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
-      // Get the processor that we will be running on
-      Processor current = enclosing->get_executing_processor();
-      // Select the variant to use
-      VariantImpl *variant = enclosing->select_inline_variant(this);
-      if (!runtime->unsafe_mapper)
-      {
-        MapperManager *mapper = runtime->find_mapper(current, map_id);
-        validate_variant_selection(mapper, variant, current.kind(), 
-                                    "select_task_variant");
-      }
-      // Now make an inline context to use for the execution
-      InlineContext *inline_ctx = new InlineContext(runtime, enclosing, this);
-      // See if we need to wait for anything
-      if (start_condition.exists())
-        start_condition.wait();
-      variant->dispatch_inline(current, inline_ctx); 
-      // Return any created privilege state
-      std::set<RtEvent> preconditions;
-      inline_ctx->return_resources(enclosing, context_index, preconditions);
-      if (!preconditions.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(preconditions);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
-      // Then delete the inline context
-      delete inline_ctx;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::end_inline_task(const void *res, size_t res_size, 
-                                         bool owned, FutureFunctor *functor) 
-    //--------------------------------------------------------------------------
-    {
-      // Save the future result and trigger it
-      if (functor != NULL)
-        result.impl->set_result(functor, owned, 
-            Processor::get_executing_processor());
-      else
-        result.impl->set_result(res, res_size, owned);
-      // Trigger our completion event
-      Runtime::trigger_event(NULL, completion_event);
-      // Now we're done, someone else will deactivate us
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndividualTask::pack_remote_complete(Serializer &rez)
@@ -6416,14 +6369,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::perform_inlining(TaskContext *enclosing)
-    //--------------------------------------------------------------------------
-    {
-      // Should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     void PointTask::send_remote_context(AddressSpaceID remote_instance,
                                         RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
@@ -6863,6 +6808,33 @@ namespace Legion {
       }
       // We should never get here
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointTask::has_remaining_inlining_dependences(
+                   std::map<PointTask*,unsigned> &remaining,
+                   std::map<RtEvent,std::vector<PointTask*> > &event_deps) const
+    //--------------------------------------------------------------------------
+    {
+      if (intra_space_mapping_dependences.empty())
+        return false;
+      unsigned count = 0;
+      for (std::set<RtEvent>::const_iterator it =
+            intra_space_mapping_dependences.begin(); it !=
+            intra_space_mapping_dependences.end(); it++)
+      {
+        if (it->has_triggered())
+          continue;
+        count++;
+        event_deps[*it].push_back(const_cast<PointTask*>(this));
+      }
+      if (count > 0)
+      {
+        remaining[const_cast<PointTask*>(this)] = count;
+        return true;
+      }
+      else
+        return false;
     }
 
     /////////////////////////////////////////////////////////////
@@ -7789,7 +7761,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::launch_task(void)
+    void IndexTask::launch_task(bool inline_task)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7994,130 +7966,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::perform_inlining(TaskContext *enclosing)
+    void IndexTask::perform_inlining(VariantImpl *variant,
+                                  const std::deque<InstanceSet> &parent_regions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_PERFORM_INLINING_CALL);
-      // See if there is anything to wait for
-      std::set<ApEvent> wait_on_events;
-      for (unsigned idx = 0; idx < futures.size(); idx++)
-      {
-        FutureImpl *impl = futures[idx].impl; 
-        wait_on_events.insert(impl->get_ready_event());
-      }
-      for (unsigned idx = 0; idx < grants.size(); idx++)
-      {
-        GrantImpl *impl = grants[idx].impl;
-        wait_on_events.insert(impl->acquire_grant());
-      }
-      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
-      {
-	ApEvent e = 
-          Runtime::get_previous_phase(wait_barriers[idx].phase_barrier);
-        wait_on_events.insert(e);
-      }
-      // Merge together all the events for the start condition 
-      ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
-      // Enumerate all of the points of our index space and run
-      // the task for each one of them either saving or reducing their futures
-      Processor current = enclosing->get_executing_processor();
-      // Select the variant to use
-      VariantImpl *variant = enclosing->select_inline_variant(this);
-      // See if we need to wait for anything
-      if (start_condition.exists())
-        start_condition.wait();
-      // Make a copy of our region requirements
-      std::vector<RegionRequirement> copy_requirements(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        copy_requirements[idx] = regions[idx];
-      bool first = true;
-      for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
-      {
-        // If this is not the first we have to restore the region
-        // requirements from copy that we made before hand
-        if (!first)
-        {
-          for (unsigned idx = 0; idx < regions.size(); idx++)
-            regions[idx] = copy_requirements[idx];
-        }
-        else
-          first = false;
-        index_point = itr.p; 
-        // Get our local args
-        if (point_arguments.impl != NULL)
-        {
-          Future local_arg = point_arguments.impl->get_future(index_point);
-          if (local_arg.impl != NULL)
-          {
-            local_args = local_arg.impl->get_untyped_result(true, NULL, true);
-            local_arglen = local_arg.impl->get_untyped_size(true);
-          }
-          else
-          {
-            local_args = NULL;
-            local_arglen = 0;
-          }
-        }
-        else
-        {
-          local_args = NULL;
-          local_arglen = 0;
-        }
-        compute_point_region_requirements();
-        InlineContext *inline_ctx = new InlineContext(runtime, enclosing, this);
-        variant->dispatch_inline(current, inline_ctx);
-        // Return any created privilege state
-        std::set<RtEvent> preconditions;
-        inline_ctx->return_resources(enclosing, context_index, preconditions);
-        if (!preconditions.empty())
-        {
-          const RtEvent wait_on = Runtime::merge_events(preconditions);
-          if (wait_on.exists() && !wait_on.has_triggered())
-            wait_on.wait();
-        }
-        // Then we can delete the inline context
-        delete inline_ctx;
-      }
-      if (redop != 0)
-        reduction_future.impl->set_result(reduction_state,
-                                          reduction_state_size,false/*owner*/);
-      // Trigger all our events event
-      Runtime::trigger_event(NULL, completion_event);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::end_inline_task(const void *res, size_t res_size,
-                                    bool owned, FutureFunctor *functor)
-    //--------------------------------------------------------------------------
-    {
-      if (redop == 0)
-      {
-        Future f = future_map.impl->get_future(index_point);
-        if (functor != NULL)
-          f.impl->set_result(functor, owned,
-              Processor::get_executing_processor());
-        else
-          f.impl->set_result(res, res_size, owned);
-      }
-      else
-      {
-        if (functor != NULL)
-        {
-#ifdef DEBUG_LEGION
-          assert(res == NULL);
-#endif
-          // We need to materialized this now so we can apply it
-          res_size = functor->callback_get_future_size();
-          void *buffer = malloc(res_size);
-          functor->callback_pack_future(buffer, res_size);
-          functor->callback_release_future();
-          if (owned)
-            delete functor;
-          res = buffer;
-          owned = true;
-        }
-        fold_reduction_future(res, res_size, owned, true/*exclusive*/);
-      }
+      total_points = launch_space->get_volume();
+      SliceTask *slice = clone_as_slice_task(launch_space->handle,
+                current_proc, false/*recurse*/, false/*stealable*/);
+      origin_mapped_slices.insert(slice);
+      slice->enumerate_points();
+      slice->perform_inlining(variant, parent_regions);
+      // Record that we are mapped and had our speculation resolved too
+      complete_mapping();
+      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -9149,7 +9011,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::launch_task(void)
+    void SliceTask::launch_task(bool inline_task)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_LAUNCH_CALL);
@@ -9158,7 +9020,7 @@ namespace Legion {
 #endif
       // Launch all of our child points
       for (unsigned idx = 0; idx < points.size(); idx++)
-        points[idx]->launch_task();
+        points[idx]->launch_task(inline_task);
     }
 
     //--------------------------------------------------------------------------
@@ -9437,11 +9299,62 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::perform_inlining(TaskContext *enclosing)
+    void SliceTask::perform_inlining(VariantImpl *variant,
+                                const std::deque<InstanceSet> &parent_instances)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // Need to handle inter-space dependences correctly here
+      std::map<PointTask*,unsigned> remaining;
+      std::map<RtEvent,std::vector<PointTask*> > event_deps;
+      for (std::vector<PointTask*>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+        if (!(*it)->has_remaining_inlining_dependences(remaining, event_deps))
+          (*it)->perform_inlining(variant, parent_instances);
+      while (!remaining.empty())
+      {
+#ifdef DEBUG_LEGION
+        bool found = false; // should find at least one each iteration
+#endif
+        for (std::map<PointTask*,unsigned>::iterator it =
+              remaining.begin(); it != remaining.end(); /*nothing*/)
+        {
+          if (it->second == 0)
+          {
+            const RtEvent mapped = it->first->get_mapped_event();
+            it->first->perform_inlining(variant, parent_instances);
+#ifdef DEBUG_LEGION
+            found = true;
+            assert(mapped.has_triggered());
+#endif
+            std::map<RtEvent,std::vector<PointTask*> >::const_iterator finder =
+              event_deps.find(mapped);
+            if (finder != event_deps.end())
+            {
+              for (unsigned idx = 0; idx < finder->second.size(); idx++)
+              {
+                std::map<PointTask*,unsigned>::iterator point_finder =
+                  remaining.find(finder->second[idx]);
+#ifdef DEBUG_LEGION
+                assert(point_finder != remaining.end());
+                assert(point_finder->second > 0);
+#endif
+                point_finder->second--;
+              }
+              event_deps.erase(finder);
+            }
+            std::map<PointTask*,unsigned>::iterator to_delete = it++;
+            remaining.erase(to_delete);
+          }
+          else
+            it++;
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
+      }
+      // Record that we've mapped and executed this slice
+      complete_mapping();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------

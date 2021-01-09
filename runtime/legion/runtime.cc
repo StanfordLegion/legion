@@ -2087,6 +2087,8 @@ namespace Legion {
     void PhysicalRegionImpl::get_references(InstanceSet &instances) const
     //--------------------------------------------------------------------------
     {
+      if (mapped_event.exists() && !mapped_event.has_triggered())
+        mapped_event.wait();
       instances = references;
     }
 
@@ -10056,7 +10058,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VariantImpl::dispatch_inline(Processor current, InlineContext *ctx)
+    void VariantImpl::dispatch_inline(Processor current, TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
       const Realm::FunctionPointerImplementation *fp_impl = 
