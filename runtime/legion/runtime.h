@@ -1385,7 +1385,7 @@ namespace Legion {
       ApEvent dispatch_task(Processor target, SingleTask *task, 
           TaskContext *ctx, ApEvent precondition, PredEvent pred,
           int priority, Realm::ProfilingRequestSet &requests);
-      void dispatch_inline(Processor current, InlineContext *ctx);
+      void dispatch_inline(Processor current, TaskContext *ctx);
     public:
       bool can_use(Processor::Kind kind, bool warn) const;
     public:
