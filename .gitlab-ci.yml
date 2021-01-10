@@ -593,10 +593,10 @@ gcc49_cxx11_release_gasnet1_mpi_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnet1_mpi, *legion]
-gcc49_cxx11_debug_gasnet1_mpi_cmake_legion:
+gcc48_cxx11_debug_gasnet1_mpi_cmake_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnet1_mpi, *cmake, *legion, *ctest]
+    <<: [*gcc48, *terra38, *debug, *cxx11_normal, *gasnet1_mpi, *cmake, *legion, *ctest]
 gcc49_cxx11_debug_gasnet1_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -623,10 +623,10 @@ gcc49_cxx11_debug_gasnetex_mpi_nightly_regent:
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnetex_mpi_nightly, *regent, *incremental]
 #   * GASNet (UCX conduit)
-gcc49_cxx11_release_gasnet1_ucx_legion:
+gcc48_cxx11_release_gasnet1_ucx_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnet1_ucx, *legion]
+    <<: [*gcc48, *terra38, *release, *cxx11_normal, *gasnet1_ucx, *legion]
 gcc49_cxx11_release_gasnet1_ucx_cmake_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -667,19 +667,19 @@ gcc49_cxx11_debug_llvm_gasnetex_mpi_regent:
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx11_normal, *llvm, *gasnetex_mpi, *regent, *incremental]
 # * Integration: LLVM + MPI
-gcc49_cxx11_debug_llvm_mpi_legion:
+gcc48_cxx11_debug_llvm_mpi_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *llvm, *mpi, *legion]
+    <<: [*gcc48, *terra38, *debug, *cxx11_normal, *llvm, *mpi, *legion]
 gcc49_cxx11_debug_llvm_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx11_normal, *llvm, *mpi, *regent, *incremental]
 # * Integration: HDF5 + GASNet
-gcc49_cxx11_debug_hdf5_gasnetex_mpi_legion:
+gcc48_cxx11_debug_hdf5_gasnetex_mpi_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *gasnetex_mpi, *legion]
+    <<: [*gcc48, *terra38, *debug, *cxx11_normal, *hdf5, *gasnetex_mpi, *legion]
 gcc49_cxx11_debug_hdf5_gasnetex_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
