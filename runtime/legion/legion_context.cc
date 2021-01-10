@@ -38,15 +38,17 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TaskContext::TaskContext(Runtime *rt, TaskOp *owner, int d,
+    TaskContext::TaskContext(Runtime *rt, SingleTask *owner, int d,
                              const std::vector<RegionRequirement> &reqs,
-                             const std::vector<RegionRequirement> &out_reqs)
+                             const std::vector<RegionRequirement> &out_reqs,
+                             bool inline_t)
       : runtime(rt), owner_task(owner), regions(reqs),
         output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
         total_tunable_count(0), overhead_tracker(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
-        children_complete_invoked(false), children_commit_invoked(false)
+        children_complete_invoked(false), children_commit_invoked(false),
+        inline_task(inline_t)
     //--------------------------------------------------------------------------
     {
     }
@@ -54,7 +56,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(const TaskContext &rhs)
       : runtime(NULL), owner_task(NULL), regions(rhs.regions),
-        output_reqs(rhs.output_reqs), depth(-1)
+        output_reqs(rhs.output_reqs), depth(-1), inline_task(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1869,7 +1871,7 @@ namespace Legion {
       // Otherwise we have privileges on these fields for all regions
       // so we are good on privileges
       return NO_ERROR;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     LegionErrorType TaskContext::check_privilege_internal(
@@ -1939,6 +1941,70 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool TaskContext::check_region_dependence(RegionTreeID our_tid,
+                                              IndexSpace our_space,
+                                              const RegionRequirement &our_req,
+                                              const RegionUsage &our_usage,
+                                              const RegionRequirement &req,
+                                              bool check_privileges) const
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, CHECK_REGION_DEPENDENCE_CALL);
+      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+          (req.handle_type == LEGION_REGION_PROJECTION))
+      {
+        // If the trees are different we're done 
+        if (our_tid != req.region.get_tree_id())
+          return false;
+        // Check to see if there is a path between
+        // the index spaces
+        std::vector<LegionColor> path;
+        if (!runtime->forest->compute_index_path(our_space,
+                         req.region.get_index_space(),path))
+          return false;
+      }
+      else
+      {
+        // Check if the trees are different
+        if (our_tid != req.partition.get_tree_id())
+          return false;
+        std::vector<LegionColor> path;
+        if (!runtime->forest->compute_partition_path(our_space,
+                     req.partition.get_index_partition(), path))
+          return false;
+      }
+      // Check to see if any privilege fields overlap
+      std::vector<FieldID> intersection(our_req.privilege_fields.size());
+      std::vector<FieldID>::iterator intersect_it = 
+        std::set_intersection(our_req.privilege_fields.begin(),
+                              our_req.privilege_fields.end(),
+                              req.privilege_fields.begin(),
+                              req.privilege_fields.end(),
+                              intersection.begin());
+      intersection.resize(intersect_it - intersection.begin());
+      if (intersection.empty())
+        return false;
+      // If we aren't supposed to check privileges then we're done
+      if (!check_privileges)
+        return true;
+      // Finally if everything has overlapped, do a dependence analysis
+      // on the privileges and coherence
+      RegionUsage usage(req);
+      switch (check_dependence_type<true>(our_usage,usage))
+      {
+        // Only allow no-dependence, or simultaneous dependence through
+        case LEGION_NO_DEPENDENCE:
+        case LEGION_SIMULTANEOUS_DEPENDENCE:
+          {
+            return false;
+          }
+        default:
+          break;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion TaskContext::find_logical_region(unsigned index)
     //--------------------------------------------------------------------------
     {
@@ -1977,7 +2043,8 @@ namespace Legion {
 #endif
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
-      pending_done = owner_task->get_context()->decrement_pending(owner_task);
+      if (!inline_task)
+        pending_done = find_parent_context()->decrement_pending(owner_task);
       return physical_regions;
     }
 
@@ -2440,20 +2507,80 @@ namespace Legion {
       return result;
     }
 
+    //--------------------------------------------------------------------------
+    VariantImpl* TaskContext::select_inline_variant(TaskOp *child,
+                              const std::vector<PhysicalRegion> &parent_regions,
+                              std::deque<InstanceSet> &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, SELECT_INLINE_VARIANT_CALL);
+      Mapper::SelectVariantInput input;
+      Mapper::SelectVariantOutput output;
+      input.processor = executing_processor;
+      input.chosen_instances.resize(parent_regions.size());
+      // Extract the specific field instances for each region requirement
+      for (unsigned idx1 = 0; idx1 < parent_regions.size(); idx1++)
+      {
+        const RegionRequirement &child_req = child->regions[idx1];
+        FieldSpaceNode *space = 
+          runtime->forest->get_node(child_req.parent.get_field_space());
+        FieldMask mask = space->get_field_mask(child_req.privilege_fields);
+        InstanceSet instances;
+        parent_regions[idx1].impl->get_references(instances);
+        for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
+        {
+          const InstanceRef &ref = instances[idx2];
+          const FieldMask overlap = mask & ref.get_valid_fields();
+          if (!overlap)
+            continue;
+          physical_instances[idx1].add_instance(
+              InstanceRef(ref.get_manager(), overlap, ref.get_ready_event()));
+          input.chosen_instances[idx1].push_back(
+              MappingInstance(ref.get_manager()));
+          mask -= overlap;
+          if (!mask)
+            break;
+        }
+#ifdef DEBUG_LEGION
+        assert(!mask);
+#endif
+      }
+      output.chosen_variant = 0;
+      // Always do this with the child mapper
+      MapperManager *child_mapper = 
+        runtime->find_mapper(executing_processor, child->map_id);
+      child_mapper->invoke_select_task_variant(child, &input, &output);
+      VariantImpl *variant_impl= runtime->find_variant_impl(child->task_id,
+                                  output.chosen_variant, true/*can fail*/);
+      if (variant_impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invoction of "
+                      "'select_task_variant' on mapper %s. Mapper selected "
+                      "an invalid variant ID %d for inlining of task %s "
+                      "(UID %lld).", child_mapper->get_mapper_name(),
+                      output.chosen_variant, child->get_task_name(), 
+                      child->get_unique_id())
+      if (!runtime->unsafe_mapper)
+        child->validate_variant_selection(child_mapper, variant_impl,
+         executing_processor.kind(), physical_instances, "select_task_variant");
+      return variant_impl;
+    }
+
     /////////////////////////////////////////////////////////////
     // Inner Context 
     /////////////////////////////////////////////////////////////
     
     //--------------------------------------------------------------------------
-    InnerContext::InnerContext(Runtime *rt, TaskOp *owner,int d,bool full_inner,
+    InnerContext::InnerContext(Runtime *rt, SingleTask *owner,int d,bool finner,
                                const std::vector<RegionRequirement> &reqs,
                                const std::vector<RegionRequirement> &out_reqs,
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
-                               UniqueID uid, ApEvent exec_fence, bool remote)
-      : TaskContext(rt, owner, d, reqs, out_reqs),
+                               UniqueID uid, ApEvent exec_fence, bool remote,
+                               bool inline_task)
+      : TaskContext(rt, owner, d, reqs, out_reqs, inline_task),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
-        remote_context(remote), full_inner_context(full_inner),
+        remote_context(remote), full_inner_context(finner),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
         total_children_count(0), total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
@@ -2508,7 +2635,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(const InnerContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs),
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs, false),
         tree_context(rhs.tree_context),
         context_uid(0), remote_context(false), full_inner_context(false),
         parent_req_indexes(rhs.parent_req_indexes), 
@@ -7260,40 +7387,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::unregister_child_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent to_trigger;
-      {
-        AutoLock child_lock(child_op_lock);
-        // Remove it from everything and then see if we need to
-        // trigger the window wait event
-        executing_children.erase(op);
-        executed_children.erase(op);
-        complete_children.erase(op);
-#ifdef DEBUG_LEGION
-        outstanding_children.erase(op->get_ctx_index());
-#endif
-        int diff = -1; // Need this for PGI dumbness
-        int outstanding_count = 
-          __sync_add_and_fetch(&outstanding_children_count, diff);
-#ifdef DEBUG_LEGION
-        assert(outstanding_count >= 0);
-#endif
-        if (valid_wait_event && (context_configuration.max_window_size > 0) &&
-            (outstanding_count <=
-             int((100 - context_configuration.hysteresis_percentage) *
-                 context_configuration.max_window_size / 100)))
-        {
-          to_trigger = window_wait;
-          valid_wait_event = false;
-        }
-      }
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
     int InnerContext::has_conflicting_regions(MapOp *op, bool &parent_conflict,
                                               bool &inline_conflict)
     //--------------------------------------------------------------------------
@@ -7625,71 +7718,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
       const RegionRequirement &req = fill->get_requirement();
       find_conflicting_internal(req, conflicting);
-    }
-
-    //--------------------------------------------------------------------------
-    bool InnerContext::check_region_dependence(RegionTreeID our_tid,
-                                             IndexSpace our_space,
-                                             const RegionRequirement &our_req,
-                                             const RegionUsage &our_usage,
-                                             const RegionRequirement &req,
-                                             bool check_privileges) const
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, CHECK_REGION_DEPENDENCE_CALL);
-      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
-          (req.handle_type == LEGION_REGION_PROJECTION))
-      {
-        // If the trees are different we're done 
-        if (our_tid != req.region.get_tree_id())
-          return false;
-        // Check to see if there is a path between
-        // the index spaces
-        std::vector<LegionColor> path;
-        if (!runtime->forest->compute_index_path(our_space,
-                         req.region.get_index_space(),path))
-          return false;
-      }
-      else
-      {
-        // Check if the trees are different
-        if (our_tid != req.partition.get_tree_id())
-          return false;
-        std::vector<LegionColor> path;
-        if (!runtime->forest->compute_partition_path(our_space,
-                     req.partition.get_index_partition(), path))
-          return false;
-      }
-      // Check to see if any privilege fields overlap
-      std::vector<FieldID> intersection(our_req.privilege_fields.size());
-      std::vector<FieldID>::iterator intersect_it = 
-        std::set_intersection(our_req.privilege_fields.begin(),
-                              our_req.privilege_fields.end(),
-                              req.privilege_fields.begin(),
-                              req.privilege_fields.end(),
-                              intersection.begin());
-      intersection.resize(intersect_it - intersection.begin());
-      if (intersection.empty())
-        return false;
-      // If we aren't supposed to check privileges then we're done
-      if (!check_privileges)
-        return true;
-      // Finally if everything has overlapped, do a dependence analysis
-      // on the privileges and coherence
-      RegionUsage usage(req);
-      switch (check_dependence_type<true>(our_usage,usage))
-      {
-        // Only allow no-dependence, or simultaneous dependence through
-        case LEGION_NO_DEPENDENCE:
-        case LEGION_SIMULTANEOUS_DEPENDENCE:
-          {
-            return false;
-          }
-        default:
-          break;
-      }
-      return true;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void InnerContext::register_inline_mapped_region(PhysicalRegion &region)
@@ -9273,7 +9302,7 @@ namespace Legion {
       // Tell the parent context that we are ready for post-end
       // Make a copy of the results if necessary
       TaskContext *parent_ctx = owner_task->get_context();
-      RtEvent effects_done(!external_implicit_task ? 
+      RtEvent effects_done(!external_implicit_task && !inline_task ? 
           Processor::get_current_finish_event() : Realm::Event::NO_EVENT); 
       if (last_registration.exists() && !last_registration.has_triggered())
         effects_done = Runtime::merge_events(effects_done, last_registration);
@@ -9310,11 +9339,12 @@ namespace Legion {
       }
       else
         parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size);
+      if (!inline_task)
 #ifdef DEBUG_LEGION
-      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                     false/*meta*/);
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
 #else
-      runtime_ptr->decrement_total_outstanding_tasks();
+        runtime_ptr->decrement_total_outstanding_tasks();
 #endif
     }
 
@@ -9550,14 +9580,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::inline_child_task(TaskOp *child)
+    bool InnerContext::inline_child_task(TaskOp *child)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INLINE_CHILD_TASK_CALL);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_inline_task(child->get_unique_id());
-      // Remove this child from our context
-      unregister_child_operation(child);
       // Check to see if the child is predicated
       // If it is wait for it to resolve
       if (child->is_predicated_op())
@@ -9565,151 +9593,82 @@ namespace Legion {
         // See if the predicate speculates false, if so return false
         // and then we are done.
         if (!child->get_predicate_value(executing_processor))
-          return;
+          return true;
       }
-      // Save the state of our physical regions
-      std::vector<bool> phy_regions_mapped(physical_regions.size());
-      for (unsigned idx = 0; idx < physical_regions.size(); idx++)
-        phy_regions_mapped[idx] = is_region_mapped(idx);
-      // Inline the child task
-      child->perform_inlining(this);
-      // Now see if the mapping state of any of our
-      // originally mapped regions has changed
-      std::set<ApEvent> wait_events;
-      for (unsigned idx = 0; idx < phy_regions_mapped.size(); idx++)
+      // Find the mapped physical regions associated with each of the
+      // child task's region requirements. If we don't have one then
+      // it's not legal to inline the child task
+      std::vector<PhysicalRegion> child_regions(child->regions.size());
+      for (unsigned childidx = 0; childidx < child_regions.size(); childidx++)
       {
-        if (phy_regions_mapped[idx] && !is_region_mapped(idx))
+        const RegionRequirement &child_req = child->regions[childidx]; 
+        bool found = false;
+        for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
         {
-          // Need to remap
-          MapOp *op = runtime->get_available_map_op();
-          op->initialize(this, physical_regions[idx]);
-          wait_events.insert(op->get_completion_event());
-          add_to_dependence_queue(op);
-        }
-        else if (!phy_regions_mapped[idx] && is_region_mapped(idx))
-        {
-          // Need to unmap
-          physical_regions[idx].impl->unmap_region();
-        }
-        // Otherwise everything is still the same
-      }
-      if (!wait_events.empty())
-      {
-        RtEvent wait_on = Runtime::protect_merge_events(wait_events);
-        wait_on.wait();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    VariantImpl* InnerContext::select_inline_variant(TaskOp *child)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, SELECT_INLINE_VARIANT_CALL);
-      Mapper::SelectVariantInput input;
-      Mapper::SelectVariantOutput output;
-      input.processor = executing_processor;
-      input.chosen_instances.resize(child->regions.size());
-      // Compute the parent indexes since we're going to need them
-      child->compute_parent_indexes();
-      // Find the instances for this child
-      for (unsigned idx = 0; idx < child->regions.size(); idx++)
-      {
-        // We can get access to physical_regions without the
-        // lock because we know we are running in the application
-        // thread in order to do this inlining
-        unsigned local_index = child->find_parent_index(idx); 
-        if (local_index < physical_regions.size())
-        {
-          // Check to see if it is still mapped
-          if (physical_regions[local_index].is_mapped())
-          {
-            InstanceSet instances;
-            physical_regions[local_index].impl->get_references(instances);
-            std::vector<MappingInstance> &mapping_instances = 
-              input.chosen_instances[idx];
-            mapping_instances.resize(instances.size());
-            for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
-            {
-              mapping_instances[idx2] = 
-                MappingInstance(instances[idx2].get_manager());
-            }
+          if (!physical_regions[our_idx].is_mapped())
             continue;
-          }
-          // Otherwise fall through
+          const RegionRequirement &our_req = regions[our_idx];
+          const RegionTreeID our_tid = our_req.region.get_tree_id();
+          const IndexSpace our_space = our_req.region.get_index_space();
+          const RegionUsage our_usage(our_req);
+          if (!check_region_dependence(our_tid, our_space, our_req,
+                  our_usage, child_req, false/*ignore privileges*/))
+            continue;
+          child_regions[childidx] = physical_regions[our_idx];
+          found = true;
+          break;
         }
-        const RegionRequirement &child_req = child->regions[idx];
-        std::map<FieldID,MappingInstance> mapped_fields;
-        // Next check to see which overlapping fields are mapped
+        if (found)
+          continue;
+        // Need the lock here because of unordered detach operations
+        AutoLock i_lock(inline_lock,1,false/*exclusive*/);
+        for (std::list<PhysicalRegion>::const_iterator it =
+              inline_regions.begin(); it != inline_regions.end(); it++)
         {
-          // Need inline lock because of unordered detach ops
-          AutoLock i_lock(inline_lock,1,false/*exclusive*/);
-          for (std::list<PhysicalRegion>::const_iterator it = 
-                inline_regions.begin(); it != inline_regions.end(); it++)
-          {
-            if (!it->is_mapped())
-              continue;
-            const RegionRequirement &inline_req = it->impl->get_requirement();
-            const RegionUsage inline_usage(inline_req);
-            // Don't both checking the privilege, we want to know if the
-            // fields and index spaces overlap
-            if (!check_region_dependence(inline_req.region.get_tree_id(),
-                  inline_req.region.get_index_space(), inline_req, 
-                  inline_usage, child_req, false/*check privileges*/))
-              continue;
-            InstanceSet instances;
-            it->impl->get_references(instances);
-            FieldSpaceNode *fs_node = 
-              runtime->forest->get_node(child_req.parent.get_field_space());
-            // Find all the fields that we can that overlap
-            for (std::set<FieldID>::const_iterator fit = 
-                  child_req.privilege_fields.begin(); fit !=
-                  child_req.privilege_fields.end(); fit++)
-            {
-              if (inline_req.privilege_fields.find(*fit) ==
-                  inline_req.privilege_fields.end())
-                continue;
-              const unsigned fidx = fs_node->get_field_index(*fit);
-              for (unsigned instidx = 0; instidx < instances.size(); instidx++)
-              {
-                const InstanceRef &ref = instances[instidx];
-                if (ref.get_valid_fields().is_set(fidx))
-                  mapped_fields[*fit] = MappingInstance(ref.get_manager());
-              }
-            }
-          }
+#ifdef DEBUG_LEGION
+          assert(it->is_mapped());
+#endif
+          const RegionRequirement &our_req = it->impl->get_requirement();
+          const RegionTreeID our_tid = our_req.region.get_tree_id();
+          const IndexSpace our_space = our_req.region.get_index_space();
+          const RegionUsage our_usage(our_req);
+          if (!check_region_dependence(our_tid, our_space, our_req,
+                  our_usage, child_req, false/*ignore privileges*/))
+            continue;
+          child_regions[childidx] = *it;
+          found = true;
+          break;
         }
-        // If all the fields are mapped then we can create a physical
-        // instance mapping, otherwise give it a virtual mapping
-        if (mapped_fields.size() == child_req.privilege_fields.size())
+        // If we didn't find any physical region then report the warning
+        // and return because we couldn't find a mapped physical region
+        if (!found)
         {
-          std::vector<MappingInstance> &mapping_instances = 
-              input.chosen_instances[idx];
-          mapping_instances.reserve(mapped_fields.size());
-          for (std::map<FieldID,MappingInstance>::const_iterator it = 
-                mapped_fields.begin(); it != mapped_fields.end(); it++) 
-            mapping_instances.push_back(it->second);
+          REPORT_LEGION_WARNING(LEGION_WARNING_FAILED_INLINING,
+              "Failed to inline task %s (UID %lld) into parent task "
+              "%s (UID %lld) because there was no mapped region for "
+              "region requirement %d to use. Currently all regions "
+              "must be mapped in the parent task in order to allow "
+              "for inlining. If you believe you have a compelling use "
+              "case for inline a task with virtually mapped regions "
+              "then please contact the Legion developers.", 
+              child->get_task_name(), child->get_unique_id(), 
+              owner_task->get_task_name(), owner_task->get_unique_id(),childidx)
+          return false;
         }
-        else
-          input.chosen_instances[idx].push_back(
-              MappingInstance(runtime->virtual_manager)); 
       }
-      output.chosen_variant = 0;
-      // Always do this with the child mapper
-      MapperManager *child_mapper = runtime->find_mapper(executing_processor,
-                                                         child->map_id);
-      child_mapper->invoke_select_task_variant(child, &input, &output);
-      VariantImpl *variant_impl= runtime->find_variant_impl(child->task_id,
-                                  output.chosen_variant, true/*can fail*/);
-      if (variant_impl == NULL)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invoction of "
-                      "'select_task_variant' on mapper %s. Mapper selected "
-                      "an invalid variant ID %d for inlining of task %s "
-                      "(UID %lld).", child_mapper->get_mapper_name(),
-                      output.chosen_variant, child->get_task_name(), 
-                      child->get_unique_id())
-      return variant_impl;
-    }
+      register_executing_child(child);
+      const ApEvent child_done = child->get_completion_event();
+      // Now select the variant for task based on the regions 
+      std::deque<InstanceSet> physical_instances(child_regions.size());
+      VariantImpl *variant = 
+        select_inline_variant(child, child_regions, physical_instances); 
+      child->perform_inlining(variant, physical_instances);
+      // Then wait for the child operation to be finished
+      bool poisoned = false;
+      if (!child_done.has_triggered_faultaware(poisoned))
+        child_done.wait_faultaware(poisoned);
+      return true;
+    } 
 
     //--------------------------------------------------------------------------
     void InnerContext::handle_registration_callback_effects(RtEvent effects)
@@ -9815,14 +9774,7 @@ namespace Legion {
         inline_task = task->select_task_options(true/*prioritize*/);
       // Now check to see if we're inling the task or just performing
       // a normal asynchronous task launch
-      if (inline_task)
-      {
-        inline_child_task(task);
-        // After we're done we can deactivate it since we
-        // know that it will never be used again
-        task->deactivate();
-      }
-      else
+      if (!inline_task || !inline_child_task(task))
       {
         // Normal task launch, iterate over the context task's
         // regions and see if we need to unmap any of them
@@ -10019,9 +9971,9 @@ namespace Legion {
                                  const std::vector<unsigned> &parent_indexes,
                                  const std::vector<bool> &virt_mapped,
                                  UniqueID ctx_uid, ApEvent exec_fence,
-                                 ShardManager *manager)
+                                 ShardManager *manager, bool inline_task)
       : InnerContext(rt, owner, d, full, reqs, out_reqs, parent_indexes,
-                     virt_mapped, ctx_uid, exec_fence),
+         virt_mapped, ctx_uid, exec_fence, false/*remote*/, inline_task),
         owner_shard(owner), shard_manager(manager),
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_indirection_bar_index(0),
@@ -10401,6 +10353,33 @@ namespace Legion {
       if (++dynamic_id_allocator_shard == total_shards)
         dynamic_id_allocator_shard = 0;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl* ReplicateContext::select_inline_variant(TaskOp *child,
+                              const std::vector<PhysicalRegion> &parent_regions,
+                              std::deque<InstanceSet> &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+      VariantImpl *variant_impl = TaskContext::select_inline_variant(child,
+                                        parent_regions, physical_instances);
+      if (!variant_impl->is_replicable())
+      {
+        MapperManager *child_mapper = 
+          runtime->find_mapper(executing_processor, child->map_id);
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invoction of "
+                      "'select_task_variant' on mapper %s. Mapper selected "
+                      "an invalid variant ID %d for inlining of task %s "
+                      "(UID %lld). Parent task %s (UID %lld) is a control-"
+                      "replicated task but mapper selected non-replicable "
+                      "variant %d for task %s.",child_mapper->get_mapper_name(),
+                      variant_impl->vid, child->get_task_name(), 
+                      child->get_unique_id(), owner_task->get_task_name(),
+                      owner_task->get_unique_id(), variant_impl->vid,
+                      child->get_task_name())
+      }
+      return variant_impl;
     }
 
     //--------------------------------------------------------------------------
@@ -19200,9 +19179,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LeafContext::LeafContext(Runtime *rt, TaskOp *owner)
+    LeafContext::LeafContext(Runtime *rt, SingleTask *owner, bool inline_task)
       : TaskContext(rt, owner, owner->get_depth(), owner->regions,
-                    owner->output_regions),
+                    owner->output_regions, inline_task),
         inlined_tasks(0)
     //--------------------------------------------------------------------------
     {
@@ -19210,7 +19189,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LeafContext::LeafContext(const LeafContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs)
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs, false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -19323,60 +19302,76 @@ namespace Legion {
     void LeafContext::inline_child_task(TaskOp *child)
     //--------------------------------------------------------------------------
     {
+      if (runtime->check_privileges)
+        child->perform_privilege_checks();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_inline_task(child->get_unique_id());
-      child->perform_inlining(this);
+      // Find the mapped physical regions associated with each of the
+      // child task's region requirements. If they aren't mapped then
+      // we need a mapping fence to ensure that all the mappings are
+      // done before we attempt to run this task. If they are all mapped
+      // though then we can run this right away.
+      std::vector<PhysicalRegion> child_regions(child->regions.size());
+      for (unsigned childidx = 0; childidx < child_regions.size(); childidx++)
+      {
+        const RegionRequirement &child_req = child->regions[childidx];
+#ifdef DEBUG_LEGION
+        bool found = false;
+#endif
+        for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
+        {
+          if (!physical_regions[our_idx].is_mapped())
+            continue;
+          const RegionRequirement &our_req = regions[our_idx];
+          const RegionTreeID our_tid = our_req.region.get_tree_id();
+          const IndexSpace our_space = our_req.region.get_index_space();
+          const RegionUsage our_usage(our_req);
+          if (!check_region_dependence(our_tid, our_space, our_req,
+                  our_usage, child_req, false/*ignore privileges*/))
+            continue;
+          child_regions[childidx] = physical_regions[our_idx];
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
+      }
+      // Now select the variant for task based on the regions 
+      std::deque<InstanceSet> physical_instances(child_regions.size());
+      VariantImpl *variant = 
+        select_inline_variant(child, child_regions, physical_instances); 
+      child->perform_inlining(variant, physical_instances);
+      // No need to wait here, we know everything are leaves all the way
+      // down from here so there is no way for there to be effects
     }
 
     //--------------------------------------------------------------------------
-    VariantImpl* LeafContext::select_inline_variant(TaskOp *child)
+    VariantImpl* LeafContext::select_inline_variant(TaskOp *child,
+                              const std::vector<PhysicalRegion> &parent_regions,
+                              std::deque<InstanceSet> &physical_instances)
     //--------------------------------------------------------------------------
     {
-      Mapper::SelectVariantInput input;
-      Mapper::SelectVariantOutput output;
-      input.processor = executing_processor;
-      input.chosen_instances.resize(child->regions.size());
-      // Compute the parent indexes since we're going to need them
-      // Make sure we use ourselves here so that we know we get the
-      // right indexes when doing computations
-      child->compute_parent_indexes(this);
-      // Find the instances for this child
-      for (unsigned idx = 0; idx < child->regions.size(); idx++)
+      VariantImpl *variant_impl = TaskContext::select_inline_variant(child,
+                                        parent_regions, physical_instances);
+      if (!variant_impl->is_leaf())
       {
-        // We can get access to physical_regions without the
-        // lock because we know we are running in the application
-        // thread in order to do this inlining
-        unsigned local_index = child->find_parent_index(idx); 
-#ifdef DEBUG_LEGION
-        assert(local_index <= physical_regions.size());
-        assert(physical_regions[local_index].is_mapped());
-#endif
-        InstanceSet instances;
-        physical_regions[local_index].impl->get_references(instances);
-        std::vector<MappingInstance> &mapping_instances = 
-          input.chosen_instances[idx];
-        mapping_instances.resize(instances.size());
-        for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
-        {
-          mapping_instances[idx2] = 
-            MappingInstance(instances[idx2].get_manager());
-        }
-      }
-      output.chosen_variant = 0;
-      // Always do this with the child mapper
-      MapperManager *child_mapper = runtime->find_mapper(executing_processor,
-                                                         child->map_id);
-      child_mapper->invoke_select_task_variant(child, &input, &output);
-      VariantImpl *variant_impl= runtime->find_variant_impl(child->task_id,
-                                  output.chosen_variant, true/*can fail*/);
-      if (variant_impl == NULL)
+        MapperManager *child_mapper = 
+          runtime->find_mapper(executing_processor, child->map_id);
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invoction of "
                       "'select_task_variant' on mapper %s. Mapper selected "
-                      "an invalidate variant ID %d for inlining of task %s "
-                      "(UID %lld).", child_mapper->get_mapper_name(),
-                      output.chosen_variant, child->get_task_name(), 
-                      child->get_unique_id())
+                      "an invalid variant ID %d for inlining of task %s "
+                      "(UID %lld). Parent task %s (UID %lld) is a leaf task "
+                      "but mapper selected non-leaf variant %d for task %s.",
+                      child_mapper->get_mapper_name(),
+                      variant_impl->vid, child->get_task_name(), 
+                      child->get_unique_id(), owner_task->get_task_name(),
+                      owner_task->get_unique_id(), variant_impl->vid,
+                      child->get_task_name())
+      }
       return variant_impl;
     }
 
@@ -20182,7 +20177,6 @@ namespace Legion {
         InnerContext *parent = owner_task->get_context();
         Future result = task->initialize_task(parent, launcher, outputs);
         inline_child_task(task);
-        task->deactivate();
         return result;
       }
       else
@@ -20212,7 +20206,6 @@ namespace Legion {
         FutureMap result = 
           task->initialize_task(parent, launcher, launch_space, outputs);
         inline_child_task(task);
-        task->deactivate();
         return result;
       }
       else
@@ -20242,7 +20235,6 @@ namespace Legion {
         Future result = task->initialize_task(parent, launcher, launch_space, 
                                               redop, deterministic, outputs);
         inline_child_task(task);
-        task->deactivate();
         return result;
       }
       else
@@ -20711,13 +20703,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::unregister_child_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-    }
-
-    //--------------------------------------------------------------------------
     ApEvent LeafContext::register_implicit_dependences(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -21007,7 +20992,8 @@ namespace Legion {
       // Tell the parent context that we are ready for post-end
       // Make a copy of the results if necessary
       TaskContext *parent_ctx = owner_task->get_context();
-      const RtEvent effects_done(Processor::get_current_finish_event());
+      const RtEvent effects_done(!inline_task ?
+          Processor::get_current_finish_event() : Realm::Event::NO_EVENT);
       if (deferred_result_instance.exists())
         parent_ctx->add_to_post_task_queue(this, effects_done,
                                            res, res_size, 
@@ -21041,11 +21027,12 @@ namespace Legion {
       }
       else
         parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size);
+      if (!inline_task)
 #ifdef DEBUG_LEGION
-      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                     false/*meta*/);
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
 #else
-      runtime_ptr->decrement_total_outstanding_tasks();
+        runtime_ptr->decrement_total_outstanding_tasks();
 #endif
     }
 
@@ -21121,1417 +21108,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Inline Context 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    InlineContext::InlineContext(Runtime *rt, TaskContext *enc, TaskOp *child)
-      : TaskContext(rt, child, enc->get_depth(), child->regions,
-                    child->output_regions),
-        enclosing(enc), inline_task(child)
-    //--------------------------------------------------------------------------
-    {
-      executing_processor = enclosing->get_executing_processor();
-      physical_regions.resize(regions.size());
-      parent_req_indexes.resize(regions.size());
-      // Now update the parent regions so that they are valid with
-      // respect to the outermost context
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        int index = enclosing->find_parent_region_req(regions[idx]);
-        if (index < 0)
-          REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE,
-                        "Parent task %s (ID %lld) of inline task %s "
-                        "(ID %lld) does not have a region "
-                        "requirement for region (%x,%x,%x) "
-                        "as a parent of child task's region "
-                        "requirement at index %d", enclosing->get_task_name(),
-                        enclosing->get_unique_id(), get_task_name(),
-                        get_unique_id(), regions[idx].region.index_space.id,
-                        regions[idx].region.field_space.id, 
-                        regions[idx].region.tree_id, idx)
-        parent_req_indexes[idx] = index;
-        if (((unsigned)index) < enclosing->regions.size())
-        {
-          child->regions[idx].parent = enclosing->regions[index].parent;
-          physical_regions[idx] = enclosing->get_physical_region(index);
-        }
-        else
-        {
-          // This is a created requirements, so we have to make a copy
-          RegionRequirement copy;
-          enclosing->clone_requirement(index, copy);
-          child->regions[idx].parent = copy.parent;
-          // physical regions are empty becaue they are virtual
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    InlineContext::InlineContext(const InlineContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs),
-        enclosing(NULL), inline_task(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    InlineContext::~InlineContext(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    InlineContext& InlineContext::operator=(const InlineContext &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::receive_resources(size_t return_index,
-              std::map<LogicalRegion,unsigned> &created_regs,
-              std::vector<LogicalRegion> &deleted_regs,
-              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
-              std::map<FieldSpace,unsigned> &created_fs,
-              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
-              std::vector<FieldSpace> &deleted_fs,
-              std::map<IndexSpace,unsigned> &created_is,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
-              std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
-              std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->receive_resources(return_index, created_regs, deleted_regs,
-          created_fids, deleted_fids, created_fs, latent_fs, deleted_fs,
-          created_is, deleted_is, created_partitions, deleted_partitions,
-          preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    RegionTreeContext InlineContext::get_context(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_context();
-    }
-
-    //--------------------------------------------------------------------------
-    ContextID InlineContext::get_context_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_context_id();
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID InlineContext::get_context_uid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return owner_task->get_unique_id();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::pack_remote_context(Serializer &rez,
-                                          AddressSpaceID target, bool replicate)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::compute_task_tree_coordinates(
-                       std::vector<std::pair<size_t,DomainPoint> > &coordinates)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->compute_task_tree_coordinates(coordinates);
-      coordinates.push_back(std::make_pair(
-            owner_task->get_context_index(), owner_task->index_point));
-    }
-
-    //--------------------------------------------------------------------------
-    bool InlineContext::attempt_children_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool InlineContext::attempt_children_commit(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::inline_child_task(TaskOp *child)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->inline_child_task(child);
-    }
-
-    //--------------------------------------------------------------------------
-    VariantImpl* InlineContext::select_inline_variant(TaskOp *child)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->select_inline_variant(child);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::handle_registration_callback_effects(RtEvent effects)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->handle_registration_callback_effects(effects);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(const Domain &domain, 
-                                                 TypeTag type_tag)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space(domain, type_tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(const Future &f, TypeTag tag)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space(f, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(
-                                         const std::vector<DomainPoint> &points)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space(points);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(
-                                               const std::vector<Domain> &rects)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space(rects);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::union_index_spaces(
-                                          const std::vector<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->union_index_spaces(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::intersect_index_spaces(
-                                          const std::vector<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->intersect_index_spaces(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::subtract_index_spaces(
-                                              IndexSpace left, IndexSpace right)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->subtract_index_spaces(left, right);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::create_shared_ownership(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->create_shared_ownership(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_index_space(IndexSpace handle, 
-                                       const bool unordered, const bool recurse)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->destroy_index_space(handle, unordered, recurse);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::create_shared_ownership(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->create_shared_ownership(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_index_partition(IndexPartition handle,
-                                       const bool unordered, const bool recurse)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->destroy_index_partition(handle, unordered, recurse);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_equal_partition(
-                                                IndexSpace parent,
-                                                IndexSpace color_space,
-                                                size_t granularity, Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_equal_partition(parent, color_space,
-                                               granularity, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_weights(IndexSpace parent,
-                                                const FutureMap &weights,
-                                                IndexSpace color_space,
-                                                size_t granularity, Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_weights(parent, weights, 
-                                    color_space, granularity, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_union(
-                                      IndexSpace parent,
-                                      IndexPartition handle1,
-                                      IndexPartition handle2,
-                                      IndexSpace color_space,
-                                      PartitionKind kind, Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_union(parent, handle1, handle2, 
-                                                  color_space, kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_intersection(
-                                      IndexSpace parent,
-                                      IndexPartition handle1,
-                                      IndexPartition handle2,
-                                      IndexSpace color_space,
-                                      PartitionKind kind, Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_intersection(parent,
-                                          handle1, handle2, color_space, 
-                                          kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_intersection(
-                                      IndexSpace parent,
-                                      IndexPartition partition,
-                                      PartitionKind kind, Color color,
-                                      bool dominates)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_intersection(parent,
-                                        partition, kind, color, dominates);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_difference(
-                                      IndexSpace parent,
-                                      IndexPartition handle1,
-                                      IndexPartition handle2,
-                                      IndexSpace color_space,
-                                      PartitionKind kind, Color color)   
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_difference(parent,
-                          handle1, handle2, color_space, kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    Color InlineContext::create_cross_product_partitions(
-                                                       IndexPartition handle1,
-                                                       IndexPartition handle2,
-                                  std::map<IndexSpace,IndexPartition> &handles,
-                                                       PartitionKind kind,
-                                                       Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_cross_product_partitions(handle1, handle2,
-                                                        handles, kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::create_association(LogicalRegion domain,
-                                           LogicalRegion domain_parent,
-                                           FieldID domain_fid,
-                                           IndexSpace range,
-                                           MapperID id, MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->create_association(domain, domain_parent, domain_fid, 
-                                    range, id, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_restricted_partition(
-                                                IndexSpace parent,
-                                                IndexSpace color_space,
-                                                const void *transform,
-                                                size_t transform_size,
-                                                const void *extent,
-                                                size_t extent_size,
-                                                PartitionKind part_kind,
-                                                Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_restricted_partition(parent, color_space,
-                                 transform, transform_size, extent, extent_size,
-                                 part_kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_domain(
-                                                IndexSpace parent,
-                                    const std::map<DomainPoint,Domain> &domains,
-                                                IndexSpace color_space,
-                                                bool perform_intersections,
-                                                PartitionKind part_kind,
-                                                Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_domain(parent, domains,
-              color_space, perform_intersections, part_kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_domain(
-                                                IndexSpace parent,
-                                                const FutureMap &domains,
-                                                IndexSpace color_space,
-                                                bool perform_intersections,
-                                                PartitionKind part_kind,
-                                                Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_domain(parent, domains,
-                      color_space, perform_intersections, part_kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_field(
-                                                      LogicalRegion handle,
-                                                      LogicalRegion parent_priv,
-                                                      FieldID fid,
-                                                      IndexSpace color_space,
-                                                      Color color,
-                                                      MapperID id, 
-                                                      MappingTagID tag,
-                                                      PartitionKind part_kind)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_field(handle, parent_priv,
-                                  fid, color_space, color, id, tag, part_kind);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_image(
-                                                    IndexSpace handle,
-                                                    LogicalPartition projection,
-                                                    LogicalRegion parent,
-                                                    FieldID fid,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color,
-                                                    MapperID id,
-                                                    MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_image(handle, projection,
-                          parent, fid, color_space, part_kind, color, id, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_image_range(
-                                                    IndexSpace handle,
-                                                    LogicalPartition projection,
-                                                    LogicalRegion parent,
-                                                    FieldID fid,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color,
-                                                    MapperID id, 
-                                                    MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_image_range(handle, 
-              projection, parent, fid, color_space, part_kind, color, id, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_preimage(
-                                                    IndexPartition projection,
-                                                    LogicalRegion handle,
-                                                    LogicalRegion parent,
-                                                    FieldID fid,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color,
-                                                    MapperID id,
-                                                    MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_preimage(projection, handle,
-                           parent, fid, color_space, part_kind, color, id, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_preimage_range(
-                                                    IndexPartition projection,
-                                                    LogicalRegion handle,
-                                                    LogicalRegion parent,
-                                                    FieldID fid,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color,
-                                                    MapperID id,
-                                                    MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_preimage_range(projection, 
-                  handle, parent, fid, color_space, part_kind, color, id, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_pending_partition(
-                                                    IndexSpace parent,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_pending_partition(parent, color_space,
-                                                 part_kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space_union(
-                                                  IndexPartition parent,
-                                                  const void *realm_color,
-                                                  size_t color_size,
-                                                  TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space_union(parent, realm_color, 
-                                                 color_size, type_tag, handles);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space_union(
-                                                  IndexPartition parent,
-                                                  const void *realm_color,
-                                                  size_t color_size,
-                                                  TypeTag type_tag,
-                                                  IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space_union(parent, realm_color, 
-                                                 color_size, type_tag, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space_intersection(
-                                                  IndexPartition parent,
-                                                  const void *realm_color,
-                                                  size_t color_size,
-                                                  TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space_intersection(parent, realm_color, 
-                                              color_size, type_tag, handles);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space_intersection(
-                                                  IndexPartition parent,
-                                                  const void *realm_color,
-                                                  size_t color_size,
-                                                  TypeTag type_tag,
-                                                  IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space_intersection(parent, realm_color, 
-                                              color_size, type_tag, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space_difference(
-                                                  IndexPartition parent,
-                                                  const void *realm_color,
-                                                  size_t color_size,
-                                                  TypeTag type_tag,
-                                                  IndexSpace initial,
-                                        const std::vector<IndexSpace> &handles)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space_difference(parent, realm_color, 
-                                  color_size, type_tag, initial, handles);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldSpace InlineContext::create_field_space(void)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_field_space();
-    }
-
-    //--------------------------------------------------------------------------
-    FieldSpace InlineContext::create_field_space(
-                                         const std::vector<size_t> &sizes,
-                                         std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_field_space(sizes, resulting_fields, serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldSpace InlineContext::create_field_space(
-                                         const std::vector<Future> &sizes,
-                                         std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_field_space(sizes, resulting_fields, serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::create_shared_ownership(FieldSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->create_shared_ownership(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_field_space(FieldSpace handle,
-                                            const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->destroy_field_space(handle, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldID InlineContext::allocate_field(FieldSpace space, size_t field_size,
-                                          FieldID fid, bool local,
-                                          CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->allocate_field(space, field_size, fid, local,serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::free_field(FieldAllocatorImpl *allocator, 
-                            FieldSpace space, FieldID fid, const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->free_field(allocator, space, fid, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::allocate_fields(FieldSpace space,
-                                        const std::vector<size_t> &sizes,
-                                        std::vector<FieldID> &resulting_fields,
-                                        bool local, CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->allocate_fields(space, sizes,resulting_fields,local,serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::free_fields(FieldAllocatorImpl *allocator, 
-                                    FieldSpace space, 
-                                    const std::set<FieldID> &to_free,
-                                    const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->free_fields(allocator, space, to_free, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldID InlineContext::allocate_field(FieldSpace space, 
-                                          const Future &field_size,
-                                          FieldID fid, bool local,
-                                          CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->allocate_field(space, field_size, fid, local,serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::allocate_local_field(FieldSpace space,size_t size,
-                                     FieldID fid, CustomSerdezID serdez_id,
-                                     std::set<RtEvent> &done_events)
-    //--------------------------------------------------------------------------
-    {
-      // Should never get here
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::allocate_fields(FieldSpace space,
-                                        const std::vector<Future> &sizes,
-                                        std::vector<FieldID> &resulting_fields,
-                                        bool local, CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->allocate_fields(space, sizes, resulting_fields, 
-                                        local, serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::allocate_local_fields(FieldSpace space,
-                                   const std::vector<size_t> &sizes,
-                                   const std::vector<FieldID> &resuling_fields,
-                                   CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events)
-    //--------------------------------------------------------------------------
-    {
-      // Should never get here
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegion InlineContext::create_logical_region(RegionTreeForest *forest,
-                                                       IndexSpace index_space,
-                                                       FieldSpace field_space,
-                                                       bool task_local)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_logical_region(forest, index_space, field_space,
-                                              task_local);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::create_shared_ownership(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->create_shared_ownership(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_logical_region(LogicalRegion handle,
-                                               const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->destroy_logical_region(handle, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldAllocatorImpl* InlineContext::create_field_allocator(FieldSpace handle,
-                                                              bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_field_allocator(handle, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_field_allocator(FieldSpaceNode *node)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->destroy_field_allocator(node);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::get_local_field_set(const FieldSpace handle,
-                                            const std::set<unsigned> &indexes,
-                                            std::set<FieldID> &to_set) const
-    //--------------------------------------------------------------------------
-    {
-      enclosing->get_local_field_set(handle, indexes, to_set);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::get_local_field_set(const FieldSpace handle,
-                                            const std::set<unsigned> &indexes,
-                                            std::vector<FieldID> &to_set) const
-    //--------------------------------------------------------------------------
-    {
-      enclosing->get_local_field_set(handle, indexes, to_set);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::add_physical_region(const RegionRequirement &req,
-          bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances)
-    //--------------------------------------------------------------------------
-    {
-      // This should never be called directly
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::execute_task(const TaskLauncher &launcher,
-                                       std::vector<OutputRequirement> *outputs)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->execute_task(launcher, outputs);
-    }
-
-    //--------------------------------------------------------------------------
-    FutureMap InlineContext::execute_index_space(
-                                        const IndexTaskLauncher &launcher,
-                                        std::vector<OutputRequirement> *outputs)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->execute_index_space(launcher, outputs);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::execute_index_space(const IndexTaskLauncher &launcher,
-                                        ReductionOpID redop, bool deterministic,
-                                        std::vector<OutputRequirement> *outputs)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->execute_index_space(
-                                       launcher, redop, deterministic, outputs);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::reduce_future_map(const FutureMap &future_map,
-                                        ReductionOpID redop, bool deterministic)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->reduce_future_map(future_map, redop, deterministic);
-    }
-
-    //--------------------------------------------------------------------------
-    FutureMap InlineContext::construct_future_map(const Domain &domain,
-                                    const std::map<DomainPoint,Future> &futures,
-                                    RtUserEvent domain_deletion, bool internal)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->construct_future_map(domain, futures, 
-                                             domain_deletion, internal);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalRegion InlineContext::map_region(const InlineLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->map_region(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent InlineContext::remap_region(PhysicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->remap_region(region);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::unmap_region(PhysicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->unmap_region(region);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::unmap_all_regions(bool external)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->unmap_all_regions(external);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::fill_fields(const FillLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->fill_fields(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::fill_fields(const IndexFillLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->fill_fields(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::issue_copy(const CopyLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->issue_copy(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::issue_copy(const IndexCopyLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->issue_copy(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::issue_acquire(const AcquireLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->issue_acquire(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::issue_release(const ReleaseLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->issue_release(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalRegion InlineContext::attach_resource(
-                                                 const AttachLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->attach_resource(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::detach_resource(PhysicalRegion region, 
-                                          const bool flush,const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->detach_resource(region, flush, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::progress_unordered_operations(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->progress_unordered_operations();
-    }
-
-    //--------------------------------------------------------------------------
-    FutureMap InlineContext::execute_must_epoch(
-                                              const MustEpochLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->execute_must_epoch(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::issue_timing_measurement(
-                                                 const TimingLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->issue_timing_measurement(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::issue_mapping_fence(void)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->issue_mapping_fence();
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::issue_execution_fence(void)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->issue_execution_fence();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::complete_frame(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->complete_frame();
-    }
-
-    //--------------------------------------------------------------------------
-    Predicate InlineContext::create_predicate(const Future &f)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_predicate(f);
-    }
-
-    //--------------------------------------------------------------------------
-    Predicate InlineContext::predicate_not(const Predicate &p)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->predicate_not(p);
-    }
-
-    //--------------------------------------------------------------------------
-    Predicate InlineContext::create_predicate(const PredicateLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_predicate(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::get_predicate_future(const Predicate &p)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_predicate_future(p);
-    }
-
-    //--------------------------------------------------------------------------
-    ApBarrier InlineContext::create_phase_barrier(unsigned arrivals,
-                                                  ReductionOpID redop,
-                                                  const void *init_value,
-                                                  size_t init_size)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_phase_barrier(arrivals, redop, 
-                                             init_value, init_size);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_phase_barrier(ApBarrier bar)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->destroy_phase_barrier(bar);
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier InlineContext::advance_phase_barrier(PhaseBarrier bar)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->advance_phase_barrier(bar);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::arrive_dynamic_collective(DynamicCollective dc,
-                                                  const void *buffer,
-                                                  size_t size, unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->arrive_dynamic_collective(dc, buffer, size, count);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::defer_dynamic_collective_arrival(DynamicCollective dc,
-                                                         const Future &f,
-                                                         unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->defer_dynamic_collective_arrival(dc, f, count);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::get_dynamic_collective_result(DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_dynamic_collective_result(dc);
-    }
-
-    //--------------------------------------------------------------------------
-    DynamicCollective InlineContext::advance_dynamic_collective( 
-                                                           DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->advance_dynamic_collective(dc);
-    }
-
-    //--------------------------------------------------------------------------
-    size_t InlineContext::register_new_child_operation(Operation *op,
-                      const std::vector<StaticDependence> *dependences)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->register_new_child_operation(op, dependences);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_new_internal_operation(InternalOp *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_new_internal_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    size_t InlineContext::register_new_close_operation(CloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->register_new_close_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    size_t InlineContext::register_new_summary_operation(TraceSummaryOp *op)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->register_new_summary_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent InlineContext::add_to_dependence_queue(Operation *op, 
-                                                 bool unordered, bool outermost)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->add_to_dependence_queue(op, unordered, outermost);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::add_to_post_task_queue(TaskContext *ctx,RtEvent wait_on, 
-                                               const void *result, size_t size, 
-                                               PhysicalInstance inst,
-                                               FutureFunctor *callback_functor,
-                                               bool own_functor)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->add_to_post_task_queue(ctx, wait_on, result, size, inst,
-                                        callback_functor, own_functor);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_executing_child(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_executing_child(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_child_executed(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_child_executed(op);
-    }
-    
-    //--------------------------------------------------------------------------
-    void InlineContext::register_child_complete(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_child_complete(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_child_commit(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_child_commit(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::unregister_child_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->unregister_child_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent InlineContext::register_implicit_dependences(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->register_implicit_dependences(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::perform_fence_analysis(Operation *op, 
-                 std::set<ApEvent> &preconditions, bool mapping, bool execution)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->perform_fence_analysis(op, preconditions, mapping, execution);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::update_current_fence(FenceOp *op, 
-                                             bool mapping, bool execution)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->update_current_fence(op, mapping, execution);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::update_current_implicit(Operation *op) 
-    //--------------------------------------------------------------------------
-    {
-      enclosing->update_current_implicit(op);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent InlineContext::get_current_mapping_fence_event(void)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_current_mapping_fence_event();
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent InlineContext::get_current_execution_fence_event(void)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_current_execution_fence_event();
-    }
-
-
-    //--------------------------------------------------------------------------
-    void InlineContext::begin_trace(TraceID tid, bool logical_only,
-        bool static_trace, const std::set<RegionTreeID> *trees, bool deprecated)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->begin_trace(tid, logical_only, static_trace, trees,deprecated);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::end_trace(TraceID tid, bool deprecated)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->end_trace(tid, deprecated);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::record_previous_trace(LegionTrace *trace)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->record_previous_trace(trace);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::invalidate_trace_cache(
-                                     LegionTrace *trace, Operation *invalidator)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->invalidate_trace_cache(trace, invalidator);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::record_blocking_call(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->record_blocking_call();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::issue_frame(FrameOp *frame, ApEvent frame_termination)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->issue_frame(frame, frame_termination);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::perform_frame_issue(FrameOp *frame, ApEvent frame_term)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->perform_frame_issue(frame, frame_term);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::finish_frame(ApEvent frame_termination)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->finish_frame(frame_termination);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::increment_outstanding(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->increment_outstanding();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::decrement_outstanding(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->decrement_outstanding();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::increment_pending(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->increment_pending();
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent InlineContext::decrement_pending(TaskOp *child)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->decrement_pending(child);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent InlineContext::decrement_pending(bool need_deferral)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->decrement_pending(need_deferral);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::increment_frame(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->increment_frame();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::decrement_frame(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->decrement_frame();
-    }
-
-    //--------------------------------------------------------------------------
-#ifdef DEBUG_LEGION_COLLECTIVES
-    MergeCloseOp* InlineContext::get_merge_close_op(const LogicalUser &user,
-                                                    RegionTreeNode *node)
-#else
-    MergeCloseOp* InlineContext::get_merge_close_op(void)
-#endif
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION_COLLECTIVES
-      return enclosing->get_merge_close_op(user, node);
-#else
-      return enclosing->get_merge_close_op();
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_parent_logical_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(index < parent_req_indexes.size());
-#endif
-      return enclosing->find_parent_logical_context(parent_req_indexes[index]);
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_parent_physical_context(unsigned index,
-                                                           LogicalRegion parent)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(index < parent_req_indexes.size());
-#endif
-      return enclosing->find_parent_physical_context(
-                    parent_req_indexes[index], parent);
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_outermost_local_context(InnerContext *pre)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->find_outermost_local_context(pre);
-    }
-    
-    //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_top_context(InnerContext *previous)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->find_top_context(previous);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::initialize_region_tree_contexts(
-                       const std::vector<RegionRequirement> &clone_requirements,
-                       const std::vector<ApUserEvent> &unmap_events,
-                       std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::invalidate_region_tree_contexts(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::send_back_created_state(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceView* InlineContext::create_instance_top_view(
-                                PhysicalManager *manager, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& InlineContext::begin_task(
-                                                           Legion::Runtime *&rt)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(implicit_context == enclosing);
-      assert(implicit_runtime == this->runtime);
-#endif
-      rt = this->runtime->external;
-      executing_processor = Processor::get_executing_processor();
-      owner_task->current_proc = executing_processor;
-#ifdef DEBUG_LEGION
-      log_task.debug("Task %s (ID %lld) inlining on processor " IDFMT "",
-                    get_task_name(), get_unique_id(), executing_processor.id);
-      assert(regions.size() == physical_regions.size());
-#endif
-      return physical_regions;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalInstance InlineContext::create_task_local_instance(Memory memory, 
-                                           Realm::InstanceLayoutGeneric *layout)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_task_local_instance(memory, layout);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::end_task(const void *res, size_t res_size, bool owned,
-     PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!deferred_result_instance.exists());
-#endif
-      inline_task->end_inline_task(res, res_size, owned, callback_functor);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::post_end_task(const void *res, size_t res_size, 
-                                    bool owned, FutureFunctor *callback_functor)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::record_dynamic_collective_contribution(
-                                          DynamicCollective dc, const Future &f)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->record_dynamic_collective_contribution(dc, f);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::find_collective_contributions(DynamicCollective dc, 
-                                             std::vector<Future> &contributions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->find_collective_contributions(dc, contributions);
-    }
-
-    //--------------------------------------------------------------------------
-    TaskPriority InlineContext::get_current_priority(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_current_priority();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::set_current_priority(TaskPriority priority)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->set_current_priority(priority);
     }
 
   };

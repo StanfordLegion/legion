@@ -308,7 +308,7 @@ namespace Legion {
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL) = 0;
-      virtual void launch_task(void) = 0;
+      virtual void launch_task(bool inline_task = false) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool is_output_global(unsigned idx) const { return false; }
       virtual bool is_output_valid(unsigned idx) const { return false; }
@@ -320,10 +320,8 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
-      virtual void perform_inlining(TaskContext *enclosing) = 0;
-    public:
-      virtual void end_inline_task(const void *result, size_t result_size,
-                                   bool owned, FutureFunctor *functor);
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions) = 0;
     public:
       RtEvent defer_distribute_task(RtEvent precondition);
       RtEvent defer_perform_mapping(RtEvent precondition, MustEpochOp *op,
@@ -358,6 +356,11 @@ namespace Legion {
       // From Memoizable
       virtual const RegionRequirement& get_requirement(unsigned idx) const
         { return logical_regions[idx]; }
+    public: // helper for mapping, here because of inlining
+      void validate_variant_selection(MapperManager *local_mapper,
+                          VariantImpl *impl, Processor::Kind kind, 
+                          const std::deque<InstanceSet> &physical_instances,
+                          const char *call_name) const;
     public:
       // These methods get called once the task has executed
       // and all the children have either mapped, completed,
@@ -520,10 +523,8 @@ namespace Legion {
       void replay_map_task_output(void);
       virtual InnerContext* create_implicit_context(void);
       void set_shard_manager(ShardManager *manager);
-    protected: // mapper helper calls
+    protected: // mapper helper call
       void validate_target_processors(const std::vector<Processor> &prcs) const;
-      void validate_variant_selection(MapperManager *local_mapper,
-          VariantImpl *impl, Processor::Kind kind, const char *call_name) const;
     protected:
       void invoke_mapper(MustEpochOp *must_epoch_owner);
       void invoke_mapper_replicated(MustEpochOp *must_epoch_owner);
@@ -554,7 +555,7 @@ namespace Legion {
       virtual SingleTask* get_origin_task(void) const = 0;
     public:
       virtual void resolve_false(bool speculated, bool launched) = 0;
-      virtual void launch_task(void);
+      virtual void launch_task(bool inline_task = false);
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
@@ -579,7 +580,8 @@ namespace Legion {
                                std::set<RtEvent> &ready_events) = 0; 
       virtual void pack_as_shard_task(Serializer &rez, 
                                       AddressSpaceID target) = 0;
-      virtual void perform_inlining(TaskContext *enclosing) = 0;
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions);
     public:
       virtual void handle_future(const void *res, size_t res_size,
                                  bool owned, FutureFunctor *functor,
@@ -598,7 +600,8 @@ namespace Legion {
       void handle_remote_profiling_response(Deserializer &derez);
       static void process_remote_profiling_response(Deserializer &derez);
     protected:
-      virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
+      virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
+                                                            bool inline_task);
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool>                     virtual_mapped;
@@ -696,7 +699,7 @@ namespace Legion {
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL) = 0;
-      virtual void launch_task(void) = 0;
+      virtual void launch_task(bool inline_task = false) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual void map_and_launch(void) = 0;
     public:
@@ -711,7 +714,8 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
-      virtual void perform_inlining(TaskContext *enclosing) = 0;
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions) = 0;
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                       Processor p, bool recurse, bool stealable) = 0;
@@ -812,6 +816,8 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions);
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
@@ -839,10 +845,7 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual void pack_as_shard_task(Serializer &rez, AddressSpaceID target);
-      virtual void perform_inlining(TaskContext *enclosing);
       virtual bool is_top_level_task(void) const { return top_level_task; }
-      virtual void end_inline_task(const void *result, size_t result_size,
-                                   bool owned, FutureFunctor *functor);
     protected:
       void pack_remote_versions(Serializer &rez);
       void pack_remote_complete(Serializer &rez);
@@ -931,7 +934,6 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual void pack_as_shard_task(Serializer &rez, AddressSpaceID target);
-      virtual void perform_inlining(TaskContext *enclosing);
     public:
       virtual void handle_future(const void *res, size_t res_size,
                                  bool owned, FutureFunctor *functor,
@@ -974,6 +976,9 @@ namespace Legion {
     public:
       void record_intra_space_dependences(unsigned index,
              const std::vector<DomainPoint> &dependences);
+      bool has_remaining_inlining_dependences(
+            std::map<PointTask*,unsigned> &remaining,
+            std::map<RtEvent,std::vector<PointTask*> > &event_deps) const;
     protected:
       friend class SliceTask;
       PointTask                   *orig_task;
@@ -1043,7 +1048,8 @@ namespace Legion {
                                std::set<RtEvent> &ready_events); 
       virtual void pack_as_shard_task(Serializer &rez, AddressSpaceID target);
       RtEvent unpack_shard_task(Deserializer &derez);
-      virtual void perform_inlining(TaskContext *enclosing);
+      virtual void perform_inlining(VariantImpl *variant,
+              const std::deque<InstanceSet> &parent_regions);
     public:
       virtual void handle_future(const void *res, size_t res_size, 
                                  bool owned, FutureFunctor *functor,
@@ -1052,7 +1058,8 @@ namespace Legion {
                           RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
     protected:
-      virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
+      virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
+                                                            bool inline_task);
     public:
       virtual InnerContext* create_implicit_context(void);
     public:
@@ -1142,7 +1149,7 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
-      virtual void launch_task(void);
+      virtual void launch_task(bool inline_task = false);
       virtual bool is_stealable(void) const;
       virtual void map_and_launch(void);
     public:
@@ -1155,9 +1162,8 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(TaskContext *enclosing);
-      virtual void end_inline_task(const void *result, size_t result_size,
-                                   bool owned, FutureFunctor *functor);
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
     public:
@@ -1310,7 +1316,7 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
-      virtual void launch_task(void);
+      virtual void launch_task(bool inline_task = false);
       virtual bool is_stealable(void) const;
       virtual void map_and_launch(void);
       virtual bool is_output_global(unsigned idx) const;
@@ -1322,7 +1328,8 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(TaskContext *enclosing);
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions);
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
