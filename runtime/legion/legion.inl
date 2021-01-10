@@ -18706,6 +18706,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    inline PieceIteratorT<DIM,T>::PieceIteratorT(PieceIteratorT &&rhs)
+      : PieceIterator(rhs), current_rect(rhs.current_rect)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     inline PieceIteratorT<DIM,T>::PieceIteratorT(const PhysicalRegion &region,
         FieldID fid, bool privilege_only, bool silence_warn, const char *warn)
       : PieceIterator(region, fid, privilege_only, silence_warn, warn)
@@ -18719,6 +18727,17 @@ namespace Legion {
     template<int DIM, typename T>
     inline PieceIteratorT<DIM,T>& PieceIteratorT<DIM,T>::operator=(
                                                       const PieceIteratorT &rhs)
+    //--------------------------------------------------------------------------
+    {
+      PieceIterator::operator=(rhs);
+      current_rect = rhs.current_rect;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline PieceIteratorT<DIM,T>& PieceIteratorT<DIM,T>::operator=(
+                                                           PieceIteratorT &&rhs)
     //--------------------------------------------------------------------------
     {
       PieceIterator::operator=(rhs);

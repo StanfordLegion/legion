@@ -301,6 +301,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ArgumentMap::ArgumentMap(ArgumentMap &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     ArgumentMap::ArgumentMap(Internal::ArgumentMapImpl *i)
       : impl(i)
     //--------------------------------------------------------------------------
@@ -362,6 +370,17 @@ namespace Legion {
       {
         impl->add_reference();
       }
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ArgumentMap& ArgumentMap::operator=(ArgumentMap &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
       return *this;
     }
 
@@ -442,6 +461,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Predicate::Predicate(Predicate &&p)
+    //--------------------------------------------------------------------------
+    {
+      const_value = p.const_value;
+      impl = p.impl;
+      p.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     Predicate::Predicate(bool value)
       : impl(NULL), const_value(value)
     //--------------------------------------------------------------------------
@@ -478,6 +506,18 @@ namespace Legion {
       impl = rhs.impl;
       if (impl != NULL)
         impl->add_predicate_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    Predicate& Predicate::operator=(Predicate &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->remove_predicate_reference();
+      const_value = rhs.const_value;
+      impl = rhs.impl;
+      rhs.impl = NULL;
       return *this;
     }
 
@@ -2029,6 +2069,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future::Future(Future &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     Future::~Future(void)
     //--------------------------------------------------------------------------
     {
@@ -2061,6 +2109,18 @@ namespace Legion {
       impl = rhs.impl;
       if (impl != NULL)
         impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    Future& Future::operator=(Future &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && 
+          impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
       return *this;
     }
 
@@ -2143,6 +2203,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureMap::FutureMap(FutureMap &&map)
+      : impl(map.impl)
+    //--------------------------------------------------------------------------
+    {
+      map.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap::FutureMap(Internal::FutureMapImpl *i, bool need_reference)
       : impl(i)
     //--------------------------------------------------------------------------
@@ -2175,6 +2243,18 @@ namespace Legion {
       impl = rhs.impl;
       if (impl != NULL)
         impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap& FutureMap::operator=(FutureMap &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && 
+          impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
       return *this;
     }
 
@@ -2228,6 +2308,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalRegion::PhysicalRegion(PhysicalRegion &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion::PhysicalRegion(Internal::PhysicalRegionImpl *i)
       : impl(i)
     //--------------------------------------------------------------------------
@@ -2260,6 +2348,17 @@ namespace Legion {
       impl = rhs.impl;
       if (impl != NULL)
         impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion& PhysicalRegion::operator=(PhysicalRegion &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
       return *this;
     }
 
@@ -2465,6 +2564,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PieceIterator::PieceIterator(PieceIterator &&rhs)
+      : impl(rhs.impl), index(rhs.index), current_piece(rhs.current_piece)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     PieceIterator::~PieceIterator(void)
     //--------------------------------------------------------------------------
     {
@@ -2483,6 +2590,19 @@ namespace Legion {
       current_piece = rhs.current_piece;
       if (impl != NULL)
         impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    PieceIterator& PieceIterator::operator=(PieceIterator &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
+      index = rhs.index;
+      current_piece = rhs.current_piece;
       return *this;
     }
 
@@ -2679,6 +2799,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldAllocator::FieldAllocator(FieldAllocator &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     FieldAllocator::~FieldAllocator(void)
     //--------------------------------------------------------------------------
     {
@@ -2708,6 +2836,17 @@ namespace Legion {
       impl = rhs.impl;
       if (impl != NULL)
         impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocator& FieldAllocator::operator=(FieldAllocator &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
       return *this;
     }
 
