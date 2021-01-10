@@ -512,6 +512,9 @@ namespace Legion {
       virtual void remove_deleted_local_fields(FieldSpace space,
                                  const std::vector<FieldID> &to_remove); 
     public:
+      virtual void raise_poison_exception(void);
+      virtual void raise_region_exception(PhysicalRegion region, bool nuclear);
+    public:
       bool safe_cast(RegionTreeForest *forest, IndexSpace handle, 
                      const void *realm_point, TypeTag type_tag);
       bool is_region_mapped(unsigned idx);

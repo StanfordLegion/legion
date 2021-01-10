@@ -561,7 +561,10 @@ namespace Legion {
       assert(reservation_lock.exists());
 #endif
       Internal::ApEvent lock_event(reservation_lock.acquire(mode,exclusive));
-      lock_event.wait();
+      bool poisoned = false;
+      lock_event.wait_faultaware(poisoned);
+      if (poisoned)
+        Internal::implicit_context->raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -698,7 +701,10 @@ namespace Legion {
       assert(phase_barrier.exists());
 #endif
       Internal::ApEvent e = Internal::Runtime::get_previous_phase(*this);
-      e.wait();
+      bool poisoned = false;
+      e.wait_faultaware(poisoned);
+      if (poisoned)
+        Internal::implicit_context->raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -2154,7 +2160,12 @@ namespace Legion {
           impl->subscribe() : impl->get_ready_event();
         // Always subscribe to the Realm event to know when it triggers
         ready.subscribe();
-        return ready.has_triggered();
+        bool poisoned = false;
+        if (ready.has_triggered_faultaware(poisoned))
+          return true;
+        else if (poisoned)
+          Internal::implicit_context->raise_poison_exception();
+        return false;
       }
       return true; // Empty futures are always ready
     }
@@ -6047,7 +6058,7 @@ namespace Legion {
     Processor Runtime::get_executing_processor(Context ctx)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_executing_processor(ctx);
+      return ctx->get_executing_processor();
     }
 
     //--------------------------------------------------------------------------
@@ -6061,18 +6072,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::raise_region_exception(Context ctx, 
-                                                  PhysicalRegion region,
-                                                  bool nuclear)
+                                         PhysicalRegion region, bool nuclear)
     //--------------------------------------------------------------------------
     {
-      runtime->raise_region_exception(ctx, region, nuclear);
+      ctx->raise_region_exception(region, nuclear);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::yield(Context ctx)
     //--------------------------------------------------------------------------
     {
-      runtime->yield(ctx);
+      ctx->yield();
     }
 
     //--------------------------------------------------------------------------

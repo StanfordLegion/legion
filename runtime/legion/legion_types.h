@@ -2065,7 +2065,18 @@ namespace Legion {
     public:
       inline ApEvent& operator=(const ApEvent &rhs) = default;
       inline bool has_triggered_faultignorant(void) const
-        { bool poisoned; return has_triggered_faultaware(poisoned); }
+        { bool poisoned = false; 
+          return has_triggered_faultaware(poisoned) || poisoned; }
+      inline void wait_faultignorant(void) const
+        { bool poisoned = false; LgEvent::wait_faultaware(poisoned); }
+      // TODO: enable this to ensure we are always checking for faults
+#if 0
+    private:
+      // Make these private because we always want to be conscious of faults
+      // when testing or waiting on application events
+      inline bool has_triggered(void) const { return LgEvent::has_triggered(); }
+      inline void wait(void) const { LgEvent::wait(); }
+#endif
     };
 
     class ApUserEvent : public ApEvent {

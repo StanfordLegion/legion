@@ -133,7 +133,8 @@ namespace Legion {
         Runtime::trigger_event(mapped_event);
       if (!resolved)
         Runtime::trigger_event(resolved_event);
-      if (need_completion_trigger && !completion_event.has_triggered())
+      if (need_completion_trigger && 
+          !completion_event.has_triggered_faultignorant())
         Runtime::trigger_event(NULL, completion_event);
       if (!commit_event.has_triggered())
         Runtime::trigger_event(commit_event);
@@ -5224,7 +5225,7 @@ namespace Legion {
       IndexSpaceNode *node = runtime->forest->get_node(space);
       ApEvent domain_ready;
       const Domain dom = node->get_domain(domain_ready, true/*tight*/);
-      if (domain_ready.exists() && !domain_ready.has_triggered())
+      if (domain_ready.exists())
       {
         for (unsigned idx = 0; idx < insts.size(); idx++)
         {
@@ -5239,7 +5240,7 @@ namespace Legion {
         {
           const InstanceRef &ref = insts[idx];
           const ApEvent inst_ready = ref.get_ready_event();
-          if (inst_ready.exists() && !inst_ready.has_triggered())
+          if (inst_ready.exists())
           {
             records.push_back(IndirectRecord(ref.get_valid_fields(),
                   ref.get_manager(), key, space,
@@ -6919,13 +6920,13 @@ namespace Legion {
         AutoLock o_lock(op_lock);
         if (sources)
         {
-          if (domain_ready.exists() && !domain_ready.has_triggered())
+          if (domain_ready.exists())
           {
             for (unsigned idx = 0; idx < insts.size(); idx++)
             {
               const InstanceRef &ref = insts[idx];
               const ApEvent inst_ready = ref.get_ready_event();
-              if (inst_ready.exists() && !inst_ready.has_triggered())
+              if (inst_ready.exists())
                 src_records[index].push_back(IndirectRecord(
                       ref.get_valid_fields(), ref.get_manager(), key, space,
                       Runtime::merge_events(&trace_info, domain_ready,
@@ -6956,13 +6957,13 @@ namespace Legion {
         }
         else
         {
-          if (domain_ready.exists() && !domain_ready.has_triggered())
+          if (domain_ready.exists())
           {
             for (unsigned idx = 0; idx < insts.size(); idx++)
             {
               const InstanceRef &ref = insts[idx];
               const ApEvent inst_ready = ref.get_ready_event();
-              if (inst_ready.exists() && !inst_ready.has_triggered())
+              if (inst_ready.exists())
                 dst_records[index].push_back(IndirectRecord(
                       ref.get_valid_fields(), ref.get_manager(), key, space,
                       Runtime::merge_events(&trace_info, domain_ready,
@@ -11429,7 +11430,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ApEvent barrier = Runtime::get_previous_phase(collective.phase_barrier);
-      if (!barrier.has_triggered())
+      if (!barrier.has_triggered_faultignorant())
       {
         DeferredExecuteArgs deferred_execute_args(this);
         runtime->issue_runtime_meta_task(deferred_execute_args,
@@ -15740,7 +15741,7 @@ namespace Legion {
       {
         // If we have a future value see if its event has triggered
         ApEvent future_ready_event = future.impl->get_ready_event();
-        if (!future_ready_event.has_triggered())
+        if (!future_ready_event.has_triggered_faultignorant())
         {
           // Launch a task to handle the deferred complete
           DeferredExecuteArgs deferred_execute_args(this);
@@ -17768,7 +17769,7 @@ namespace Legion {
             it != preconditions.end(); it++)
       {
         const ApEvent ready = it->impl->get_ready_event();
-        if (!ready.has_triggered())
+        if (ready.exists())
           pre_events.insert(ready);
       }
       // Also make sure we wait for any execution fences that we have

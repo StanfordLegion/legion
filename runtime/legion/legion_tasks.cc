@@ -4181,9 +4181,12 @@ namespace Legion {
       ApEvent task_launch_event;
       if (inline_task)
       {
-        // TODO: resilience support if the event has been poisoned
-        if (start_condition.exists() && !start_condition.has_triggered())
-          start_condition.wait();
+        bool poisoned = false;
+        if (start_condition.exists() && 
+            !start_condition.has_triggered_faultaware(poisoned) && !poisoned)
+          start_condition.wait_faultaware(poisoned);
+        if (poisoned)
+          execution_context->raise_poison_exception();
         variant->dispatch_inline(launch_processor, execution_context);
       }
       else
@@ -5317,7 +5320,7 @@ namespace Legion {
       if (predicate_false_future.impl != NULL)
       {
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
-        if (wait_on.has_triggered())
+        if (wait_on.has_triggered_faultignorant())
         {
           const size_t result_size = 
             check_future_size(predicate_false_future.impl);
@@ -5719,7 +5722,10 @@ namespace Legion {
       {
         // Wait for the future to be ready
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
-        wait_on.wait();
+        bool poisoned = false;
+        wait_on.wait_faultaware(poisoned);
+        if (poisoned)
+          execution_context->raise_poison_exception();
         void *ptr = 
           predicate_false_future.impl->get_untyped_result(true, NULL, true);
         size_t size = predicate_false_future.impl->get_untyped_size(true);
@@ -6644,7 +6650,7 @@ namespace Legion {
         if (f.impl != NULL)
         {
           ApEvent ready = f.impl->get_ready_event();
-          ready.wait();
+          ready.wait_faultignorant();
           local_arglen = f.impl->get_untyped_size(true/*internal*/);
           // Have to make a local copy since the point takes ownership
           if (local_arglen > 0)
@@ -7356,7 +7362,7 @@ namespace Legion {
         if (predicate_false_future.impl != NULL)
         {
           ApEvent wait_on = predicate_false_future.impl->get_ready_event();
-          if (wait_on.has_triggered())
+          if (wait_on.has_triggered_faultignorant())
           {
             const size_t result_size = 
               check_future_size(predicate_false_future.impl);
@@ -7403,7 +7409,7 @@ namespace Legion {
         if (predicate_false_future.impl != NULL)
         {
           ApEvent wait_on = predicate_false_future.impl->get_ready_event();
-          if (wait_on.has_triggered())
+          if (wait_on.has_triggered_faultignorant())
           {
             const size_t result_size = 
                         check_future_size(predicate_false_future.impl);
@@ -9550,7 +9556,7 @@ namespace Legion {
       {
         // Wait for the future to be ready
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
-        wait_on.wait(); 
+        wait_on.wait_faultignorant(); 
         result_size = predicate_false_future.impl->get_untyped_size(true);
         return predicate_false_future.impl->get_untyped_result(true,NULL,true);
       }
@@ -9706,13 +9712,8 @@ namespace Legion {
         {
           effects_postconditions.insert(point_completion);
         }
-        else
-        {
-#ifndef LEGION_SPY
-          if (!point_completion.has_triggered())
-#endif
-            effects_postconditions.insert(point_completion);
-        }
+        else if (!point_completion.exists())
+          effects_postconditions.insert(point_completion);
       }
       if (is_remote())
       {
