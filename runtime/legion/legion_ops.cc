@@ -918,6 +918,7 @@ namespace Legion {
         // before we record that this operation is commited. This is crucial
         // to ensuring that fence operations are working correctly in the
         // parent context. If not triggered, then defer this until it does.
+        // Inner task completion also relies upon this to work correctly
         bool do_not_care;
         if (!completion_event.has_triggered_faultaware(do_not_care))
         {
@@ -2774,7 +2775,7 @@ namespace Legion {
       requirement = launcher.requirement;
       const ApUserEvent term_event = Runtime::create_ap_user_event(NULL);
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-            mapped_event, completion_event, term_event, true/*mapped*/, ctx,
+            mapped_event, ready_event, term_event, true/*mapped*/, ctx,
             map_id, tag, false/*leaf*/, false/*virtual mapped*/, runtime));
       termination_event = term_event;
       grants = launcher.grants;
@@ -2818,7 +2819,7 @@ namespace Legion {
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
       region = reg;
-      termination_event = region.impl->remap_region(completion_event);
+      termination_event = region.impl->remap_region(ready_event);
       remap_region = true;
       // No need to check the privileges here since we know that we have
       // them from the first time that we made this physical region
@@ -2836,6 +2837,7 @@ namespace Legion {
       remap_region = false;
       mapper = NULL;
       layout_constraint_id = 0;
+      ready_event = Runtime::create_ap_user_event(NULL);
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       outstanding_profiling_requests = 0;
@@ -2982,8 +2984,6 @@ namespace Legion {
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
       ApEvent effects_done;
-      const bool track_effects = 
-        (!atomic_locks.empty() || !arrive_barriers.empty());
       if (remap_region)
       {
         region.impl->get_references(mapped_instances);
@@ -2995,12 +2995,12 @@ namespace Legion {
                                                 termination_event,
                                                 mapped_instances, 
                                                 trace_info,
-                                                map_applied_conditions,
+                                                map_applied_conditions
 #ifdef DEBUG_LEGION
-                                               get_logging_name(),
-                                               unique_op_id,
+                                                , get_logging_name()
+                                                , unique_op_id
 #endif
-                                               track_effects);
+                                                );
       }
       else
       { 
@@ -3022,7 +3022,7 @@ namespace Legion {
                                                 get_logging_name(),
                                                 unique_op_id,
 #endif
-                                                track_effects, record_valid);
+                                                record_valid);
       }
 #ifdef DEBUG_LEGION
       if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
@@ -3051,14 +3051,10 @@ namespace Legion {
                                         termination_event);
 #endif
       }
-      // See if we have any reservations to take as part of this map
-      if (track_effects)
+      if (!effects_done.exists())
+        effects_done = termination_event; 
+      if (!atomic_locks.empty() || !arrive_barriers.empty())
       {
-        if (!effects_done.exists())
-          effects_done = 
-            Runtime::merge_events(&trace_info, effects_done, termination_event);
-        else
-          effects_done = termination_event;
         // They've already been sorted in order 
         for (std::map<Reservation,bool>::const_iterator it = 
               atomic_locks.begin(); it != atomic_locks.end(); it++)
@@ -3079,6 +3075,8 @@ namespace Legion {
                                         effects_done);    
         }
       }
+      // We can trigger the ready event now that we know its precondition
+      Runtime::trigger_event(NULL, ready_event, map_complete_event);
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
       RtEvent mapping_applied;
@@ -3088,25 +3086,6 @@ namespace Legion {
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
       complete_mapping(mapping_applied);
-      
-      if (!request_early_complete(map_complete_event))
-      {
-        // Issue a deferred trigger on our completion event
-        // and mark that we are no longer responsible for 
-        // triggering our completion event
-        DeferredExecuteArgs deferred_execute_args(this);
-        runtime->issue_runtime_meta_task(deferred_execute_args,
-                                         LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                   Runtime::protect_event(map_complete_event));
-      }
-      else
-        deferred_execute();
-    }
-
-    //--------------------------------------------------------------------------
-    void MapOp::deferred_execute(void)
-    //--------------------------------------------------------------------------
-    { 
       // Note that completing mapping and execution should
       // be enough to trigger the completion operation call
       // Trigger an early commit of this operation
@@ -3118,8 +3097,13 @@ namespace Legion {
       // This means that any attempts to restart an inline mapping
       // will result in the entire task needing to be restarted.
       request_early_commit();
-      // Mark that we are done executing
-      complete_execution();
+      // If we have any copy-out effects from this inline mapping, we'll
+      // need to keep it around long enough for the parent task in case
+      // it decides that it needs to
+      if (!request_early_complete(effects_done))
+        complete_execution(Runtime::protect_event(effects_done));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -3238,6 +3222,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       map_applied_conditions.insert(event);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent MapOp::get_program_order_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ready_event;
     }
 
     //--------------------------------------------------------------------------
@@ -4730,8 +4721,6 @@ namespace Legion {
       ApEvent init_precondition = compute_init_precondition(trace_info);
       // Register the source and destination regions
       std::set<ApEvent> copy_complete_events;
-      const bool track_effects = 
-        (!atomic_locks.empty() || !arrive_barriers.empty());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         InstanceSet src_targets, dst_targets, gather_targets, scatter_targets;
@@ -4796,7 +4785,6 @@ namespace Legion {
                                               get_logging_name(),
                                               unique_op_id,
 #endif
-                                              false/*track effects*/,
                                               record_valid);
         }
         else
@@ -4829,12 +4817,12 @@ namespace Legion {
                                           local_completion,
                                           dst_targets,
                                           dst_info,
-                                          local_applied_events,
+                                          local_applied_events
 #ifdef DEBUG_LEGION
-                                          get_logging_name(),
-                                          unique_op_id,
+                                          , get_logging_name()
+                                          , unique_op_id
 #endif
-                                          track_effects);
+                                          );
         if (effects_done.exists())
           copy_complete_events.insert(effects_done);
         if (runtime->legion_spy_enabled)
@@ -4872,7 +4860,7 @@ namespace Legion {
                                        get_logging_name(),
                                        unique_op_id,
 #endif
-                                       track_effects, record_valid);
+                                       record_valid);
           if (effects_done.exists())
             copy_complete_events.insert(effects_done);
           if (runtime->legion_spy_enabled)
@@ -4908,7 +4896,7 @@ namespace Legion {
                                       get_logging_name(),
                                       unique_op_id,
 #endif
-                                      track_effects, record_valid);
+                                      record_valid);
           if (effects_done.exists())
             copy_complete_events.insert(effects_done);
           if (runtime->legion_spy_enabled)
@@ -9119,7 +9107,6 @@ namespace Legion {
                                               get_logging_name(),
                                               unique_op_id,
 #endif
-                                              true/*track effects*/,
                                               true/*record valid*/,
                                               false/*check initialized*/);
       std::set<ApEvent> close_preconditions;
@@ -12275,6 +12262,9 @@ namespace Legion {
       input.constraints.clear();
       output.task_processors.clear();
       output.constraint_mappings.clear();
+      slice_version_events.clear();
+      completion_preconditions.clear();
+      completion_effects.clear();
       // Return this operation to the free list
       runtime->free_epoch_op(this);
     }
@@ -12505,12 +12495,20 @@ namespace Legion {
       }
       if (need_complete)
       {
+        ApEvent effects_done;
+        if (!completion_effects.empty())
+          effects_done = Runtime::merge_events(NULL, completion_effects);
+        if (!request_early_complete(effects_done))
+          completion_preconditions.insert(Runtime::protect_event(effects_done));
+        RtEvent completion_done;
+        if (!completion_preconditions.empty())
+          completion_done = Runtime::merge_events(completion_preconditions);
 #ifdef LEGION_SPY
         // Still need this for Legion Spy
         LegionSpy::log_operation_events(unique_op_id,
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
-        complete_operation();
+        complete_operation(completion_done);
       }
     }
 
@@ -12743,12 +12741,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::notify_subop_complete(Operation *op)
+    void MustEpochOp::notify_subop_complete(Operation *op, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       bool need_complete;
       {
         AutoLock o_lock(op_lock);
+        if (precondition.exists())
+          completion_preconditions.insert(precondition);
+        completion_effects.insert(op->get_completion_event());
 #ifdef DEBUG_LEGION
         assert(remaining_subop_completes > 0);
 #endif
@@ -12757,12 +12758,20 @@ namespace Legion {
       }
       if (need_complete)
       {
+        ApEvent effects_done;
+        if (!completion_effects.empty())
+          effects_done = Runtime::merge_events(NULL, completion_effects);
+        if (!request_early_complete(effects_done))
+          completion_preconditions.insert(Runtime::protect_event(effects_done));
+        RtEvent completion_done;
+        if (!completion_preconditions.empty())
+          completion_done = Runtime::merge_events(completion_preconditions);
 #ifdef LEGION_SPY
         // Still need this for Legion Spy
-        LegionSpy::log_operation_events(unique_op_id,
+        LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
-        complete_operation();
+        complete_operation(completion_done);
       }
     }
 
@@ -14138,7 +14147,6 @@ namespace Legion {
                                               get_logging_name(),
                                               unique_op_id,
 #endif
-                                              false/*track effects*/,
                                               record_valid);
       ApEvent done_event = trigger_thunk(requirement.region.get_index_space(),
                                      mapped_instances, trace_info, index_point);
@@ -17520,7 +17528,6 @@ namespace Legion {
                                                   get_logging_name(),
                                                   unique_op_id,
 #endif
-                                                  true/*track effects*/,
                                                   false/*record valid*/,
                                                   false/*check initialized*/);
         requirement.privilege = LEGION_READ_WRITE;

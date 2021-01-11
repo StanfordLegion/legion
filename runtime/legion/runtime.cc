@@ -22918,7 +22918,7 @@ namespace Legion {
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
       TopFinishArgs args(top_context);
-      ApEvent pre = top_task->get_task_completion();
+      ApEvent pre = top_task->get_completion_event();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
       // Put the task in the ready queue, make sure that the runtime is all
@@ -23012,7 +23012,7 @@ namespace Legion {
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
       TopFinishArgs args(top_context);
-      ApEvent pre = top_task->get_task_completion();
+      ApEvent pre = top_task->get_completion_event();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
       execution_context = top_task->create_implicit_context();

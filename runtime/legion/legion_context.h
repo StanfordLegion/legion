@@ -1501,7 +1501,6 @@ namespace Legion {
       UniqueID parent_context_uid;
       TaskContext *parent_ctx;
     protected:
-      ApEvent remote_completion_event;
       bool top_level_context;
       RemoteTask remote_task;
     protected:
