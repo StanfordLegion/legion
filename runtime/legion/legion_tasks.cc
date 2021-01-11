@@ -4532,13 +4532,21 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!all_children_complete.exists() || 
-              single_task_termination.exists());
+              single_task_termination.exists() || is_implicit_top_level_task());
 #endif
       if (single_task_termination.exists())
       {
         Runtime::trigger_event(NULL, 
             single_task_termination, all_children_complete); 
         single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
+      }
+      else if (all_children_complete.exists())
+      {
+#ifdef DEBUG_LEGION
+        assert(is_implicit_top_level_task());
+        assert(!task_effects_complete.exists());
+#endif
+        task_effects_complete = all_children_complete;
       }
       TaskOp::trigger_children_complete();
     }

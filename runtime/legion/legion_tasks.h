@@ -503,6 +503,9 @@ namespace Legion {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
       virtual bool is_top_level_task(void) const { return false; }
+#ifdef DEBUG_LEGION
+      virtual bool is_implicit_top_level_task(void) const { return false; }
+#endif
       virtual SingleTask* get_origin_task(void) const = 0;
     public:
       virtual void resolve_false(bool speculated, bool launched) = 0;
@@ -774,6 +777,10 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual bool is_top_level_task(void) const { return top_level_task; }
+#ifdef DEBUG_LEGION
+      virtual bool is_implicit_top_level_task(void) const 
+        { return implicit_top_level_task; }
+#endif
     protected:
       void pack_remote_complete(Serializer &rez);
       void pack_remote_commit(Serializer &rez);
