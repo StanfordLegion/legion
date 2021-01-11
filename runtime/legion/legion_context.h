@@ -765,6 +765,9 @@ namespace Legion {
       virtual ~InnerContext(void);
     public:
       InnerContext& operator=(const InnerContext &rhs);
+    public:
+      inline unsigned get_max_trace_templates(void) const
+        { return context_configuration.max_templates_per_trace; }
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,

@@ -2404,6 +2404,8 @@ namespace Legion {
       context_configuration.min_frames_to_schedule = 0;
       context_configuration.meta_task_vector_width = 
         runtime->initial_meta_task_vector_width;
+      context_configuration.max_templates_per_trace =
+        LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
       context_configuration.mutable_priority = false;
 #ifdef DEBUG_LEGION
       assert(tree_context.exists());
@@ -8244,6 +8246,13 @@ namespace Legion {
                       "Invalid mapper output from call 'configure context' "
                       "on mapper %s for task %s (ID %lld). The "
                       "'meta_task_vector_width' must be a non-zero value.",
+                      mapper->get_mapper_name(),
+                      get_task_name(), get_unique_id())
+      if (context_configuration.max_templates_per_trace == 0)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from call 'configure context' "
+                      "on mapper %s for task %s (ID %lld). The "
+                      "'max_templates_per_trace' must be a non-zero value.",
                       mapper->get_mapper_name(),
                       get_task_name(), get_unique_id())
 

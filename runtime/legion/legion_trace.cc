@@ -1897,7 +1897,7 @@ namespace Legion {
     PhysicalTrace::~PhysicalTrace()
     //--------------------------------------------------------------------------
     {
-      for (LegionVector<PhysicalTemplate*>::aligned::iterator it =
+      for (std::vector<PhysicalTemplate*>::iterator it =
            templates.begin(); it != templates.end(); ++it)
         delete (*it);
       templates.clear();
@@ -1945,6 +1945,22 @@ namespace Legion {
       {
         // Reset the nonreplayable count when we find a replayable template
         nonreplayable_count = 0;
+        // See if we're going to exceed the maximum number of templates
+        if (templates.size() == logical_trace->ctx->get_max_trace_templates())
+        {
+#ifdef DEBUG_LEGION
+          assert(!templates.empty());
+#endif
+          PhysicalTemplate *to_delete = templates.front();
+          if (!to_delete->defer_template_deletion(pending_deletion, 
+                                                  applied_events))
+            delete to_delete;
+          // Remove the least recently used (first) one from the vector
+          // shift it to the back first though, should be fast
+          if (templates.size() > 1)
+            std::rotate(templates.begin(),templates.begin()+1,templates.end());
+          templates.pop_back();
+        }
         templates.push_back(tpl);
         if (++new_template_count > LEGION_NEW_TEMPLATE_WARNING_COUNT)
         {
@@ -1970,20 +1986,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       current_template = NULL;
-      for (LegionVector<PhysicalTemplate*>::aligned::reverse_iterator it =
-           templates.rbegin(); it != templates.rend(); ++it)
+      // Scan backwards since more recently used templates are likely
+      // to be the ones that best match what we are executing
+      for (int idx = templates.size() - 1; idx >= 0; idx--)
       {
-        if ((*it)->check_preconditions(op, applied_events))
+        PhysicalTemplate *tpl = templates[idx];
+        if (tpl->check_preconditions(op, applied_events))
         {
 #ifdef DEBUG_LEGION
-          assert((*it)->is_replayable());
+          assert(tpl->is_replayable());
 #endif
           // Reset the nonreplayable count when a replayable template satisfies
           // the precondition
           nonreplayable_count = 0;
           // Also reset the new template count as we found a replay
           new_template_count = 0;
-          current_template = *it;
+          current_template = tpl;
+          // Move the template to the end of the vector as most-recently used
+          if (idx < int(templates.size() - 1))
+            std::rotate(templates.begin()+idx, 
+                        templates.begin()+idx+1, templates.end());
           return;
         }
       }
