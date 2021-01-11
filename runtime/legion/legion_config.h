@@ -331,6 +331,10 @@
 #ifndef LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE
 #define LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE 1
 #endif
+// Maximum number of templates to keep around in traces
+#ifndef LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE
+#define LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE  16
+#endif
 // Default number of replay tasks to run in parallel
 #ifndef DEFAULT_MAX_REPLAY_PARALLELISM // For backwards compatibility
 #ifndef LEGION_DEFAULT_MAX_REPLAY_PARALLELISM

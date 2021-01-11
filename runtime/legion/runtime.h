@@ -2563,10 +2563,6 @@ namespace Legion {
       MappingCallInfo* begin_mapper_call(Context ctx, MapperID id, 
                                          Processor target);
       void end_mapper_call(MappingCallInfo *info);
-      Processor get_executing_processor(Context ctx);
-      void raise_region_exception(Context ctx, PhysicalRegion region, 
-                                  bool nuclear);
-      void yield(Context ctx);
     public:
       void print_once(Context ctx, FILE *f, const char *message);
       void log_once(Context ctx, Realm::LoggerMessage &message);

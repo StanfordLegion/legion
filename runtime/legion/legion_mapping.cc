@@ -132,7 +132,7 @@ namespace Legion {
         return Domain::NO_DOMAIN;
       Internal::ApEvent ready;
       Domain domain = impl->instance_domain->get_domain(ready, true);
-      ready.wait();
+      ready.wait_faultignorant();
       return domain;
     }
 

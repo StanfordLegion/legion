@@ -5883,7 +5883,12 @@ namespace Legion {
             execution_preconditions.insert(pending_deletion);
         }
         else
-          physical_trace->record_replayable_capture(current_template);
+        {
+          ApEvent pending_deletion = physical_trace->record_replayable_capture(
+                                      current_template, map_applied_conditions);
+          if (pending_deletion.exists())
+            execution_preconditions.insert(pending_deletion);
+        }
         // Reset the local trace
         local_trace->initialize_tracing_state();
       }
@@ -6154,7 +6159,12 @@ namespace Legion {
             execution_preconditions.insert(pending_deletion);
         }
         else
-          physical_trace->record_replayable_capture(current_template);
+        {
+          ApEvent pending_deletion = physical_trace->record_replayable_capture(
+                                      current_template, map_applied_conditions);
+          if (pending_deletion.exists())
+            execution_preconditions.insert(pending_deletion);
+        }
         local_trace->initialize_tracing_state();
       }
       else if (replayed)

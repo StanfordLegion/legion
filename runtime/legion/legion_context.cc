@@ -1583,6 +1583,22 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void TaskContext::raise_poison_exception(void)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: handle poisoned task
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::raise_region_exception(PhysicalRegion region,bool nuclear)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: handle region exception
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     bool TaskContext::safe_cast(RegionTreeForest *forest, IndexSpace handle,
                                 const void *realm_point, TypeTag type_tag)
     //--------------------------------------------------------------------------
@@ -2210,10 +2226,15 @@ namespace Legion {
       }
       // Wait for all the re-mapping operations to complete
       const ApEvent mapped_event = Runtime::merge_events(NULL, mapped_events);
-      if (mapped_event.has_triggered())
+      bool poisoned = false;
+      if (mapped_event.has_triggered_faultaware(poisoned))
         return;
+      if (poisoned)
+        raise_poison_exception();
       begin_task_wait(true/*from runtime*/);
-      mapped_event.wait();
+      mapped_event.wait_faultaware(poisoned);
+      if (poisoned)
+        raise_poison_exception();
       end_task_wait();
     }
 
@@ -2377,7 +2398,7 @@ namespace Legion {
       {
         ApEvent ready_event =
           launcher.predicate_false_future.impl->get_ready_event();
-        if (ready_event.has_triggered())
+        if (ready_event.has_triggered_faultignorant())
         {
           const void *f_result =
             launcher.predicate_false_future.impl->get_untyped_result();
@@ -2606,6 +2627,8 @@ namespace Legion {
       context_configuration.min_frames_to_schedule = 0;
       context_configuration.meta_task_vector_width = 
         runtime->initial_meta_task_vector_width;
+      context_configuration.max_templates_per_trace =
+        LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
       context_configuration.mutable_priority = false;
 #ifdef DEBUG_LEGION
       assert(tree_context.exists());
@@ -6849,7 +6872,10 @@ namespace Legion {
           ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         begin_task_wait(true/*from runtime*/);
-        term_event.wait();
+        bool poisoned = false;
+        term_event.wait_faultaware(poisoned);
+        if (poisoned)
+          raise_poison_exception();
         end_task_wait();
       }
       return term_event;
@@ -7859,7 +7885,8 @@ namespace Legion {
         // We can't have internal operations pruning out fences
         // because we can't test if they are memoizing or not
         // Their 'get_memoizable' method will always return NULL
-        if (current_execution_fence_event.has_triggered() &&
+        bool poisoned = false;
+        if (current_execution_fence_event.has_triggered_faultaware(poisoned) &&
             !op->is_internal_op())
         {
           // We can only do this optimization safely if we're not 
@@ -7869,6 +7896,8 @@ namespace Legion {
           if ((memo == NULL) || !memo->is_recording())
             current_execution_fence_event = ApEvent::NO_AP_EVENT;
         }
+        if (poisoned)
+          raise_poison_exception();
         return current_execution_fence_event;
       }
       return ApEvent::NO_AP_EVENT;
@@ -8298,8 +8327,11 @@ namespace Legion {
         frame_events.push_back(frame_termination); 
       }
       frame->set_previous(previous);
-      if (!wait_on.has_triggered())
-        wait_on.wait();
+      bool poisoned = false;
+      if (!wait_on.has_triggered_faultaware(poisoned))
+        wait_on.wait_faultaware(poisoned);
+      if (poisoned)
+        raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -8633,6 +8665,13 @@ namespace Legion {
                       "Invalid mapper output from call 'configure context' "
                       "on mapper %s for task %s (ID %lld). The "
                       "'meta_task_vector_width' must be a non-zero value.",
+                      mapper->get_mapper_name(),
+                      get_task_name(), get_unique_id())
+      if (context_configuration.max_templates_per_trace == 0)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from call 'configure context' "
+                      "on mapper %s for task %s (ID %lld). The "
+                      "'max_templates_per_trace' must be a non-zero value.",
                       mapper->get_mapper_name(),
                       get_task_name(), get_unique_id())
 

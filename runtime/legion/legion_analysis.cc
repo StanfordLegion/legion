@@ -3696,7 +3696,7 @@ namespace Legion {
       ApEvent wait_on;
       const Domain d = expr->get_domain(wait_on, true/*tight*/);
       if (wait_on.exists())
-        wait_on.wait();
+        wait_on.wait_faultignorant();
       return d.bounds<DIM,coord_t>();
     }
 

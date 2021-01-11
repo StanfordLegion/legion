@@ -760,18 +760,21 @@ namespace Legion {
       }
       if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
         implicit_context->record_blocking_call();
-      if (!future_complete.has_triggered())
+      bool poisoned = false;
+      if (!future_complete.has_triggered_faultaware(poisoned))
       {
         TaskContext *context = implicit_context;
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          future_complete.wait();
+          future_complete.wait_faultaware(poisoned);
           context->end_task_wait();
         }
         else
-          future_complete.wait();
+          future_complete.wait_faultaware(poisoned);
       }
+      if (poisoned)
+        implicit_context->raise_poison_exception();
       mark_sampled();
     }
     
@@ -818,18 +821,21 @@ namespace Legion {
       else
       {
         const ApEvent ready_event = subscribe();
-        if (!ready_event.has_triggered())
+        bool poisoned = false;
+        if (!ready_event.has_triggered_faultaware(poisoned))
         {
           TaskContext *context = implicit_context;
           if (context != NULL)
           {
             context->begin_task_wait(false/*from runtime*/);
-            ready_event.wait();
+            ready_event.wait_faultaware(poisoned);
             context->end_task_wait();
           }
           else
-            ready_event.wait();
+            ready_event.wait_faultaware(poisoned);
         }
+        if (poisoned)
+          implicit_context->raise_poison_exception();
       }
       if (check_size)
       {
@@ -885,19 +891,22 @@ namespace Legion {
       if (block)
       {
         const ApEvent ready_event = subscribe();
-        if (!ready_event.has_triggered())
+        bool poisoned = false;
+        if (!ready_event.has_triggered_faultaware(poisoned))
         {
           TaskContext *context =
             (producer_op == NULL) ? NULL : producer_op->get_context();
           if (context != NULL)
           {
             context->begin_task_wait(false/*from runtime*/);
-            ready_event.wait();
+            ready_event.wait_faultaware(poisoned);
             context->end_task_wait();
           }
           else
-            ready_event.wait();
+            ready_event.wait_faultaware(poisoned);
         }
+        if (poisoned)
+          implicit_context->raise_poison_exception();
         mark_sampled();
       }
       return empty;
@@ -1115,6 +1124,7 @@ namespace Legion {
     {
       if (!empty)
       {
+        bool poisoned = false;
         valid = !subscription_internal.exists() || 
                   subscription_internal.has_triggered();
 #ifdef DEBUG_LEGION
@@ -1625,7 +1635,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const ApEvent ready = subscribe();
-      if (!ready.has_triggered())
+      if (!ready.has_triggered_faultignorant())
       {
         // If we're not done then defer the operation until we are triggerd
         // First add a garbage collection reference so we don't get
@@ -4082,7 +4092,7 @@ namespace Legion {
       // Note we use the external wait to be sure 
       // we don't get drafted by the Realm runtime
       ApBarrier previous = Runtime::get_previous_phase(ext_wait_barrier);
-      if (!previous.has_triggered())
+      if (!previous.has_triggered_faultignorant())
       {
         // We can't call external wait directly on the barrier
         // right now, so as a work-around we'll make an event
@@ -11990,7 +12000,7 @@ namespace Legion {
       else
       {
         // No predicate guard
-        if (!ready_event.has_triggered())
+        if (ready_event.exists())
           return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx),requests,
              Runtime::merge_events(NULL, precondition, ready_event), priority));
         return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx), requests, 
@@ -16839,31 +16849,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Processor Runtime::get_executing_processor(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      Processor result = ctx->get_executing_processor();
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::raise_region_exception(Context ctx, 
-                                         PhysicalRegion region, bool nuclear)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      // TODO: implement this
-      assert(false);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::print_once(Context ctx, FILE *f, const char *message)
     //--------------------------------------------------------------------------
     {
@@ -16879,15 +16864,6 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context log once!");
       ctx->log_once(message);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::yield(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context yield");
-      ctx->yield();
     }
 
     //--------------------------------------------------------------------------
