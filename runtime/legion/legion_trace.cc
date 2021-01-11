@@ -2084,6 +2084,11 @@ namespace Legion {
       // Also reset the new template count as we found a replay
       new_template_count = 0;
       current_template = templates[index]; 
+      // Move this one to the back of the line since we all agreed to replay it
+      // This way the most recently used on is the one at the end of the vector
+      if (index < (templates.size() - 1))
+        std::rotate(templates.begin()+index, 
+                    templates.begin()+index+1, templates.end());
     }
 
     //--------------------------------------------------------------------------
