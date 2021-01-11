@@ -7891,8 +7891,7 @@ namespace Legion {
                 current_proc, false/*recurse*/, false/*stealable*/);
       slice->enumerate_points();
       slice->perform_inlining(variant, parent_regions);
-      // Record that we are mapped and had our speculation resolved too
-      complete_mapping();
+      // Record that we had our speculation resolved too
       resolve_speculation();
     }
 
@@ -9239,8 +9238,7 @@ namespace Legion {
 #endif
       }
       // Record that we've mapped and executed this slice
-      complete_mapping();
-      complete_execution();
+      trigger_slice_mapped();
     }
 
     //--------------------------------------------------------------------------
