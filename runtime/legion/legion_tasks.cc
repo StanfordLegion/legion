@@ -7424,8 +7424,12 @@ namespace Legion {
       if (manager->original_task != NULL)
         remote_owner_uid = 
           manager->original_task->get_context()->get_unique_id();
-      single_task_termination = Runtime::create_ap_user_event(NULL);
-      task_effects_complete = single_task_termination;
+      // Only make our termination event on the node where the shard will run
+      if (proc.address_space() == runtime->address_space)
+      {
+        single_task_termination = Runtime::create_ap_user_event(NULL);
+        task_effects_complete = single_task_termination;
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -7666,7 +7670,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
+#ifdef DEBUG_LEGION
+      assert(single_task_termination.exists());
+#endif
+      // Save this on the stack to prevent it being overwritten by unpack_single
+      const ApUserEvent temp_single_task_termination = single_task_termination;
       unpack_single_task(derez, ready_events);
+      // Restore the single task termination event
+#ifdef DEBUG_LEGION
+      assert(!single_task_termination.exists());
+#endif
+      single_task_termination = temp_single_task_termination;
       derez.deserialize(remote_owner_uid);
       // Figure out what our parent context is
       RtEvent ctx_ready;
