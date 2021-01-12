@@ -5039,6 +5039,8 @@ namespace Legion {
                                         effects_done);    
         }
       }
+      // We can trigger the ready event now that we know its precondition
+      Runtime::trigger_event(NULL, ready_event, map_complete_event);
       // Remove profiling our guard and trigger the profiling event if necessary
       int diff = -1; // need this dumbness for PGI
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, diff) == 0) &&
@@ -5053,18 +5055,24 @@ namespace Legion {
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
       complete_mapping(complete_inline_mapping(mapping_applied));
-      if (!request_early_complete(map_complete_event))
-      {
-        // Issue a deferred trigger on our completion event
-        // and mark that we are no longer responsible for 
-        // triggering our completion event
-        DeferredExecuteArgs deferred_execute_args(this);
-        runtime->issue_runtime_meta_task(deferred_execute_args,
-                                         LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                   Runtime::protect_event(map_complete_event));
-      }
+      // Note that completing mapping and execution should
+      // be enough to trigger the completion operation call
+      // Trigger an early commit of this operation
+      // Note that a mapping operation terminates as soon as it
+      // is done mapping reflecting that after this happens, information
+      // has flowed back out into the application task's execution.
+      // Therefore mapping operations cannot be restarted because we
+      // cannot track how the application task uses their data.
+      // This means that any attempts to restart an inline mapping
+      // will result in the entire task needing to be restarted.
+      request_early_commit();
+      // If we have any copy-out effects from this inline mapping, we'll
+      // need to keep it around long enough for the parent task in case
+      // it decides that it needs to
+      if (!request_early_complete(effects_done))
+        complete_execution(Runtime::protect_event(effects_done));
       else
-        deferred_execute();
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
