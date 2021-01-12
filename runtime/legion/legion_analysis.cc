@@ -3293,7 +3293,7 @@ namespace Legion {
       ApEvent wait_on;
       const Domain d = expr->get_domain(wait_on, true/*tight*/);
       if (wait_on.exists())
-        wait_on.wait();
+        wait_on.wait_faultignorant();
       return d.bounds<DIM,coord_t>();
     }
 
@@ -6354,12 +6354,11 @@ namespace Legion {
                      std::vector<InstanceView*> &target_vws,
                      const PhysicalTraceInfo &t_info,
                      const ApEvent pre, const ApEvent term,
-                     const bool track, const bool check, const bool record)
+                     const bool check, const bool record)
       : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(req), 
         node(rn), target_instances(target_insts), target_views(target_vws), 
         trace_info(t_info), precondition(pre), term_event(term), 
-        track_effects(track), check_initialized(check && 
-            !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
+        check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
         record_valid(record), output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
@@ -6373,14 +6372,12 @@ namespace Legion {
                      std::vector<InstanceView*> &target_vws,
                      const PhysicalTraceInfo &info,
                      const RtEvent user_reg, const ApEvent pre, 
-                     const ApEvent term, const bool track, const bool check,
-                     const bool record)
+                     const ApEvent term, const bool check, const bool record)
       : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/), 
         usage(use), node(rn), target_instances(target_insts), 
         target_views(target_vws), trace_info(info), precondition(pre), 
-        term_event(term), track_effects(track), check_initialized(check), 
-        record_valid(record), output_aggregator(NULL), 
-        remote_user_registered(user_reg)
+        term_event(term), check_initialized(check), record_valid(record), 
+        output_aggregator(NULL), remote_user_registered(user_reg)
     //--------------------------------------------------------------------------
     {
     }
@@ -6390,8 +6387,8 @@ namespace Legion {
       : PhysicalAnalysis(rhs), usage(rhs.usage), node(rhs.node), 
         target_instances(rhs.target_instances), target_views(rhs.target_views),
         trace_info(rhs.trace_info), precondition(rhs.precondition), 
-        term_event(rhs.term_event), track_effects(rhs.track_effects), 
-        check_initialized(rhs.check_initialized), record_valid(rhs.record_valid)
+        term_event(rhs.term_event), check_initialized(rhs.check_initialized), 
+        record_valid(rhs.record_valid)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6486,9 +6483,7 @@ namespace Legion {
         const AddressSpaceID target = rit->first.first;
         const RtUserEvent updated = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
-        const ApUserEvent effects = track_effects ? 
-          Runtime::create_ap_user_event(&trace_info) : 
-          ApUserEvent::NO_AP_USER_EVENT;
+        const ApUserEvent effects = Runtime::create_ap_user_event(&trace_info);
         Serializer rez;
         {
           RezCheck z(rez);
@@ -6527,8 +6522,7 @@ namespace Legion {
         runtime->send_equivalence_set_remote_updates(target, rez);
         remote_events.insert(updated);
         applied_events.insert(applied);
-        if (track_effects)
-          effects_events.insert(effects);
+        effects_events.insert(effects);
       }
       return Runtime::merge_events(remote_events);
     }
@@ -6692,7 +6686,6 @@ namespace Legion {
       derez.deserialize(applied);
       ApUserEvent effects_done;
       derez.deserialize(effects_done);
-      const bool track_effects = effects_done.exists();
       VersionManager *version_manager;
       derez.deserialize(version_manager);
       bool check_initialized;
@@ -6707,7 +6700,7 @@ namespace Legion {
       UpdateAnalysis *analysis = new UpdateAnalysis(runtime, original_source,
           previous, op, index, version_manager, usage, node, targets, 
           target_views, trace_info, remote_user_registered, precondition, 
-          term_event, track_effects, check_initialized, record_valid);
+          term_event, check_initialized, record_valid);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events; 
       // Make sure that all our pointers are ready

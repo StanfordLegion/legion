@@ -512,6 +512,9 @@ namespace Legion {
       virtual void remove_deleted_local_fields(FieldSpace space,
                                  const std::vector<FieldID> &to_remove); 
     public:
+      virtual void raise_poison_exception(void);
+      virtual void raise_region_exception(PhysicalRegion region, bool nuclear);
+    public:
       bool safe_cast(RegionTreeForest *forest, IndexSpace handle, 
                      const void *realm_point, TypeTag type_tag);
       bool is_region_mapped(unsigned idx);
@@ -762,6 +765,9 @@ namespace Legion {
       virtual ~InnerContext(void);
     public:
       InnerContext& operator=(const InnerContext &rhs);
+    public:
+      inline unsigned get_max_trace_templates(void) const
+        { return context_configuration.max_templates_per_trace; }
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
@@ -1495,7 +1501,6 @@ namespace Legion {
       UniqueID parent_context_uid;
       TaskContext *parent_ctx;
     protected:
-      ApEvent remote_completion_event;
       bool top_level_context;
       RemoteTask remote_task;
     protected:
