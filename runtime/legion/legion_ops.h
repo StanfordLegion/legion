@@ -447,6 +447,9 @@ namespace Legion {
       virtual void handle_profiling_update(int count);
       // Compute the initial precondition for this operation
       virtual ApEvent compute_init_precondition(const TraceInfo &info); 
+      // Return the event to use for waiting for program order execution
+      virtual ApEvent get_program_order_event(void) const 
+        { return completion_event; }
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
@@ -486,6 +489,9 @@ namespace Legion {
         {
           if (!runtime->program_order_execution)
           {
+#ifdef DEBUG_LEGION
+            assert(need_completion_trigger);
+#endif
             need_completion_trigger = false;
             __sync_synchronize();
             Runtime::trigger_event(NULL, completion_event, chain_event);
@@ -498,6 +504,9 @@ namespace Legion {
         {
           if (!runtime->program_order_execution)
           {
+#ifdef DEBUG_LEGION
+            assert(need_completion_trigger);
+#endif
             need_completion_trigger = false;
             __sync_synchronize();
             to_trigger = completion_event;
@@ -1098,7 +1107,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const unsigned index,
@@ -1110,6 +1118,7 @@ namespace Legion {
       virtual void update_atomic_locks(const unsigned index,
                                        Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
+      virtual ApEvent get_program_order_event(void) const;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const;
@@ -1131,6 +1140,7 @@ namespace Legion {
       virtual DomainPoint get_shard_point(void) const;
     protected:
       bool remap_region;
+      ApUserEvent ready_event;
       ApEvent termination_event;
       PhysicalRegion region;
       RegionTreePath privilege_path;
@@ -2527,7 +2537,7 @@ namespace Legion {
     public:
       // Methods for keeping track of when we can complete and commit
       void register_subop(Operation *op);
-      void notify_subop_complete(Operation *op);
+      void notify_subop_complete(Operation *op, RtEvent precondition);
       void notify_subop_commit(Operation *op);
     public:
       RtUserEvent find_slice_versioning_event(UniqueID slice_id, bool &first);
@@ -2596,6 +2606,8 @@ namespace Legion {
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     protected:
       std::map<UniqueID,RtUserEvent> slice_version_events;
+    protected:
+      std::set<RtEvent> completion_preconditions;
     };
 
     /**

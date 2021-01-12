@@ -2416,7 +2416,6 @@ namespace Legion {
       TaskContext *parent_ctx;
       ShardManager *shard_manager; // if we're lucky and one is already here
     protected:
-      ApEvent remote_completion_event;
       bool top_level_context;
       RemoteTask remote_task;
     protected:

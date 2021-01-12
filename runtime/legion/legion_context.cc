@@ -3715,7 +3715,6 @@ namespace Legion {
       rez.serialize<size_t>(virtual_indexes.size());
       for (unsigned idx = 0; idx < virtual_indexes.size(); idx++)
         rez.serialize(virtual_indexes[idx]);
-      rez.serialize(owner_task->get_task_completion());
       rez.serialize(find_parent_context()->get_context_uid());
       rez.serialize<size_t>(context_coordinates.size());
       for (std::vector<std::pair<size_t,DomainPoint> >::const_iterator it =
@@ -6083,7 +6082,7 @@ namespace Legion {
       MapOp *map_op = runtime->get_available_map_op();
       map_op->initialize(this, region);
       register_inline_mapped_region(region);
-      const ApEvent result = map_op->get_completion_event();
+      const ApEvent result = map_op->get_program_order_event();
       add_to_dependence_queue(map_op);
       return result;
     }
@@ -6840,7 +6839,12 @@ namespace Legion {
       
       bool issue_task = false;
       RtEvent precondition;
-      const ApEvent term_event = op->get_completion_event();
+      ApEvent term_event;
+      // We disable program order execution when we are replaying a
+      // fixed trace since it might not be sound to block
+      if (runtime->program_order_execution && !unordered && outermost &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+        term_event = op->get_program_order_event();
       {
         AutoLock d_lock(dependence_lock);
         if (unordered)
@@ -6866,10 +6870,7 @@ namespace Legion {
         DependenceArgs args(op, this);
         runtime->issue_runtime_meta_task(args, priority, precondition); 
       }
-      // We disable program order execution when we are replaying a
-      // fixed trace since it might not be sound to block
-      if (runtime->program_order_execution && !unordered && outermost && 
-          ((current_trace == NULL) || !current_trace->is_fixed()))
+      if (term_event.exists()) 
       {
         begin_task_wait(true/*from runtime*/);
         bool poisoned = false;
@@ -7359,6 +7360,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
+      std::set<ApEvent> child_completion_events;
       {
         AutoLock child_lock(child_op_lock);
         std::map<Operation*,GenerationID>::iterator finder = 
@@ -7372,15 +7374,25 @@ namespace Legion {
         complete_children.insert(*finder);
         executed_children.erase(finder);
         // See if we need to trigger the all children complete call
-        if (task_executed && executing_children.empty() && 
-            executed_children.empty() && !children_complete_invoked)
+        if (task_executed && (owner_task != NULL) && executing_children.empty()
+            && executed_children.empty() && !children_complete_invoked)
         {
           needs_trigger = true;
           children_complete_invoked = true;
+          for (LegionMap<Operation*,GenerationID,
+                COMPLETE_CHILD_ALLOC>::tracked::const_iterator it =
+                complete_children.begin(); it != complete_children.end(); it++)
+            child_completion_events.insert(it->first->get_completion_event());
         }
       }
-      if (needs_trigger && (owner_task != NULL))
-        owner_task->trigger_children_complete();
+      if (needs_trigger)
+      {
+        if (!child_completion_events.empty())
+          owner_task->trigger_children_complete(
+            Runtime::merge_events(NULL, child_completion_events));
+        else
+          owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7854,7 +7866,7 @@ namespace Legion {
 #endif
       }
 #ifdef LEGION_SPY
-      previous_completion_events.insert(op->get_completion_event());
+      previous_completion_events.insert(op->get_program_order_event());
       // Periodically merge these to keep this data structure from exploding
       // when we have a long-running task, although don't do this for fence
       // operations in case we have to prune ourselves out of the set
@@ -7992,7 +8004,7 @@ namespace Legion {
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(it->first->get_program_order_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
@@ -8005,7 +8017,7 @@ namespace Legion {
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(it->first->get_program_order_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
@@ -8018,7 +8030,7 @@ namespace Legion {
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(it->first->get_program_order_event());
         }
       }
       else
@@ -8037,7 +8049,7 @@ namespace Legion {
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(it->first->get_program_order_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
@@ -8051,7 +8063,7 @@ namespace Legion {
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(it->first->get_program_order_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
@@ -8065,7 +8077,7 @@ namespace Legion {
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(it->first->get_program_order_event());
         }
       }
 
@@ -8101,7 +8113,7 @@ namespace Legion {
         previous_events.insert(previous_completion_events.begin(),
                                previous_completion_events.end());
         // Don't include ourselves though
-        previous_events.erase(op->get_completion_event());
+        previous_events.erase(op->get_program_order_event());
       }
 #endif
       // Also include the current execution fence in case the operation
@@ -9410,42 +9422,45 @@ namespace Legion {
       // are done executing
       bool need_complete = false;
       bool need_commit = false;
+      std::set<RtEvent> preconditions;
+      std::set<ApEvent> child_completion_events;
       {
-        std::set<RtEvent> preconditions;
+        AutoLock child_lock(child_op_lock);
+        // Only need to do this for executing and executed children
+        // We know that any complete children are done
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              executing_children.begin(); it != 
+              executing_children.end(); it++)
         {
-          AutoLock child_lock(child_op_lock);
-          // Only need to do this for executing and executed children
-          // We know that any complete children are done
-          for (std::map<Operation*,GenerationID>::const_iterator it = 
-                executing_children.begin(); it != 
-                executing_children.end(); it++)
-          {
-            preconditions.insert(it->first->get_mapped_event());
-          }
-          for (std::map<Operation*,GenerationID>::const_iterator it = 
-                executed_children.begin(); it != executed_children.end(); it++)
-          {
-            preconditions.insert(it->first->get_mapped_event());
-          }
+          preconditions.insert(it->first->get_mapped_event());
+        }
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              executed_children.begin(); it != executed_children.end(); it++)
+        {
+          preconditions.insert(it->first->get_mapped_event());
+        }
 #ifdef DEBUG_LEGION
-          assert(!task_executed);
+        assert(!task_executed);
 #endif
-          // Now that we know the last registration has taken place we
-          // can mark that we are done executing
-          task_executed = true;
-          if (executing_children.empty() && executed_children.empty())
+        // Now that we know the last registration has taken place we
+        // can mark that we are done executing
+        task_executed = true;
+        if (executing_children.empty() && executed_children.empty())
+        {
+          if (!children_complete_invoked)
           {
-            if (!children_complete_invoked)
-            {
-              need_complete = true;
-              children_complete_invoked = true;
-            }
-            if (complete_children.empty() && 
-                !children_commit_invoked)
-            {
-              need_commit = true;
-              children_commit_invoked = true;
-            }
+            need_complete = true;
+            children_complete_invoked = true;
+            for (LegionMap<Operation*,GenerationID,
+                  COMPLETE_CHILD_ALLOC>::tracked::const_iterator it =
+                 complete_children.begin(); it != complete_children.end(); it++)
+              child_completion_events.insert(it->first->get_completion_event());
+          }
+          if (complete_children.empty() && 
+              !children_commit_invoked)
+          {
+            need_commit = true;
+            children_commit_invoked = true;
           }
         }
         if (!preconditions.empty())
@@ -9453,9 +9468,15 @@ namespace Legion {
               Runtime::merge_events(preconditions));
         else
           single_task->handle_post_mapped(false/*deferral*/);
-      } 
+      }
       if (need_complete)
-        owner_task->trigger_children_complete();
+      {
+        if (!child_completion_events.empty())
+          owner_task->trigger_children_complete(
+              Runtime::merge_events(NULL, child_completion_events));
+        else
+          owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
+      }
       if (need_commit)
         owner_task->trigger_children_committed();
     }
@@ -19011,7 +19032,6 @@ namespace Legion {
         derez.deserialize(index);
         local_virtual_mapped[index] = true;
       }
-      derez.deserialize(remote_completion_event);
       derez.deserialize(parent_context_uid);
       size_t num_coordinates;
       derez.deserialize(num_coordinates);
@@ -21113,7 +21133,7 @@ namespace Legion {
         }
       } 
       if (need_complete)
-        owner_task->trigger_children_complete();
+        owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
       if (need_commit)
         owner_task->trigger_children_committed();
     }

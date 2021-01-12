@@ -2133,7 +2133,7 @@ namespace Legion {
       void handle_post_mapped(bool local, RtEvent precondition);
       void handle_post_execution(const void *res, size_t res_size, 
                                  bool owned, bool local);
-      void trigger_task_complete(bool local);
+      void trigger_task_complete(bool local, ApEvent effects_done);
       void trigger_task_commit(bool local);
     public:
       void send_collective_message(ShardID target, Serializer &rez);
@@ -2258,6 +2258,9 @@ namespace Legion {
 #endif
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
+    protected:
+      // ApEvents describing the completion of each shard
+      std::set<ApEvent> shard_effects;
     protected:
       // A unique set of address spaces on which shards exist 
       std::set<AddressSpaceID> unique_shard_spaces;

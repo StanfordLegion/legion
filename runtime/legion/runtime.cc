@@ -1124,7 +1124,6 @@ namespace Legion {
     {
       if (!empty)
       {
-        bool poisoned = false;
         valid = !subscription_internal.exists() || 
                   subscription_internal.has_triggered();
 #ifdef DEBUG_LEGION
@@ -26719,7 +26718,7 @@ namespace Legion {
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
       TopFinishArgs args(top_context);
-      ApEvent pre = top_task->get_task_completion();
+      ApEvent pre = top_task->get_completion_event();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
       // Put the task in the ready queue, make sure that the runtime is all
@@ -26758,7 +26757,7 @@ namespace Legion {
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
       TopFinishArgs args(top_context);
-      ApEvent pre = top_task->get_task_completion();
+      ApEvent pre = top_task->get_completion_event();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
       return top_task;

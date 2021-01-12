@@ -2141,7 +2141,6 @@ namespace Legion {
                                const char *log_name,
                                UniqueID uid,
 #endif
-                               const bool track_effects,
                                const bool record_valid,
                                const bool check_initialized,
                                const bool defer_copies,
@@ -2184,8 +2183,7 @@ namespace Legion {
       analysis = new UpdateAnalysis(runtime, op, index, version_info, req, 
                                     region_node, targets, target_views, 
                                     trace_info, precondition, term_event, 
-                                    track_effects, check_initialized,
-                                    record_valid, skip_output);
+                                    check_initialized,record_valid,skip_output);
       analysis->add_reference();
       // Iterate over all the equivalence classes and perform the analysis
       // Only need to check for uninitialized data for things not discarding
@@ -2310,7 +2308,6 @@ namespace Legion {
                                        const char *log_name,
                                        UniqueID uid,
 #endif
-                                       const bool track_effects,
                                        const bool record_valid,
                                        const bool check_initialized)
     //--------------------------------------------------------------------------
@@ -2322,7 +2319,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
          log_name, uid,
 #endif
-         track_effects, record_valid, check_initialized, false/*defer copies*/);
+         record_valid, check_initialized, false/*defer copies*/);
       if (registration_precondition.exists() && 
           !registration_precondition.has_triggered())
         registration_precondition.wait();

@@ -1682,8 +1682,8 @@ namespace Legion {
                      std::vector<InstanceView*> &target_views,
                      const PhysicalTraceInfo &trace_info,
                      const ApEvent precondition, const ApEvent term_event,
-                     const bool track_effects, const bool check_initialized,
-                     const bool record_valid, const bool skip_output);
+                     const bool check_initialized, const bool record_valid,
+                     const bool skip_output);
       UpdateAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                      Operation *op, unsigned index, VersionManager *man,
                      const RegionUsage &usage, RegionNode *node, 
@@ -1692,8 +1692,8 @@ namespace Legion {
                      const PhysicalTraceInfo &trace_info,
                      const RtEvent user_registered,
                      const ApEvent precondition, const ApEvent term_event,
-                     const bool track_effects, const bool check_initialized,
-                     const bool record_valid, const bool skip_output);
+                     const bool check_initialized, const bool record_valid,
+                     const bool skip_output);
       UpdateAnalysis(const UpdateAnalysis &rhs);
       virtual ~UpdateAnalysis(void);
     public:
@@ -1733,7 +1733,6 @@ namespace Legion {
       const PhysicalTraceInfo trace_info;
       const ApEvent precondition;
       const ApEvent term_event;
-      const bool track_effects;
       const bool check_initialized;
       const bool record_valid;
       const bool skip_output;

@@ -457,7 +457,7 @@ namespace Legion {
       }
       else
         complete_execution();
-      trigger_children_complete();
+      trigger_children_complete(ApEvent::NO_AP_EVENT);
       trigger_children_committed();
     }
 
@@ -4820,7 +4820,7 @@ namespace Legion {
                                       0/*index*/, version_info,
                                       requirement, node, mapped_instances,
                                       mapped_views,trace_info,init_precondition,
-                                      termination_event, true/*track effects*/,
+                                      termination_event,
                                       false/*check initialized*/, record_valid,
                                       false/*skip output*/);
           analysis->add_reference();
@@ -4833,11 +4833,11 @@ namespace Legion {
             runtime->forest->physical_perform_updates_and_registration(
                 requirement, version_info, this, 0/*index*/, init_precondition,
                 termination_event, mapped_instances, trace_info, 
-                map_applied_conditions,
+                map_applied_conditions
 #ifdef DEBUG_LEGION
-                get_logging_name(), unique_op_id,
+                , get_logging_name(), unique_op_id
 #endif
-                true/*track effects*/);
+                );
         // Complete the exchange
         exchange->complete_exchange(this, sharded_view, 
                                     mapped_instances, map_applied_conditions);
@@ -4855,7 +4855,7 @@ namespace Legion {
                                       0/*index*/, version_info,
                                       requirement, node, mapped_instances,
                                       mapped_views,trace_info,init_precondition,
-                                      termination_event, true/*track effects*/,
+                                      termination_event,
                                       false/*check initialized*/, record_valid,
                                       false/*skip output*/);
         analysis->add_reference();
@@ -4903,12 +4903,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               get_logging_name(), unique_op_id,
 #endif
-              // No need to track effects since we know it can't be 
-              // restricted in a control replicated context
               // Can't track initialized here because it might not be
               // correct with our altered privileges
-              false/*track effects*/, record_valid/*record valid*/,
-              false/*check initialized*/,
+              record_valid/*record valid*/, false/*check initialized*/,
               // We can skip output for the same reason we don't 
               // need to track any effects
               true/*defer copies*/, true/*skip output*/); 
@@ -5301,8 +5298,8 @@ namespace Legion {
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 0/*index*/,
           version_info, requirement, node, attach_instances, attach_views,
           trace_info, ApEvent::NO_AP_EVENT, mapping ? termination_event : 
-            completion_event, false/*track effects*/, 
-          false/*check initialized*/, true/*record valid*/,true/*skip output*/);
+            completion_event, false/*check initialized*/, 
+          true/*record valid*/, true/*skip output*/);
         analysis->add_reference();
         // Have each operation do its own registration
         // Note this will clean up the analysis allocation above
@@ -7324,7 +7321,6 @@ namespace Legion {
                            true/*owned*/, NULL/*functor*/, Processor::NO_PROC);
           local_future_result = NULL;
           local_future_size = 0;
-          original_task->complete_execution();
         }
       }
       // if we own it and don't use it we need to free it
@@ -7333,7 +7329,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::trigger_task_complete(bool local)
+    void ShardManager::trigger_task_complete(bool local, ApEvent shard_complete)
     //--------------------------------------------------------------------------
     {
       bool notify = false;
@@ -7353,15 +7349,20 @@ namespace Legion {
           assert(trigger_remote_complete <= remote_constituents);
 #endif
         }
+        if (shard_complete.exists())
+          shard_effects.insert(shard_complete);
         notify = (trigger_local_complete == local_shards.size()) &&
                  (trigger_remote_complete == remote_constituents);
       }
       if (notify)
       {
+        const ApEvent all_shard_effects =
+          Runtime::merge_events(NULL, shard_effects);
         if (original_task == NULL)
         {
           Serializer rez;
           rez.serialize(repl_id);
+          rez.serialize(all_shard_effects);
           runtime->send_replicate_trigger_complete(owner_space, rez);
         }
         else
@@ -7379,15 +7380,11 @@ namespace Legion {
           else
             local_shards[0]->return_resources(
                 original_task->get_context(), applied);
-          // We'll just wait for now since there's no good way to
-          // force this to be propagated back otherwise
           if (!applied.empty())
-          {
-            const RtEvent wait_on = Runtime::merge_events(applied);
-            if (wait_on.exists() && !wait_on.has_triggered())
-              wait_on.wait();
-          }
-          original_task->trigger_children_complete();
+            original_task->complete_execution(Runtime::merge_events(applied));
+          else
+            original_task->complete_execution();
+          original_task->trigger_children_complete(all_shard_effects);
         }
       }
     }
@@ -7996,8 +7993,10 @@ namespace Legion {
     {
       ReplicationID repl_id;
       derez.deserialize(repl_id);
+      ApEvent all_shards_done;
+      derez.deserialize(all_shards_done);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->trigger_task_complete(false/*local*/);
+      manager->trigger_task_complete(false/*local*/, all_shards_done);
     }
 
     //--------------------------------------------------------------------------
