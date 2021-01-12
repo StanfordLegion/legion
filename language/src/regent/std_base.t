@@ -554,7 +554,7 @@ function base.find_task_privileges(region_type, task)
   local field_paths, field_types = base.types.flatten_struct_fields(
     region_type:fspace())
 
-  local fields_by_mode = data.new_recursive_map(1)
+  local fields_by_mode = data.newmap()
   local min_field_index_by_mode = data.newmap()
   local field_type_by_field = data.newmap()
   for i, field_path in ipairs(field_paths) do
@@ -563,7 +563,10 @@ function base.find_task_privileges(region_type, task)
       privileges, coherence_modes, flags, region_type, field_path, field_type)
     local mode = data.newtuple(privilege, redop_id, coherence, flag)
     if privilege ~= "none" then
-      fields_by_mode[mode][field_path] = true
+      if not fields_by_mode[mode] then
+        fields_by_mode[mode] = terralib.newlist()
+      end
+      fields_by_mode[mode]:insert(field_path)
       if not min_field_index_by_mode[mode] then
         min_field_index_by_mode[mode] = i
       end
@@ -618,7 +621,7 @@ function base.find_task_privileges(region_type, task)
   local privilege_next_index = 1
   for _, mode in ipairs(modes) do
     local privilege, redop_id, coherence, flag = unpack(mode)
-    for _, field_path in fields_by_mode[mode]:keys() do
+    for _, field_path in ipairs(fields_by_mode[mode]) do
       local field_type = field_type_by_field[field_path]
       local index = privilege_index[mode]
       if not index then
