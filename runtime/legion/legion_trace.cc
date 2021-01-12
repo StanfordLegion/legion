@@ -2772,12 +2772,14 @@ namespace Legion {
               {
                 disjoint_expressions.push_back(intersection);
                 disjoint_components.resize(disjoint_components.size() + 1);
-                std::vector<IndexSpaceExpression*> &components = 
+                std::vector<IndexSpaceExpression*> &components =
                   disjoint_components.back();
                 components.insert(components.end(),
                     disjoint_components[idx].begin(), 
                     disjoint_components[idx].end());
                 components.push_back(*isit);
+                disjoint_expressions[idx] =
+                  forest->subtract_index_spaces(expr, intersection);
               }
               else // Congruent so we are done
                 disjoint_components[idx].push_back(*isit);
@@ -2804,6 +2806,8 @@ namespace Legion {
                   disjoint_components[idx].begin(), 
                   disjoint_components[idx].end());
               components.push_back(*isit);
+              disjoint_expressions[idx] =
+                forest->subtract_index_spaces(expr, intersection);
               current = forest->subtract_index_spaces(current, intersection);
 #ifdef DEBUG_LEGION
               assert(!current->is_empty());
@@ -2816,29 +2820,29 @@ namespace Legion {
             disjoint_components.resize(disjoint_components.size() + 1);
             disjoint_components.back().push_back(*isit);
           }
-          // Now we have overlapping expressions and constituents for
-          // each of what used to be the old equivalence sets, so we 
-          // can now build the actual output target
-          for (unsigned idx = 0; idx < disjoint_expressions.size(); idx++)
+        }
+        // Now we have overlapping expressions and constituents for
+        // each of what used to be the old equivalence sets, so we
+        // can now build the actual output target
+        for (unsigned idx = 0; idx < disjoint_expressions.size(); idx++)
+        {
+          FieldMaskSet<LogicalView> &dst_views =
+            target[disjoint_expressions[idx]];
+          for (std::vector<IndexSpaceExpression*>::const_iterator sit =
+                disjoint_components[idx].begin(); sit !=
+                disjoint_components[idx].end(); sit++)
           {
-            FieldMaskSet<LogicalView> &dst_views = 
-              target[disjoint_expressions[idx]];
-            for (std::vector<IndexSpaceExpression*>::const_iterator sit =
-                  disjoint_components[idx].begin(); sit !=
-                  disjoint_components[idx].end(); sit++)
-            {
 #ifdef DEBUG_LEGION
-              assert(intermediate.find(*sit) != intermediate.end());
+            assert(intermediate.find(*sit) != intermediate.end());
 #endif
-              const FieldMaskSet<LogicalView> &src_views = intermediate[*sit];
-              for (FieldMaskSet<LogicalView>::const_iterator it =
-                    src_views.begin(); it != src_views.end(); it++)
-              {
-                const FieldMask overlap = it->second & eit->set_mask;
-                if (!overlap)
-                  continue;
-                dst_views.insert(it->first, overlap);
-              }
+            const FieldMaskSet<LogicalView> &src_views = intermediate[*sit];
+            for (FieldMaskSet<LogicalView>::const_iterator it =
+                  src_views.begin(); it != src_views.end(); it++)
+            {
+              const FieldMask overlap = it->second & eit->set_mask;
+              if (!overlap)
+                continue;
+              dst_views.insert(it->first, overlap);
             }
           }
         }
