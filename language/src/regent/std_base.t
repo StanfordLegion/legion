@@ -611,11 +611,7 @@ function base.find_task_privileges(region_type, task)
         index = privilege_next_index
         privilege_next_index = privilege_next_index + 1
 
-        -- Reduction privileges cannot be grouped, because the Legion
-        -- runtime does not know how to handle multi-field reductions.
-        if not base.is_reduction_op(privilege) then
-          privilege_index[mode] = index
-        end
+        privilege_index[mode] = index
 
         grouped_privileges:insert(privilege)
         grouped_coherence_modes:insert(coherence)

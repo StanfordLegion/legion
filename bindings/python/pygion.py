@@ -602,9 +602,7 @@ class Privilege(object):
                         ' '.join(self.fields), ' '.join(fspace.keys())))
         fields = fspace.keys() if self.fields is None else self.fields
         if self.reduce:
-            return [
-                (self, None, self._legion_redop_id(fspace.field_types[field_name]), (field_name,))
-                for field_name in fields]
+            return [(self, None, self._legion_redop_id(fspace.field_types[field_name]), fields)]
         else:
             return [(self, self._legion_privilege(), None, fields if self.read or self.write or self.reduce else [])]
 
