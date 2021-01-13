@@ -457,7 +457,7 @@ namespace Legion {
       }
       else
         complete_execution();
-      trigger_children_complete();
+      trigger_children_complete(ApEvent::NO_AP_EVENT);
       trigger_children_committed();
     }
 
@@ -4028,12 +4028,14 @@ namespace Legion {
           // participate in the collective operations
           const ApEvent done_event = 
             thunk->perform(this,runtime->forest,ApEvent::NO_AP_EVENT,instances);
-          // We can try to early-complete this operation too
-          request_early_complete(done_event);
           // We have no local points, so we can just trigger
           Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
           complete_mapping(mapping_barrier);
-          complete_execution(Runtime::protect_event(done_event));
+          // We can try to early-complete this operation too
+          if (!request_early_complete(done_event))
+            complete_execution(Runtime::protect_event(done_event));
+          else
+            complete_execution();
         }
         else // If we have valid points then we do the base call
         {
@@ -5406,12 +5408,9 @@ namespace Legion {
             Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/, 
                                           execution_fence_precondition);
             // We can always trigger the completion event when these are done
-            request_early_complete(execution_fence_barrier);
-            if (!execution_fence_barrier.has_triggered())
-            {
-              RtEvent wait_on = Runtime::protect_event(execution_fence_barrier);
-              complete_execution(wait_on);
-            }
+            if (!request_early_complete(execution_fence_barrier))
+              complete_execution(
+                  Runtime::protect_event(execution_fence_barrier));
             else
               complete_execution();
             break;
@@ -5579,10 +5578,13 @@ namespace Legion {
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
       bool record_valid = true;
-      if (remap_region)
-        region.impl->get_references(mapped_instances);
-      else
+      if (!remap_region)
+      {
         record_valid = invoke_mapper(mapped_instances, source_instances);
+        region.impl->set_references(mapped_instances);
+      }
+      else
+        region.impl->get_references(mapped_instances);
       // First kick off the exchange to get that in flight
       std::vector<InstanceView*> mapped_views;
       std::vector<InstanceView*> source_views;
@@ -5614,7 +5616,7 @@ namespace Legion {
                                       0/*index*/, requirement, node,
                                       mapped_instances, mapped_views,
                                       source_views,trace_info,init_precondition,
-                                      termination_event, true/*track effects*/,
+                                      termination_event,
                                       false/*check initialized*/, record_valid,
                                       false/*skip output*/);
           analysis->add_reference();
@@ -5627,11 +5629,11 @@ namespace Legion {
             runtime->forest->physical_perform_updates_and_registration(
                 requirement, version_info, this, 0/*index*/, init_precondition,
                 termination_event, mapped_instances, source_instances,
-                trace_info, map_applied_conditions,
+                trace_info, map_applied_conditions
 #ifdef DEBUG_LEGION
-                get_logging_name(), unique_op_id,
+                , get_logging_name(), unique_op_id
 #endif
-                true/*track effects*/);
+                );
         // Complete the exchange
         exchange->complete_exchange(this, sharded_view, 
                                     mapped_instances, map_applied_conditions);
@@ -5649,7 +5651,7 @@ namespace Legion {
                                       0/*index*/, requirement, node, 
                                       mapped_instances, mapped_views,
                                       source_views,trace_info,init_precondition,
-                                      termination_event, true/*track effects*/,
+                                      termination_event,
                                       false/*check initialized*/, record_valid,
                                       false/*skip output*/);
         analysis->add_reference();
@@ -5698,12 +5700,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               get_logging_name(), unique_op_id,
 #endif
-              // No need to track effects since we know it can't be 
-              // restricted in a control replicated context
               // Can't track initialized here because it might not be
               // correct with our altered privileges
-              false/*track effects*/, record_valid/*record valid*/,
-              false/*check initialized*/,
+              record_valid/*record valid*/, false/*check initialized*/,
               // We can skip output for the same reason we don't 
               // need to track any effects
               true/*defer copies*/, true/*skip output*/); 
@@ -5789,16 +5788,6 @@ namespace Legion {
         dump_physical_state(&requirement, 0);
       } 
 #endif
-      // Update our physical instance with the newly mapped instances
-      // Have to do this before triggering the mapped event
-      if (effects_done.exists())
-      {
-        region.impl->reset_references(mapped_instances, termination_event,
-          Runtime::merge_events(&trace_info, init_precondition, effects_done));
-      }
-      else
-        region.impl->reset_references(mapped_instances, termination_event,
-                                      init_precondition);
       ApEvent map_complete_event = ApEvent::NO_AP_EVENT;
       if (mapped_instances.size() > 1)
       {
@@ -5847,6 +5836,8 @@ namespace Legion {
                                         effects_done);    
         }
       }
+      // We can trigger the ready event now that we know its precondition
+      Runtime::trigger_event(NULL, ready_event, map_complete_event);
       // Remove profiling our guard and trigger the profiling event if necessary
       int diff = -1; // need this dumbness for PGI
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, diff) == 0) &&
@@ -5861,19 +5852,24 @@ namespace Legion {
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
       complete_mapping(complete_inline_mapping(mapping_applied));
-      if (!map_complete_event.has_triggered())
-      {
-        // Issue a deferred trigger on our completion event
-        // and mark that we are no longer responsible for 
-        // triggering our completion event
-        request_early_complete(map_complete_event);
-        DeferredExecuteArgs deferred_execute_args(this);
-        runtime->issue_runtime_meta_task(deferred_execute_args,
-                                         LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                   Runtime::protect_event(map_complete_event));
-      }
+      // Note that completing mapping and execution should
+      // be enough to trigger the completion operation call
+      // Trigger an early commit of this operation
+      // Note that a mapping operation terminates as soon as it
+      // is done mapping reflecting that after this happens, information
+      // has flowed back out into the application task's execution.
+      // Therefore mapping operations cannot be restarted because we
+      // cannot track how the application task uses their data.
+      // This means that any attempts to restart an inline mapping
+      // will result in the entire task needing to be restarted.
+      request_early_commit();
+      // If we have any copy-out effects from this inline mapping, we'll
+      // need to keep it around long enough for the parent task in case
+      // it decides that it needs to
+      if (!request_early_complete(effects_done))
+        complete_execution(Runtime::protect_event(effects_done));
       else
-        deferred_execute();
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -6107,9 +6103,8 @@ namespace Legion {
         std::vector<InstanceView*> dummy_source_views;
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 0/*index*/,
           requirement, node, attach_instances, attach_views, dummy_source_views,
-          trace_info, ApEvent::NO_AP_EVENT, 
-          mapping ? termination_event : completion_event, 
-          false/*track effects*/, false/*check initialized*/, 
+          trace_info, ApEvent::NO_AP_EVENT, mapping ? termination_event : 
+            completion_event, false/*check initialized*/, 
           true/*record valid*/, true/*skip output*/);
         analysis->add_reference();
         // Have each operation do its own registration
@@ -6146,13 +6141,8 @@ namespace Legion {
 #endif
         // This operation is ready once the file is attached
         if (mapping)
-        {
-          attach_instances[0].set_ready_event(broadcast_barrier);
-          region.impl->reset_references(attach_instances, termination_event,
-                                        broadcast_barrier);
-        }
-        else
-          region.impl->set_reference(external_instance);
+          external_instance.set_ready_event(broadcast_barrier);
+        region.impl->set_reference(external_instance);
         // Also set the sharded view in this case
         region.impl->set_sharded_view(sharded_view);
         // Make sure that all the attach operations are done mapping
@@ -6163,8 +6153,10 @@ namespace Legion {
         else
           Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
         complete_mapping(resource_barrier);
-        request_early_complete(broadcast_barrier);
-        complete_execution(Runtime::protect_event(broadcast_barrier));
+        if (!request_early_complete(broadcast_barrier))
+          complete_execution(Runtime::protect_event(broadcast_barrier));
+        else
+          complete_execution();
       }
       else
       {
@@ -6229,13 +6221,8 @@ namespace Legion {
                                         attach_event);
           // Save the instance information out to region
           if (mapping)
-          {
-            attach_instances[0].set_ready_event(broadcast_barrier);
-            region.impl->reset_references(attach_instances, termination_event,
-                                          broadcast_barrier);
-          }
-          else
-            region.impl->set_reference(external_instance);
+            external_instance.set_ready_event(broadcast_barrier);
+          region.impl->set_reference(external_instance);
           // This operation is ready once the file is attached
           // Make sure that all the attach operations are done mapping
           // before we consider this attach operation done
@@ -6245,8 +6232,10 @@ namespace Legion {
           else
             Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
           complete_mapping(resource_barrier);
-          request_early_complete(broadcast_barrier);
-          complete_execution(Runtime::protect_event(broadcast_barrier));
+          if (!request_early_complete(broadcast_barrier))
+            complete_execution(Runtime::protect_event(broadcast_barrier));
+          else
+            complete_execution();
         }
         else
         {
@@ -6265,15 +6254,8 @@ namespace Legion {
           external_instance = InstanceRef(manager, instance_fields);
           // Save the instance information out to region
           if (mapping)
-          {
-            InstanceSet attach_instances(1);
-            attach_instances[0] = external_instance;
-            attach_instances[0].set_ready_event(broadcast_barrier);
-            region.impl->reset_references(attach_instances, termination_event,
-                                          broadcast_barrier);
-          }
-          else
-            region.impl->set_reference(external_instance);
+            external_instance.set_ready_event(broadcast_barrier);
+          region.impl->set_reference(external_instance);
           // Record that we're mapped once everyone else does
           Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
           complete_mapping(resource_barrier);
@@ -6357,9 +6339,6 @@ namespace Legion {
 #endif
       const bool is_owner_shard = (repl_ctx->owner_shard->shard_id == 0);
       const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
-      // Actual unmap of an inline mapped region was deferred to here
-      if (region.impl->is_mapped())
-        region.impl->unmap_region();
       // Now we can get the reference we need for the detach operation
       InstanceSet references;
       region.impl->get_references(references);
@@ -6369,9 +6348,21 @@ namespace Legion {
       InstanceRef reference = references[0];
       // Check that this is actually a file
       PhysicalManager *manager = reference.get_instance_manager();
+      if (!manager->is_external_instance())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
+                      "Illegal detach operation (ID %lld) performed in "
+                      "task %s (ID %lld). Detach was performed on an region "
+                      "that had not previously been attached.",
+                      get_unique_op_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
+      // Add a valid reference to the instances to act as an acquire to keep
+      // them valid through the end of mapping them, we'll release the valid
+      // references when we are done mapping
+      WrapperReferenceMutator mutator(map_applied_conditions);
+      manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
       ShardedView *sharded_view = region.impl->get_sharded_view();
       ApEvent detach_event;
       if ((sharded_view != NULL) || (is_owner_shard))
@@ -6411,8 +6402,10 @@ namespace Legion {
         Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
       complete_mapping(resource_barrier);
 
-      request_early_complete(detach_event);
-      complete_execution(Runtime::protect_event(detach_event));
+      if (!request_early_complete(detach_event))
+        complete_execution(Runtime::protect_event(detach_event));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -6720,7 +6713,12 @@ namespace Legion {
             execution_preconditions.insert(pending_deletion);
         }
         else
-          physical_trace->record_replayable_capture(current_template);
+        {
+          ApEvent pending_deletion = physical_trace->record_replayable_capture(
+                                      current_template, map_applied_conditions);
+          if (pending_deletion.exists())
+            execution_preconditions.insert(pending_deletion);
+        }
         // Reset the local trace
         local_trace->initialize_tracing_state();
       }
@@ -7017,7 +7015,12 @@ namespace Legion {
             execution_preconditions.insert(pending_deletion);
         }
         else
-          physical_trace->record_replayable_capture(current_template);
+        {
+          ApEvent pending_deletion = physical_trace->record_replayable_capture(
+                                      current_template, map_applied_conditions);
+          if (pending_deletion.exists())
+            execution_preconditions.insert(pending_deletion);
+        }
         local_trace->initialize_tracing_state();
       }
       else if (replayed)
@@ -8524,7 +8527,6 @@ namespace Legion {
                            true/*owned*/, NULL/*functor*/, Processor::NO_PROC);
           local_future_result = NULL;
           local_future_size = 0;
-          original_task->complete_execution();
         }
       }
       // if we own it and don't use it we need to free it
@@ -8533,8 +8535,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::trigger_task_complete(bool local, 
-                                             std::set<RtEvent> &preconditions)
+    void ShardManager::trigger_task_complete(bool local, ApEvent shard_complete) 
     //--------------------------------------------------------------------------
     {
       bool notify = false;
@@ -8554,19 +8555,21 @@ namespace Legion {
           assert(trigger_remote_complete <= remote_constituents);
 #endif
         }
+        if (shard_complete.exists())
+          shard_effects.insert(shard_complete);
         notify = (trigger_local_complete == local_shards.size()) &&
                  (trigger_remote_complete == remote_constituents);
       }
       if (notify)
       {
+        const ApEvent all_shard_effects =
+          Runtime::merge_events(NULL, shard_effects);
         if (original_task == NULL)
         {
-          const RtUserEvent pre = Runtime::create_rt_user_event();
           Serializer rez;
           rez.serialize(repl_id);
-          rez.serialize(pre);
+          rez.serialize(all_shard_effects);
           runtime->send_replicate_trigger_complete(owner_space, rez);
-          preconditions.insert(pre);
         }
         else
         {
@@ -8577,11 +8580,17 @@ namespace Legion {
           // the tree or report leaks and duplicates of resources.
           // All the shards have the same set so we only have to do this
           // for one of the shards.
+          std::set<RtEvent> applied;
           if (original_task->is_top_level_task())
-            local_shards[0]->report_leaks_and_duplicates(preconditions);
+            local_shards[0]->report_leaks_and_duplicates(applied);
           else
             local_shards[0]->return_resources(
-                original_task->get_context(), preconditions);
+                original_task->get_context(), applied); 
+          if (!applied.empty())
+            original_task->complete_execution(Runtime::merge_events(applied));
+          else
+            original_task->complete_execution();
+          original_task->trigger_children_complete(all_shard_effects);
         }
       }
     }
@@ -8591,14 +8600,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool notify = false;
-      bool trigger_children = false;
       {
         AutoLock m_lock(manager_lock);
-        // The first call to trigger task commit here is enough to know
-        // that all the effects are done for completion
-        if ((original_task != NULL) && 
-            (trigger_local_commit == 0) && (trigger_remote_commit == 0))
-          trigger_children = true;
         if (local)
         {
           trigger_local_commit++;
@@ -8616,8 +8619,6 @@ namespace Legion {
         notify = (trigger_local_commit == local_shards.size()) &&
                  (trigger_remote_commit == remote_constituents);
       }
-      if (trigger_children)
-        original_task->trigger_children_complete();
       if (notify)
       {
         if (original_task == NULL)
@@ -9239,22 +9240,16 @@ namespace Legion {
                                      false/*owned*/, false/*local*/);
     }
 
-    //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_trigger_complete(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       ReplicationID repl_id;
       derez.deserialize(repl_id);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      std::set<RtEvent> preconditions;
+      ApEvent all_shards_done;
+      derez.deserialize(all_shards_done);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->trigger_task_complete(false/*local*/, preconditions);
-      if (!preconditions.empty())
-        Runtime::trigger_event(done_event,Runtime::merge_events(preconditions));
-      else
-        Runtime::trigger_event(done_event);
+      manager->trigger_task_complete(false/*local*/, all_shards_done);
     }
 
     //--------------------------------------------------------------------------

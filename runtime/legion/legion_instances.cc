@@ -996,7 +996,7 @@ namespace Legion {
         for (std::set<ApEvent>::iterator it = info.view_events.begin();
               it != info.view_events.end(); /*nothing*/)
         {
-          if (it->has_triggered())
+          if (it->has_triggered_faultignorant())
           {
             to_collect.insert(*it);
             std::set<ApEvent>::iterator to_delete = it++;
@@ -1031,7 +1031,7 @@ namespace Legion {
         for (std::set<ApEvent>::const_iterator it = 
               git->second.view_events.begin(); it != 
               git->second.view_events.end(); it++)
-          if (!it->has_triggered())
+          if (!it->has_triggered_faultignorant())
             preconditions.insert(*it);
       }
     }
@@ -1422,8 +1422,8 @@ namespace Legion {
                                                    const DomainPoint &key) const
     //--------------------------------------------------------------------------
     {
-      if (use_event.exists() && !use_event.has_triggered())
-        use_event.wait();
+      if (use_event.exists() && !use_event.has_triggered_faultignorant())
+        use_event.wait_faultignorant();
       void *inst_ptr = instance.pointer_untyped(0/*offset*/, 0/*elem size*/);
       return PointerConstraint(memory_manager->memory, uintptr_t(inst_ptr));
     }

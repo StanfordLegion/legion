@@ -15,15 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_layout_constraints)
+project(LegionExample_inline_tasks)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(layout_constraints transpose.cc)
-target_link_libraries(layout_constraints Legion::Legion)
+add_executable(inline_tasks inline_tasks.cc)
+target_link_libraries(inline_tasks Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME layout_constraints COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:transpose> ${Legion_TEST_ARGS})
+  add_test(NAME inline_tasks COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:inline_tasks> ${Legion_TEST_ARGS})
 endif()

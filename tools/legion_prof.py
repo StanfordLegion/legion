@@ -1205,7 +1205,7 @@ class Variant(StatObject):
         self.color = None
 
     def __hash__(self):
-        return hash(self.variant_id)
+        return hash(str(self))
 
     def __eq__(self, other):
         return self.variant_id == other.variant_id

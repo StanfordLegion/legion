@@ -1684,7 +1684,6 @@ namespace Legion {
     class ReplicateContext;
     class RemoteContext;
     class LeafContext;
-    class InlineContext;
 
     // Nasty global variable for TLS support of figuring out
     // our context implicitly
@@ -1994,7 +1993,6 @@ namespace Legion {
     friend class Internal::TopLevelContext;                 \
     friend class Internal::RemoteContext;                   \
     friend class Internal::LeafContext;                     \
-    friend class Internal::InlineContext;                   \
     friend class Internal::ReplicateContext;                \
     friend class Internal::InstanceBuilder;                 \
     friend class Internal::FutureNameExchange;              \
@@ -2327,6 +2325,7 @@ namespace Legion {
     public:
       // Override the wait method so we can have our own implementation
       inline void wait(void) const;
+      inline void wait_faultaware(bool &poisoned) const;
     };
 
     class PredEvent : public LgEvent {
@@ -2353,7 +2352,18 @@ namespace Legion {
     public:
       inline ApEvent& operator=(const ApEvent &rhs) = default;
       inline bool has_triggered_faultignorant(void) const
-        { bool poisoned; return has_triggered_faultaware(poisoned); }
+        { bool poisoned = false; 
+          return has_triggered_faultaware(poisoned) || poisoned; }
+      inline void wait_faultignorant(void) const
+        { bool poisoned = false; LgEvent::wait_faultaware(poisoned); }
+      // TODO: enable this to ensure we are always checking for faults
+#if 0
+    private:
+      // Make these private because we always want to be conscious of faults
+      // when testing or waiting on application events
+      inline bool has_triggered(void) const { return LgEvent::has_triggered(); }
+      inline void wait(void) const { LgEvent::wait(); }
+#endif
     };
 
     class ApUserEvent : public ApEvent {
@@ -2705,6 +2715,56 @@ namespace Legion {
       if (((stop - start) >= LIMIT) && (local_meta_task_id == BAD_TASK_ID))
         assert(false);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline void LgEvent::wait_faultaware(bool &poisoned) const
+    //--------------------------------------------------------------------------
+    {
+      // Save the context locally
+      Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      // Save the task provenance information
+      UniqueID local_provenance = Internal::implicit_provenance;
+      // Save whether we are in a registration callback
+      unsigned local_callback = Internal::inside_registration_callback;
+      // Check to see if we have any local locks to notify
+      if (Internal::local_lock_list != NULL)
+      {
+        // Make a copy of the local locks here
+        AutoLock *local_lock_list_copy = Internal::local_lock_list;
+        // Set this back to NULL until we are done waiting
+        Internal::local_lock_list = NULL;
+        // Make a user event and notify all the thread locks
+        const Realm::UserEvent done = Realm::UserEvent::create_user_event();
+        local_lock_list_copy->advise_sleep_entry(done);
+        // Now we can do the wait
+        if (external_implicit_task)
+          Realm::Event::external_wait_faultaware(poisoned);
+        else
+          Realm::Event::wait_faultaware(poisoned);
+        // When we wake up, notify that we are done and exited the wait
+        local_lock_list_copy->advise_sleep_exit();
+        // Trigger the user-event
+        done.trigger();
+        // Restore our local lock list
+#ifdef DEBUG_LEGION
+        assert(Internal::local_lock_list == NULL); 
+#endif
+        Internal::local_lock_list = local_lock_list_copy; 
+      }
+      else // Just do the normal wait
+      {
+        if (external_implicit_task)
+          Realm::Event::external_wait_faultaware(poisoned);
+        else
+          Realm::Event::wait_faultaware(poisoned);
+      }
+      // Write the context back
+      Internal::implicit_context = local_ctx;
+      // Write the provenance information back
+      Internal::implicit_provenance = local_provenance;
+      // Write the registration callback information back
+      Internal::inside_registration_callback = local_callback;
     }
 
 #ifdef LEGION_SPY

@@ -483,7 +483,7 @@ namespace Legion {
       void select_template(unsigned template_index);
     public:
       PhysicalTemplate* get_current_template(void) { return current_template; }
-      bool has_any_templates(void) const { return templates.size() > 0; }
+      bool has_any_templates(void) const { return !templates.empty(); }
     public:
       void record_previous_template_completion(ApEvent template_completion)
         { previous_template_completion = template_completion; }
@@ -496,7 +496,8 @@ namespace Legion {
         { return execution_fence_event; }
     public:
       PhysicalTemplate* start_new_template(void);
-      void record_replayable_capture(PhysicalTemplate *tpl);
+      ApEvent record_replayable_capture(PhysicalTemplate *tpl,
+                    std::set<RtEvent> &map_applied_conditions);
       void record_failed_capture(PhysicalTemplate *tpl);
       void record_intermediate_execution_fence(FenceOp *fence);
     public:
@@ -511,7 +512,7 @@ namespace Legion {
     private:
       mutable LocalLock trace_lock;
       PhysicalTemplate* current_template;
-      LegionVector<PhysicalTemplate*>::aligned templates;
+      std::vector<PhysicalTemplate*> templates;
       unsigned nonreplayable_count;
       unsigned new_template_count;
     private:

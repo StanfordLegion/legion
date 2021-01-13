@@ -2275,7 +2275,7 @@ namespace Legion {
       static inline bool is_dense_layout(const Rect<N,T> &bounds,
                   const Realm::Point<N,size_t> &strides, size_t field_size)
       {
-        ptrdiff_t exp_offset = field_size;
+        size_t exp_offset = field_size;
         int used_mask = 0; // keep track of the dimensions we've already matched
         for (int i = 0; i < N; i++) {
           bool found = false;
@@ -18802,9 +18802,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    inline PieceIteratorT<DIM,T>::PieceIteratorT(PieceIteratorT &&rhs)
+      : PieceIterator(rhs), current_rect(rhs.current_rect)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     inline PieceIteratorT<DIM,T>::PieceIteratorT(const PhysicalRegion &region,
-                                               FieldID fid, bool privilege_only)
-      : PieceIterator(region, fid, privilege_only)
+        FieldID fid, bool privilege_only, bool silence_warn, const char *warn)
+      : PieceIterator(region, fid, privilege_only, silence_warn, warn)
     //--------------------------------------------------------------------------
     {
       if (valid())
@@ -18815,6 +18823,17 @@ namespace Legion {
     template<int DIM, typename T>
     inline PieceIteratorT<DIM,T>& PieceIteratorT<DIM,T>::operator=(
                                                       const PieceIteratorT &rhs)
+    //--------------------------------------------------------------------------
+    {
+      PieceIterator::operator=(rhs);
+      current_rect = rhs.current_rect;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline PieceIteratorT<DIM,T>& PieceIteratorT<DIM,T>::operator=(
+                                                           PieceIteratorT &&rhs)
     //--------------------------------------------------------------------------
     {
       PieceIterator::operator=(rhs);

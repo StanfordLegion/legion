@@ -312,6 +312,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ArgumentMap::ArgumentMap(ArgumentMap &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     ArgumentMap::ArgumentMap(Internal::ArgumentMapImpl *i)
       : impl(i)
     //--------------------------------------------------------------------------
@@ -373,6 +381,17 @@ namespace Legion {
       {
         impl->add_reference();
       }
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ArgumentMap& ArgumentMap::operator=(ArgumentMap &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
       return *this;
     }
 
@@ -453,6 +472,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Predicate::Predicate(Predicate &&p)
+    //--------------------------------------------------------------------------
+    {
+      const_value = p.const_value;
+      impl = p.impl;
+      p.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     Predicate::Predicate(bool value)
       : impl(NULL), const_value(value)
     //--------------------------------------------------------------------------
@@ -489,6 +517,18 @@ namespace Legion {
       impl = rhs.impl;
       if (impl != NULL)
         impl->add_predicate_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    Predicate& Predicate::operator=(Predicate &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->remove_predicate_reference();
+      const_value = rhs.const_value;
+      impl = rhs.impl;
+      rhs.impl = NULL;
       return *this;
     }
 
@@ -532,7 +572,10 @@ namespace Legion {
       assert(reservation_lock.exists());
 #endif
       Internal::ApEvent lock_event(reservation_lock.acquire(mode,exclusive));
-      lock_event.wait();
+      bool poisoned = false;
+      lock_event.wait_faultaware(poisoned);
+      if (poisoned)
+        Internal::implicit_context->raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -669,7 +712,10 @@ namespace Legion {
       assert(phase_barrier.exists());
 #endif
       Internal::ApEvent e = Internal::Runtime::get_previous_phase(*this);
-      e.wait();
+      bool poisoned = false;
+      e.wait_faultaware(poisoned);
+      if (poisoned)
+        Internal::implicit_context->raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -2164,6 +2210,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future::Future(Future &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     Future::~Future(void)
     //--------------------------------------------------------------------------
     {
@@ -2200,6 +2254,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future& Future::operator=(Future &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && 
+          impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
     void Future::get_void_result(bool silence_warnings,
                                  const char *warning_string) const
     //--------------------------------------------------------------------------
@@ -2229,7 +2295,12 @@ namespace Legion {
           impl->subscribe() : impl->get_ready_event();
         // Always subscribe to the Realm event to know when it triggers
         ready.subscribe();
-        return ready.has_triggered();
+        bool poisoned = false;
+        if (ready.has_triggered_faultaware(poisoned))
+          return true;
+        else if (poisoned)
+          Internal::implicit_context->raise_poison_exception();
+        return false;
       }
       return true; // Empty futures are always ready
     }
@@ -2278,6 +2349,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureMap::FutureMap(FutureMap &&map)
+      : impl(map.impl)
+    //--------------------------------------------------------------------------
+    {
+      map.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap::FutureMap(Internal::FutureMapImpl *i, bool need_reference)
       : impl(i)
     //--------------------------------------------------------------------------
@@ -2310,6 +2389,18 @@ namespace Legion {
       impl = rhs.impl;
       if (impl != NULL)
         impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap& FutureMap::operator=(FutureMap &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && 
+          impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
       return *this;
     }
 
@@ -2373,6 +2464,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalRegion::PhysicalRegion(PhysicalRegion &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion::PhysicalRegion(Internal::PhysicalRegionImpl *i)
       : impl(i)
     //--------------------------------------------------------------------------
@@ -2405,6 +2504,17 @@ namespace Legion {
       impl = rhs.impl;
       if (impl != NULL)
         impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion& PhysicalRegion::operator=(PhysicalRegion &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
       return *this;
     }
 
@@ -2484,10 +2594,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegion::get_memories(std::set<Memory>& memories) const
+    void PhysicalRegion::get_memories(std::set<Memory>& memories,
+                        bool silence_warnings, const char *warning_string) const
     //--------------------------------------------------------------------------
     {
-      impl->get_memories(memories);
+      impl->get_memories(memories, silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2686,12 +2797,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PieceIterator::PieceIterator(const PhysicalRegion &region, FieldID fid,
-                                 bool privilege_only)
+                                 bool privilege_only, bool silence_warnings,
+                                 const char *warning_string)
       : impl(NULL), index(-1)
     //--------------------------------------------------------------------------
     {
       if (region.impl != NULL)
-        impl = region.impl->get_piece_iterator(fid, privilege_only);
+        impl = region.impl->get_piece_iterator(fid, privilege_only,
+                                  silence_warnings, warning_string);
       if (impl != NULL)
       {
         impl->add_reference();
@@ -2706,6 +2819,14 @@ namespace Legion {
     {
       if (impl != NULL)
         impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    PieceIterator::PieceIterator(PieceIterator &&rhs)
+      : impl(rhs.impl), index(rhs.index), current_piece(rhs.current_piece)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -2727,6 +2848,19 @@ namespace Legion {
       current_piece = rhs.current_piece;
       if (impl != NULL)
         impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    PieceIterator& PieceIterator::operator=(PieceIterator &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
+      index = rhs.index;
+      current_piece = rhs.current_piece;
       return *this;
     }
 
@@ -2923,6 +3057,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldAllocator::FieldAllocator(FieldAllocator &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     FieldAllocator::~FieldAllocator(void)
     //--------------------------------------------------------------------------
     {
@@ -2952,6 +3094,17 @@ namespace Legion {
       impl = rhs.impl;
       if (impl != NULL)
         impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocator& FieldAllocator::operator=(FieldAllocator &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
       return *this;
     }
 
@@ -5694,7 +5847,7 @@ namespace Legion {
     void Runtime::unmap_all_regions(Context ctx)
     //--------------------------------------------------------------------------
     {
-      runtime->unmap_all_regions(ctx);
+      ctx->unmap_all_regions(true/*external*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6225,7 +6378,7 @@ namespace Legion {
     Processor Runtime::get_executing_processor(Context ctx)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_executing_processor(ctx);
+      return ctx->get_executing_processor();
     }
 
     //--------------------------------------------------------------------------
@@ -6239,18 +6392,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::raise_region_exception(Context ctx, 
-                                                  PhysicalRegion region,
-                                                  bool nuclear)
+                                         PhysicalRegion region, bool nuclear)
     //--------------------------------------------------------------------------
     {
-      runtime->raise_region_exception(ctx, region, nuclear);
+      ctx->raise_region_exception(region, nuclear);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::yield(Context ctx)
     //--------------------------------------------------------------------------
     {
-      runtime->yield(ctx);
+      ctx->yield();
     }
 
     //--------------------------------------------------------------------------
