@@ -446,7 +446,6 @@ namespace Legion {
                                 const char *log_name,
                                 UniqueID uid,
 #endif
-                                const bool track_effects,
                                 const bool record_valid = true,
                                 const bool check_initialized = true,
                                 const bool defer_copies = true);
@@ -469,7 +468,6 @@ namespace Legion {
                                    const char *log_name,
                                    UniqueID uid,
 #endif
-                                   const bool track_effects,
                                    const bool record_valid = true,
                                    const bool check_initialized = true);
       // A helper method for deferring the computation of registration

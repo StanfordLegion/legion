@@ -540,18 +540,21 @@ namespace Legion {
       }
       if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
         implicit_context->record_blocking_call();
-      if (!future_complete.has_triggered())
+      bool poisoned = false;
+      if (!future_complete.has_triggered_faultaware(poisoned))
       {
         TaskContext *context = implicit_context;
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          future_complete.wait();
+          future_complete.wait_faultaware(poisoned);
           context->end_task_wait();
         }
         else
-          future_complete.wait();
+          future_complete.wait_faultaware(poisoned);
       }
+      if (poisoned)
+        implicit_context->raise_poison_exception();
       mark_sampled();
     }
     
@@ -580,18 +583,21 @@ namespace Legion {
           implicit_context->record_blocking_call();
       }
       const ApEvent ready_event = subscribe();
-      if (!ready_event.has_triggered())
+      bool poisoned = false;
+      if (!ready_event.has_triggered_faultaware(poisoned))
       {
         TaskContext *context = implicit_context;
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          ready_event.wait();
+          ready_event.wait_faultaware(poisoned);
           context->end_task_wait();
         }
         else
-          ready_event.wait();
+          ready_event.wait_faultaware(poisoned);
       }
+      if (poisoned)
+        implicit_context->raise_poison_exception();
       if (check_size)
       {
         if (empty)
@@ -646,19 +652,22 @@ namespace Legion {
       if (block)
       {
         const ApEvent ready_event = subscribe();
-        if (!ready_event.has_triggered())
+        bool poisoned = false;
+        if (!ready_event.has_triggered_faultaware(poisoned))
         {
           TaskContext *context =
             (producer_op == NULL) ? NULL : producer_op->get_context();
           if (context != NULL)
           {
             context->begin_task_wait(false/*from runtime*/);
-            ready_event.wait();
+            ready_event.wait_faultaware(poisoned);
             context->end_task_wait();
           }
           else
-            ready_event.wait();
+            ready_event.wait_faultaware(poisoned);
         }
+        if (poisoned)
+          implicit_context->raise_poison_exception();
         mark_sampled();
       }
       return empty;
@@ -864,7 +873,10 @@ namespace Legion {
     {
       if (!empty)
       {
-        valid = future_complete.has_triggered();
+        bool poisoned = false;
+        valid = future_complete.has_triggered_faultaware(poisoned);
+        if (poisoned)
+          implicit_context->raise_poison_exception();
 #ifdef DEBUG_LEGION
         assert(callback_functor == NULL);
 #endif
@@ -1250,7 +1262,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const ApEvent ready = subscribe();
-      if (!ready.has_triggered())
+      if (!ready.has_triggered_faultignorant())
       {
         // If we're not done then defer the operation until we are triggerd
         // First add a garbage collection reference so we don't get
@@ -1726,14 +1738,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalRegionImpl::PhysicalRegionImpl(const RegionRequirement &r, 
-                                   ApEvent mapped, bool m, TaskContext *ctx, 
-                                   MapperID mid, MappingTagID t, 
-                                   bool leaf, bool virt, Runtime *rt)
+      RtEvent mapped, ApEvent ready, ApUserEvent term, bool m, TaskContext *ctx, 
+      MapperID mid, MappingTagID t, bool leaf, bool virt, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
         leaf_region(leaf), virtual_mapped(virt), 
         replaying((ctx != NULL) ? ctx->owner_task->is_replaying() : false),
-        mapped_event(mapped), req(r), mapped(m), valid(false), 
-        trigger_on_unmap(false), made_accessor(false)
+        req(r),mapped_event(mapped),ready_event(ready),termination_event(term),
+        mapped(m), valid(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1742,8 +1753,7 @@ namespace Legion {
     PhysicalRegionImpl::PhysicalRegionImpl(const PhysicalRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL), map_id(0), tag(0),
         leaf_region(false), virtual_mapped(false), replaying(false),
-        mapped_event(ApEvent::NO_AP_EVENT), mapped(false), valid(false), 
-        trigger_on_unmap(false), made_accessor(false)
+        req(rhs.req), mapped_event(RtEvent::NO_RT_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1754,13 +1764,9 @@ namespace Legion {
     PhysicalRegionImpl::~PhysicalRegionImpl(void)
     //--------------------------------------------------------------------------
     {
-      // If we still have a trigger on unmap, do that before
-      // deleting ourselves to avoid leaking events
-      if (trigger_on_unmap)
-      {
-        trigger_on_unmap = false;
-        Runtime::trigger_event(NULL, termination_event);
-      }
+#ifdef DEBUG_LEGION
+      assert(!termination_event.exists());
+#endif
       if (!references.empty() && !replaying)
         references.remove_resource_references(PHYSICAL_REGION_REF);
     }
@@ -1803,7 +1809,7 @@ namespace Legion {
               context->get_task_name(), context->get_unique_id(),
               (warning_string == NULL) ? "" : warning_string)
       }
-      if (!mapped_event.has_triggered())
+      if (mapped_event.exists() && !mapped_event.has_triggered())
       {
         if (warn && !silence_warnings && (source != NULL))
           REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_REGION_WAIT, 
@@ -1823,19 +1829,14 @@ namespace Legion {
       if (valid)
         return;
       // Now wait for the reference to be ready
-      std::set<ApEvent> wait_on;
-      references.update_wait_on_events(wait_on);
-      ApEvent ref_ready;
-      if (!wait_on.empty())
-        ref_ready = Runtime::merge_events(NULL, wait_on);
-      bool poisoned;
-      if (!ref_ready.has_triggered_faultaware(poisoned))
+      bool poisoned = false;
+      if (!ready_event.has_triggered_faultaware(poisoned))
       {
         if (!poisoned)
         {
           if (context != NULL)
             context->begin_task_wait(false/*from runtime*/);
-          ref_ready.wait_faultaware(poisoned);
+          ready_event.wait_faultaware(poisoned);
           if (context != NULL)
             context->end_task_wait();
         }
@@ -1849,16 +1850,12 @@ namespace Legion {
     {
       if (valid)
         return true;
-      if (mapped_event.has_triggered())
+      if (!mapped_event.exists() || mapped_event.has_triggered())
       {
-        std::set<ApEvent> wait_on;
-        references.update_wait_on_events(wait_on);
-        if (wait_on.empty())
-          return true;
-        ApEvent ref_ready = Runtime::merge_events(NULL, wait_on);
-        return ref_ready.has_triggered();
+        bool poisoned = false;
+        return ready_event.has_triggered_faultaware(poisoned) || poisoned;
       }
-      return false;
+      return valid;
     }
 
     //--------------------------------------------------------------------------
@@ -1866,18 +1863,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return mapped;
-    }
-
-    //--------------------------------------------------------------------------
-    bool PhysicalRegionImpl::is_external_region(void) const
-    //--------------------------------------------------------------------------
-    {
-      if (references.empty())
-        return false;
-      for (unsigned idx = 0; idx < references.size(); idx++)
-        if (!references[idx].get_manager()->is_external_instance())
-          return false;
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -2043,52 +2028,31 @@ namespace Legion {
     {
       if (!mapped)
         return;
-      wait_until_valid(true/*silence warnings*/, NULL);
-      if (trigger_on_unmap)
-      {
-        trigger_on_unmap = false;
-        // Can only do the trigger when we have actually ready
-        std::set<ApEvent> wait_on;
-        references.update_wait_on_events(wait_on);
-        if (!wait_on.empty())
-        {
-          wait_on.insert(mapped_event);
-          Runtime::trigger_event(NULL, termination_event,
-                                 Runtime::merge_events(NULL, wait_on));
-        }
-        else
-          Runtime::trigger_event(NULL, termination_event, mapped_event);
-      }
-      valid = false;
+#ifdef DEBUG_LEGION
+      assert(termination_event.exists());
+#endif
+      // trigger the termination event conditional upon the ready event
+      Runtime::trigger_event(NULL, termination_event, ready_event);
+#ifdef DEBUG_LEGION
+      termination_event = ApUserEvent::NO_AP_USER_EVENT;
+#endif
+      // reset mapped and valid
       mapped = false;
-      // If we have a wait for unmapped event, then we need to wait
-      // before we return, this usually occurs because we had restricted
-      // coherence on the region and we have to issue copies back to 
-      // the restricted instances before we are officially unmapped
-      bool poisoned;
-      if (wait_for_unmap.exists() && 
-          !wait_for_unmap.has_triggered_faultaware(poisoned))
-      {
-        if (!poisoned)
-        {
-          if (context != NULL)
-            context->begin_task_wait(false/*from runtime*/);
-          wait_for_unmap.wait();
-          if (context != NULL)
-            context->end_task_wait();
-        }
-      }
+      valid = false;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::remap_region(ApEvent new_mapped)
+    ApEvent PhysicalRegionImpl::remap_region(ApEvent new_ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!mapped);
+      assert(!termination_event.exists());
 #endif
-      mapped_event = new_mapped;
+      termination_event = Runtime::create_ap_user_event(NULL);
+      ready_event = new_ready;
       mapped = true;
+      return termination_event;
     }
 
     //--------------------------------------------------------------------------
@@ -2099,36 +2063,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::set_reference(const InstanceRef &ref)
+    void PhysicalRegionImpl::set_reference(const InstanceRef &ref, bool safe)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(ref.has_ref());
+      assert(references.empty());
+      assert(safe || (mapped_event.exists() && !mapped_event.has_triggered()));
 #endif
       references.add_instance(ref);
       ref.add_resource_reference(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::reset_references(const InstanceSet &refs,
-                                       ApUserEvent term_event, ApEvent wait_for)
+    void PhysicalRegionImpl::set_references(const InstanceSet &refs, bool safe)
     //--------------------------------------------------------------------------
     {
-      if (!references.empty())
-        references.remove_resource_references(PHYSICAL_REGION_REF);
+#ifdef DEBUG_LEGION
+      assert(references.empty());
+      assert(safe || (mapped_event.exists() && !mapped_event.has_triggered()));
+#endif
       references = refs;
       if (!references.empty())
         references.add_resource_references(PHYSICAL_REGION_REF);
-      termination_event = term_event;
-      trigger_on_unmap = true;
-      wait_for_unmap = wait_for;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent PhysicalRegionImpl::get_mapped_event(void) const
-    //--------------------------------------------------------------------------
-    {
-      return mapped_event;
     }
 
     //--------------------------------------------------------------------------
@@ -2142,13 +2099,32 @@ namespace Legion {
     void PhysicalRegionImpl::get_references(InstanceSet &instances) const
     //--------------------------------------------------------------------------
     {
+      if (mapped_event.exists() && !mapped_event.has_triggered())
+        mapped_event.wait();
       instances = references;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::get_memories(std::set<Memory>& memories) const
+    void PhysicalRegionImpl::get_memories(std::set<Memory>& memories,
+                        bool silence_warnings, const char *warning_string) const
     //--------------------------------------------------------------------------
     {
+      if (mapped_event.exists() && !mapped_event.has_triggered())
+      {
+        if (runtime->runtime_warnings && !silence_warnings)
+          REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_REGION_WAIT, 
+              "Request for 'get_memories' was performed on a "
+              "physical region in task %s (ID %lld) without first waiting "
+              "for the physical region to be valid. Legion is performing "
+              "the wait for you. Warning string: %s", context->get_task_name(), 
+              context->get_unique_id(), (warning_string == NULL) ? 
+              "" : warning_string)
+        if (context != NULL)
+          context->begin_task_wait(false/*from runtime*/);
+        mapped_event.wait();
+        if (context != NULL)
+          context->end_task_wait();
+      }
       for (unsigned idx = 0; idx < references.size(); idx++)
         memories.insert(references[idx].get_memory());
     }
@@ -2205,7 +2181,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PieceIteratorImpl* PhysicalRegionImpl::get_piece_iterator(FieldID fid,
-                                                            bool privilege_only)
+         bool privilege_only, bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
@@ -2213,6 +2189,22 @@ namespace Legion {
                        "Piece iterator construction in task %s on "
                        "PhysicalRegion that does not contain field %d!", 
                        context->get_task_name(), fid)
+      if (mapped_event.exists() && !mapped_event.has_triggered())
+      {
+        if (runtime->runtime_warnings && !silence_warnings)
+          REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_REGION_WAIT, 
+              "Request for 'get_piece_iterator' was performed on a "
+              "physical region in task %s (ID %lld) without first waiting "
+              "for the physical region to be valid. Legion is performing "
+              "the wait for you. Warning string: %s", context->get_task_name(), 
+              context->get_unique_id(), (warning_string == NULL) ? 
+              "" : warning_string)
+        if (context != NULL)
+          context->begin_task_wait(false/*from runtime*/);
+        mapped_event.wait();
+        if (context != NULL)
+          context->end_task_wait();
+      }
       for (unsigned idx = 0; idx < references.size(); idx++)
       {
         const InstanceRef &ref = references[idx];
@@ -2836,7 +2828,7 @@ namespace Legion {
       // Note we use the external wait to be sure 
       // we don't get drafted by the Realm runtime
       ApBarrier previous = Runtime::get_previous_phase(ext_wait_barrier);
-      if (!previous.has_triggered())
+      if (!previous.has_triggered_faultignorant())
       {
         // We can't call external wait directly on the barrier
         // right now, so as a work-around we'll make an event
@@ -10069,7 +10061,7 @@ namespace Legion {
       else
       {
         // No predicate guard
-        if (!ready_event.has_triggered())
+        if (ready_event.exists())
           return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx),requests,
              Runtime::merge_events(NULL, precondition, ready_event), priority));
         return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx), requests, 
@@ -10078,16 +10070,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VariantImpl::dispatch_inline(Processor current, InlineContext *ctx)
+    void VariantImpl::dispatch_inline(Processor current, TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
       const Realm::FunctionPointerImplementation *fp_impl = 
         realm_descriptor.find_impl<Realm::FunctionPointerImplementation>();
 #ifdef DEBUG_LEGION
       assert(fp_impl != NULL);
+      assert(implicit_context != NULL);
 #endif
+      // Save the implicit context here on the stack so we can restore it
+      TaskContext *previous_context = implicit_context;
       RealmFnptr inline_ptr = fp_impl->get_impl<RealmFnptr>();
       (*inline_ptr)(&ctx, sizeof(ctx), user_data, user_data_size, current);
+      // Restore the implicit context back to the previous context
+      implicit_context = previous_context;
     }
 
     //--------------------------------------------------------------------------
@@ -13548,17 +13545,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::unmap_all_regions(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      ctx->unmap_all_regions();
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::fill_fields(Context ctx, const FillLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -14272,40 +14258,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       info->manager->finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
-    Processor Runtime::get_executing_processor(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      Processor result = ctx->get_executing_processor();
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::raise_region_exception(Context ctx, 
-                                         PhysicalRegion region, bool nuclear)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      // TODO: implement this
-      assert(false);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::yield(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context yield");
-      ctx->yield();
     }
 
     //--------------------------------------------------------------------------
@@ -20156,10 +20108,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T, MessageKind MK, VirtualChannelKind VC>
     DistributedCollectable* Runtime::find_or_request_distributed_collectable(
-                                              DistributedID did, RtEvent &ready)
+                                          DistributedID to_find, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
-      did &= LEGION_DISTRIBUTED_ID_MASK;
+      const DistributedID did = LEGION_DISTRIBUTED_ID_FILTER(to_find);
       DistributedCollectable *result = NULL;
       {
         AutoLock d_lock(distributed_collectable_lock);
@@ -20195,7 +20147,7 @@ namespace Legion {
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(did);
+        rez.serialize(to_find);
       }
       find_messenger(target)->send_message(rez, MK, VC, true/*flush*/);
       return result;
@@ -22966,7 +22918,7 @@ namespace Legion {
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
       TopFinishArgs args(top_context);
-      ApEvent pre = top_task->get_task_completion();
+      ApEvent pre = top_task->get_completion_event();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
       // Put the task in the ready queue, make sure that the runtime is all
@@ -23060,7 +23012,7 @@ namespace Legion {
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
       TopFinishArgs args(top_context);
-      ApEvent pre = top_task->get_task_completion();
+      ApEvent pre = top_task->get_completion_event();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
       execution_context = top_task->create_implicit_context();

@@ -479,6 +479,7 @@ namespace Legion {
     public:
       FieldAllocator(void);
       FieldAllocator(const FieldAllocator &allocator);
+      FieldAllocator(FieldAllocator &&allocator);
       ~FieldAllocator(void);
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
@@ -486,6 +487,7 @@ namespace Legion {
       FieldAllocator(Internal::FieldAllocatorImpl *impl);
     public:
       FieldAllocator& operator=(const FieldAllocator &allocator);
+      FieldAllocator& operator=(FieldAllocator &&allocator);
       inline bool operator<(const FieldAllocator &rhs) const;
       inline bool operator==(const FieldAllocator &rhs) const;
     public:
@@ -634,10 +636,12 @@ namespace Legion {
       ArgumentMap(void);
       ArgumentMap(const FutureMap &rhs);
       ArgumentMap(const ArgumentMap &rhs);
+      ArgumentMap(ArgumentMap &&rhs);
       ~ArgumentMap(void);
     public:
       ArgumentMap& operator=(const FutureMap &rhs);
       ArgumentMap& operator=(const ArgumentMap &rhs);
+      ArgumentMap& operator=(ArgumentMap &&rhs);
       inline bool operator==(const ArgumentMap &rhs) const
         { return (impl == rhs.impl); }
       inline bool operator<(const ArgumentMap &rhs) const
@@ -726,6 +730,7 @@ namespace Legion {
     public:
       Predicate(void);
       Predicate(const Predicate &p);
+      Predicate(Predicate &&p);
       explicit Predicate(bool value);
       ~Predicate(void);
     protected:
@@ -735,6 +740,7 @@ namespace Legion {
       explicit Predicate(Internal::PredicateImpl *impl);
     public:
       Predicate& operator=(const Predicate &p);
+      Predicate& operator=(Predicate &&p);
       inline bool operator==(const Predicate &p) const;
       inline bool operator<(const Predicate &p) const;
       inline bool operator!=(const Predicate &p) const;
@@ -1148,6 +1154,7 @@ namespace Legion {
     public:
       Future(void);
       Future(const Future &f);
+      Future(Future &&f);
       ~Future(void);
     private:
       Internal::FutureImpl *impl;
@@ -1162,6 +1169,7 @@ namespace Legion {
       bool operator<(const Future &f) const
         { return impl < f.impl; }
       Future& operator=(const Future &f);
+      Future& operator=(Future &&f);
     public:
       /**
        * Wait on the result of this future.  Return
@@ -1282,6 +1290,7 @@ namespace Legion {
     public:
       FutureMap(void);
       FutureMap(const FutureMap &map);
+      FutureMap(FutureMap &&map);
       ~FutureMap(void);
     private:
       Internal::FutureMapImpl *impl;
@@ -1298,6 +1307,7 @@ namespace Legion {
       inline Future operator[](const DomainPoint &point) const
         { return get_future(point); }
       FutureMap& operator=(const FutureMap &f);
+      FutureMap& operator=(FutureMap &&f);
     public:
       /**
        * Block until we can return the result for the
@@ -2210,6 +2220,7 @@ namespace Legion {
     public:
       PhysicalRegion(void);
       PhysicalRegion(const PhysicalRegion &rhs);
+      PhysicalRegion(PhysicalRegion &&rhs);
       ~PhysicalRegion(void);
     private:
       Internal::PhysicalRegionImpl *impl;
@@ -2218,6 +2229,7 @@ namespace Legion {
       explicit PhysicalRegion(Internal::PhysicalRegionImpl *impl);
     public:
       PhysicalRegion& operator=(const PhysicalRegion &rhs);
+      PhysicalRegion& operator=(PhysicalRegion &&rhs);
       inline bool operator==(const PhysicalRegion &reg) const
         { return (impl == reg.impl); }
       inline bool operator<(const PhysicalRegion &reg) const
@@ -2282,7 +2294,9 @@ namespace Legion {
       /**
        * Return the memories where the underlying physical instances locate.
        */
-      void get_memories(std::set<Memory>& memories) const;
+      void get_memories(std::set<Memory>& memories,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL) const;
       /**
        * Return a list of fields that the physical region contains.
        */
@@ -2720,11 +2734,15 @@ namespace Legion {
     public:
       PieceIterator(void);
       PieceIterator(const PieceIterator &rhs);
+      PieceIterator(PieceIterator &&rhs);
       PieceIterator(const PhysicalRegion &region, FieldID fid,
-                    bool privilege_only);
+                    bool privilege_only,
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL);
       ~PieceIterator(void);
     public:
       PieceIterator& operator=(const PieceIterator &rhs);
+      PieceIterator& operator=(PieceIterator &&rhs);
     public:
       inline bool valid(void) const;
       bool step(void);
@@ -2756,10 +2774,14 @@ namespace Legion {
     public:
       PieceIteratorT(void);
       PieceIteratorT(const PieceIteratorT &rhs);
+      PieceIteratorT(PieceIteratorT &&rhs);
       PieceIteratorT(const PhysicalRegion &region, FieldID fid,
-                     bool privilege_only);
+                     bool privilege_only,
+                     bool silence_warnings = false,
+                     const char *warning_string = NULL);
     public:
       PieceIteratorT<DIM,COORD_T>& operator=(const PieceIteratorT &rhs);
+      PieceIteratorT<DIM,COORD_T>& operator=(PieceIteratorT &&rhs);
     public:
       inline bool step(void);
       inline const Rect<DIM,COORD_T>& operator*(void) const;

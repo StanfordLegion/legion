@@ -508,7 +508,7 @@ if __name__ == '__main__':
         help='Skip certificate checks on downloads.')
     parser.add_argument(
         '--cmake', dest='legion_use_cmake', action='store_true',
-        default=os.environ.get('USE_CMAKE') == 1,
+        default=os.environ.get('USE_CMAKE') == '1',
         help='Use CMake to build Legion.')
     parser.add_argument(
         '--extra', dest='extra_flags', action='append', required=False,
