@@ -685,6 +685,11 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DLegion_BUILD_WARN_AS_ERROR=%s' % ('ON' if env.get('WARN_AS_ERROR','0') == '1' else 'OFF'))
     cmdline.append('-DLegion_MAX_DIM=%s' % env['MAX_DIM'])
     cmdline.append('-DLegion_NETWORKS=%s' % env['REALM_NETWORKS'])
+    if 'EMBED_GASNET' in env:
+        cmdline.append('-DLegion_EMBED_GASNet=ON')
+        cmdline.append('-DGASNet_CONDUIT=' + env['CONDUIT'])
+        if 'EMBED_GASNET_SRC' in env:
+            cmdline.append('-DLegion_EMBED_GASNet_LOCALSRC=' + env['EMBED_GASNET_SRC'])
     cmdline.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
     if 'GPU_ARCH' in env:
         cmdline.append('-DLegion_CUDA_ARCH=%s' % env['GPU_ARCH'])
