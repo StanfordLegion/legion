@@ -7341,7 +7341,6 @@ namespace Legion {
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, diff) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
-      shard_manager->trigger_task_complete(true/*local*/,task_effects_complete);
       // Invalidate any context that we had so that the child
       // operations can begin committing
       std::set<RtEvent> preconditions;
@@ -7349,6 +7348,7 @@ namespace Legion {
                                                          preconditions);
       if (runtime->legion_spy_enabled)
         execution_context->log_created_requirements();
+      shard_manager->trigger_task_complete(true/*local*/,task_effects_complete);
       // See if we need to trigger that our children are complete
       const bool need_commit = execution_context->attempt_children_commit();
       // Make sure all the shards are complete together
