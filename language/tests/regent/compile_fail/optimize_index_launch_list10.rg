@@ -26,6 +26,7 @@ local c = regentlib.c
 
 struct t {
   f: int1d,
+  n: int,
 }
 
 terra e(x : int) : int
@@ -57,25 +58,25 @@ where reads(r, s), writes(r) do
 end
 
 task h(r : region(ispace(int1d), t)) : int
-where reduces +(r) do
+where reduces +(r.n) do
   return 5
 end
 
 task h2(r : region(ispace(int1d), t), s : region(ispace(int1d), t)) : int
-where reduces +(r, s) do
+where reduces +(r.n, s.n) do
   return 5
 end
 
 task h2b(r : region(ispace(int1d), t), s : region(ispace(int1d), t)) : int
-where reduces +(r), reduces *(s) do
+where reduces +(r.n), reduces *(s.n) do
   return 5
 end
 
 task with_partitions(cs : ispace(int1d),
                      r0 : region(ispace(int1d), t),
-                     p0_disjoint : partition(disjoint, r0),
+                     p0_disjoint : partition(disjoint, r0, cs),
                      r1 : region(ispace(int1d), t),
-                     p1_disjoint : partition(disjoint, r1))
+                     p1_disjoint : partition(disjoint, r1, cs))
 where reads(r0, r1), writes(r0, r1) do
 
   -- not optimized: loop-variant argument is (statically) interfering
@@ -91,15 +92,15 @@ task main()
   var r = region(cs, t)
   for i in cs do
     r[i].f = i/2
+    r[i].n = i/2
   end
-  var p_disjoint = partition(disjoint, r, rc)
+  var p_disjoint = partition(equal, r, cs)
   var p_aliased = image(r, p_disjoint, r.f)
   var r0 = p_disjoint[0]
   var r1 = p_disjoint[1]
-  var p0_disjoint = partition(equal, r0, rc)
-  var p1_disjoint = partition(equal, r1, rc)
+  var p0_disjoint = partition(equal, r0, cs)
+  var p1_disjoint = partition(equal, r1, cs)
 
-  with_partitions(ispace(int1d, n), r0, p0_disjoint, r1, p1_disjoint)
+  with_partitions(cs, r0, p0_disjoint, r1, p1_disjoint)
 end
 regentlib.start(main)
-
