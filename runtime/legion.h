@@ -2357,6 +2357,36 @@ namespace Legion {
     }; 
 
     /**
+     * \class ExternalResources
+     * An external resources object stores a collection of physical
+     * regions that were attached together using the same index space
+     * attach operation. It acts as a vector-like container of the
+     * physical regions and ensures that they are detached together.
+     */
+    class ExternalResources : public Unserializable<ExternalResources> {
+    public:
+      ExternalResources(void);
+      ExternalResources(const ExternalResources &rhs);
+      ExternalResources(ExternalResources &&rhs);
+      ~ExternalResources(void);
+    private:
+      Internal::ExternalResourcesImpl *impl;
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      explicit ExternalResources(Internal::ExternalResourcesImpl *impl);
+    public:
+      ExternalResources& operator=(const ExternalResources &rhs);
+      ExternalResources& operator=(ExternalResources &&rhs);
+      inline bool operator==(const ExternalResources &reg) const
+        { return (impl == reg.impl); }
+      inline bool operator<(const ExternalResources &reg) const
+        { return (impl < reg.impl); }
+    public:
+      size_t size(void) const;
+      PhysicalRegion operator[](unsigned index) const;
+    };
+
+    /**
      * \class FieldAccessor
      * A field accessor is a class used to get access to the data 
      * inside of a PhysicalRegion object for a specific field. The
@@ -6414,35 +6444,35 @@ namespace Legion {
        * and the runtime will interpret them as different sub-operations
        * coming from different shards. All the physical regions returned
        * from this method must be detached together as well using the
-       * 'detach_external_resources' method.
+       * 'detach_external_resources' method and cannot be detached
+       * individually using the 'detach_external_resource' method.
        * @param ctx enclosing task context
        * @param launcher the index attach launcher describing the external
        *        resources to be attached
-       * @param regions a vector where the output physical regions (one
-       *        for each input resource) will be stored
        * @param deduplicate_across_shards whether the runtime should check
        *        for duplicate resources across the shards in a control
        *        replicated context, it is illegal to pass in the same
        *        resource to different shards if this is set to false
+       * @return an external resources objects containing the physical
+       *        regions for the attached resources with regions in the
+       *        same order as specified in the launcher
        */
-      void attach_external_resources(Context ctx,
+      ExternalResources attach_external_resources(Context ctx,
                                      const IndexAttachLauncher &launcher,
-                                     std::vector<PhysicalRegion> &regions,
                                      bool deduplicate_across_shards = false);
 
       /**
        * Detach multiple external resources that were all created by 
        * a common call to 'attach_external_resources'. This method is also
        * a "collective" method meaning that different shards in control
-       * replicated contexts are allowed to pass in different physical regions
+       * replicated contexts are allowed to pass in external resources
        * and they will be treated correctly.
        * @param ctx enclosing task context
        * @param regions vector of regions representing an external 
        *        physical resource to detach
        * @return an empty future indicating when the resources are detached
        */
-      Future detach_external_resources(Context ctx,
-                                    const std::vector<PhysicalRegion> &regions);
+      Future detach_external_resources(Context ctx, ExternalResources external);
 
       /**
        * Force progress on unordered operations. After performing one

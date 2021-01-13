@@ -139,6 +139,7 @@ namespace Legion {
   class FutureMap;
   class Predicate;
   class PhysicalRegion;
+  class ExternalResources;
   template<PrivilegeMode,typename,int,typename,typename,bool> 
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
@@ -1377,6 +1378,7 @@ namespace Legion {
     class FutureImpl;
     class FutureMapImpl;
     class PhysicalRegionImpl;
+    class ExternalResourcesImpl;
     class PieceIteratorImpl;
     class GrantImpl;
     class PredicateImpl;
