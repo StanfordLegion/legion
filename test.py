@@ -1011,7 +1011,7 @@ def run_tests(test_modules=None,
         if test_fuzzer:
             with Stage('fuzzer'):
                 run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
-        if test_realm:
+        if test_realm and not test_ctest:
             with Stage('realm'):
                 run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_external:
