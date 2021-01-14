@@ -97,6 +97,7 @@ jobs:
           PATH=$PWD/clang+llvm-6.0.0-x86_64-apple-darwin/bin:$PATH
           export CMAKE_PREFIX_PATH=$PWD/clang+llvm-6.0.0-x86_64-apple-darwin
           export INCLUDE_PATH="$(xcrun --sdk macosx --show-sdk-path)/usr/include"
+          ls -al ${INCLUDE_PATH}
           ./test.py
         env:
           TEST_LEGION_CXX: 0
