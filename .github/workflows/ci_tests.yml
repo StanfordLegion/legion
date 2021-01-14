@@ -52,8 +52,8 @@ jobs:
           free
           pwd
           ${CXX} --version
-	  dpkg -l | grep clang
-	  llvm-config --version || echo no
+          dpkg -l | grep clang
+          llvm-config --version || echo no
       - name: checkout
         uses: actions/checkout@v2
       - name: test
