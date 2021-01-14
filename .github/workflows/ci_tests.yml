@@ -56,9 +56,11 @@ jobs:
           pwd
           ${CXX} --version
           dpkg -l | grep clang
+          dpkg -l | grep llvm
           llvm-config --version || echo no
           sudo apt-get update
           sudo apt-get install -y libclang-6.0-dev
+          sudo apt-get remove clang-8 clang-9
       - name: checkout
         uses: actions/checkout@v2
       - name: test
