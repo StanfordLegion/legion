@@ -2066,7 +2066,7 @@ namespace Legion {
       inline ApEvent& operator=(const ApEvent &rhs) = default;
       inline bool has_triggered_faultignorant(void) const
         { bool poisoned = false; 
-          return has_triggered_faultaware(poisoned) || poisoned; }
+          return has_triggered_faultaware(poisoned); }
       inline void wait_faultignorant(void) const
         { bool poisoned = false; LgEvent::wait_faultaware(poisoned); }
       // TODO: enable this to ensure we are always checking for faults

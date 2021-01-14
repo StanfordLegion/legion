@@ -1853,7 +1853,10 @@ namespace Legion {
       if (!mapped_event.exists() || mapped_event.has_triggered())
       {
         bool poisoned = false;
-        return ready_event.has_triggered_faultaware(poisoned) || poisoned;
+        if (ready_event.has_triggered_faultaware(poisoned) && !poisoned)
+          return true;
+        if (poisoned)
+          implicit_context->raise_poison_exception();
       }
       return valid;
     }

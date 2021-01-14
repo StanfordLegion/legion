@@ -2162,9 +2162,11 @@ namespace Legion {
         ready.subscribe();
         bool poisoned = false;
         if (ready.has_triggered_faultaware(poisoned))
+        {
+          if (poisoned)
+            Internal::implicit_context->raise_poison_exception();
           return true;
-        else if (poisoned)
-          Internal::implicit_context->raise_poison_exception();
+        }
         return false;
       }
       return true; // Empty futures are always ready
