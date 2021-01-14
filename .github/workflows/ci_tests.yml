@@ -97,6 +97,8 @@ jobs:
         uses: actions/checkout@v2
       - name: test
         run: |
+          pwd
+          ls -al
           PATH=$PWD/clang+llvm-6.0.0-x86_64-darwin-apple/bin:$PATH
           which clang
           which llvm-config
