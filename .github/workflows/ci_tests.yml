@@ -52,6 +52,8 @@ jobs:
           free
           pwd
           ${CXX} --version
+	  dpkg -l | grep clang
+	  llvm-config --version || echo no
       - name: checkout
         uses: actions/checkout@v2
       - name: test
@@ -67,6 +69,7 @@ jobs:
     env:
       CXX: clang++
       CXXFLAGS: "-std=c++11"
+    if: false
     steps:
       - name: system info
         run: |
