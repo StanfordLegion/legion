@@ -565,7 +565,7 @@ function base.find_task_privileges(region_type, task)
     if privilege ~= "none" then
       fields_by_mode[mode][field_path] = true
       if not min_field_index_by_mode[mode] then
-        min_field_index_by_mode[mode] = field_id
+        min_field_index_by_mode[mode] = i
       end
       field_type_by_field[field_path] = field_type
     end
