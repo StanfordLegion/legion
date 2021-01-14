@@ -54,8 +54,8 @@ jobs:
           ${CXX} --version
           dpkg -l | grep clang
           llvm-config --version || echo no
-          apt-get update
-          apt-get install -y libclang-6.0-dev
+          sudo apt-get update
+          sudo apt-get install -y libclang-6.0-dev
       - name: checkout
         uses: actions/checkout@v2
       - name: test
