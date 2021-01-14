@@ -602,13 +602,13 @@ class Privilege(object):
                         ' '.join(self.fields), ' '.join(fspace.keys())))
         fields = fspace.keys() if self.fields is None else self.fields
         if self.reduce:
-            redop_ids = {}
-            for field_name in fields:
+            redop_ids = collections.OrderedDict()
+            for i, field_name in enumerate(fields):
                 redop_id = self._legion_redop_id(fspace.field_types[field_name])
                 if redop_id not in redop_ids:
                     redop_ids[redop_id] = []
                 redop_ids[redop_id].append(field_name)
-            return [(self, None, redop_id, redop_ids[redop_id]) for redop_id in sorted(redop_ids.keys())]
+            return [(self, None, redop_id, redop_fields) for redop_id, redop_fields in redop_ids.items()]
         else:
             return [(self, self._legion_privilege(), None, fields if self.read or self.write or self.reduce else [])]
 
