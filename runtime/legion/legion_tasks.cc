@@ -4828,6 +4828,15 @@ namespace Legion {
       return result;
     } 
 
+    //--------------------------------------------------------------------------
+    /*static*/ void SingleTask::handle_deferred_task_complete(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferTriggerTaskCompleteArgs *targs =
+        (const DeferTriggerTaskCompleteArgs*)args;
+      targs->task->trigger_task_complete();
+    }
+
     /////////////////////////////////////////////////////////////
     // Multi Task 
     /////////////////////////////////////////////////////////////
@@ -7150,7 +7159,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardTask::ShardTask(Runtime *rt, ShardManager *manager,
                          ShardID id, Processor proc)
-      : SingleTask(rt), shard_id(id)
+      : SingleTask(rt), shard_id(id), all_shards_complete(false)
     //--------------------------------------------------------------------------
     {
       activate_single();
@@ -7335,6 +7344,23 @@ namespace Legion {
     void ShardTask::trigger_task_complete(void)
     //--------------------------------------------------------------------------
     {
+      // We need to ensure that each shard has gotten this call to ensure that
+      // all the child operations are done and have propagated all their context
+      // information back to us before we go about invalidating our contexts
+      if (!all_shards_complete)
+      {
+        Runtime::phase_barrier_arrive(shard_barrier, 1/*false*/);
+        const RtEvent shards_complete = shard_barrier;
+        Runtime::advance_barrier(shard_barrier);
+        all_shards_complete = true;
+        if (!shards_complete.has_triggered())
+        {
+          DeferTriggerTaskCompleteArgs args(this);
+          runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, shards_complete);
+          return;
+        }
+      }
       // First do the normal clean-up operations
       // Remove profiling our guard and trigger the profiling event if necessary
       int diff = -1; // need this dumbness for PGI
@@ -7348,7 +7374,10 @@ namespace Legion {
                                                          preconditions);
       if (runtime->legion_spy_enabled)
         execution_context->log_created_requirements();
+      const RtEvent shard_event =
       shard_manager->trigger_task_complete(true/*local*/,task_effects_complete);
+      if (shard_event.exists())
+        preconditions.insert(shard_event);
       // See if we need to trigger that our children are complete
       const bool need_commit = execution_context->attempt_children_commit();
       // Make sure all the shards are complete together

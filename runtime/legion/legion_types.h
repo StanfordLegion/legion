@@ -350,6 +350,7 @@ namespace Legion {
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
       LG_DEFER_LAUNCH_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
+      LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID,
       LG_DEFER_FIND_COPY_PRE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_DEFER_REDUCTION_VIEW_TASK_ID,
@@ -473,6 +474,7 @@ namespace Legion {
         "Defer Task Perform Mapping",                             \
         "Defer Task Launch",                                      \
         "Handle Mapping Misspeculation",                          \
+        "Defer Trigger Task Complete",                            \
         "Defer Find Copy Preconditions",                          \
         "Defer Materialized View Registration",                   \
         "Defer Reduction View Registration",                      \

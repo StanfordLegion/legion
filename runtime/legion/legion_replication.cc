@@ -8535,7 +8535,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::trigger_task_complete(bool local, ApEvent shard_complete) 
+    RtEvent ShardManager::trigger_task_complete(bool local, ApEvent effects) 
     //--------------------------------------------------------------------------
     {
       bool notify = false;
@@ -8555,8 +8555,8 @@ namespace Legion {
           assert(trigger_remote_complete <= remote_constituents);
 #endif
         }
-        if (shard_complete.exists())
-          shard_effects.insert(shard_complete);
+        if (effects.exists())
+          shard_effects.insert(effects);
         notify = (trigger_local_complete == local_shards.size()) &&
                  (trigger_remote_complete == remote_constituents);
       }
@@ -8566,10 +8566,13 @@ namespace Legion {
           Runtime::merge_events(NULL, shard_effects);
         if (original_task == NULL)
         {
+          const RtUserEvent done_event = Runtime::create_rt_user_event();
           Serializer rez;
           rez.serialize(repl_id);
           rez.serialize(all_shard_effects);
+          rez.serialize(done_event);
           runtime->send_replicate_trigger_complete(owner_space, rez);
+          return done_event;
         }
         else
         {
@@ -8580,19 +8583,21 @@ namespace Legion {
           // the tree or report leaks and duplicates of resources.
           // All the shards have the same set so we only have to do this
           // for one of the shards.
-          std::set<RtEvent> applied;
+          std::set<RtEvent> applied_events;
           if (original_task->is_top_level_task())
-            local_shards[0]->report_leaks_and_duplicates(applied);
+            local_shards[0]->report_leaks_and_duplicates(applied_events);
           else
             local_shards[0]->return_resources(
-                original_task->get_context(), applied); 
-          if (!applied.empty())
-            original_task->complete_execution(Runtime::merge_events(applied));
-          else
-            original_task->complete_execution();
+                original_task->get_context(), applied_events); 
+          RtEvent applied_event;
+          if (!applied_events.empty())
+            applied_event = Runtime::merge_events(applied_events);
+          original_task->complete_execution(applied_event);
           original_task->trigger_children_complete(all_shard_effects);
+          return applied_event;
         }
       }
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -9248,8 +9253,11 @@ namespace Legion {
       derez.deserialize(repl_id);
       ApEvent all_shards_done;
       derez.deserialize(all_shards_done);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->trigger_task_complete(false/*local*/, all_shards_done);
+      Runtime::trigger_event(done_event,
+          manager->trigger_task_complete(false/*local*/, all_shards_done));
     }
 
     //--------------------------------------------------------------------------

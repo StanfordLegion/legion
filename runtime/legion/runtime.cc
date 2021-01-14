@@ -28934,6 +28934,11 @@ namespace Legion {
             targs->task->handle_misspeculation();
             break;
           }
+        case LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID:
+          {
+            SingleTask::handle_deferred_task_complete(args);
+            break;
+          }
         case LG_DEFER_FIND_COPY_PRE_TASK_ID:
           {
             InstanceView::handle_view_find_copy_pre_request(args, runtime);

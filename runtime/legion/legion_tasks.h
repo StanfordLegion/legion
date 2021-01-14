@@ -419,6 +419,17 @@ namespace Legion {
       public:
         SingleTask *const task;
       };
+      struct DeferTriggerTaskCompleteArgs :
+        public LgTaskArgs<DeferTriggerTaskCompleteArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID;
+      public:
+        DeferTriggerTaskCompleteArgs(SingleTask *t)
+          : LgTaskArgs<DeferTriggerTaskCompleteArgs>(t->get_unique_op_id()),
+            task(t) { }
+      public:
+        SingleTask *const task;
+      };
     public:
       SingleTask(Runtime *rt);
       virtual ~SingleTask(void);
@@ -550,6 +561,8 @@ namespace Legion {
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
                                                             bool inline_task);
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx);
+    public:
+      static void handle_deferred_task_complete(const void *args);
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool>                           virtual_mapped;
@@ -1037,6 +1050,7 @@ namespace Legion {
     protected:
       UniqueID remote_owner_uid;
       RtBarrier shard_barrier;
+      bool all_shards_complete;
     };
 
     /**

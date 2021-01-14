@@ -11378,7 +11378,7 @@ namespace Legion {
       }
       else
         applied_events.insert(broadcast_events.begin(), broadcast_events.end());
-      receive_replicate_created_region_contexts(ctx, created_state, 
+      receive_replicate_created_region_contexts(ctx, created_state,
                         applied_events, num_shards, source_context);
     }
 
