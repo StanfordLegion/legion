@@ -48,6 +48,7 @@ jobs:
       CLANG: clang-6.0
       LLVM_CONFIG: llvm-config-6.0
       USE_CUDA: 0
+    if: false
     steps:
       - name: system info
         run: |
@@ -76,9 +77,12 @@ jobs:
     name: Test macos regent
     runs-on: macos-10.15
     env:
-      CXX: clang++
+      CC: clang-6.0
+      CXX: clang++-6.0
       CXXFLAGS: "-std=c++11"
-    if: false
+      CLANG: clang-6.0
+      LLVM_CONFIG: llvm-config-6.0
+      USE_CUDA: 0
     steps:
       - name: system info
         run: |
@@ -86,16 +90,16 @@ jobs:
           vm_stat
           pwd
           ${CXX} --version
-          mkdir -p clang9
-          cd clang9
-          curl -L -O http://releases.llvm.org/9.0.0/clang+llvm-9.0.0-x86_64-darwin-apple.tar.xz
-          tar xf clang+llvm-9.0.0-x86_64-darwin-apple.tar.xz
+          curl -L -O http://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
+          tar xf clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
+          ln -s clang+llvm-6.0.0-x86_64-apple-darwin/bin/llvm-config llvm-config-6.0
+          ln -s clang+llvm-6.0.0-x86_64-apple-darwin/bin/clang clang-6.0
       - name: checkout
         uses: actions/checkout@v2
       - name: test
         run: |
-          PATH=`pwd`/clang9/clang+llvm-9.0.0-x86_64-darwin-apple:$PATH
-          export CMAKE_PREFIX_PATH=clang9/clang+llvm-9.0.0-x86_64-darwin-apple
+          PATH=$PWD/clang+llvm-6.0.0-x86_64-darwin-apple/bin:$PATH
+          export CMAKE_PREFIX_PATH=$PWD/clang+llvm-6.0.0-x86_64-apple-darwin
           ${CXX} --version
           which llvm-config
           ./test.py
