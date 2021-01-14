@@ -1,7 +1,14 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 20.12.0 (December 28, 2020)
+Version ??.??.? (???? ??, ????)
+  * Regent
+    - Breaking change to the Regent calling convention: reductions are
+        now aggregated into region requirements and sorted by the
+        index of the first field in the field space among the set of
+        fields for each reduction.
+
+version 20.12.0 (December 28, 2020)
   * Build
     - Legion and Realm now require a compiler with (at least) c++11 support
     - Python scripts (e.g. legion_prof and legion_spy) require Python 3.5
