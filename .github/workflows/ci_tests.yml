@@ -98,6 +98,8 @@ jobs:
           export CMAKE_PREFIX_PATH=$PWD/clang+llvm-6.0.0-x86_64-apple-darwin
           export INCLUDE_PATH="$(xcrun --sdk macosx --show-sdk-path)/usr/include"
           ls -al ${INCLUDE_PATH}
+          export SDKROOT=`xcrun --show-sdk-path`
+          echo ${SDKROOT}
           ./test.py
         env:
           TEST_LEGION_CXX: 0
