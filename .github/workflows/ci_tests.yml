@@ -45,6 +45,9 @@ jobs:
     runs-on: ubuntu-18.04
     env:
       CXX: g++
+      CLANG: clang-6.0
+      LLVM_CONFIG: llvm-config-6.0
+      USE_CUDA: 0
     steps:
       - name: system info
         run: |
