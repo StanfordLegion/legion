@@ -88,28 +88,15 @@ jobs:
         run: |
           uname -a
           vm_stat
-          pwd
-          curl -L -O http://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
-          tar xf clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
-          ln -s clang+llvm-6.0.0-x86_64-apple-darwin/bin/llvm-config llvm-config-6.0
-          ln -s clang+llvm-6.0.0-x86_64-apple-darwin/bin/clang clang-6.0
-          pwd
-          ls -al
       - name: checkout
         uses: actions/checkout@v2
       - name: test
         run: |
-          pwd
-          ls -al
           curl -L -O http://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
           tar xf clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
-          ls -al
           PATH=$PWD/clang+llvm-6.0.0-x86_64-apple-darwin/bin:$PATH
-          which clang
-          which llvm-config
           export CMAKE_PREFIX_PATH=$PWD/clang+llvm-6.0.0-x86_64-apple-darwin
-          ${CXX} --version
-          which llvm-config
+          export INCLUDE_PATH="$(xcrun --sdk macosx --show-sdk-path)/usr/include"
           ./test.py
         env:
           TEST_LEGION_CXX: 0
