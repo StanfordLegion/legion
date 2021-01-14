@@ -77,11 +77,11 @@ jobs:
     name: Test macos regent
     runs-on: macos-10.15
     env:
-      CC: clang-6.0
-      CXX: clang++-6.0
+      CC: clang
+      CXX: clang++
       CXXFLAGS: "-std=c++11"
-      CLANG: clang-6.0
-      LLVM_CONFIG: llvm-config-6.0
+      CLANG: clang
+      LLVM_CONFIG: llvm-config
       USE_CUDA: 0
     steps:
       - name: system info
@@ -98,6 +98,8 @@ jobs:
       - name: test
         run: |
           PATH=$PWD/clang+llvm-6.0.0-x86_64-darwin-apple/bin:$PATH
+          which clang
+          which llvm-config
           export CMAKE_PREFIX_PATH=$PWD/clang+llvm-6.0.0-x86_64-apple-darwin
           ${CXX} --version
           which llvm-config
