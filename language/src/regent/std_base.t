@@ -521,6 +521,7 @@ local function find_field_privilege(privileges, coherence_modes, flags,
     field_privilege = "reads_writes"
   end
 
+  local redop_id = false
   if base.is_reduction_op(field_privilege) then
     local op = base.get_reduction_op(field_privilege)
     if not (base.reduction_op_ids[op] and base.reduction_op_ids[op][field_type]) then
@@ -528,9 +529,12 @@ local function find_field_privilege(privileges, coherence_modes, flags,
       -- have made it past the parser anyway.
       assert(false)
     end
+    -- Hack: This is a way to bucket reductions by redop ID and make
+    -- sure they sort deterministically.
+    redop_id = base.reduction_op_ids[op][field_type]
   end
 
-  return field_privilege, coherence_mode, flag
+  return field_privilege, redop_id, coherence_mode, flag
 end
 
 function base.find_task_privileges(region_type, task)
@@ -554,9 +558,9 @@ function base.find_task_privileges(region_type, task)
   local field_type_by_field = data.newmap()
   for i, field_path in ipairs(field_paths) do
     local field_type = field_types[i]
-    local privilege, coherence, flag = find_field_privilege(
+    local privilege, redop_id, coherence, flag = find_field_privilege(
       privileges, coherence_modes, flags, region_type, field_path, field_type)
-    local mode = data.newtuple(privilege, coherence, flag)
+    local mode = data.newtuple(privilege, redop_id, coherence, flag)
     if privilege ~= "none" then
       fields_by_mode[mode][field_path] = true
       field_type_by_field[field_path] = field_type
@@ -581,29 +585,34 @@ function base.find_task_privileges(region_type, task)
         return true
       elseif py then
         return false
+      elseif x[2] and y[2] and x[2] ~= y[2] then
+        -- Reductions are relatively ordered by their redop IDs.
+        return x[2] < y[2]
       elseif x[1] ~= y[1] then
-        return x[1] < y[1]
+        -- There are no other privileges.
+        assert(false)
+        -- return x[1] < y[1]
       end
 
-      local cx = coherence_order[x[2]]
-      local cy = coherence_order[y[2]]
+      local cx = coherence_order[x[3]]
+      local cy = coherence_order[y[3]]
       if cx and cy then
         return cx < cy
       elseif cx then
         return true
       elseif cy then
         return false
-      elseif x[2] ~= y[2] then
-        return x[2] < y[2]
+      elseif x[3] ~= y[3] then
+        return x[3] < y[3]
       end
 
-      return x[3] < y[3]
+      return x[4] < y[4]
     end)
 
   local privilege_index = data.newmap()
   local privilege_next_index = 1
   for _, mode in ipairs(modes) do
-    local privilege, coherence, flag = unpack(mode)
+    local privilege, redop_id, coherence, flag = unpack(mode)
     for _, field_path in fields_by_mode[mode]:keys() do
       local field_type = field_type_by_field[field_path]
       local index = privilege_index[mode]
@@ -611,11 +620,7 @@ function base.find_task_privileges(region_type, task)
         index = privilege_next_index
         privilege_next_index = privilege_next_index + 1
 
-        -- Reduction privileges cannot be grouped, because the Legion
-        -- runtime does not know how to handle multi-field reductions.
-        if not base.is_reduction_op(privilege) then
-          privilege_index[mode] = index
-        end
+        privilege_index[mode] = index
 
         grouped_privileges:insert(privilege)
         grouped_coherence_modes:insert(coherence)
