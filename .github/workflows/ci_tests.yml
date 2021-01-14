@@ -93,12 +93,16 @@ jobs:
           tar xf clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
           ln -s clang+llvm-6.0.0-x86_64-apple-darwin/bin/llvm-config llvm-config-6.0
           ln -s clang+llvm-6.0.0-x86_64-apple-darwin/bin/clang clang-6.0
+          pwd
+          ls -al
       - name: checkout
         uses: actions/checkout@v2
       - name: test
         run: |
           pwd
           ls -al
+          curl -L -O http://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
+          tar xf clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
           PATH=$PWD/clang+llvm-6.0.0-x86_64-darwin-apple/bin:$PATH
           which clang
           which llvm-config
