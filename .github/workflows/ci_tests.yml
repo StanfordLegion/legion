@@ -89,7 +89,6 @@ jobs:
           uname -a
           vm_stat
           pwd
-          ${CXX} --version
           curl -L -O http://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
           tar xf clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
           ln -s clang+llvm-6.0.0-x86_64-apple-darwin/bin/llvm-config llvm-config-6.0
