@@ -131,21 +131,15 @@ variables:
 .gasnet1_mpi: &gasnet1_mpi
   REALM_NETWORKS: "gasnet1"
   CONDUIT: "mpi"
-  # can't change the default until the ucx-conduit/mpi-interop issue is resolved
-  GASNET_VERSION: "GASNet-2020.11.0-memory_kinds_prototype"
 .gasnetex_mpi: &gasnetex_mpi
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "mpi"
-  # can't change the default until the ucx-conduit/mpi-interop issue is resolved
-  GASNET_VERSION: "GASNet-2020.11.0-memory_kinds_prototype"
 .gasnetex_mpi_debug: &gasnetex_mpi_debug
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "mpi"
   GASNET_DEBUG: "1"
   # GASNet headers are not guaranteed to be warning-free in debug mode
   WARN_AS_ERROR: "0"
-  # can't change the default until the ucx-conduit/mpi-interop issue is resolved
-  GASNET_VERSION: "GASNet-2020.11.0-memory_kinds_prototype"
 .gasnetex_mpi_nightly: &gasnetex_mpi_nightly
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "mpi"
