@@ -68,6 +68,7 @@ local default_options = {
   ["skip-empty-tasks"] = false,
   ["vectorize"] = true,
   ["offline"] = not data.is_luajit(),
+  ["separate"] = false,
 
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,
