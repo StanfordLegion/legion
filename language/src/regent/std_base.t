@@ -555,6 +555,7 @@ function base.find_task_privileges(region_type, task)
     region_type:fspace())
 
   local fields_by_mode = data.new_recursive_map(1)
+  local min_field_index_by_mode = data.newmap()
   local field_type_by_field = data.newmap()
   for i, field_path in ipairs(field_paths) do
     local field_type = field_types[i]
@@ -563,6 +564,9 @@ function base.find_task_privileges(region_type, task)
     local mode = data.newtuple(privilege, redop_id, coherence, flag)
     if privilege ~= "none" then
       fields_by_mode[mode][field_path] = true
+      if not min_field_index_by_mode[mode] then
+        min_field_index_by_mode[mode] = i
+      end
       field_type_by_field[field_path] = field_type
     end
   end
@@ -586,12 +590,13 @@ function base.find_task_privileges(region_type, task)
       elseif py then
         return false
       elseif x[2] and y[2] and x[2] ~= y[2] then
-        -- Reductions are relatively ordered by their redop IDs.
-        return x[2] < y[2]
+        -- Reductions are relatively ordered by the field index (i.e.,
+        -- the index of the first field that appears in the field
+        -- space of the region).
+        return min_field_index_by_mode[x] < min_field_index_by_mode[y]
       elseif x[1] ~= y[1] then
         -- There are no other privileges.
         assert(false)
-        -- return x[1] < y[1]
       end
 
       local cx = coherence_order[x[3]]
