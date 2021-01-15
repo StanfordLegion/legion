@@ -13017,7 +13017,10 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id,
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
-        complete_operation();
+        if (!completion_preconditions.empty())
+          complete_operation(Runtime::merge_events(completion_preconditions));
+        else
+          complete_operation();
       }
     }
 
@@ -13278,7 +13281,10 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id,
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
-        complete_operation();
+        if (!completion_preconditions.empty())
+          complete_operation(Runtime::merge_events(completion_preconditions));
+        else
+          complete_operation();
       }
     }
 
