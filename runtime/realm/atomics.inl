@@ -151,7 +151,8 @@ namespace Realm {
 #ifdef REALM_USE_STD_ATOMIC
     // do we need a relaxed version of this?
     return value.compare_exchange_strong(expected, newval,
-                                         std::memory_order_acq_rel);
+                                         std::memory_order_acq_rel,
+                                         std::memory_order_acquire);
 #else
     T oldval = __sync_val_compare_and_swap(&value, expected, newval);
     if(oldval == expected) {

@@ -178,7 +178,7 @@
         typedef __declspec(align(bytes)) origtype newtype
 #else
   #define REALM_ALIGNED_TYPE_CONST(newtype, origtype, bytes) \
-        typedef origtype __attribute__((aligned(bytes))) newtype
+        typedef origtype __attribute__((aligned((bytes)+0))) newtype
 #endif
 
 // REALM_HAVE_CXXABI_H - defined if <cxxabi.h> is available
