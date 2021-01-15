@@ -1483,8 +1483,7 @@ namespace Legion {
         // to ensuring that fence operations are working correctly in the
         // parent context. If not triggered, then defer this until it does.
         // Inner task completion also relies upon this to work correctly
-        bool do_not_care;
-        if (!completion_event.has_triggered_faultaware(do_not_care))
+        if (!completion_event.has_triggered_faultignorant())
         {
           DeferredCommitArgs args(this, do_deactivate);
           runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
@@ -14630,7 +14629,10 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id,
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
-        complete_operation();
+        if (!completion_preconditions.empty())
+          complete_operation(Runtime::merge_events(completion_preconditions));
+        else
+          complete_operation();
       }
     }
 
@@ -14992,7 +14994,10 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id,
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
-        complete_operation();
+        if (!completion_preconditions.empty())
+          complete_operation(Runtime::merge_events(completion_preconditions));
+        else
+          complete_operation();
       }
     }
 

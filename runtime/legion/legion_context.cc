@@ -2206,9 +2206,11 @@ namespace Legion {
       const ApEvent mapped_event = Runtime::merge_events(NULL, mapped_events);
       bool poisoned = false;
       if (mapped_event.has_triggered_faultaware(poisoned))
+      {
+        if (poisoned)
+          raise_poison_exception();
         return;
-      if (poisoned)
-        raise_poison_exception();
+      }
       begin_task_wait(true/*from runtime*/);
       mapped_event.wait_faultaware(poisoned);
       if (poisoned)
@@ -7972,18 +7974,20 @@ namespace Legion {
         // because we can't test if they are memoizing or not
         // Their 'get_memoizable' method will always return NULL
         bool poisoned = false;
-        if (current_execution_fence_event.has_triggered_faultaware(poisoned) &&
-            !op->is_internal_op())
+        if (current_execution_fence_event.has_triggered_faultaware(poisoned))
         {
-          // We can only do this optimization safely if we're not 
-          // recording a physical trace, otherwise the physical
-          // trace needs to see this dependence
-          Memoizable *memo = op->get_memoizable();
-          if ((memo == NULL) || !memo->is_recording())
-            current_execution_fence_event = ApEvent::NO_AP_EVENT;
+          if (poisoned)
+            raise_poison_exception();
+          if (!op->is_internal_op())
+          {
+            // We can only do this optimization safely if we're not 
+            // recording a physical trace, otherwise the physical
+            // trace needs to see this dependence
+            Memoizable *memo = op->get_memoizable();
+            if ((memo == NULL) || !memo->is_recording())
+              current_execution_fence_event = ApEvent::NO_AP_EVENT;
+          }
         }
-        if (poisoned)
-          raise_poison_exception();
         return current_execution_fence_event;
       }
       return ApEvent::NO_AP_EVENT;
@@ -10004,6 +10008,8 @@ namespace Legion {
       bool poisoned = false;
       if (!child_done.has_triggered_faultaware(poisoned))
         child_done.wait_faultaware(poisoned);
+      if (poisoned)
+        raise_poison_exception();
       return true;
     } 
 

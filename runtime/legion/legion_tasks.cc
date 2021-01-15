@@ -4486,7 +4486,7 @@ namespace Legion {
       {
         bool poisoned = false;
         if (start_condition.exists() && 
-            !start_condition.has_triggered_faultaware(poisoned) && !poisoned)
+            !start_condition.has_triggered_faultaware(poisoned))
           start_condition.wait_faultaware(poisoned);
         if (poisoned)
           execution_context->raise_poison_exception();
