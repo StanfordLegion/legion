@@ -28,7 +28,8 @@ def load_json_config(filename):
 os_name = platform.system()
 
 # Find Regent.
-regent_dir = os.path.dirname(os.path.realpath(__file__))
+regent_exe = os.path.realpath(__file__)
+regent_dir = os.path.dirname(regent_exe)
 terra_dir = os.path.join(regent_dir, 'terra')
 
 # Find Legion (in the environment, or relative to Regent).
@@ -123,6 +124,7 @@ def regent(args, env={}, cwd=None, **kwargs):
     python_path.append(python_dir)
 
     terra_env = {
+        'REGENT': regent_exe,
         'TERRA_PATH': ';'.join(terra_path),
         LD_LIBRARY_PATH: ':'.join(lib_path),
         'INCLUDE_PATH': ';'.join(include_path),
