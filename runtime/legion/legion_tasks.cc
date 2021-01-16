@@ -4255,11 +4255,14 @@ namespace Legion {
         task_launch_event = variant->dispatch_task(launch_processor, this,
                             execution_context, start_condition, true_guard,
                             task_priority, profiling_requests);
-      if (chain_precondition.exists())
-        Runtime::trigger_event(NULL, chain_task_termination,
-            Runtime::merge_events(NULL, chain_precondition, task_launch_event));
-      else
-        Runtime::trigger_event(NULL, chain_task_termination, task_launch_event);
+      if (chain_task_termination.exists())
+      {
+        if (chain_precondition.exists())
+          Runtime::trigger_event(NULL, chain_task_termination,
+              Runtime::merge_events(NULL, chain_precondition, task_launch_event));
+        else
+          Runtime::trigger_event(NULL, chain_task_termination, task_launch_event);
+      }
       // Finally if this is a predicated task and we have a speculative
       // guard then we need to launch a meta task to handle the case
       // where the task misspeculates
