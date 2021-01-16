@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2020 Stanford University, NVIDIA Corporation
+# Copyright 2021 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -154,6 +154,11 @@ legion_dimension_kind_t = {
     27 : 'OUTER_DIM_R',
 }
 
+request = {
+    0 : 'fill',
+    1 : 'reduc',
+    2 : 'copy',
+}
 
 # Micro-seconds per pixel
 US_PER_PIXEL = 100
@@ -1200,7 +1205,7 @@ class Variant(StatObject):
         self.color = None
 
     def __hash__(self):
-        return hash(self.variant_id)
+        return hash(str(self))
 
     def __eq__(self, other):
         return self.variant_id == other.variant_id
@@ -1223,7 +1228,10 @@ class Variant(StatObject):
             if self.name != None and self.name != self.task_kind.name:
                 title += ' ['+self.name+']'
         else:
-            title = self.name
+            if self.name != None:
+                title = self.name
+            else:
+                title = ""
         return title
 
 class Base(object):
@@ -1639,9 +1647,27 @@ class UserMarker(Base, TimeRange, HasNoDependencies):
     def __repr__(self):
         return 'User Marker "'+self.name+'"'
 
+class CopyInfo(object):
+    __slots__ = [
+        'src_inst', 'dst_inst', 'fevent', 'num_fields', 'request_type', 'num_hops'
+        ]
+    def __init__(self, src_inst, dst_inst, fevent, num_fields, request_type, num_hops):
+        self.src_inst = src_inst
+        self.dst_inst = dst_inst
+        self.fevent = fevent
+        self.num_fields = num_fields
+        self.request_type = request_type
+        self.num_hops = num_hops
+
+    def get_short_text(self):
+        return 'src_inst=%s, dst_inst=%s, fields=%s, type=%s, hops=%s' % (hex(self.src_inst), hex(self.dst_inst), self.num_fields, request[self.request_type], self.num_hops)
+
+    def __repr__(self):
+        return self.get_short_text()
+
 class Copy(Base, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['src', 'dst', 'size', 'chan']
-    def __init__(self, src, dst, initiation_op, size, create, ready, start, stop):
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['src', 'dst', 'size', 'chan', 'fevent', 'src_inst', 'dst_inst', 'num_requests', 'copy_info']
+    def __init__(self, src, dst, initiation_op, size, create, ready, start, stop, fevent, num_requests):
         Base.__init__(self)
         HasInitiationDependencies.__init__(self, initiation_op)
         TimeRange.__init__(self, create, ready, start, stop)
@@ -1649,6 +1675,12 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
         self.dst = dst
         self.size = size
         self.chan = None
+        self.fevent = fevent
+        self.num_requests = num_requests
+        self.copy_info = list()
+
+    def add_copy_info(self, entry):
+        self.copy_info.append(entry)
 
     def get_owner(self):
         return self.chan
@@ -1658,7 +1690,12 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
         return self.initiation_op.get_color()
 
     def __repr__(self):
-        return 'Copy size='+str(self.size)
+        val =  'copy size='+str(self.size) + ', num requests=' + str(len(self.copy_info))
+        cnt = 0
+        for node in self.copy_info:
+            val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
+            cnt = cnt+1
+        return val
 
     def get_unique_tuple(self):
         assert self.chan is not None
@@ -1941,8 +1978,8 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
                     output_str = output_str + "["
                     output_str = output_str + legion_dimension_kind_t[self.dim_order_desc[pos]]
                     output_str = output_str +  "]"
-                    if (pos+1)%4 == 0 and pos != dim_order:
-                        output_str = output_str+ "$"
+                    if (pos+1)%4 == 0 and pos != len(self.dim_order_desc)-1:
+                        output_str = output_str + "$"
             else:
                 if aos == True:
                     output_str = output_str + "[Array-of-structs (AOS)]"
@@ -2412,7 +2449,7 @@ class State(object):
         'prof_uid_map', 'multi_tasks', 'first_times', 'last_times',
         'last_time', 'mapper_call_kinds', 'mapper_calls', 'runtime_call_kinds', 
         'runtime_calls', 'instances', 'index_spaces', 'partitions', 'logical_regions', 
-        'field_spaces', 'fields', 'has_spy_data', 'spy_state', 'callbacks'
+        'field_spaces', 'fields', 'has_spy_data', 'spy_state', 'callbacks', 'copy_map'
     ]
     def __init__(self):
         self.max_dim = 3
@@ -2440,6 +2477,7 @@ class State(object):
         self.logical_regions = {}
         self.field_spaces = {}
         self.fields = {}
+        self.copy_map = {}
         self.has_spy_data = False
         self.spy_state = None
         self.callbacks = {
@@ -2483,7 +2521,8 @@ class State(object):
             "PhysicalInstLayoutDesc": self.log_physical_inst_layout_desc,
             "PhysicalInstDimOrderDesc": self.log_physical_inst_layout_dim_desc,
             "IndexSpaceSizeDesc": self.log_index_space_size_desc,
-            "MaxDimDesc": self.log_max_dim
+            "MaxDimDesc": self.log_max_dim,
+            "CopyInstInfo": self.log_copy_inst_info
             #"UserInfo": self.log_user_info
         }
 
@@ -2502,7 +2541,6 @@ class State(object):
     def log_index_space_desc(self, unique_id, name):
         index_space = self.find_index_space(unique_id)
         index_space.set_name(name)
-        repr(index_space)
 
     def log_logical_region_desc(self, ispace_id, fspace_id, tree_id, name):
         logical_region = self.create_logical_region(ispace_id, fspace_id, tree_id, name)
@@ -2591,17 +2629,28 @@ class State(object):
         proc = self.find_processor(proc_id)
         proc.add_task(meta)
 
+    def add_copy_map(self,fevent,copy):
+        key = fevent
+        if key not in self.copy_map:
+            self.copy_map[key] = copy
+
     def log_copy_info(self, op_id, src, dst, size,
-                      create, ready, start, stop):
+                      create, ready, start, stop, fevent, num_requests):
         op = self.find_op(op_id)
         src = self.find_memory(src)
         dst = self.find_memory(dst)
-        copy = self.create_copy(src, dst, op, size, create, ready, start, stop)
+        copy = self.create_copy(src, dst, op, size, create, ready, start, stop, fevent, num_requests)
+        self.add_copy_map(fevent,copy)
         if stop > self.last_time:
             self.last_time = stop
         channel = self.find_channel(src, dst)
         channel.add_copy(copy)
- 
+
+    def log_copy_inst_info(self, op_id, src_inst, dst_inst, fevent, num_fields, request_type, num_hops):
+        cpy = self.find_copy(fevent)
+        entry = self.create_copy_inst_info(src_inst, dst_inst, fevent, num_fields, request_type, num_hops)
+        cpy.add_copy_info(entry)
+
     def log_fill_info(self, op_id, dst, create, ready, start, stop):
         op = self.find_op(op_id)
         dst = self.find_memory(dst)
@@ -2827,6 +2876,12 @@ class State(object):
             self.prof_uid_map[op.prof_uid] = op
         return self.operations[op_id]
 
+    def find_copy(self,fevent):
+        key = fevent
+        if key not in self.copy_map:
+            assert False
+        return self.copy_map[key]
+
     def find_task(self, op_id, variant, create=None, ready=None, start=None, stop=None):
         task = self.find_op(op_id)
         # Upgrade this operation to a task if necessary
@@ -2960,11 +3015,15 @@ class State(object):
         self.prof_uid_map[meta.prof_uid] = meta
         return meta
 
-    def create_copy(self, src, dst, op, size, create, ready, start, stop):
-        copy = Copy(src, dst, op, size, create, ready, start, stop)
+    def create_copy(self, src, dst,  op, size, create, ready, start, stop, fevent, num_requests):
+        copy = Copy(src, dst, op, size, create, ready, start, stop, fevent, num_requests)
         # update prof_uid map
         self.prof_uid_map[copy.prof_uid] = copy
         return copy
+
+    def create_copy_inst_info(self, src_inst, dst_inst, fevent, num_fields, request_type, num_hops):
+        copyinfo =  CopyInfo(src_inst, dst_inst, fevent, num_fields, request_type, num_hops)
+        return copyinfo
 
     def create_fill(self, dst, op, create, ready, start, stop):
         fill = Fill(dst, op, create, ready, start, stop)
@@ -2989,6 +3048,12 @@ class State(object):
         else:
             inst = self.instances[key]
         return inst
+
+    def find_instance(self, inst_id, op_id):
+        key = (inst_id, op_id)
+        if key not in self.instances:
+            return None
+        return self.instances[key]
 
     def create_user_marker(self, name):
         user = UserMarker(name)

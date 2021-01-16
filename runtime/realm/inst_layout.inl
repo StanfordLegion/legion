@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -62,6 +62,8 @@ namespace Realm {
   // class InstanceLayoutGeneric
 
   inline InstanceLayoutGeneric::InstanceLayoutGeneric(void)
+    : bytes_used(0)
+    , alignment_reqd(0)
   {}
 
   template <typename S>
@@ -271,12 +273,19 @@ namespace Realm {
 
   template <int N, typename T>
   inline InstanceLayoutPiece<N,T>::InstanceLayoutPiece(void)
-    : layout_type(InvalidLayoutType)
+    : layout_type(PieceLayoutTypes::InvalidLayoutType)
   {}
 
   template <int N, typename T>
-  inline InstanceLayoutPiece<N,T>::InstanceLayoutPiece(LayoutType _layout_type)
+  inline InstanceLayoutPiece<N,T>::InstanceLayoutPiece(PieceLayoutTypes::LayoutType _layout_type)
     : layout_type(_layout_type)
+  {}
+
+  template <int N, typename T>
+  inline InstanceLayoutPiece<N,T>::InstanceLayoutPiece(PieceLayoutTypes::LayoutType _layout_type,
+						       const Rect<N,T>& _bounds)
+    : layout_type(_layout_type)
+    , bounds(_bounds)
   {}
 
   template <int N, typename T>
@@ -310,7 +319,7 @@ namespace Realm {
 
   template <int N, typename T>
   inline AffineLayoutPiece<N,T>::AffineLayoutPiece(void)
-    : InstanceLayoutPiece<N,T>(InstanceLayoutPiece<N,T>::AffineLayoutType)
+    : InstanceLayoutPiece<N,T>(PieceLayoutTypes::AffineLayoutType)
   {}
 
   template <int N, typename T>
@@ -354,6 +363,22 @@ namespace Realm {
   void AffineLayoutPiece<N,T>::print(std::ostream& os) const
   {
     os << this->bounds << "->affine(" << strides << "+" << offset << ")";
+  }
+
+  template <int N, typename T>
+  size_t AffineLayoutPiece<N,T>::lookup_inst_size() const
+  {
+    return sizeof(PieceLookup::AffinePiece<N,T>);
+  }
+
+  template <int N, typename T>
+  PieceLookup::Instruction *AffineLayoutPiece<N,T>::create_lookup_inst(void *ptr, unsigned next_delta) const
+  {
+    PieceLookup::AffinePiece<N,T> *ap = new(ptr) PieceLookup::AffinePiece<N,T>(next_delta);
+    ap->bounds = this->bounds;
+    ap->base = offset;
+    ap->strides = strides;
+    return ap;
   }
 
   template <int N, typename T>
@@ -624,10 +649,14 @@ namespace Realm {
     //
     // class PieceLookup::Instruction
 
+    inline Instruction::Instruction(uint32_t _data)
+      : data(_data)
+    {}
+
     REALM_CUDA_HD
-    inline Instruction::Opcode Instruction::opcode() const
+    inline Opcodes::Opcode Instruction::opcode() const
     {
-      return static_cast<Opcode>(data & 0xff);
+      return static_cast<Opcodes::Opcode>(data & 0xff);
     }
 
     REALM_CUDA_HD
@@ -650,6 +679,11 @@ namespace Realm {
     // class PieceLookup::AffinePiece<N,T>
 
     template <int N, typename T>
+    AffinePiece<N,T>::AffinePiece(unsigned next_delta)
+      : Instruction(PieceLookup::Opcodes::OP_AFFINE_PIECE + (next_delta << 8))
+    {}
+
+    template <int N, typename T>
     REALM_CUDA_HD
     unsigned AffinePiece<N,T>::delta() const
     {
@@ -667,6 +701,22 @@ namespace Realm {
     ////////////////////////////////////////////////////////////////////////
     //
     // class PieceLookup::SplitPlane<N,T>
+
+    template <int N, typename T>
+    SplitPlane<N,T>::SplitPlane(int _split_dim, T _split_plane,
+				unsigned _next_delta)
+      : Instruction(Opcodes::OP_SPLIT1 +
+		    (_split_dim << 8) +
+		    (_next_delta << 16))
+      , split_plane(_split_plane)
+    {}
+
+    template <int N, typename T>
+    void SplitPlane<N,T>::set_delta(unsigned _next_delta)
+    {
+      this->data = ((this->data & 0xffff) +
+		    (_next_delta << 16));
+    }
 
     template <int N, typename T>
     REALM_CUDA_HD
@@ -889,7 +939,7 @@ namespace Realm {
     // this constructor only works if there's exactly one piece and it's affine
     assert(ipl.pieces.size() == 1);
     const InstanceLayoutPiece<N,T> *ilp = ipl.pieces[0];
-    assert((ilp->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType));
+    assert((ilp->layout_type == PieceLayoutTypes::AffineLayoutType));
     const AffineLayoutPiece<N,T> *alp = static_cast<const AffineLayoutPiece<N,T> *>(ilp);
     base = reinterpret_cast<uintptr_t>(inst.pointer_untyped(0,
 							    layout->bytes_used));
@@ -935,7 +985,7 @@ namespace Realm {
       //  exists, covers the whole subrect, and is affine
       const InstanceLayoutPiece<N,T> *ilp = ipl.find_piece(subrect.lo);
       assert(ilp && ilp->bounds.contains(subrect));
-      assert((ilp->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType));
+      assert((ilp->layout_type == PieceLayoutTypes::AffineLayoutType));
       const AffineLayoutPiece<N,T> *alp = static_cast<const AffineLayoutPiece<N,T> *>(ilp);
       base = reinterpret_cast<uintptr_t>(inst.pointer_untyped(0,
 							      layout->bytes_used));
@@ -991,7 +1041,7 @@ namespace Realm {
     // this constructor only works if there's exactly one piece and it's affine
     assert(ipl.pieces.size() == 1);
     const InstanceLayoutPiece<N2,T2> *ilp = ipl.pieces[0];
-    assert((ilp->layout_type == InstanceLayoutPiece<N2,T2>::AffineLayoutType));
+    assert((ilp->layout_type == PieceLayoutTypes::AffineLayoutType));
     const AffineLayoutPiece<N2,T2> *alp = static_cast<const AffineLayoutPiece<N2,T2> *>(ilp);
     base = reinterpret_cast<uintptr_t>(inst.pointer_untyped(0,
 							    layout->bytes_used));
@@ -1073,7 +1123,7 @@ namespace Realm {
       //  exists, covers the whole subrect, and is affine
       const InstanceLayoutPiece<N2,T2> *ilp = ipl.find_piece(subrect_image.lo);
       assert(ilp && ilp->bounds.contains(subrect_image));
-      assert((ilp->layout_type == InstanceLayoutPiece<N2,T2>::AffineLayoutType));
+      assert((ilp->layout_type == PieceLayoutTypes::AffineLayoutType));
       const AffineLayoutPiece<N2,T2> *alp = static_cast<const AffineLayoutPiece<N2,T2> *>(ilp);
       base = reinterpret_cast<uintptr_t>(inst.pointer_untyped(0,
 							      layout->bytes_used));
@@ -1119,7 +1169,7 @@ namespace Realm {
     if(ipl.pieces.size() != 1)
       return false;
     const InstanceLayoutPiece<N,T> *ilp = ipl.pieces[0];
-    if(ilp->layout_type != InstanceLayoutPiece<N,T>::AffineLayoutType)
+    if(ilp->layout_type != PieceLayoutTypes::AffineLayoutType)
       return false;
     void *base = inst.pointer_untyped(0, layout->bytes_used);
     if(base == 0)
@@ -1148,7 +1198,7 @@ namespace Realm {
     const InstanceLayoutPiece<N,T> *ilp = ipl.find_piece(subrect.lo);
     if(!(ilp && ilp->bounds.contains(subrect)))
       return false;
-    if(ilp->layout_type != InstanceLayoutPiece<N,T>::AffineLayoutType)
+    if(ilp->layout_type != PieceLayoutTypes::AffineLayoutType)
       return false;
     void *base = inst.pointer_untyped(0, layout->bytes_used);
     if(base == 0)
@@ -1176,7 +1226,7 @@ namespace Realm {
     if(ipl.pieces.size() != 1)
       return false;
     const InstanceLayoutPiece<N2,T2> *ilp = ipl.pieces[0];
-    if(ilp->layout_type != InstanceLayoutPiece<N2,T2>::AffineLayoutType)
+    if(ilp->layout_type != PieceLayoutTypes::AffineLayoutType)
       return false;
     void *base = inst.pointer_untyped(0, layout->bytes_used);
     if(base == 0)
@@ -1227,7 +1277,7 @@ namespace Realm {
     const InstanceLayoutPiece<N2,T2> *ilp = ipl.find_piece(subrect_image.lo);
     if(!(ilp && ilp->bounds.contains(subrect_image)))
       return false;
-    if(ilp->layout_type != InstanceLayoutPiece<N2,T2>::AffineLayoutType)
+    if(ilp->layout_type != PieceLayoutTypes::AffineLayoutType)
       return false;
     void *base = inst.pointer_untyped(0, layout->bytes_used);
     if(base == 0)
@@ -1499,8 +1549,8 @@ namespace Realm {
 							     FieldID field_id)
   {
     size_t field_offset = 0;
-    unsigned allowed_mask = (PieceLookup::Instruction::ALLOW_AFFINE_PIECE |
-			     PieceLookup::Instruction::ALLOW_SPLIT1);
+    unsigned allowed_mask = (PieceLookup::ALLOW_AFFINE_PIECE |
+			     PieceLookup::ALLOW_SPLIT1);
     const PieceLookup::Instruction *start_inst =
       inst.get_lookup_program<N,T>(field_id, allowed_mask, field_offset);
     return (start_inst != 0);
@@ -1512,8 +1562,8 @@ namespace Realm {
 							     const Rect<N,T>& subrect)
   {
     size_t field_offset = 0;
-    unsigned allowed_mask = (PieceLookup::Instruction::ALLOW_AFFINE_PIECE |
-			     PieceLookup::Instruction::ALLOW_SPLIT1);
+    unsigned allowed_mask = (PieceLookup::ALLOW_AFFINE_PIECE |
+			     PieceLookup::ALLOW_SPLIT1);
     const PieceLookup::Instruction *start_inst =
       inst.get_lookup_program<N,T>(field_id, subrect, allowed_mask,
 				   field_offset);
@@ -1534,15 +1584,15 @@ namespace Realm {
 					  FieldID field_id,
 					  size_t subfield_offset /*= 0*/)
   {
-    unsigned allowed_mask = (PieceLookup::Instruction::ALLOW_AFFINE_PIECE |
-			     PieceLookup::Instruction::ALLOW_SPLIT1);
+    unsigned allowed_mask = (PieceLookup::ALLOW_AFFINE_PIECE |
+			     PieceLookup::ALLOW_SPLIT1);
     start_inst = inst.get_lookup_program<N,T>(field_id, allowed_mask,
 					      field_offset);
     assert(start_inst != 0);
 
     // special case: if the first instruction is an AffinePiece and there's
     //  no next instruction, we cache the answer and forget the program
-    if(start_inst->opcode() == PieceLookup::Instruction::OP_AFFINE_PIECE) {
+    if(start_inst->opcode() == PieceLookup::Opcodes::OP_AFFINE_PIECE) {
       const PieceLookup::AffinePiece<N,T> *ap_inst =
 	static_cast<const PieceLookup::AffinePiece<N,T> *>(start_inst);
       if(ap_inst->delta() == 0) {
@@ -1567,15 +1617,15 @@ namespace Realm {
 					  const Rect<N,T>& subrect,
 					  size_t subfield_offset /*= 0*/)
   {
-    unsigned allowed_mask = (PieceLookup::Instruction::ALLOW_AFFINE_PIECE |
-			     PieceLookup::Instruction::ALLOW_SPLIT1);
+    unsigned allowed_mask = (PieceLookup::ALLOW_AFFINE_PIECE |
+			     PieceLookup::ALLOW_SPLIT1);
     start_inst = inst.get_lookup_program<N,T>(field_id, subrect, allowed_mask,
 					      field_offset);
     assert(start_inst != 0);
 
     // special case: if the first instruction is an AffinePiece and there's
     //  no next instruction, we cache the answer and forget the program
-    if(start_inst->opcode() == PieceLookup::Instruction::OP_AFFINE_PIECE) {
+    if(start_inst->opcode() == PieceLookup::Opcodes::OP_AFFINE_PIECE) {
       const PieceLookup::AffinePiece<N,T> *ap_inst =
 	static_cast<const PieceLookup::AffinePiece<N,T> *>(start_inst);
       if(ap_inst->delta() == 0) {
@@ -1609,7 +1659,7 @@ namespace Realm {
 #ifdef DEBUG_REALM
 	assert(i != 0);
 #endif
-	if(i->opcode() == PieceLookup::Instruction::OP_AFFINE_PIECE) {
+	if(i->opcode() == PieceLookup::Opcodes::OP_AFFINE_PIECE) {
 	  const PieceLookup::AffinePiece<N,T> *ap =
 	    static_cast<const PieceLookup::AffinePiece<N,T> *>(i);
 	  if(ap->bounds.contains(p)) {
@@ -1620,7 +1670,7 @@ namespace Realm {
 	  } else
 	    i = ap->next();
 	} else {
-	  assert(i->opcode() == PieceLookup::Instruction::OP_SPLIT1);
+	  assert(i->opcode() == PieceLookup::Opcodes::OP_SPLIT1);
 	  i = static_cast<const PieceLookup::SplitPlane<N,T> *>(i)->next(p);
 	}
       }
@@ -1643,7 +1693,7 @@ namespace Realm {
 #ifdef DEBUG_REALM
 	assert(i != 0);
 #endif
-	if(i->opcode() == PieceLookup::Instruction::OP_AFFINE_PIECE) {
+	if(i->opcode() == PieceLookup::Opcodes::OP_AFFINE_PIECE) {
 	  const PieceLookup::AffinePiece<N,T> *ap =
 	    static_cast<const PieceLookup::AffinePiece<N,T> *>(i);
 	  if(ap->bounds.contains(r)) {
@@ -1655,7 +1705,7 @@ namespace Realm {
 	  } else
 	    i = ap->next();
 	} else {
-	  assert(i->opcode() == PieceLookup::Instruction::OP_SPLIT1);
+	  assert(i->opcode() == PieceLookup::Opcodes::OP_SPLIT1);
 	  const PieceLookup::SplitPlane<N,T> *sp =
 	    static_cast<const PieceLookup::SplitPlane<N,T> *>(i);
 	  if(sp->splits_rect(r))
@@ -1698,7 +1748,7 @@ namespace Realm {
 #ifdef DEBUG_REALM
 	assert(i != 0);
 #endif
-	if(i->opcode() == PieceLookup::Instruction::OP_AFFINE_PIECE) {
+	if(i->opcode() == PieceLookup::Opcodes::OP_AFFINE_PIECE) {
 	  const PieceLookup::AffinePiece<N,T> *ap =
 	    static_cast<const PieceLookup::AffinePiece<N,T> *>(i);
 	  if(ap->bounds.contains(p)) {
@@ -1711,7 +1761,7 @@ namespace Realm {
 	  } else
 	    i = ap->next();
 	} else {
-	  assert(i->opcode() == PieceLookup::Instruction::OP_SPLIT1);
+	  assert(i->opcode() == PieceLookup::Opcodes::OP_SPLIT1);
 	  i = static_cast<const PieceLookup::SplitPlane<N,T> *>(i)->next(p);
 	}
       }
@@ -1733,7 +1783,7 @@ namespace Realm {
 #ifdef DEBUG_REALM
 	assert(i != 0);
 #endif
-	if(i->opcode() == PieceLookup::Instruction::OP_AFFINE_PIECE) {
+	if(i->opcode() == PieceLookup::Opcodes::OP_AFFINE_PIECE) {
 	  const PieceLookup::AffinePiece<N,T> *ap =
 	    static_cast<const PieceLookup::AffinePiece<N,T> *>(i);
 	  if(ap->bounds.contains(r)) {
@@ -1746,7 +1796,7 @@ namespace Realm {
 	  } else
 	    i = ap->next();
 	} else {
-	  assert(i->opcode() == PieceLookup::Instruction::OP_SPLIT1);
+	  assert(i->opcode() == PieceLookup::Opcodes::OP_SPLIT1);
 	  const PieceLookup::SplitPlane<N,T> *sp =
 	    static_cast<const PieceLookup::SplitPlane<N,T> *>(i);
 	  if(sp->splits_rect(r))

@@ -9,7 +9,7 @@ for distributed, heterogeneous machines.
 The Legion team uses this repository for active development, so please make sure you're
 using the right branch for your needs:
 
-  * stable [![Build Status](https://travis-ci.org/StanfordLegion/legion.svg?branch=stable)](https://travis-ci.org/StanfordLegion/legion/branches) - This is the default branch if you clone the
+  * stable - This is the default branch if you clone the
 repository.  It is generally about a month behind the master branch, allowing us to get some
 mileage on larger changes before foisting them on everybody.  Most users of Legion should use this
 branch, although you should be prepared to try the master branch if you run into issues.
@@ -17,7 +17,7 @@ Updates are moved to the stable branch roughly monthly, although important bug f
 applied directly when needed.  Each batch of updates is given a "version" number, and
 [CHANGES.txt](https://github.com/StanfordLegion/legion/blob/stable/CHANGES.txt) lists the
 major changes.
-  * master [![Build Status](https://travis-ci.org/StanfordLegion/legion.svg?branch=master)](https://travis-ci.org/StanfordLegion/legion/branches) - This is the "mainline" used by the Legion team,
+  * master - This is the "mainline" used by the Legion team,
 and contains changes and bug fixes that may not have made it into the stable branch yet.  If you
 are a user of "bleeding-edge" Legion functionality, you will probably need to be using this branch.
   * lots of other feature branches - These exist as necessary for larger changes, and users will

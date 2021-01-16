@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -177,6 +177,12 @@ namespace Realm {
     trigger_finish_event(had_failures);
   }
 
+  void Operation::mark_gpu_work_start()
+  {
+    if(wants_gpu_timeline)
+      timeline_gpu.record_start_time();
+  }
+
   bool Operation::attempt_cancellation(int error_code,
 				       const void *reason_data, size_t reason_size)
   {
@@ -286,8 +292,8 @@ namespace Realm {
   void Operation::reconstruct_measurements()
   {
     measurements.import_requests(requests);
-    wants_timeline = (measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>() ||
-		      measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>());
+    wants_timeline = measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>();
+    wants_gpu_timeline = measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>();
     wants_event_waits = measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>();
     if(wants_timeline)
       timeline.record_create_time();
@@ -578,7 +584,7 @@ namespace Realm {
       log_optable.info() << "event " << finish_event << " - requesting remote cancellation on node " << remote_node;
       ActiveMessage<CancelOperationMessage> amsg(remote_node, reason_size);
       amsg->finish_event = finish_event;
-      amsg << ByteArrayRef(reason_data, reason_size);
+      amsg.add_payload(reason_data, reason_size);
       amsg.commit();
     }
 

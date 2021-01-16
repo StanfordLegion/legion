@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -398,7 +398,8 @@ namespace Realm {
 						    const void *payload, size_t payload_size,
 						    int payload_mode,
 						    CallbackFnptr callback_fnptr,
-						    CallbackData callback_data,
+						    CallbackData callback_data1,
+						    CallbackData callback_data2,
 						    TimeLimit work_until)
   {
 #ifdef DEBUG_INCOMING
@@ -489,7 +490,8 @@ namespace Realm {
       msg->sender = sender;
       msg->handler = handler;
       msg->callback_fnptr = callback_fnptr;
-      msg->callback_data = callback_data;
+      msg->callback_data1 = callback_data1;
+      msg->callback_data2 = callback_data2;
 
       if(hdr_mode == PAYLOAD_COPY)
 	memcpy(msg->hdr, hdr, hdr_size);
@@ -761,7 +763,8 @@ namespace Realm {
 
       if(current_msg->callback_fnptr)
 	(current_msg->callback_fnptr)(current_msg->sender,
-				      current_msg->callback_data);
+				      current_msg->callback_data1,
+				      current_msg->callback_data2);
 
       if(do_profile)
 	current_msg->handler->stats.record(t_start, t_end);
@@ -842,7 +845,8 @@ namespace Realm {
 
 	if(current_msg->callback_fnptr)
 	  (current_msg->callback_fnptr)(current_msg->sender,
-					current_msg->callback_data);
+					current_msg->callback_data1,
+					current_msg->callback_data2);
 
 	if(Config::profile_activemsg_handlers)
 	  current_msg->handler->stats.record(t_start, t_end);

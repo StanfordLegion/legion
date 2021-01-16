@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1844,9 +1844,10 @@ namespace Realm {
 	// any remote nodes to notify?
 	if(!to_update.empty()) {
 	  int npg_cached = num_poisoned_generations.load_acquire();
-	  ActiveMessage<EventUpdateMessage> amsg(to_update, npg_cached*sizeof(EventImpl::gen_t));
+	  ActiveMessage<EventUpdateMessage> amsg(to_update,
+						 poisoned_generations,
+						 npg_cached*sizeof(EventImpl::gen_t));
 	  amsg->event = make_event(update_gen);
-	  amsg.add_payload(poisoned_generations, npg_cached*sizeof(EventImpl::gen_t), PAYLOAD_KEEP);
 	  amsg.commit();
 	}
 
@@ -2079,7 +2080,7 @@ namespace Realm {
 						       NodeID sender, bool forwarded,
 						       const void *data, size_t datalen)
     {
-      ActiveMessage<BarrierAdjustMessage> amsg(target,datalen);
+      ActiveMessage<BarrierAdjustMessage> amsg(target, datalen);
       amsg->barrier = barrier;
       amsg->delta = delta;
       amsg->wait_on = wait_on;
@@ -2106,7 +2107,7 @@ namespace Realm {
 							NodeID migration_target,	unsigned base_arrival_count,
 							const void *data, size_t datalen)
     {
-      ActiveMessage<BarrierTriggerMessage> amsg(target,datalen);
+      ActiveMessage<BarrierTriggerMessage> amsg(target, datalen);
       amsg->barrier_id = barrier_id;
       amsg->trigger_gen = trigger_gen;
       amsg->previous_gen = previous_gen;
@@ -3110,12 +3111,17 @@ static void *bytedup(const void *data, size_t datalen)
     CompQueueImpl *cq = get_runtime()->get_compqueue_impl(msg.comp_queue);
 
     Event *events = 0;
+    size_t max_to_pop = msg.max_to_pop;
     if(!msg.discard_events) {
-      events = reinterpret_cast<Event *>(malloc(msg.max_to_pop * sizeof(Event)));
+      // we're going to use temp space on the stack, so limit the number of
+      //  events to something sane
+      if(max_to_pop > 1024)
+	max_to_pop = 1024;
+      events = reinterpret_cast<Event *>(alloca(max_to_pop * sizeof(Event)));
       assert(events != 0);
     }
 
-    size_t count = cq->pop_events(events, msg.max_to_pop);
+    size_t count = cq->pop_events(events, max_to_pop);
 
     size_t bytes = (msg.discard_events ?
 		      0 :
@@ -3124,9 +3130,7 @@ static void *bytedup(const void *data, size_t datalen)
     amsg->count = count;
     amsg->request = msg.request;
     if(bytes > 0)
-      amsg.add_payload(events, bytes, PAYLOAD_FREE);
-    else
-      if(events) free(events);
+      amsg.add_payload(events, bytes, PAYLOAD_COPY);
     amsg.commit();
   }
 

@@ -1,5 +1,5 @@
-/* Copyright 2020 Stanford University
- * Copyright 2020 Los Alamos National Laboratory
+/* Copyright 2021 Stanford University
+ * Copyright 2021 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -131,7 +131,7 @@ namespace Realm {
     public:
       //NodeID dst_node;
       const void *src_base;
-      void *dst_base;
+      //void *dst_base;
       //size_t nbytes;
     };
 
@@ -562,7 +562,7 @@ namespace Realm {
       struct Write1DMessage {
 	XferDesID next_xd_guid;
 	int next_port_idx;
-	size_t span_start, pre_bytes_total;
+	size_t span_start;
 
 	static void handle_message(NodeID sender,
 				   const Write1DMessage &args,
@@ -699,7 +699,9 @@ namespace Realm {
 	enum SrcDstType {
 	  SPECIFIC_MEMORY,
 	  LOCAL_KIND,
-	  GLOBAL_KIND
+	  GLOBAL_KIND,
+	  LOCAL_RDMA,
+	  REMOTE_RDMA,
 	};
 	SrcDstType src_type, dst_type;
 	union {
@@ -746,6 +748,11 @@ namespace Realm {
 		    XferDesKind xd_kind);
       void add_path(Memory::Kind src_kind, bool src_global,
 		    Memory::Kind dst_kind, bool dst_global,
+		    unsigned bandwidth, unsigned latency,
+		    bool redops_allowed, bool serdez_allowed,
+		    XferDesKind xd_kind);
+      // TODO: allow rdma path to limit by kind?
+      void add_path(bool local_loopback,
 		    unsigned bandwidth, unsigned latency,
 		    bool redops_allowed, bool serdez_allowed,
 		    XferDesKind xd_kind);
@@ -1119,7 +1126,8 @@ namespace Realm {
 				 const void *data,
 				 size_t datalen);
 
-      static void send_request(NodeID target, void *dst_buf,
+      static void send_request(NodeID target,
+			       const RemoteAddress& dst_buf,
                                const void *src_buf, size_t nbytes,
                                RemoteWriteRequest* req,
 			       XferDesID next_xd_guid,
@@ -1141,7 +1149,8 @@ namespace Realm {
 	amsg.commit();
       }
 
-      static void send_request(NodeID target,  void *dst_buf,
+      static void send_request(NodeID target,
+			       const RemoteAddress& dst_buf,
                                const void *src_buf, size_t nbytes, off_t src_str,
                                size_t nlines, RemoteWriteRequest* req,
 			       XferDesID next_xd_guid,

@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::CachePerfCounters<_ID>);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::IPCPerfCounters);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::TLBPerfCounters);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::BranchPredictionPerfCounters);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationCopyInfo::InstInfo);
 
 #include "realm/timers.h"
 
@@ -199,6 +200,18 @@ namespace Realm {
     {
       delete_time = Clock::current_time_in_nanoseconds();
     }
+
+   ////////////////////////////////////////////////////////////////////////
+    //
+    // struct OperationCopyInfo
+    //
+
+    template <typename S>
+    bool serdez(S& serdez, const OperationCopyInfo& c)
+    {
+      return (serdez & c.inst_info);
+    }
+
 
   }; // namespace ProfilingMeasurements
 

@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University
+/* Copyright 2021 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -250,7 +250,7 @@ LegionPyMapper::~LegionPyMapper(void)
 /*static*/ size_t LegionPyMapper::get_total_nodes(Machine m)
 {
   Machine::ProcessorQuery query(m);
-  query.only_kind(Processor::LOC_PROC);
+  query.only_kind(Processor::PY_PROC);
   std::set<AddressSpace> spaces;
   for (Machine::ProcessorQuery::iterator it = query.begin(); 
         it != query.end(); it++)

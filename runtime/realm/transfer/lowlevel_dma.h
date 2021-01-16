@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@ namespace Realm {
       //int idx;
       //ID::IDType src_inst_id, dst_inst_id;
       off_t offset;
-      size_t size;
+      //size_t size;
 
       static void handle_message(NodeID sender, const RemoteIBAllocResponseAsync &args,
 				 const void *data, size_t msglen);
@@ -141,6 +141,20 @@ namespace Realm {
 			    CustomSerdezID serdez_id,
 			    MemPathInfo& info);
 
+  struct OffsetsAndSize {
+      FieldID src_field_id, dst_field_id;
+      off_t src_subfield_offset, dst_subfield_offset;
+      int size;
+      CustomSerdezID serdez_id;
+    };
+
+    typedef std::vector<OffsetsAndSize> OASVec;
+    typedef std::pair<Memory, Memory> MemPair;
+    typedef std::pair<RegionInstance, RegionInstance> InstPair;
+    typedef std::map<InstPair, OASVec> OASByInst;
+    typedef std::map<MemPair, OASByInst *> OASByMem;
+    class TransferDomain;
+
     class DmaRequest : public Realm::Operation {
     public:
       DmaRequest(int _priority,
@@ -204,17 +218,6 @@ namespace Realm {
 
     void free_intermediate_buffer(DmaRequest* req, Memory mem, off_t offset, size_t size);
 
-    struct OffsetsAndSize {
-      FieldID src_field_id, dst_field_id;
-      off_t src_subfield_offset, dst_subfield_offset;
-      int size;
-      CustomSerdezID serdez_id;
-    };
-    typedef std::vector<OffsetsAndSize> OASVec;
-    typedef std::pair<Memory, Memory> MemPair;
-    typedef std::pair<RegionInstance, RegionInstance> InstPair;
-    typedef std::map<InstPair, OASVec> OASByInst;
-    typedef std::map<MemPair, OASByInst *> OASByMem;
 
     class MemPairCopier;
 
@@ -475,8 +478,6 @@ namespace Realm {
       template<int DIM>
       void perform_dma_rect(MemoryImpl *mem_impl);
 
-      size_t optimize_fill_buffer(RegionInstanceImpl *impl, int &fill_elmts);
-
       TransferDomain *domain;
       //Domain domain;
       CopySrcDstField dst;
@@ -513,7 +514,49 @@ namespace Realm {
       std::string name;
     };
 
-    class Request;
+  class Request;
+
+  class CopyProfile : public DmaRequest {
+    public:
+    CopyProfile(GenEventImpl *_after_copy,
+                EventImpl::gen_t _after_gen, int _priority,
+                const Realm::ProfilingRequestSet & _reqs)
+      : DmaRequest(_priority, _after_copy, _after_gen, _reqs),
+        before_copy(Event::NO_EVENT), end_copy(Event::NO_EVENT), total_field_size(0),num_requests(0), src_mem(Memory::NO_MEMORY), dst_mem(Memory::NO_MEMORY), is_src_indirect(false), is_dst_indirect(false)
+    {
+    }
+
+    void add_copy_entry(const OASByInst *_oas_by_inst,
+                        const TransferDomain *domain,
+                        bool is_src_indirect,
+                        bool is_dst_indirect);
+
+    void add_reduc_entry(const CopySrcDstField &src,
+                         const CopySrcDstField &dst,
+                         const TransferDomain *domain);
+
+    void add_fill_entry(const CopySrcDstField &dst,
+                        const TransferDomain *domain);
+
+  protected:
+    ProfilingMeasurements::OperationCopyInfo cpinfo;
+    Event before_copy, end_copy;
+    size_t total_field_size;
+    size_t num_requests;
+    Memory src_mem, dst_mem;
+    bool is_src_indirect, is_dst_indirect;
+    Waiter waiter;
+    // deletion performed when reference count goes to zero
+    virtual ~CopyProfile(void);
+    virtual void mark_completed(void) { Operation::mark_completed(); }
+
+  public:
+    void set_end_copy(Event e) { end_copy = e;}
+    void set_start_copy(Event e) { before_copy = e;}
+    virtual bool check_readiness(void);
+    virtual void perform_dma(void) { return; }
+    virtual bool handler_safe(void) { return(false); }
+  };
 
     class AsyncFileIOContext : public BackgroundWorkItem {
     public:
@@ -550,6 +593,7 @@ namespace Realm {
       aio_context_t aio_ctx;
 #endif
     };
+
 };
 
 #endif

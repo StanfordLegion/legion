@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2020 Stanford University, NVIDIA Corporation
+# Copyright 2021 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -3132,8 +3132,8 @@ class LogicalRegion(object):
 
     def update_parent(self):
         if not self.parent and self.index_space.parent is not None:
-            self.parent = self.state.get_partition(
-                self.index_space.parent.uid, self.field_space.uid, self.tree_id)
+            self.set_parent(self.state.get_partition(
+                self.index_space.parent.uid, self.field_space.uid, self.tree_id))
 
     def __str__(self):
         if self.name is None:
@@ -3560,8 +3560,8 @@ class LogicalPartition(object):
     def update_parent(self):
         if not self.parent:
             assert self.index_partition.parent
-            self.parent = self.state.get_region(self.index_partition.parent.uid,
-                                             self.field_space.uid, self.tree_id)
+            self.set_parent(self.state.get_region(self.index_partition.parent.uid,
+                                                  self.field_space.uid, self.tree_id))
 
     def __str__(self):
         if self.name is None:
@@ -3701,7 +3701,7 @@ class LogicalPartition(object):
                 ' [style=dotted,color=black,penwidth=2];')
 
     def gen_id(self):
-        return 'part: '+hex(self.index_partition.uid)+','+\
+        return 'part: '+str(self.index_partition.uid)+','+\
                 'field: '+str(self.field_space.uid)+','+\
                 'tree: '+str(self.tree_id)
 
@@ -7696,8 +7696,14 @@ class Operation(object):
             title += '  (replayed)'
         label = printer.generate_html_op_label(title, self.reqs, self.mappings,
                                        self.get_color(), self.state.detailed_graphs)
-        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
-                'fontcolor=black,shape=record,penwidth=0];')
+        if dataflow or self.task is None or len(self.task.operations) == 0:
+            # Box shape is sufficient unless we have nesting
+            printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
+                    'fontcolor=black,shape=box,penwidth=0];')
+        else:
+            # For non-leaf tasks we need record shape to handle subgraphs
+            printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
+                    'fontcolor=black,shape=record,penwidth=0];')
 
     def print_dataflow_node(self, printer):
         # Print any close operations that we have, then print ourself 
@@ -7729,7 +7735,7 @@ class Operation(object):
                                 "white", self.state.detailed_graphs)
                         node_name = contributor.node_name+'_'+self.node_name
                         printer.println(node_name+' [label=<'+label+'>,fontsize=14,'+\
-                                'fontcolor=black,shape=record,penwidth=0];')
+                                'fontcolor=black,shape=box,penwidth=0];')
                         printer.println(node_name+' -> '+self.node_name+
                                 ' [style=solid,color=black,penwidth=2];')
         if self.arrival_barriers:
@@ -7743,7 +7749,7 @@ class Operation(object):
                                 "white", self.state.detailed_graphs)
                         node_name = waiter.node_name+'_'+self.node_name
                         printer.println(node_name+' [label=<'+label+'>,fontsize=14,'+\
-                                'fontcolor=black,shape=record,penwidth=0];')
+                                'fontcolor=black,shape=box,penwidth=0];')
                         printer.println(self.node_name+' -> '+node_name+
                                 ' [style=solid,color=black,penwidth=2];')
 
@@ -7995,6 +8001,10 @@ class Task(object):
             return str(self.op)
 
     __repr__ = __str__
+
+    @property
+    def html_safe_name(self):
+        return str(self).replace('<','&lt;').replace('>','&gt;')
 
     def add_operation(self, operation):
         self.operations.append(operation)
@@ -8572,7 +8582,7 @@ class Task(object):
             return
         if not top:
             # Start the cluster 
-            title = str(self)+' (UID: '+str(self.op.uid)+')'
+            title = self.html_safe_name + ' (UID: '+str(self.op.uid)+')'
             if self.point.dim > 0:
                 title += ' Point: ' + self.point.to_string()
             if self.op.replayed:
@@ -10003,7 +10013,7 @@ class RealmCopy(RealmBase):
         label = '<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="%s">' % color + \
                 "".join([printer.wrap_with_trtd(line) for line in lines]) + '</table>'
         printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
-                ',fontcolor=black,shape=record,penwidth=0];')
+                ',fontcolor=black,shape=box,penwidth=0];')
 
     def compute_copy_size(self):
         field_size = 0
@@ -10139,7 +10149,7 @@ class RealmFill(RealmBase):
         label = '<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="%s">' % color + \
                 "".join([printer.wrap_with_trtd(line) for line in lines]) + '</table>'
         printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
-                ',fontcolor=black,shape=record,penwidth=0];')
+                ',fontcolor=black,shape=box,penwidth=0];')
 
     def compute_fill_size(self):
         field_size = 0
@@ -10207,7 +10217,7 @@ class RealmDeppart(RealmBase):
         label = '<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="%s">' % color + \
                 "".join([printer.wrap_with_trtd(line) for line in lines]) + '</table>'
         printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
-                ',fontcolor=black,shape=record,penwidth=0];')
+                ',fontcolor=black,shape=box,penwidth=0];')
 
     def get_equivalence_privileges(self):
         assert self.creator is not None

@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -582,16 +582,16 @@ namespace Realm {
 	      log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
 			       << ", size = " << size << ", has_rdma = " << has_rdma_info << ")";
 	      if(remote) {
-		MemoryImpl *mem;
+		IBMemory *ibmem;
 		if(has_rdma_info) {
-		  mem = Network::get_network(node_id)->create_remote_memory(m,
-									    size,
-									    kind,
-									    rdma_info);
+		  ibmem = Network::get_network(node_id)->create_remote_ib_memory(m,
+										 size,
+										 kind,
+										 rdma_info);
 		} else {
-		  mem = new RemoteMemory(m, size, kind);
+		  ibmem = new IBMemory(m, size, MemoryImpl::MKIND_REMOTE, kind, 0, 0);
 		}
-		n.ib_memories[ID(m).memory_mem_idx()] = mem;
+		n.ib_memories[ID(m).memory_mem_idx()] = ibmem;
 	      }
 	    }
 	  }

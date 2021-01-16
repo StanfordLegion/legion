@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -921,6 +921,12 @@ namespace Legion {
       template<typename T>
       void unpack_counts(const int stage, Deserializer &derez, 
                          std::map<T,unsigned> &future_counts);
+      template<typename T>
+      void pack_field_counts(Serializer &rez, 
+          const std::map<std::pair<T,FieldID>,unsigned> &counts);
+      template<typename T>
+      void unpack_field_counts(const int stage, Deserializer &derez, 
+          std::map<std::pair<T,FieldID>,unsigned> &future_counts);
       template<typename T, typename OP>
       void initialize_counts(const std::map<T,OP*> &ops,
                              std::map<T,unsigned> &counts);
@@ -1093,7 +1099,7 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual void shard_off(RtEvent mapped_precondition);
     public:
@@ -1138,7 +1144,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     protected:
       virtual RtEvent prepare_index_task_complete(void);
     public:
@@ -1224,7 +1230,7 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
     protected:
       ShardingID sharding_functor;
@@ -1261,7 +1267,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
     public:
       void initialize_replication(ReplicateContext *ctx);
@@ -1298,7 +1304,7 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
     protected:
       ShardingID sharding_functor;
@@ -1334,7 +1340,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual ApEvent exchange_indirect_records(const unsigned index,
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
@@ -1706,7 +1712,7 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_mapping(void);
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent complete_event);
     protected:
       RtBarrier mapping_fence_barrier;
@@ -1889,6 +1895,7 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
@@ -2126,7 +2133,7 @@ namespace Legion {
       void handle_post_mapped(bool local, RtEvent precondition);
       void handle_post_execution(const void *res, size_t res_size, 
                                  bool owned, bool local);
-      void trigger_task_complete(bool local);
+      void trigger_task_complete(bool local, ApEvent effects_done);
       void trigger_task_commit(bool local);
     public:
       void send_collective_message(ShardID target, Serializer &rez);
@@ -2251,6 +2258,9 @@ namespace Legion {
 #endif
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
+    protected:
+      // ApEvents describing the completion of each shard
+      std::set<ApEvent> shard_effects;
     protected:
       // A unique set of address spaces on which shards exist 
       std::set<AddressSpaceID> unique_shard_spaces;

@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -348,7 +348,7 @@ namespace Realm {
       Processor proc;
       Event start_event;
       Event finish_event;
-      size_t user_arglen;
+      size_t arglen;
       int priority;
       Processor::TaskFuncID func_id;
 

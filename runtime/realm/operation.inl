@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,8 +39,8 @@ namespace Realm {
   {
     status.error_code = 0;
     measurements.import_requests(requests); 
-    wants_timeline = (measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>() ||
-		      measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>());
+    wants_timeline = measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>();
+    wants_gpu_timeline = measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>();
     wants_event_waits = measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>();
     if(wants_timeline)
       timeline.record_create_time();
@@ -114,6 +114,11 @@ namespace Realm {
       return 0;
   }
 
+  inline bool Operation::wants_gpu_work_start() const
+  {
+    return wants_gpu_timeline;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -133,13 +138,6 @@ namespace Realm {
   inline void Operation::AsyncWorkItem::mark_finished(bool successful)
   {
     op->work_item_finished(this, successful);
-  }
-
-  inline void Operation::AsyncWorkItem::mark_gpu_task_start()
-  {
-    if(op->wants_timeline)
-      op->timeline_gpu.record_start_time();
-    mark_finished(true);
   }
 
 }; // namespace Realm

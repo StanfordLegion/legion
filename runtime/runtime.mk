@@ -1,5 +1,5 @@
-# Copyright 2020 Stanford University, NVIDIA Corporation
-# Copyright 2020 Los Alamos National Laboratory
+# Copyright 2021 Stanford University, NVIDIA Corporation
+# Copyright 2021 Los Alamos National Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,8 +32,9 @@ LEGION_CC_FLAGS ?=
 REALM_CC_FLAGS ?=
 
 # Map some common GNU variable names into our variables
-CXXFLAGS ?=
 CPPFLAGS ?=
+CFLAGS ?=
+CXXFLAGS ?=
 LDLIBS ?=
 LDFLAGS ?=
 CC_FLAGS += $(CXXFLAGS) $(CPPFLAGS)
@@ -60,6 +61,10 @@ SHARED_OBJECTS ?= 0
 ifeq ($(strip $(SHARED_OBJECTS)),0)
 SLIB_LEGION     := liblegion.a
 SLIB_REALM      := librealm.a
+OUTFILE		?= liblegion.a
+ifeq ($(strip $(OUTFILE)),)
+  OUTFILE	:= liblegion.a
+endif
 else
 CC_FLAGS	+= -fPIC
 FC_FLAGS	+= -fPIC
@@ -67,9 +72,17 @@ NVCC_FLAGS	+= -Xcompiler -fPIC
 ifeq ($(shell uname -s),Darwin)
 SLIB_LEGION     := liblegion.dylib
 SLIB_REALM      := librealm.dylib
+OUTFILE		?= liblegion.dylib
+ifeq ($(strip $(OUTFILE)),)
+  OUTFILE	:= liblegion.dylib
+endif
 else
 SLIB_LEGION     := liblegion.so
 SLIB_REALM      := librealm.so
+OUTFILE		?= liblegion.so
+ifeq ($(strip $(OUTFILE)),)
+  OUTFILE	:= liblegion.so
+endif
 endif
 # shared libraries can link against other shared libraries
 SLIB_LEGION_DEPS = -L. -lrealm
@@ -289,12 +302,11 @@ ifeq ($(strip $(USE_LLVM)),1)
   LEGION_LD_FLAGS += $(LLVM_SYSTEM_LIBS)
 endif
 
-OMP_FLAGS ?=
 ifeq ($(strip $(USE_OPENMP)),1)
   REALM_CC_FLAGS += -DREALM_USE_OPENMP
   # Add the -fopenmp flag for Linux, but not for Mac as clang doesn't need it
   #ifneq ($(strip $(DARWIN)),1)
-  OMP_FLAGS += -fopenmp
+  CC_FLAGS += -fopenmp
   #endif
   REALM_OPENMP_GOMP_SUPPORT ?= 1
   ifeq ($(strip $(REALM_OPENMP_GOMP_SUPPORT)),1)
@@ -518,8 +530,8 @@ NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gencode arch=compute_
 NVCC_FLAGS += -Xcudafe --diag_suppress=boolean_controlling_expr_is_constant
 endif
 
-# Realm uses GASNet if requested
-ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
+# Realm uses GASNet if requested (detect both gasnet1 and gasnetex here)
+ifneq ($(findstring gasnet,$(REALM_NETWORKS)),)
   ifeq ($(GASNET),)
     $(error GASNET variable is not defined, aborting build)
   endif
@@ -546,7 +558,15 @@ ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
   else
     LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
   endif
-  REALM_CC_FLAGS	+= -DREALM_USE_GASNET1
+  ifneq ($(findstring gasnetex,$(REALM_NETWORKS)),)
+    REALM_CC_FLAGS	+= -DREALM_USE_GASNETEX
+  else
+    ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
+      REALM_CC_FLAGS	+= -DREALM_USE_GASNET1
+    else
+      $(error REALM_NETWORKS must be gasnet1 or gasnetex)
+    endif
+  endif
   # newer versions of gasnet seem to need this
   CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
 
@@ -655,30 +675,40 @@ endif
 
 ifeq ($(strip $(DEBUG)),1)
   ifeq ($(strip $(DARWIN)),1)
+    CFLAGS	+= -O0 -glldb
     CC_FLAGS	+= -O0 -glldb
     FC_FLAGS	+= -O0 -glldb
   else ifeq ($(strip $(USE_PGI)),1)
+    CFLAGS	+= -O0 -g
     CC_FLAGS	+= -O0 -g # --display_error_number
     FC_FLAGS	+= -O0 -g
   else
+    CFLAGS	+= -0O -ggdb
     CC_FLAGS	+= -O0 -ggdb #-ggdb -Wall
     FC_FLAGS	+= -O0 -ggdb
   endif
   REALM_CC_FLAGS	+= -DDEBUG_REALM
   LEGION_CC_FLAGS	+= -DDEBUG_LEGION
 else
+  CFLAGS	+= -O2
   CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
   FC_FLAGS	+= -O2 -fno-strict-aliasing
 endif
 
 BOUNDS_CHECKS ?= 0
+LEGION_BOUNDS_CHECKS ?= 0
 ifeq ($(strip $(BOUNDS_CHECKS)),1)
-LEGION_CC_FLAGS	+= -DBOUNDS_CHECKS
+LEGION_CC_FLAGS	+= -DLEGION_BOUNDS_CHECKS
+else ifeq ($(strip $(LEGION_BOUNDS_CHECKS)),1)
+LEGION_CC_FLAGS	+= -DLEGION_BOUNDS_CHECKS
 endif
 
 PRIVILEGE_CHECKS ?= 0
+LEGION_PRIVILEGE_CHECKS ?= 0
 ifeq ($(strip $(PRIVILEGE_CHECKS)),1)
-LEGION_CC_FLAGS	+= -DPRIVILEGE_CHECKS
+LEGION_CC_FLAGS	+= -DLEGION_PRIVILEGE_CHECKS
+else ifeq ($(strip $(LEGION_PRIVILEGE_CHECKS)),1)
+LEGION_CC_FLAGS	+= -DLEGION_PRIVILEGE_CHECKS
 endif
 
 # DEBUG_TSAN=1 enables thread sanitizer (data race) checks
@@ -727,11 +757,20 @@ ifeq ($(strip ${USE_DEFCHECK}),1)
   REALM_DEFCHECK = --defcheck realm_defines.h
 endif
 
+CC_SRC		?=
+CXX_SRC		?=
+# Backwards compatibility for older makefiles
+GEN_SRC		?=
+CXX_SRC		+= $(GEN_SRC)
+FORT_SRC	?=
+CUDA_SRC	?=
+# Backwards compatibility for older makefiles
+GEN_GPU_SRC	?= 
+CUDA_SRC	+= $(GEN_GPU_SRC)
 REALM_SRC	?=
 LEGION_SRC	?=
-LEGION_GPU_SRC	?=
+LEGION_CUDA_SRC	?=
 MAPPER_SRC	?=
-ASM_SRC		?=
 
 # Set the source files
 REALM_SRC 	+= $(LG_RT_DIR)/realm/runtime_impl.cc \
@@ -774,6 +813,11 @@ ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/gasnet1/gasnet1_module.cc \
                    $(LG_RT_DIR)/realm/gasnet1/gasnetmsg.cc
 endif
+ifneq ($(findstring gasnetex,$(REALM_NETWORKS)),)
+REALM_SRC 	+= $(LG_RT_DIR)/realm/gasnetex/gasnetex_module.cc \
+	           $(LG_RT_DIR)/realm/gasnetex/gasnetex_internal.cc \
+	           $(LG_RT_DIR)/realm/gasnetex/gasnetex_handlers.cc
+endif
 ifneq ($(findstring mpi,$(REALM_NETWORKS)),)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/mpi/mpi_module.cc \
                    $(LG_RT_DIR)/realm/mpi/am_mpi.cc
@@ -811,7 +855,8 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/logging.cc \
 	           $(LG_RT_DIR)/realm/cmdline.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
 	           $(LG_RT_DIR)/realm/codedesc.cc \
-		   $(LG_RT_DIR)/realm/timers.cc
+		   $(LG_RT_DIR)/realm/timers.cc \
+		   $(LG_RT_DIR)/realm/utils.cc
 
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
 		   $(LG_RT_DIR)/mappers/mapping_utilities.cc \
@@ -844,11 +889,11 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/runtime.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \
 		    $(LG_RT_DIR)/legion/mapper_manager.cc
-LEGION_GPU_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
+LEGION_CUDA_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
 # LEGION_INST_SRC will be compiled {MAX_DIM}^2 times in parallel
 LEGION_INST_SRC  += $(LG_RT_DIR)/legion/region_tree_tmpl.cc
 
-LEGION_FORTRAN_SRC += $(LG_RT_DIR)/legion/legion_f_types.f90 \
+LEGION_FORT_SRC  += $(LG_RT_DIR)/legion/legion_f_types.f90 \
 		    $(LG_RT_DIR)/legion/legion_f_c_interface.f90 \
 		    $(LG_RT_DIR)/legion/legion_f.f90
 
@@ -983,29 +1028,34 @@ REALM_INST_OBJS := $(call f_expand2,f_replace2,$(REALM_INST_SRC))
 LEGION_INST_OBJS := $(call f_expand1,f_replace1,$(LEGION_INST_SRC)) \
                     $(call f_expand2,f_replace2,$(LEGION_INST_SRC))
 
-GEN_OBJS	:= $(GEN_SRC:.cc=.cc.o)
+APP_OBJS	:= $(CC_SRC:.c=.c.o)
+APP_OBJS	+= $(CXX_SRC:.cc=.cc.o)
+APP_OBJS	+= $(ASM_SRC:.S=.S.o)
 REALM_OBJS	:= $(REALM_SRC:.cc=.cc.o)
 LEGION_OBJS	:= $(LEGION_SRC:.cc=.cc.o)
 MAPPER_OBJS	:= $(MAPPER_SRC:.cc=.cc.o)
-ASM_OBJS	:= $(ASM_SRC:.S=.S.o)
 # Only compile the gpu objects if we need to
 ifeq ($(strip $(USE_CUDA)),1)
-GEN_GPU_OBJS	:= $(GEN_GPU_SRC:.cu=.cu.o)
-LEGION_GPU_OBJS := $(LEGION_GPU_SRC:.cu=.cu.o)
-else
-GEN_GPU_OBJS	:=
-LEGION_GPU_OBJS :=
+APP_OBJS	+= $(CUDA_SRC:.cu=.cu.o)
+LEGION_OBJS 	+= $(LEGION_CUDA_SRC:.cu=.cu.o)
 endif
 
+USE_FORTRAN ?= 0
 LEGION_USE_FORTRAN ?= 0
-ifeq ($(strip $(LEGION_USE_FORTRAN)),1)
-LEGION_FORTRAN_OBJS := $(LEGION_FORTRAN_SRC:.f90=.f90.o)
-GEN_FORTRAN_OBJS := $(GEN_FORTRAN_SRC:.f90=.f90.o)
-FC_FLAGS += -cpp
-LD_FLAGS += -lgfortran
-else
-LEGION_FORTRAN_OBJS :=
-GEN_FORTRAN_OBJS :=
+# For backwards compatibility
+GEN_FORTRAN_SRC ?=
+FORT_SRC	+= $(GEN_FORTRAN_SRC)
+ifeq ($(strip $(USE_FORTRAN)),1)
+LEGION_OBJS 	+= $(LEGION_FORT_SRC:.f90=.f90.o)
+APP_OBJS 	+= $(FORT_SRC:.f90=.f90.o)
+FC_FLAGS 	+= -cpp
+LD_FLAGS 	+= -lgfortran
+else ifeq ($(strip $(LEGION_USE_FORTRAN)),1)
+USE_FORTRAN	:= 1
+LEGION_OBJS 	+= $(LEGION_FORT_SRC:.f90=.f90.o)
+APP_OBJS	+= $(FORT_SRC:.f90=.f90.o)
+FC_FLAGS 	+= -cpp
+LD_FLAGS 	+= -lgfortran
 endif
 
 # Provide build rules unless the user asks us not to
@@ -1048,12 +1098,12 @@ install:
 endif
 
 # If we're using CUDA we have to link with nvcc
-$(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_FORTRAN_OBJS)
+$(OUTFILE) : $(APP_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
-	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(GEN_FORTRAN_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
+	$(CXX) -o $(OUTFILE) $(APP_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
 
 ifeq ($(strip $(SHARED_OBJECTS)),0)
-$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LEGION_GPU_OBJS)
+$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS)
 	rm -f $@
 	$(AR) rcs $@ $^
 
@@ -1061,20 +1111,23 @@ $(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
 	rm -f $@
 	$(AR) rcs $@ $^
 else
-$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LEGION_GPU_OBJS) $(SLIB_REALM)
+$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(SLIB_REALM)
 	rm -f $@
-	$(CXX) $(SO_FLAGS) -o $@ $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LEGION_GPU_OBJS) $(SLIB_LEGION_DEPS)
+	$(CXX) $(SO_FLAGS) -o $@ $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(SLIB_LEGION_DEPS)
 
 $(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
 	rm -f $@
 	$(CXX) $(SO_FLAGS) -o $@ $^ $(SLIB_REALM_DEPS)
 endif
 
-$(GEN_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) $(OMP_FLAGS)
+$(filter %.c.o,$(APP_OBJS)) : %.c.o : %.c $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(CC) -o $@ -c $< $(CPPFLAGS) $(CFLAGS) $(INC_FLAGS)
 
-$(ASM_OBJS) : %.S.o : %.S
+$(filter %.cc.o,$(APP_OBJS)) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+
+$(filter %.S.o,$(APP_OBJS)) : %.S.o : %.S
+	$(AS) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 # special rules for per-dimension deppart source files
 #  (hopefully making the path explicit doesn't break things too badly...)
@@ -1093,19 +1146,20 @@ $(REALM_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 $(LG_RT_DIR)/legion/region_tree_%.cc.o : $(LG_RT_DIR)/legion/region_tree_tmpl.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) $(patsubst %,-DINST_N2=%,$(word 2,$(subst _, ,$*))) $(LEGION_DEFCHECK)
 
-$(LEGION_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+$(filter %.cc.o,$(LEGION_OBJS)) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) $(LEGION_DEFCHECK)
 
 $(MAPPER_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(GEN_GPU_OBJS) : %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+$(filter %.cu.o,$(APP_OBJS)) : %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
-$(LEGION_GPU_OBJS): %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+$(filter %.cu.o,$(LEGION_OBJS)): %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
-ifeq ($(strip $(LEGION_USE_FORTRAN)),1)
+# Special rules for building the legion fortran files because the fortran compiler is dumb
+ifeq ($(strip $(USE_FORTRAN)),1)
 $(LG_RT_DIR)/legion/legion_f_types.f90.o : $(LG_RT_DIR)/legion/legion_f_types.f90 $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(FC) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
 
@@ -1115,7 +1169,7 @@ $(LG_RT_DIR)/legion/legion_f_c_interface.f90.o : $(LG_RT_DIR)/legion/legion_f_c_
 $(LG_RT_DIR)/legion/legion_f.f90.o : $(LG_RT_DIR)/legion/legion_f.f90 $(LG_RT_DIR)/legion/legion_f_c_interface.f90.o $(LG_RT_DIR)/legion/legion_f_types.f90.o $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(FC) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
 
-$(GEN_FORTRAN_OBJS) : %.f90.o : %.f90 $(LEGION_FORTRAN_OBJS) $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+$(filter %.f90.o,$(APP_OBJS)) : %.f90.o : %.f90 $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(filter %.f90.o,$(LEGION_OBJS))
 	$(FC) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
 endif
 
@@ -1123,7 +1177,7 @@ endif
 % : %.o
 
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(LEGION_GPU_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) $(LEGION_FORTRAN_OBJS) $(LG_RT_DIR)/*mod $(GEN_FORTRAN_OBJS) *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 
 ifeq ($(strip $(USE_LLVM)),1)
 llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)

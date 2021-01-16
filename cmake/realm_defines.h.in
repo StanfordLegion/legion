@@ -31,6 +31,7 @@
 #cmakedefine REALM_USE_KOKKOS
 
 #cmakedefine REALM_USE_GASNET1
+#cmakedefine REALM_USE_GASNETEX
 
 /* technically these are defined by per-conduit GASNet include files,
  * but we do it here as well for the benefit of applications that care

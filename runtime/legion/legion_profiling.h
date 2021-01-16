@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -262,12 +262,23 @@ namespace Legion {
         LgEvent provenance, finish_event;
 #endif
       };
+      struct CopyInstInfo {
+      public:
+        InstID src_inst_id;
+        InstID dst_inst_id;
+        unsigned num_fields;
+        unsigned num_hops;
+        unsigned request_type;
+      };
       struct CopyInfo {
       public:
         UniqueID op_id;
         MemID src, dst;
         unsigned long long size;
         timestamp_t create, ready, start, stop;
+        LgEvent fevent;
+        unsigned num_requests;
+        std::deque<CopyInstInfo> requests;
 #ifdef LEGION_PROF_PROVENANCE
         LgEvent provenance;
 #endif

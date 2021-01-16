@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -231,6 +231,8 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
+      virtual bool has_parent_task(void) const;
+      virtual const Task* get_parent_task(void) const;
       virtual const char* get_task_name(void) const;
       virtual bool is_reducing_future(void) const;
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
@@ -277,6 +279,8 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { exec_fence = false; return !regions.empty(); }
     public:
       virtual void trigger_dependence_analysis(void) = 0;
       virtual void trigger_complete(void);
@@ -304,22 +308,19 @@ namespace Legion {
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL) = 0;
-      virtual void launch_task(void) = 0;
+      virtual void launch_task(bool inline_task = false) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool is_output_global(unsigned idx) const { return false; }
       virtual bool is_output_valid(unsigned idx) const { return false; }
     public:
-      virtual ApEvent get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
     public:
       // Returns true if the task should be deactivated
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
-      virtual void perform_inlining(TaskContext *enclosing) = 0;
-    public:
-      virtual void end_inline_task(const void *result, size_t result_size,
-                                   bool owned, FutureFunctor *functor);
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions) = 0;
     public:
       RtEvent defer_distribute_task(RtEvent precondition);
       RtEvent defer_perform_mapping(RtEvent precondition, MustEpochOp *op,
@@ -354,6 +355,11 @@ namespace Legion {
       // From Memoizable
       virtual const RegionRequirement& get_requirement(unsigned idx) const
         { return logical_regions[idx]; }
+    public: // helper for mapping, here because of inlining
+      void validate_variant_selection(MapperManager *local_mapper,
+                          VariantImpl *impl, Processor::Kind kind, 
+                          const std::deque<InstanceSet> &physical_instances,
+                          const char *call_name) const;
     public:
       // These methods get called once the task has executed
       // and all the children have either mapped, completed,
@@ -375,8 +381,6 @@ namespace Legion {
       std::map<unsigned/*idx*/,InstanceSet>     early_mapped_regions;
       // A map of any locks that we need to take for this task
       std::map<Reservation,bool/*exclusive*/>   atomic_locks;
-      // Post condition effects for copies out
-      std::set<ApEvent>                         effects_postconditions;
       // Set of acquired instances for this task
       std::map<PhysicalManager*,unsigned/*ref count*/> acquired_instances;
     protected:
@@ -430,6 +434,8 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
+      virtual bool has_parent_task(void) const;
+      virtual const Task* get_parent_task(void) const;
       virtual const char* get_task_name(void) const;
       virtual void set_context_index(size_t index);
     public:
@@ -514,14 +520,12 @@ namespace Legion {
       void replay_map_task_output(void);
       virtual InnerContext* create_implicit_context(void);
       void set_shard_manager(ShardManager *manager);
-    protected: // mapper helper calls
+    protected: // mapper helper call
       void validate_target_processors(const std::vector<Processor> &prcs) const;
-      void validate_variant_selection(MapperManager *local_mapper,
-          VariantImpl *impl, Processor::Kind kind, const char *call_name) const;
     protected:
       void invoke_mapper(MustEpochOp *must_epoch_owner);
       void invoke_mapper_replicated(MustEpochOp *must_epoch_owner);
-      RtEvent map_all_regions(ApEvent user_event, MustEpochOp *must_epoch_owner,
+      RtEvent map_all_regions(MustEpochOp *must_epoch_owner,
                               const DeferMappingArgs *defer_args);
       void perform_post_mapping(const TraceInfo &trace_info);
       void replicate_task(void);
@@ -544,11 +548,14 @@ namespace Legion {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
       virtual bool is_top_level_task(void) const { return false; }
+#ifdef DEBUG_LEGION
+      virtual bool is_implicit_top_level_task(void) const { return false; }
+#endif
       virtual bool is_shard_task(void) const { return false; }
       virtual SingleTask* get_origin_task(void) const = 0;
     public:
       virtual void resolve_false(bool speculated, bool launched) = 0;
-      virtual void launch_task(void);
+      virtual void launch_task(bool inline_task = false);
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
@@ -556,9 +563,7 @@ namespace Legion {
       // For tasks that are sharded off by control replication
       virtual void shard_off(RtEvent mapped_precondition);
       virtual bool is_stealable(void) const = 0;
-      virtual bool can_early_complete(ApUserEvent &chain_event) = 0;
     public:
-      virtual ApEvent get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
     public:
       // Override these methods from operation class
@@ -571,9 +576,8 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0; 
-      virtual void pack_as_shard_task(Serializer &rez, 
-                                      AddressSpaceID target) = 0;
-      virtual void perform_inlining(TaskContext *enclosing) = 0;
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions);
     public:
       virtual void handle_future(const void *res, size_t res_size,
                                  bool owned, FutureFunctor *functor,
@@ -584,15 +588,17 @@ namespace Legion {
     public:
       // From Memoizable
       virtual bool is_memoizable_task(void) const { return true; }
-      virtual ApEvent get_memo_completion(void) const
-        { return get_task_completion(); }
+      virtual ApEvent get_memo_completion(void) const;
       virtual void replay_mapping_output(void) { replay_map_task_output(); }
       virtual void set_effects_postcondition(ApEvent postcondition);
     public:
       void handle_remote_profiling_response(Deserializer &derez);
       static void process_remote_profiling_response(Deserializer &derez);
+    public:
+      void trigger_children_complete(ApEvent all_children_complete);
     protected:
-      virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
+      virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
+                                                            bool inline_task);
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool>                     virtual_mapped;
@@ -616,6 +622,19 @@ namespace Legion {
       // Events that must be triggered before we are done mapping
       std::set<RtEvent>                     map_applied_conditions;
       RtUserEvent                           deferred_complete_mapping;
+      // The single task termination event encapsulates the exeuction of the
+      // task being done and all child operations and their effects being done
+      // It does NOT encapsulate the 'effects_complete' of this task
+      // Only the actual operation completion event captures that
+      ApUserEvent                           single_task_termination;
+      // Event recording when all "effects" are complete
+      // The effects of the task include the following:
+      // 1. the execution of the task
+      // 2. the execution of all child ops of the task
+      // 3. all copy-out operations of child ops
+      // 4. all copy-out operations of the task itself
+      // Note that this definition is recursive
+      ApEvent                               task_effects_complete;
     protected:
       TaskContext*                          execution_context;
       TraceInfo*                            remote_trace_info;
@@ -690,11 +709,10 @@ namespace Legion {
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL) = 0;
-      virtual void launch_task(void) = 0;
+      virtual void launch_task(bool inline_task = false) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual void map_and_launch(void) = 0;
     public:
-      virtual ApEvent get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
     public:
       virtual void trigger_mapping(void);
@@ -705,7 +723,8 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
-      virtual void perform_inlining(TaskContext *enclosing) = 0;
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions) = 0;
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                       Processor p, bool recurse, bool stealable) = 0;
@@ -806,15 +825,15 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions);
       virtual bool is_stealable(void) const;
-      virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual bool is_output_valid(unsigned idx) const;
     public:
-      virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
       virtual void trigger_task_complete(void);
@@ -832,11 +851,11 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void pack_as_shard_task(Serializer &rez, AddressSpaceID target);
-      virtual void perform_inlining(TaskContext *enclosing);
       virtual bool is_top_level_task(void) const { return top_level_task; }
-      virtual void end_inline_task(const void *result, size_t result_size,
-                                   bool owned, FutureFunctor *functor);
+#ifdef DEBUG_LEGION
+      virtual bool is_implicit_top_level_task(void) const 
+        { return implicit_top_level_task; }
+#endif
     protected:
       void pack_remote_versions(Serializer &rez);
       void pack_remote_complete(Serializer &rez);
@@ -845,7 +864,7 @@ namespace Legion {
       void unpack_remote_commit(Deserializer &derez);
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent completion_event);
     public:
       static void process_unpack_remote_complete(Deserializer &derez);
@@ -858,7 +877,6 @@ namespace Legion {
     protected:
       // Information for remotely executing task
       IndividualTask *orig_task; // Not a valid pointer when remote
-      ApEvent remote_completion_event;
       UniqueID remote_unique_id;
       UniqueID remote_owner_uid;
     protected:
@@ -909,13 +927,11 @@ namespace Legion {
                                       const DeferMappingArgs *args = NULL);
       virtual void shard_off(RtEvent mapped_precondition);
       virtual bool is_stealable(void) const;
-      virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual bool is_output_global(unsigned idx) const; 
       virtual bool is_output_valid(unsigned idx) const;
     public:
-      virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
       virtual void trigger_task_complete(void);
@@ -924,8 +940,6 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void pack_as_shard_task(Serializer &rez, AddressSpaceID target);
-      virtual void perform_inlining(TaskContext *enclosing);
     public:
       virtual void handle_future(const void *res, size_t res_size,
                                  bool owned, FutureFunctor *functor,
@@ -946,7 +960,7 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent completion_event);
     public:
       // From Memoizable
@@ -968,12 +982,13 @@ namespace Legion {
     public:
       void record_intra_space_dependences(unsigned index,
              const std::vector<DomainPoint> &dependences);
+      bool has_remaining_inlining_dependences(
+            std::map<PointTask*,unsigned> &remaining,
+            std::map<RtEvent,std::vector<PointTask*> > &event_deps) const;
     protected:
       friend class SliceTask;
       PointTask                   *orig_task;
       SliceTask                   *slice_owner;
-      ApUserEvent                 point_termination;
-      ApUserEvent                 deferred_effects;
     protected:
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
     };
@@ -1004,7 +1019,7 @@ namespace Legion {
       virtual bool is_reducing_future(void) const { return true; }
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void resolve_false(bool speculated, bool launched);
@@ -1035,9 +1050,8 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events); 
-      virtual void pack_as_shard_task(Serializer &rez, AddressSpaceID target);
-      RtEvent unpack_shard_task(Deserializer &derez);
-      virtual void perform_inlining(TaskContext *enclosing);
+      virtual void perform_inlining(VariantImpl *variant,
+              const std::deque<InstanceSet> &parent_regions);
     public:
       virtual void handle_future(const void *res, size_t res_size, 
                                  bool owned, FutureFunctor *functor,
@@ -1046,7 +1060,8 @@ namespace Legion {
                           RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
     protected:
-      virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
+      virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
+                                                            bool inline_task);
     public:
       virtual InnerContext* create_implicit_context(void);
     public:
@@ -1136,11 +1151,10 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
-      virtual void launch_task(void);
+      virtual void launch_task(bool inline_task = false);
       virtual bool is_stealable(void) const;
       virtual void map_and_launch(void);
     public:
-      virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     protected:
       virtual void trigger_task_complete(void);
@@ -1149,9 +1163,8 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(TaskContext *enclosing);
-      virtual void end_inline_task(const void *result, size_t result_size,
-                                   bool owned, FutureFunctor *functor);
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
     public:
@@ -1194,9 +1207,8 @@ namespace Legion {
       // and provide an event for when the result is ready
       virtual RtEvent prepare_index_task_complete(void);
     public:
-      void return_slice_mapped(unsigned points,
-                               RtEvent applied_condition,
-                               ApEvent restrict_postcondition);
+      void return_slice_mapped(unsigned points, RtEvent applied_condition,
+                               ApEvent slice_complete);
       void return_slice_complete(unsigned points, RtEvent applied_condition,
          const std::map<unsigned,std::map<DomainPoint,size_t> > &output_sizes);
       void return_slice_commit(unsigned points, RtEvent applied_condition);
@@ -1206,7 +1218,7 @@ namespace Legion {
       void unpack_slice_commit(Deserializer &derez);
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode *get_collective_space(void) const
@@ -1232,6 +1244,7 @@ namespace Legion {
       std::set<SliceTask*> origin_mapped_slices;
     protected:
       std::set<RtEvent> map_applied_conditions;
+      std::set<ApEvent> complete_effects;
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
     protected:
@@ -1304,19 +1317,19 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
-      virtual void launch_task(void);
+      virtual void launch_task(bool inline_task = false);
       virtual bool is_stealable(void) const;
       virtual void map_and_launch(void);
       virtual bool is_output_global(unsigned idx) const;
       virtual bool is_output_valid(unsigned idx) const;
     public:
-      virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(TaskContext *enclosing);
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions);
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
@@ -1341,11 +1354,10 @@ namespace Legion {
     public:
       void return_privileges(TaskContext *point_context,
                              std::set<RtEvent> &preconditions);
-      void record_child_mapped(RtEvent child_mapped,
-          ApEvent restrict_postcondition,
+      void record_point_mapped(RtEvent child_mapped, ApEvent child_complete,
           std::map<PhysicalManager*,unsigned> &child_acquired);
-      void record_child_complete(RtEvent child_complete);
-      void record_child_committed(RtEvent commit_precondition =
+      void record_point_complete(RtEvent child_complete);
+      void record_point_committed(RtEvent commit_precondition =
                                   RtEvent::NO_RT_EVENT);
     public:
       void record_output_sizes(const DomainPoint &point,
@@ -1355,7 +1367,8 @@ namespace Legion {
       void trigger_slice_complete(void);
       void trigger_slice_commit(void);
     protected:
-      void pack_remote_mapped(Serializer &rez, RtEvent applied_condition);
+      void pack_remote_mapped(Serializer &rez, RtEvent applied_condition,
+                              ApEvent all_points_complete);
       void pack_remote_complete(Serializer &rez, RtEvent applied_condition);
       void pack_remote_commit(Serializer &rez, RtEvent applied_condition);
     public:
@@ -1376,7 +1389,7 @@ namespace Legion {
               std::set<RtEvent> &preconditions);
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent instance_ready_event);
     public:
       // Methods for supporting intra-index-space mapping dependences
@@ -1413,14 +1426,13 @@ namespace Legion {
       unsigned num_uncommitted_points;
     protected:
       IndexTask *index_owner;
-      ApEvent index_complete;
       UniqueID remote_unique_id;
       bool origin_mapped;
       UniqueID remote_owner_uid;
       TraceInfo *remote_trace_info;
-      ApUserEvent effects_postcondition;
     protected:
       std::set<RtEvent> map_applied_conditions;
+      std::set<ApEvent> point_completions;
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
     protected:

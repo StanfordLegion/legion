@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1533,12 +1533,17 @@ namespace Legion {
        * enough ahead that it can be halted for this context by setting
        * the 'min_tasks_to_schedule' parameter.
        *
-       * the mapper can control the granularity of Legion meta-tasks
+       * The mapper can control the granularity of Legion meta-tasks
        * for this context with the 'meta_task_vector_width' parameter
        * which control how many meta-tasks get batched together for 
        * certain stages of the execution pipeline. This is useful to 
        * avoid the overheads of Realm tasks which often do not deal
        * with very small meta-tasks (e.g. those that take 20us or less).
+       *
+       * The 'max_templates_per_trace' parameter specifies the maximum
+       * number of templates that should be kept around per captured 
+       * physical trace before discarding them. The runtime will use a
+       * least-recently used policy when discarding templates.
        *
        * The 'mutable_priority' parameter allows the mapper to specify
        * whether child operations launched in this context are permitted
@@ -1554,6 +1559,7 @@ namespace Legion {
         unsigned                                min_tasks_to_schedule; // = 64
         unsigned                                min_frames_to_schedule; // = 0 
         unsigned                                meta_task_vector_width; // = 16
+        unsigned                                max_templates_per_trace; // = 16
         bool                                    mutable_priority; // = false
       };
       //------------------------------------------------------------------------

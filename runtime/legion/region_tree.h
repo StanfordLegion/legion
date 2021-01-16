@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -519,7 +519,6 @@ namespace Legion {
                                 const char *log_name,
                                 UniqueID uid,
 #endif
-                                const bool track_effects,
                                 const bool record_valid = true,
                                 const bool check_initialized = true,
                                 const bool defer_copies = true,
@@ -544,7 +543,6 @@ namespace Legion {
                                    const char *log_name,
                                    UniqueID uid,
 #endif
-                                   const bool track_effects,
                                    const bool record_valid = true,
                                    const bool check_initialized = true);
       // A helper method for deferring the computation of registration

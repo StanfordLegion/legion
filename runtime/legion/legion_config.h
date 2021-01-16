@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -98,6 +98,20 @@
 #ifndef LEGION_DISABLE_DEPRECATED_ENUMS
 #ifndef GC_NEVER_PRIORITY
 #define GC_NEVER_PRIORITY  LEGION_GC_NEVER_PRIORITY
+#endif
+#endif
+// This is for backwards compatibility
+// Try to be nice in case someone else defined this
+#ifdef BOUNDS_CHECKS
+#ifndef LEGION_BOUNDS_CHECKS
+#define LEGION_BOUNDS_CHECKS
+#endif
+#endif
+// This is for backwards compatibility
+// Try to be nice in case someone else defined this
+#ifdef PRIVILEGE_CHECKS
+#ifndef LEGION_PRIVILEGE_CHECKS
+#define LEGION_PRIVILEGE_CHECKS
 #endif
 #endif
 
@@ -317,6 +331,10 @@
 #ifndef LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE
 #define LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE 1
 #endif
+// Maximum number of templates to keep around in traces
+#ifndef LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE
+#define LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE  16
+#endif
 // Default number of replay tasks to run in parallel
 #ifndef DEFAULT_MAX_REPLAY_PARALLELISM // For backwards compatibility
 #ifndef LEGION_DEFAULT_MAX_REPLAY_PARALLELISM
@@ -468,7 +486,7 @@
 #define LEGION_MACRO_TO_STRING(x) LEGION_STRINGIFY(x)
 
 #define LEGION_DISTRIBUTED_ID_MASK    0x00FFFFFFFFFFFFFFULL
-#define LEGION_DISTRIBUTED_ID_FILTER(x) ((x) & 0x00FFFFFFFFFFFFFFULL)
+#define LEGION_DISTRIBUTED_ID_FILTER(x) ((x) & LEGION_DISTRIBUTED_ID_MASK)
 #define LEGION_DISTRIBUTED_HELP_DECODE(x)   ((x) >> 56)
 #define LEGION_DISTRIBUTED_HELP_ENCODE(x,y) ((x) | (((long long)(y)) << 56))
 
@@ -1324,10 +1342,11 @@ typedef enum legion_error_t {
   LEGION_WARNING_NEW_TEMPLATE_COUNT_EXCEEDED = 1102,
   LEGION_WARNING_NON_CALLBACK_REGISTRATION = 1103,
   LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION = 1104,
-  LEGION_WARNING_DYNAMIC_SHARDING_REG = 1105,
-  LEGION_WARNING_SLOW_NON_FUNCTIONAL_PROJECTION = 1106,
-  LEGION_WARNING_MISMATCHED_REPLICATED_FUTURES = 1107,
-  LEGION_WARNING_INLINING_NOT_SUPPORTED = 1108,
+  LEGION_WARNING_FAILED_INLINING = 1105,
+  LEGION_WARNING_DYNAMIC_SHARDING_REG = 1106,
+  LEGION_WARNING_SLOW_NON_FUNCTIONAL_PROJECTION = 1107,
+  LEGION_WARNING_MISMATCHED_REPLICATED_FUTURES = 1108,
+  LEGION_WARNING_INLINING_NOT_SUPPORTED = 1109,
   
   
   LEGION_FATAL_MUST_EPOCH_NOADDRESS = 2000,

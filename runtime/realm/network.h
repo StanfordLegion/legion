@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,9 +32,23 @@ namespace Realm {
 
   class NetworkModule;
   class MemoryImpl;
+  class IBMemory;
   class ByteArray;
   class ActiveMessageImpl;
 
+  // a RemoteAddress is used to name the target of an RDMA operation - in some
+  //  cases it's as simple as a pointer, but in others additional info is needed
+  //  (hopefully we won't need more than 16B anywhere though)
+  struct RemoteAddress {
+    union {
+      struct {
+	uintptr_t ptr;
+	uintptr_t extra;
+      };
+      unsigned char raw_bytes[16];
+    };
+  };
+  
   namespace Network {
     // a few globals for efficiency
     extern NodeID my_node_id;
@@ -76,7 +90,17 @@ namespace Realm {
 						  const void *src_payload_addr,
 						  size_t src_payload_lines,
 						  size_t src_payload_line_stride,
-						  void *dest_payload_addr,
+						  void *storage_base,
+						  size_t storage_size);
+
+    ActiveMessageImpl *create_active_message_impl(NodeID target,
+						  unsigned short msgid,
+						  size_t header_size,
+						  size_t max_payload_size,
+						  const void *src_payload_addr,
+						  size_t src_payload_lines,
+						  size_t src_payload_line_stride,
+						  const RemoteAddress& dest_payload_addr,
 						  void *storage_base,
 						  size_t storage_size);
 
@@ -89,11 +113,36 @@ namespace Realm {
 						  size_t src_payload_line_stride,
 						  void *storage_base,
 						  size_t storage_size);
-    
+
+    size_t recommended_max_payload(NodeID target, bool with_congestion,
+				   size_t header_size);
+    size_t recommended_max_payload(const NodeSet& targets,
+				   bool with_congestion,
+				   size_t header_size);
+    size_t recommended_max_payload(NodeID target,
+				   const RemoteAddress& dest_payload_addr,
+				   bool with_congestion,
+				   size_t header_size);
+    size_t recommended_max_payload(NodeID target,
+				   const void *data, size_t bytes_per_line,
+				   size_t lines, size_t line_stride,
+				   bool with_congestion,
+				   size_t header_size);
+    size_t recommended_max_payload(const NodeSet& targets,
+				   const void *data, size_t bytes_per_line,
+				   size_t lines, size_t line_stride,
+				   bool with_congestion,
+				   size_t header_size);
+    size_t recommended_max_payload(NodeID target,
+				   const void *data, size_t bytes_per_line,
+				   size_t lines, size_t line_stride,
+				   const RemoteAddress& dest_payload_addr,
+				   bool with_congestion,
+				   size_t header_size);
   };
 
   class NetworkSegment;
-  
+
   // a network module provides additional functionality on top of a normal Realm
   //  module
   class NetworkModule : public Module {
@@ -135,6 +184,8 @@ namespace Realm {
     // used to create a remote proxy for a memory
     virtual MemoryImpl *create_remote_memory(Memory m, size_t size, Memory::Kind kind,
 					     const ByteArray& rdma_info) = 0;
+    virtual IBMemory *create_remote_ib_memory(Memory m, size_t size, Memory::Kind kind,
+					      const ByteArray& rdma_info) = 0;
 
     virtual ActiveMessageImpl *create_active_message_impl(NodeID target,
 							  unsigned short msgid,
@@ -143,7 +194,17 @@ namespace Realm {
 							  const void *src_payload_addr,
 							  size_t src_payload_lines,
 							  size_t src_payload_line_stride,
-							  void *dest_payload_addr,
+							  void *storage_base,
+							  size_t storage_size) = 0;
+
+    virtual ActiveMessageImpl *create_active_message_impl(NodeID target,
+							  unsigned short msgid,
+							  size_t header_size,
+							  size_t max_payload_size,
+							  const void *src_payload_addr,
+							  size_t src_payload_lines,
+							  size_t src_payload_line_stride,
+							  const RemoteAddress& dest_payload_addr,
 							  void *storage_base,
 							  size_t storage_size) = 0;
 
@@ -156,6 +217,48 @@ namespace Realm {
 							  size_t src_payload_line_stride,
 							  void *storage_base,
 							  size_t storage_size) = 0;
+
+    virtual size_t recommended_max_payload(NodeID target,
+					   bool with_congestion,
+					   size_t header_size) = 0;
+    virtual size_t recommended_max_payload(const NodeSet& targets,
+					   bool with_congestion,
+					   size_t header_size) = 0;
+    virtual size_t recommended_max_payload(NodeID target,
+					   const RemoteAddress& dest_payload_addr,
+					   bool with_congestion,
+					   size_t header_size) = 0;
+    virtual size_t recommended_max_payload(NodeID target,
+					   const void *data, size_t bytes_per_line,
+					   size_t lines, size_t line_stride,
+					   bool with_congestion,
+					   size_t header_size) = 0;
+    virtual size_t recommended_max_payload(const NodeSet& targets,
+					   const void *data, size_t bytes_per_line,
+					   size_t lines, size_t line_stride,
+					   bool with_congestion,
+					   size_t header_size) = 0;
+    virtual size_t recommended_max_payload(NodeID target,
+					   const void *data, size_t bytes_per_line,
+					   size_t lines, size_t line_stride,
+					   const RemoteAddress& dest_payload_addr,
+					   bool with_congestion,
+					   size_t header_size) = 0;
+  };
+
+  namespace NetworkSegmentInfo {
+    // "enum" (using a namespace so that they can be extended in other
+    //  headers) describing the different kind of memories that a network
+    //  segment can live in
+    typedef unsigned MemoryType;
+
+    // each memory type gets to define what the extra data means for itself
+    typedef uintptr_t MemoryTypeExtraData;
+
+    static const MemoryType Unknown = 0;
+
+    // generic memory that is read/write-able by the host CPUs
+    static const MemoryType HostMem = 1;
   };
 
   class NetworkSegment {
@@ -163,17 +266,19 @@ namespace Realm {
     NetworkSegment();
     
     // normally a request will just be for a particular size
-    NetworkSegment(size_t _bytes, size_t _alignment);
+    void request(NetworkSegmentInfo::MemoryType _memtype,
+		 size_t _bytes, size_t _alignment,
+		 NetworkSegmentInfo::MemoryTypeExtraData _memextra = 0);
 
     // but it can also be for a pre-allocated chunk of memory with a fixed address
-    NetworkSegment(void *_base, size_t _bytes);
-
-    void request(size_t _bytes, size_t _alignment);
-
-    void assign(void *_base, size_t _bytes);
+    void assign(NetworkSegmentInfo::MemoryType _memtype,
+		void *_base, size_t _bytes,
+		NetworkSegmentInfo::MemoryTypeExtraData _memextra = 0);
 
     void *base;  // once this is non-null, it cannot be changed
     size_t bytes, alignment;
+    NetworkSegmentInfo::MemoryType memtype;
+    NetworkSegmentInfo::MemoryTypeExtraData memextra;
 
     // again, a single network puts itself here in addition to adding to the map
     NetworkModule *single_network;
@@ -187,7 +292,7 @@ namespace Realm {
 		       const void *data, size_t len);
     const ByteArray *get_rdma_info(NetworkModule *network) const;
   };
-  
+
 }; // namespace Realm
 
 #include "realm/network.inl"

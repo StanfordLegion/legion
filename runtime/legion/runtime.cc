@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -760,18 +760,21 @@ namespace Legion {
       }
       if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
         implicit_context->record_blocking_call();
-      if (!future_complete.has_triggered())
+      bool poisoned = false;
+      if (!future_complete.has_triggered_faultaware(poisoned))
       {
         TaskContext *context = implicit_context;
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          future_complete.wait();
+          future_complete.wait_faultaware(poisoned);
           context->end_task_wait();
         }
         else
-          future_complete.wait();
+          future_complete.wait_faultaware(poisoned);
       }
+      if (poisoned)
+        implicit_context->raise_poison_exception();
       mark_sampled();
     }
     
@@ -818,18 +821,21 @@ namespace Legion {
       else
       {
         const ApEvent ready_event = subscribe();
-        if (!ready_event.has_triggered())
+        bool poisoned = false;
+        if (!ready_event.has_triggered_faultaware(poisoned))
         {
           TaskContext *context = implicit_context;
           if (context != NULL)
           {
             context->begin_task_wait(false/*from runtime*/);
-            ready_event.wait();
+            ready_event.wait_faultaware(poisoned);
             context->end_task_wait();
           }
           else
-            ready_event.wait();
+            ready_event.wait_faultaware(poisoned);
         }
+        if (poisoned)
+          implicit_context->raise_poison_exception();
       }
       if (check_size)
       {
@@ -885,19 +891,22 @@ namespace Legion {
       if (block)
       {
         const ApEvent ready_event = subscribe();
-        if (!ready_event.has_triggered())
+        bool poisoned = false;
+        if (!ready_event.has_triggered_faultaware(poisoned))
         {
           TaskContext *context =
             (producer_op == NULL) ? NULL : producer_op->get_context();
           if (context != NULL)
           {
             context->begin_task_wait(false/*from runtime*/);
-            ready_event.wait();
+            ready_event.wait_faultaware(poisoned);
             context->end_task_wait();
           }
           else
-            ready_event.wait();
+            ready_event.wait_faultaware(poisoned);
         }
+        if (poisoned)
+          implicit_context->raise_poison_exception();
         mark_sampled();
       }
       return empty;
@@ -1625,7 +1634,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const ApEvent ready = subscribe();
-      if (!ready.has_triggered())
+      if (!ready.has_triggered_faultignorant())
       {
         // If we're not done then defer the operation until we are triggerd
         // First add a garbage collection reference so we don't get
@@ -2566,14 +2575,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalRegionImpl::PhysicalRegionImpl(const RegionRequirement &r, 
-                                   ApEvent mapped, bool m, TaskContext *ctx, 
-                                   MapperID mid, MappingTagID t, 
-                                   bool leaf, bool virt, Runtime *rt)
+      RtEvent mapped, ApEvent ready, ApUserEvent term, bool m, TaskContext *ctx, 
+      MapperID mid, MappingTagID t, bool leaf, bool virt, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
         leaf_region(leaf), virtual_mapped(virt), 
         replaying((ctx != NULL) ? ctx->owner_task->is_replaying() : false),
-        mapped_event(mapped), req(r), sharded_view(NULL), mapped(m), 
-        valid(false), trigger_on_unmap(false), made_accessor(false)
+        req(r),mapped_event(mapped),ready_event(ready),termination_event(term),
+        sharded_view(NULL), mapped(m), valid(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2582,8 +2590,7 @@ namespace Legion {
     PhysicalRegionImpl::PhysicalRegionImpl(const PhysicalRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL), map_id(0), tag(0),
         leaf_region(false), virtual_mapped(false), replaying(false),
-        mapped_event(ApEvent::NO_AP_EVENT), mapped(false), valid(false), 
-        trigger_on_unmap(false), made_accessor(false)
+        req(rhs.req), mapped_event(RtEvent::NO_RT_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2594,13 +2601,9 @@ namespace Legion {
     PhysicalRegionImpl::~PhysicalRegionImpl(void)
     //--------------------------------------------------------------------------
     {
-      // If we still have a trigger on unmap, do that before
-      // deleting ourselves to avoid leaking events
-      if (trigger_on_unmap)
-      {
-        trigger_on_unmap = false;
-        Runtime::trigger_event(NULL, termination_event);
-      }
+#ifdef DEBUG_LEGION
+      assert(!termination_event.exists());
+#endif
       if (!references.empty() && !replaying)
         references.remove_resource_references(PHYSICAL_REGION_REF);
       if ((sharded_view != NULL) && 
@@ -2658,7 +2661,7 @@ namespace Legion {
               context->get_task_name(), context->get_unique_id(),
               (warning_string == NULL) ? "" : warning_string)
       }
-      if (!mapped_event.has_triggered())
+      if (mapped_event.exists() && !mapped_event.has_triggered())
       {
         if (warn && !silence_warnings && (source != NULL))
           REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_REGION_WAIT, 
@@ -2678,19 +2681,14 @@ namespace Legion {
       if (valid)
         return;
       // Now wait for the reference to be ready
-      std::set<ApEvent> wait_on;
-      references.update_wait_on_events(wait_on);
-      ApEvent ref_ready;
-      if (!wait_on.empty())
-        ref_ready = Runtime::merge_events(NULL, wait_on);
-      bool poisoned;
-      if (!ref_ready.has_triggered_faultaware(poisoned))
+      bool poisoned = false;
+      if (!ready_event.has_triggered_faultaware(poisoned))
       {
         if (!poisoned)
         {
           if (context != NULL)
             context->begin_task_wait(false/*from runtime*/);
-          ref_ready.wait_faultaware(poisoned);
+          ready_event.wait_faultaware(poisoned);
           if (context != NULL)
             context->end_task_wait();
         }
@@ -2704,14 +2702,13 @@ namespace Legion {
     {
       if (valid)
         return true;
-      if (mapped_event.has_triggered())
+      if (!mapped_event.exists() || mapped_event.has_triggered())
       {
-        std::set<ApEvent> wait_on;
-        references.update_wait_on_events(wait_on);
-        if (wait_on.empty())
+        bool poisoned = false;
+        if (ready_event.has_triggered_faultaware(poisoned))
           return true;
-        const ApEvent ref_ready = Runtime::merge_events(NULL, wait_on);
-        return ref_ready.has_triggered();
+        if (poisoned)
+          implicit_context->raise_poison_exception();
       }
       return false;
     }
@@ -2721,18 +2718,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return mapped;
-    }
-
-    //--------------------------------------------------------------------------
-    bool PhysicalRegionImpl::is_external_region(void) const
-    //--------------------------------------------------------------------------
-    {
-      if (references.empty())
-        return false;
-      for (unsigned idx = 0; idx < references.size(); idx++)
-        if (!references[idx].get_manager()->is_external_instance())
-          return false;
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -2807,12 +2792,12 @@ namespace Legion {
                       "a single physical instance.", context->get_task_name(),
                       context->get_unique_id())
       made_accessor = true;
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           result = references[0].get_accessor();
       result.set_region_untyped(this);
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
       result.set_privileges_untyped(
           (LegionRuntime::AccessorPrivilege)req.get_accessor_privilege()); 
 #endif
@@ -2877,12 +2862,12 @@ namespace Legion {
             "Requested field accessor for field %d without privileges!", fid)
 #endif
       made_accessor = true;
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           result = references.get_field_accessor(fid);
       result.set_region_untyped(this);
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
       result.set_privileges_untyped(
           (LegionRuntime::AccessorPrivilege)req.get_accessor_privilege());
 #endif
@@ -2898,52 +2883,30 @@ namespace Legion {
     {
       if (!mapped)
         return;
-      wait_until_valid(true/*silence warnings*/, NULL);
-      if (trigger_on_unmap)
-      {
-        trigger_on_unmap = false;
-        // Can only do the trigger when we have actually ready
-        std::set<ApEvent> wait_on;
-        references.update_wait_on_events(wait_on);
-        if (!wait_on.empty())
-        {
-          wait_on.insert(mapped_event);
-          Runtime::trigger_event(NULL, termination_event,
-                                 Runtime::merge_events(NULL, wait_on));
-        }
-        else
-          Runtime::trigger_event(NULL, termination_event, mapped_event);
-      }
-      valid = false;
+#ifdef DEBUG_LEGION
+      assert(termination_event.exists());
+#endif
+      // trigger the termination event conditional upon the ready event
+      Runtime::trigger_event(NULL, termination_event, ready_event);
+#ifdef DEBUG_LEGION
+      termination_event = ApUserEvent::NO_AP_USER_EVENT;
+#endif
       mapped = false;
-      // If we have a wait for unmapped event, then we need to wait
-      // before we return, this usually occurs because we had restricted
-      // coherence on the region and we have to issue copies back to 
-      // the restricted instances before we are officially unmapped
-      bool poisoned;
-      if (wait_for_unmap.exists() && 
-          !wait_for_unmap.has_triggered_faultaware(poisoned))
-      {
-        if (!poisoned)
-        {
-          if (context != NULL)
-            context->begin_task_wait(false/*from runtime*/);
-          wait_for_unmap.wait();
-          if (context != NULL)
-            context->end_task_wait();
-        }
-      }
+      valid = false;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::remap_region(ApEvent new_mapped)
+    ApEvent PhysicalRegionImpl::remap_region(ApEvent new_ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!mapped);
+      assert(!termination_event.exists());
 #endif
-      mapped_event = new_mapped;
+      termination_event = Runtime::create_ap_user_event(NULL);
+      ready_event = new_ready;
       mapped = true;
+      return termination_event;
     }
 
     //--------------------------------------------------------------------------
@@ -2954,36 +2917,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::set_reference(const InstanceRef &ref)
+    void PhysicalRegionImpl::set_reference(const InstanceRef &ref, bool safe)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(ref.has_ref());
+      assert(references.empty());
+      assert(safe || (mapped_event.exists() && !mapped_event.has_triggered()));
 #endif
       references.add_instance(ref);
       ref.add_resource_reference(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::reset_references(const InstanceSet &refs,
-                                       ApUserEvent term_event, ApEvent wait_for)
+    void PhysicalRegionImpl::set_references(const InstanceSet &refs, bool safe)
     //--------------------------------------------------------------------------
     {
-      if (!references.empty())
-        references.remove_resource_references(PHYSICAL_REGION_REF);
+#ifdef DEBUG_LEGION
+      assert(references.empty());
+      assert(safe || (mapped_event.exists() && !mapped_event.has_triggered()));
+#endif
       references = refs;
       if (!references.empty())
         references.add_resource_references(PHYSICAL_REGION_REF);
-      termination_event = term_event;
-      trigger_on_unmap = true;
-      wait_for_unmap = wait_for;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent PhysicalRegionImpl::get_mapped_event(void) const
-    //--------------------------------------------------------------------------
-    {
-      return mapped_event;
     }
 
     //--------------------------------------------------------------------------
@@ -2997,13 +2953,32 @@ namespace Legion {
     void PhysicalRegionImpl::get_references(InstanceSet &instances) const
     //--------------------------------------------------------------------------
     {
+      if (mapped_event.exists() && !mapped_event.has_triggered())
+        mapped_event.wait();
       instances = references;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::get_memories(std::set<Memory>& memories) const
+    void PhysicalRegionImpl::get_memories(std::set<Memory>& memories,
+                        bool silence_warnings, const char *warning_string) const
     //--------------------------------------------------------------------------
     {
+      if (mapped_event.exists() && !mapped_event.has_triggered())
+      {
+        if (runtime->runtime_warnings && !silence_warnings)
+          REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_REGION_WAIT, 
+              "Request for 'get_memories' was performed on a "
+              "physical region in task %s (ID %lld) without first waiting "
+              "for the physical region to be valid. Legion is performing "
+              "the wait for you. Warning string: %s", context->get_task_name(), 
+              context->get_unique_id(), (warning_string == NULL) ? 
+              "" : warning_string)
+        if (context != NULL)
+          context->begin_task_wait(false/*from runtime*/);
+        mapped_event.wait();
+        if (context != NULL)
+          context->end_task_wait();
+      }
       for (unsigned idx = 0; idx < references.size(); idx++)
         memories.insert(references[idx].get_memory());
     }
@@ -3018,7 +2993,7 @@ namespace Legion {
     }
 
 
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
     //--------------------------------------------------------------------------
     const char* PhysicalRegionImpl::get_task_name(void) const
     //--------------------------------------------------------------------------
@@ -3027,7 +3002,7 @@ namespace Legion {
     }
 #endif
 
-#ifdef BOUNDS_CHECKS 
+#ifdef LEGION_BOUNDS_CHECKS 
     //--------------------------------------------------------------------------
     bool PhysicalRegionImpl::contains_ptr(ptr_t ptr)
     //--------------------------------------------------------------------------
@@ -3060,7 +3035,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PieceIteratorImpl* PhysicalRegionImpl::get_piece_iterator(FieldID fid,
-                                                            bool privilege_only)
+         bool privilege_only, bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
@@ -3068,6 +3043,22 @@ namespace Legion {
                        "Piece iterator construction in task %s on "
                        "PhysicalRegion that does not contain field %d!", 
                        context->get_task_name(), fid)
+      if (mapped_event.exists() && !mapped_event.has_triggered())
+      {
+        if (runtime->runtime_warnings && !silence_warnings)
+          REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_REGION_WAIT, 
+              "Request for 'get_piece_iterator' was performed on a "
+              "physical region in task %s (ID %lld) without first waiting "
+              "for the physical region to be valid. Legion is performing "
+              "the wait for you. Warning string: %s", context->get_task_name(), 
+              context->get_unique_id(), (warning_string == NULL) ? 
+              "" : warning_string)
+        if (context != NULL)
+          context->begin_task_wait(false/*from runtime*/);
+        mapped_event.wait();
+        if (context != NULL)
+          context->end_task_wait();
+      }
       for (unsigned idx = 0; idx < references.size(); idx++)
       {
         const InstanceRef &ref = references[idx];
@@ -3664,7 +3655,6 @@ namespace Legion {
           context->owner_task->get_unique_op_id(),
           instance.get_location().id, manager->get_memory().id);
 
-
       // The realm instance backing a deferred buffer is currently tagged as
       // a task local instance, so we need to tell the runtime that the instance
       // now escapes the context.
@@ -3680,6 +3670,9 @@ namespace Legion {
                           : layout->space.bounds.volume();
 
       return_data(num_elements, field_id, ptr, layout->alignment_reqd, true);
+      // This instance was escaped so the context is no longer responsible
+      // for destroying it when the task is done, we take that responsibility
+      escaped_instances.push_back(instance);
     }
 
     //--------------------------------------------------------------------------
@@ -3830,8 +3823,10 @@ namespace Legion {
         Realm::RegionInstance instance;
         Realm::ProfilingRequestSet no_requests;
         ExternalInstanceInfo &info = it->second;
-        RtEvent wait_on(Realm::RegionInstance::create_external(
-          instance, manager->get_memory(), info.ptr, layout, no_requests));
+        const Realm::ExternalMemoryResource resource(info.ptr, 
+                      layout->bytes_used, false/*read only*/);
+        RtEvent wait_on(Realm::RegionInstance::create_external_instance(
+          instance, manager->get_memory(), layout, resource, no_requests));
         if (wait_on.exists())
           wait_on.wait();
 #ifdef DEBUG_LEGION
@@ -3844,16 +3839,13 @@ namespace Legion {
                                   PhysicalManager::EXTERNAL_OWNED_INSTANCE_KIND,
                                           bytes_used,
                                           info.ptr);
-
-        // If this is an allocation drawn from the eager pool,
-        // we need to link the pointer back to the memory manager with a
-        // new instance name so that the manager can keep track of this
-        // instance.
-        if (info.eager_pool)
-          manager->memory_manager->link_eager_instance(instance, info.ptr);
         if (delete_now)
           delete manager;
       }
+      // Lasty destroy our physical instance objects since the task is done
+      for (std::vector<PhysicalInstance>::const_iterator it =
+            escaped_instances.begin(); it != escaped_instances.end(); it++)
+        it->destroy();
     }
 
     //--------------------------------------------------------------------------
@@ -4101,7 +4093,7 @@ namespace Legion {
       // Note we use the external wait to be sure 
       // we don't get drafted by the Realm runtime
       ApBarrier previous = Runtime::get_previous_phase(ext_wait_barrier);
-      if (!previous.has_triggered())
+      if (!previous.has_triggered_faultignorant())
       {
         // We can't call external wait directly on the barrier
         // right now, so as a work-around we'll make an event
@@ -5633,7 +5625,11 @@ namespace Legion {
         local_gpu = finder.first();
       }
 #endif
-      if (!is_owner) return;
+      // We do not make eager pool instances if we are not the owner or if the
+      // memory has capacity zero (e.g. disk memory) where the creation of any 
+      // instances that are not external instances are disallowed
+      if (!is_owner || (capacity == 0)) 
+        return;
 
       // Allocate eager pool
       const coord_t eager_pool_size = 
@@ -8762,12 +8758,14 @@ namespace Legion {
         eager_remaining_capacity -= size;
         uintptr_t ptr = eager_pool + offset;
         Realm::ProfilingRequestSet no_requests;
-        wait_on = RtEvent(Realm::RegionInstance::create_external(
-              instance, memory, ptr, layout, no_requests));
+        const Realm::ExternalMemoryResource resource(ptr, 
+                    layout->bytes_used, false/*read only*/);
+        wait_on = RtEvent(Realm::RegionInstance::create_external_instance(
+              instance, memory, layout, resource, no_requests));
 #ifdef DEBUG_LEGION
-        assert(eager_instances.find(instance) == eager_instances.end());
+        assert(eager_allocations.find(ptr) == eager_allocations.end());
 #endif
-        eager_instances[instance] = std::make_pair(ptr, allocation_id);
+        eager_allocations[ptr] = allocation_id;
         log_eager.debug("allocate instance " IDFMT
                         " (%p+%zd, %zd) on memory " IDFMT ", %zd bytes left",
                         instance.id,
@@ -8804,17 +8802,26 @@ namespace Legion {
       }
       else
       {
+        // Technically realm could return us a null pointer here if the 
+        // instance is not directly accessible on this node, but that
+        // should never happen because all eager allocations are done
+        // locally and to memories for which loads and stores are safe
+        void *base = instance.pointer_untyped(0,0);
+#ifdef DEBUG_LEGION
+        assert(base != NULL);
+#endif
+        const uintptr_t ptr = reinterpret_cast<uintptr_t>(base);
         {
           AutoLock lock(manager_lock);
-          std::map<PhysicalInstance,std::pair<uintptr_t,size_t> >::iterator
-            finder = eager_instances.find(instance);
+          std::map<uintptr_t,size_t>::iterator finder = 
+            eager_allocations.find(ptr);
 #ifdef DEBUG_LEGION
-          assert(finder != eager_instances.end());
+          assert(finder != eager_allocations.end());
 #endif
-          const size_t size = eager_allocator->get_size(finder->second.second);
+          const size_t size = eager_allocator->get_size(finder->second);
           eager_remaining_capacity += size;
-          eager_allocator->deallocate(finder->second.second);
-          eager_instances.erase(finder);
+          eager_allocator->deallocate(finder->second);
+          eager_allocations.erase(finder);
           log_eager.debug(
             "deallocate instance " IDFMT " of size %zd on memory " IDFMT
             ", %zd bytes left", instance.id, size, memory.id,
@@ -8822,51 +8829,6 @@ namespace Legion {
         }
         instance.destroy();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::link_eager_instance(
-                                       PhysicalInstance instance, uintptr_t ptr)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock lock(manager_lock);
-      std::map<uintptr_t,size_t>::iterator finder =
-        unlinked_allocations.find(ptr);
-#ifdef DEBUG_LEGION
-      assert(finder != unlinked_allocations.end());
-#endif
-      log_eager.debug("link instance " IDFMT " (%p, %zd) on memory " IDFMT,
-                      instance.id, reinterpret_cast<void*>(ptr),
-                      finder->second, memory.id);
-      eager_instances[instance] = std::make_pair(finder->first, finder->second);
-      unlinked_allocations.erase(finder);
-    }
-
-    //--------------------------------------------------------------------------
-    uintptr_t MemoryManager::unlink_eager_instance(PhysicalInstance instance)
-    //--------------------------------------------------------------------------
-    {
-      // Note that this function removes the instance from the manager without
-      // deallocating it. It's the caller's responsibility to link
-      // the allocation back in the memory manager
-      AutoLock lock(manager_lock);
-      std::map<PhysicalInstance,std::pair<uintptr_t,size_t> >::iterator
-        finder = eager_instances.find(instance);
-#ifdef DEBUG_LEGION
-      assert(finder != eager_instances.end());
-#endif
-      eager_instances.erase(finder);
-      uintptr_t ptr = finder->second.first;
-      size_t allocation_id = finder->second.second;
-      log_eager.debug("unlink instance " IDFMT " (%p, %zd) on memory " IDFMT,
-                      instance.id, reinterpret_cast<void*>(ptr),
-                      allocation_id, memory.id);
-
-#ifdef DEBUG_LEGION
-      assert(unlinked_allocations.find(ptr) == unlinked_allocations.end());
-#endif
-      unlinked_allocations[ptr] = allocation_id;
-      return ptr;
     }
 
     //--------------------------------------------------------------------------
@@ -12003,7 +11965,7 @@ namespace Legion {
       else
       {
         // No predicate guard
-        if (!ready_event.has_triggered())
+        if (ready_event.exists())
           return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx),requests,
              Runtime::merge_events(NULL, precondition, ready_event), priority));
         return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx), requests, 
@@ -12012,16 +11974,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VariantImpl::dispatch_inline(Processor current, InlineContext *ctx)
+    void VariantImpl::dispatch_inline(Processor current, TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
       const Realm::FunctionPointerImplementation *fp_impl = 
         realm_descriptor.find_impl<Realm::FunctionPointerImplementation>();
 #ifdef DEBUG_LEGION
       assert(fp_impl != NULL);
+      assert(implicit_context != NULL);
 #endif
+      // Save the implicit context here on the stack so we can restore it
+      TaskContext *previous_context = implicit_context;
       RealmFnptr inline_ptr = fp_impl->get_impl<RealmFnptr>();
       (*inline_ptr)(&ctx, sizeof(ctx), user_data, user_data_size, current);
+      // Restore the implicit context back to the previous context
+      implicit_context = previous_context;
     }
 
     //--------------------------------------------------------------------------
@@ -13917,11 +13884,11 @@ namespace Legion {
       outstanding_counts.resize(LG_LAST_TASK_ID, 0);
 #endif
       // Attach any accessor debug hooks for privilege or bounds checks
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
       LegionRuntime::Accessor::DebugHooks::find_privilege_task_name =
 	&Legion::Internal::Runtime::find_privilege_task_name;
 #endif
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
       LegionRuntime::Accessor::DebugHooks::check_bounds_ptr =
 	&Legion::Internal::Runtime::check_bounds;
       LegionRuntime::Accessor::DebugHooks::check_bounds_dpoint =
@@ -16196,17 +16163,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::unmap_all_regions(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      ctx->unmap_all_regions();
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::fill_fields(Context ctx, const FillLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -16858,31 +16814,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Processor Runtime::get_executing_processor(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      Processor result = ctx->get_executing_processor();
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::raise_region_exception(Context ctx, 
-                                         PhysicalRegion region, bool nuclear)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      // TODO: implement this
-      assert(false);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::print_once(Context ctx, FILE *f, const char *message)
     //--------------------------------------------------------------------------
     {
@@ -16898,15 +16829,6 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context log once!");
       ctx->log_once(message);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::yield(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context yield");
-      ctx->yield();
     }
 
     //--------------------------------------------------------------------------
@@ -23515,10 +23437,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T, MessageKind MK, VirtualChannelKind VC>
     DistributedCollectable* Runtime::find_or_request_distributed_collectable(
-                                              DistributedID did, RtEvent &ready)
+                                          DistributedID to_find, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
-      did &= LEGION_DISTRIBUTED_ID_MASK;
+      const DistributedID did = LEGION_DISTRIBUTED_ID_FILTER(to_find);
       DistributedCollectable *result = NULL;
       {
         AutoLock d_lock(distributed_collectable_lock);
@@ -23554,7 +23476,7 @@ namespace Legion {
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(did);
+        rez.serialize(to_find);
       }
       find_messenger(target)->send_message(rez, MK, VC, true/*flush*/);
       return result;
@@ -26396,6 +26318,22 @@ namespace Legion {
       LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0,
           "Need a positive and non-zero value for "
           "LEGION_DEFAULT_MAX_MESSAGE_SIZE"); 
+#ifdef LEGION_SPY
+      LEGION_STATIC_ASSERT(
+          Realm::Logger::REALM_LOGGING_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
+        "Legion Spy requires a COMPILE_TIME_MIN_LEVEL of at most LEVEL_INFO.");
+#endif
+#ifdef LEGION_GC
+      LEGION_STATIC_ASSERT(
+          Realm::Logger::REALM_LOGGING_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
+          "Legion GC requires a COMPILE_TIME_MIN_LEVEL of at most LEVEL_INFO.");
+#endif
+#ifdef DEBUG_SHUTDOWN_HANG
+      LEGION_STATIC_ASSERT(
+          Realm::Logger::REALM_LOGGING_MIN_LEVEL <= Realm::Logger::LEVEL_INFO,
+          "DEBUG_SHUTDOWN_HANG requires a COMPILE_TIME_MIN_LEVEL "
+          "of at most LEVEL_INFO.");
+#endif
 
       // Register builtin reduction operators
       register_builtin_reduction_operators();
@@ -26646,6 +26584,59 @@ namespace Legion {
             "Illegal max local fields value %d which is larger than the "
             "value of LEGION_MAX_FIELDS (%d).", config.max_local_fields,
             LEGION_MAX_FIELDS)
+      const Realm::Logger::LoggingLevel compile_time_min_level =
+            Realm::Logger::REALM_LOGGING_MIN_LEVEL;
+      if (config.legion_spy_enabled && 
+          (Realm::Logger::LEVEL_INFO < compile_time_min_level))
+        REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
+            "Legion Spy logging requires a COMPILE_TIME_MIN_LEVEL "
+            "of at most LEVEL_INFO, but current setting is %s",
+            (compile_time_min_level == Realm::Logger::LEVEL_PRINT) ? 
+              "LEVEL_PRINT" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_WARNING) ?
+              "LEVEL_WARNING" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_ERROR) ?
+              "LEVEL_ERROR" :
+            (compile_time_min_level == Realm::Logger::LEVEL_FATAL) ?
+              "LEVEL_FATAL" : "LEVEL_NONE")
+      if ((config.num_profiling_nodes > 0) &&
+          (strcmp(config.serializer_type.c_str(), "ascii") == 0) &&
+          (Realm::Logger::LEVEL_INFO < compile_time_min_level))
+        REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
+            "Legion Prof 'ascii' logging requires a COMPILE_TIME_MIN_LEVEL "
+            "of at most LEVEL_INFO, but current setting is %s",
+            (compile_time_min_level == Realm::Logger::LEVEL_PRINT) ? 
+              "LEVEL_PRINT" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_WARNING) ?
+              "LEVEL_WARNING" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_ERROR) ?
+              "LEVEL_ERROR" :
+            (compile_time_min_level == Realm::Logger::LEVEL_FATAL) ?
+              "LEVEL_FATAL" : "LEVEL_NONE")
+      if (config.record_registration &&
+          (Realm::Logger::LEVEL_PRINT < compile_time_min_level))
+        REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
+            "Legion registration logging requires a COMPILE_TIME_MIN_LEVEL "
+            "of at most LEVEL_PRINT, but current setting is %s",
+            (compile_time_min_level == Realm::Logger::LEVEL_WARNING) ?
+              "LEVEL_WARNING" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_ERROR) ?
+              "LEVEL_ERROR" :
+            (compile_time_min_level == Realm::Logger::LEVEL_FATAL) ?
+              "LEVEL_FATAL" : "LEVEL_NONE")
+      if (config.dump_physical_traces &&
+          (Realm::Logger::LEVEL_INFO < compile_time_min_level))
+        REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
+            "Legion physical trace logging requires a COMPILE_TIME_MIN_LEVEL "
+            "of at most LEVEL_INFO, but current setting is %s",
+            (compile_time_min_level == Realm::Logger::LEVEL_PRINT) ? 
+              "LEVEL_PRINT" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_WARNING) ?
+              "LEVEL_WARNING" : 
+            (compile_time_min_level == Realm::Logger::LEVEL_ERROR) ?
+              "LEVEL_ERROR" :
+            (compile_time_min_level == Realm::Logger::LEVEL_FATAL) ?
+              "LEVEL_FATAL" : "LEVEL_NONE")
       runtime_initialized = true;
       return config;
     } 
@@ -26693,7 +26684,7 @@ namespace Legion {
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
       TopFinishArgs args(top_context);
-      ApEvent pre = top_task->get_task_completion();
+      ApEvent pre = top_task->get_completion_event();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
       // Put the task in the ready queue, make sure that the runtime is all
@@ -26732,7 +26723,7 @@ namespace Legion {
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
       TopFinishArgs args(top_context);
-      ApEvent pre = top_task->get_task_completion();
+      ApEvent pre = top_task->get_completion_event();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
       return top_task;
@@ -26938,7 +26929,7 @@ namespace Legion {
         sleep(5);
       }
 #endif
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
       if (config.num_profiling_nodes > 0)
       {
         // Give a massive warning about profiling with bounds checks enabled
@@ -26948,9 +26939,9 @@ namespace Legion {
           fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-        fprintf(stderr,"!!! YOU ARE PROFILING WITH BOUNDS_CHECKS      !!!\n");
-        fprintf(stderr,"!!! SERIOUS PERFORMANCE DEGRADATION WILL OCCUR!!!\n");
-        fprintf(stderr,"!!! PLEASE COMPILE WITHOUT BOUNDS_CHECKS      !!!\n");
+        fprintf(stderr,"!!! YOU ARE PROFILING WITH LEGION_BOUNDS_CHECKS!!!\n");
+        fprintf(stderr,"!!! SERIOUS PERFORMANCE DEGRADATION WILL OCCUR !!!\n");
+        fprintf(stderr,"!!! PLEASE COMPILE WITHOUT LEGION_BOUNDS_CHECKS!!!\n");
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         for (int i = 0; i < 4; i++)
@@ -26963,7 +26954,7 @@ namespace Legion {
         sleep(5);
       }
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
       if (config.num_profiling_nodes > 0)
       {
         // Give a massive warning about profiling with privilege checks enabled
@@ -26973,9 +26964,9 @@ namespace Legion {
           fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-        fprintf(stderr,"!!! YOU ARE PROFILING WITH PRIVILEGE_CHECKS    !!\n");
-        fprintf(stderr,"!!! SERIOUS PERFORMANCE DEGRADATION WILL OCCUR!!!\n");
-        fprintf(stderr,"!!! PLEASE COMPILE WITHOUT PRIVILEGE_CHECKS   !!!\n");
+        fprintf(stderr,"!!!YOU ARE PROFILING WITH LEGION_PRIVILEGE_CHECKS!!\n");
+        fprintf(stderr,"!!!SERIOUS PERFORMANCE DEGRADATION WILL OCCUR!!!\n");
+        fprintf(stderr,"!!!PLEASE COMPILE WITHOUT LEGION_PRIVILEGE_CHECKS!!\n");
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         for (int i = 0; i < 4; i++)
@@ -27244,14 +27235,10 @@ namespace Legion {
                 it->first.register_task(LG_ENDPOINT_TASK_ID, endpoint_task,
                   no_requests, &it->second, sizeof(it->second))));
         }
-        // Profiling tasks get registered on CPUs and utility processors
-        if ((it->first.kind() == Processor::LOC_PROC) ||
-            (it->first.kind() == Processor::TOC_PROC) ||
-            (it->first.kind() == Processor::UTIL_PROC) ||
-            (it->first.kind() == Processor::IO_PROC))
-          registered_events.insert(RtEvent(
-              it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
-                no_requests, &it->second, sizeof(it->second))));
+        // Register profiling return meta-task on all processor kinds
+        registered_events.insert(RtEvent(
+            it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
+              no_requests, &it->second, sizeof(it->second))));
         // Application processor tasks get registered on all
         // processors which are not utility processors
 #ifdef LEGION_SEPARATE_META_TASKS
@@ -27957,7 +27944,7 @@ namespace Legion {
 #endif
     }
 
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
     //--------------------------------------------------------------------------
     /*static*/ const char* Runtime::find_privilege_task_name(void *impl)
     //--------------------------------------------------------------------------
@@ -27967,7 +27954,7 @@ namespace Legion {
     }
 #endif
 
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::check_bounds(void *impl, ptr_t ptr)
     //--------------------------------------------------------------------------

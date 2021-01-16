@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -132,7 +132,7 @@ namespace Legion {
         return Domain::NO_DOMAIN;
       Internal::ApEvent ready;
       Domain domain = impl->instance_domain->get_domain(ready, true);
-      ready.wait();
+      ready.wait_faultignorant();
       return domain;
     }
 

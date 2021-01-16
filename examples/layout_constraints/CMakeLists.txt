@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2020 Kitware, Inc.
+# Copyright 2021 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(transpose transpose.cc)
-target_link_libraries(transpose Legion::Legion)
+add_executable(layout_constraints transpose.cc)
+target_link_libraries(layout_constraints Legion::Legion)
 if(Legion_ENABLE_TESTING)
   add_test(NAME layout_constraints COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:transpose> ${Legion_TEST_ARGS})
 endif()

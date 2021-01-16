@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 
 #include "realm/hdf5/hdf5_internal.h"
 
+#include "realm/hdf5/hdf5_access.h"
 #include "realm/logging.h"
 
 namespace Realm {
@@ -28,7 +29,8 @@ namespace Realm {
     // class HDF5Memory
 
     HDF5Memory::HDF5Memory(Memory _me)
-      : MemoryImpl(_me, 0 /*HDF doesn't have memory space*/, MKIND_HDF, ALIGNMENT, Memory::HDF_MEM)
+      : MemoryImpl(_me, 0 /*HDF doesn't have memory space*/, MKIND_HDF,
+		   Memory::HDF_MEM, 0)
     {
     }
 
@@ -94,9 +96,48 @@ namespace Realm {
       return 0; // cannot provide a pointer for it.
     }
 
-    int HDF5Memory::get_home_node(off_t offset, size_t size)
+    MemoryImpl::AllocationResult HDF5Memory::allocate_storage_immediate(RegionInstanceImpl *inst,
+							    bool need_alloc_result,
+							    bool poisoned,
+							    TimeLimit work_until)
     {
-      return Network::my_node_id;
+      // if the allocation request doesn't include an external HDF5 resource,
+      //  we fail it immediately
+      ExternalHDF5Resource *res = dynamic_cast<ExternalHDF5Resource *>(inst->metadata.ext_resource);
+      if(res == 0) {
+	if(inst->metadata.ext_resource)
+	  log_inst.warning() << "attempt to register non-hdf5 resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
+	else
+	  log_inst.warning() << "attempt to allocate memory in hdf5 memory: layout=" << *(inst->metadata.layout);
+	inst->notify_allocation(ALLOC_INSTANT_FAILURE, 0, work_until);
+	return ALLOC_INSTANT_FAILURE;
+      }
+
+      // poisoned preconditions cancel the allocation request
+      if(poisoned) {
+	inst->notify_allocation(ALLOC_CANCELLED, 0, work_until);
+	return ALLOC_CANCELLED;
+      }
+
+      // TODO: try to open the file once here to make sure it exists?
+
+      AllocationResult result = ALLOC_INSTANT_SUCCESS;
+      size_t inst_offset = 0;
+      inst->notify_allocation(result, inst_offset, work_until);
+
+      return result;
+    }
+
+    void HDF5Memory::release_storage_immediate(RegionInstanceImpl *inst,
+					       bool poisoned,
+					       TimeLimit work_until)
+    {
+      // nothing to do for a poisoned release
+      if(poisoned)
+	return;
+
+      // we didn't save anything on the instance, so just ack and return
+      inst->notify_deallocation();
     }
 
 

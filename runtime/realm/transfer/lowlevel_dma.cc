@@ -1,5 +1,5 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
- * Copyright 2020 Los Alamos National Laboratory
+/* Copyright 2021 Stanford University, NVIDIA Corporation
+ * Copyright 2021 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -189,7 +189,7 @@ namespace Realm {
       AutoLock<> al(queue_mutex);
       assert(NodeID(ID(tgt_mem).memory_owner_node()) == Network::my_node_id);
       // If we can allocate in target memory, no need to pend the request
-      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
+      off_t ib_offset = get_runtime()->get_ib_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
       if (ib_offset >= 0) {
         if (req->owner == Network::my_node_id) {
           // local ib alloc request
@@ -208,7 +208,6 @@ namespace Realm {
 	  //amsg->src_inst_id = req->src_inst_id;
 	  //amsg->dst_inst_id = req->dst_inst_id;
 	  amsg->offset = ib_offset;
-	  amsg->size = req->ib_size;
 	  amsg.commit();
         }
         // Remember to free IBAllocRequest
@@ -242,7 +241,7 @@ namespace Realm {
       if (it == queues.end()) return;
       while (!it->second->empty()) {
         IBAllocRequest* req = it->second->front();
-        off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
+        off_t ib_offset = get_runtime()->get_ib_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
         if (ib_offset < 0) break;
         //printf("req: src_inst_id(%llx) dst_inst_id(%llx) ib_size(%lu) idx(%d)\n", req->src_inst_id, req->dst_inst_id, req->ib_size, req->idx);
         // deal with the completed ib alloc request
@@ -259,14 +258,13 @@ namespace Realm {
 	  //req->idx, inst_pair, req->ib_size, ib_offset);
         } else {
           // remote ib alloc request
-	  ActiveMessage<RemoteIBAllocResponseAsync> amsg(req->owner, 8);
+	  ActiveMessage<RemoteIBAllocResponseAsync> amsg(req->owner);
 	  amsg->req = req->req;
 	  amsg->ibinfo = req->ibinfo;
 	  //amsg->idx = req->idx;
 	  //amsg->src_inst_id = req->src_inst_id;
 	  //amsg->dst_inst_id = req->dst_inst_id;
 	  amsg->offset = ib_offset;
-	  amsg << req->ib_size;
 	  amsg.commit();
         }
         it->second->pop();
@@ -481,15 +479,26 @@ namespace Realm {
 
     void CopyRequest::forward_request(NodeID target_node)
     {
-      ActiveMessage<RemoteCopyMessage> amsg(target_node, 65536);
+      Serialization::ByteCountSerializer bcs;
+      {
+	bool ok = ((bcs << *domain) &&
+		   (bcs << *oas_by_inst) &&
+		   (bcs << requests));
+	assert(ok);
+      }
+      size_t req_size = bcs.bytes_used();
+      ActiveMessage<RemoteCopyMessage> amsg(target_node, req_size);
       amsg->redop_id = 0;
       amsg->red_fold = false;
       amsg->before_copy = before_copy;
       amsg->after_copy = get_finish_event();
       amsg->priority = priority;
-      amsg << *domain;
-      amsg << *oas_by_inst;
-      amsg << requests;
+      {
+	bool ok = ((amsg << *domain) &&
+		   (amsg << *oas_by_inst) &&
+		   (amsg << requests));
+	assert(ok);
+      }
 
       // TODO: serialize these
       assert(gather_info == 0);
@@ -581,7 +590,7 @@ namespace Realm {
 							     const void *data, size_t msglen)
     {
       assert(NodeID(ID(args.memory).memory_owner_node()) == Network::my_node_id);
-      get_runtime()->get_memory_impl(args.memory)->free_bytes_local(args.ib_offset, args.ib_size);
+      get_runtime()->get_ib_memory_impl(args.memory)->free_bytes_local(args.ib_offset, args.ib_size);
       ib_req_queue->dequeue_request(args.memory);
     }
 
@@ -592,7 +601,7 @@ namespace Realm {
       //CopyRequest* cr = (CopyRequest*) req;
       //AutoLock<> al(cr->ib_mutex);
       if(NodeID(ID(mem).memory_owner_node()) == Network::my_node_id) {
-        get_runtime()->get_memory_impl(mem)->free_bytes_local(offset, size);
+        get_runtime()->get_ib_memory_impl(mem)->free_bytes_local(offset, size);
         ib_req_queue->dequeue_request(mem);
       } else {
 	ActiveMessage<RemoteIBFreeRequestAsync> amsg(ID(mem).memory_owner_node());
@@ -654,13 +663,13 @@ namespace Realm {
         ib_req_queue->enqueue_request(tgt_mem, ib_req);
       } else {
         // create remote intermediate buffer
-	ActiveMessage<RemoteIBAllocRequestAsync> amsg(ID(tgt_mem).memory_owner_node(), 8);
+	ActiveMessage<RemoteIBAllocRequestAsync> amsg(ID(tgt_mem).memory_owner_node());
 	amsg->memory = tgt_mem;
 	amsg->req = this;
 	amsg->idx = idx;
 	amsg->src_inst_id = inst_pair.first.id;
 	amsg->dst_inst_id = inst_pair.second.id;
-	amsg << ib_size;
+	amsg->size = ib_size;
 	amsg.commit();
       }
     }
@@ -813,7 +822,7 @@ namespace Realm {
 	}
 
 	// now go through all instance pairs
-	for(OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+	for(OASByInst::const_iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
 	  if(it->first.first.exists()) {
 	    RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(it->first.first);
 	    Event e = src_impl->request_metadata();
@@ -1834,6 +1843,8 @@ namespace Realm {
 	}
       }
 
+      //define CHECK_DMA_PATHS
+#ifdef CHECK_DMA_PATHS
       // check against old version
       // exceptions:
       //  1) old code didn't allow nodes other than 0 to
@@ -1849,6 +1860,7 @@ namespace Realm {
 	  assert(0);
 	}
       }
+#endif
       return kind;
     }
 
@@ -1875,13 +1887,13 @@ namespace Realm {
 	std::list<Memory> mems_left;
 	std::queue<Memory> active_nodes;
 	Node* node = &(get_runtime()->nodes[ID(src_mem).memory_owner_node()]);
-	for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
+	for (std::vector<IBMemory*>::const_iterator it = node->ib_memories.begin();
            it != node->ib_memories.end(); it++) {
 	  mems_left.push_back((*it)->me);
 	}
 	if(ID(dst_mem).memory_owner_node() != ID(src_mem).memory_owner_node()) {
 	  node = &(get_runtime()->nodes[ID(dst_mem).memory_owner_node()]);
-	  for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
+	  for (std::vector<IBMemory*>::const_iterator it = node->ib_memories.begin();
 	       it != node->ib_memories.end(); it++) {
 	    mems_left.push_back((*it)->me);
 	  }
@@ -2305,30 +2317,12 @@ namespace Realm {
       log_dma.debug("request %p executing", this);
 
       DetailedTimer::ScopedPush sp(TIME_COPY);
-
-      // <NEWDMA>
-      if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>()) {
-        const InstPair &pair = oas_by_inst->begin()->first;
-        size_t total_field_size = 0;
-        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
-          for (size_t i = 0; i < it->second.size(); i++) {
-            total_field_size += it->second[i].size;
-          }
-        }
-
-        ProfilingMeasurements::OperationMemoryUsage usage;
-        usage.source = pair.first.get_location();
-        usage.target = pair.second.get_location();
-        usage.size = total_field_size * domain->volume();
-        measurements.add_measurement(usage);
-      }
-
       create_xfer_descriptors();
 
       mark_finished(true/*successful*/);
       return;
       // </NEWDMA>
-    } 
+    }
 
     void CopyRequest::mark_completed(void)
     {
@@ -2407,17 +2401,30 @@ namespace Realm {
 
     void ReduceRequest::forward_request(NodeID target_node)
     {
-      ActiveMessage<RemoteCopyMessage> amsg(target_node,65536);
+      Serialization::ByteCountSerializer bcs;
+      {
+	bool ok = ((bcs << *domain) &&
+		   (bcs << srcs) &&
+		   (bcs << dst) &&
+		   (bcs << inst_lock_needed) &&
+		   (bcs << requests));
+	assert(ok);
+      }
+      size_t req_size = bcs.bytes_used();
+      ActiveMessage<RemoteCopyMessage> amsg(target_node, req_size);
       amsg->redop_id = redop_id;
       amsg->red_fold = red_fold;
       amsg->before_copy = before_copy;
       amsg->after_copy = get_finish_event();
       amsg->priority = priority;
-      amsg << *domain;
-      amsg << srcs;
-      amsg << dst;
-      amsg << inst_lock_needed;
-      amsg << requests;
+      {
+	bool ok = ((amsg << *domain) &&
+		   (amsg << srcs) &&
+		   (amsg << dst) &&
+		   (amsg << inst_lock_needed) &&
+		   (amsg << requests));
+	assert(ok);
+      }
       amsg.commit();
       log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << get_finish_event();
       clear_profiling();
@@ -2711,15 +2718,6 @@ namespace Realm {
       }
 
       //printf("kinds: " IDFMT "=%d " IDFMT "=%d\n", src_mem.id, src_mem.impl()->kind, dst_mem.id, dst_mem.impl()->kind);
-
-      if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>()) {
-        ProfilingMeasurements::OperationMemoryUsage usage;  
-        // Not precise, but close enough for now
-        usage.source = srcs[0].inst.get_location();
-        usage.target = dst.inst.get_location();
-        usage.size = total_bytes;
-        measurements.add_measurement(usage);
-      }
     }
 
     void ReduceRequest::mark_completed(void)
@@ -2808,17 +2806,27 @@ namespace Realm {
 
     void FillRequest::forward_request(NodeID target_node)
     {
-      ByteArray ba(fill_buffer, fill_size); // TODO
-      ActiveMessage<RemoteFillMessage> amsg(target_node,65536);
+      Serialization::ByteCountSerializer bcs;
+      {
+	bool ok = ((bcs << *domain) &&
+		   (bcs << ByteArrayRef(fill_buffer, fill_size)) &&
+		   (bcs << requests));
+	assert(ok);
+      }
+      size_t req_size = bcs.bytes_used();
+      ActiveMessage<RemoteFillMessage> amsg(target_node, req_size);
       amsg->inst = dst.inst;
       amsg->field_id = dst.field_id;
       assert(dst.subfield_offset == 0);
       amsg->size = fill_size;
       amsg->before_fill = before_fill;
       amsg->after_fill = get_finish_event();
-      amsg << *domain;
-      amsg << ba;
-      amsg << requests;
+      {
+	bool ok = ((amsg << *domain) &&
+		   (amsg << ByteArrayRef(fill_buffer, fill_size)) &&
+		   (amsg << requests));
+	assert(ok);
+      }
       amsg.commit();
       log_dma.debug() << "forwarding fill: target=" << target_node << " finish=" << get_finish_event();
       clear_profiling();
@@ -3031,8 +3039,8 @@ namespace Realm {
 	const std::string *prev_dsetname = 0;
 	while(!iter->done()) {
 	  TransferIterator::AddressInfoHDF5 info;
-	  size_t act_bytes = iter->step(size_t(-1), // max_bytes
-					info);
+	  size_t act_bytes = iter->step_hdf5(size_t(-1), // max_bytes
+					     info);
 	  assert(act_bytes >= 0);
 
 	  // compare the pointers, not the string contents...
@@ -3182,13 +3190,6 @@ namespace Realm {
       if(rep_buffer)
 	free(rep_buffer);
       delete iter;
-
-      if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>()) {
-        ProfilingMeasurements::OperationMemoryUsage usage;
-        usage.source = Memory::NO_MEMORY;
-        usage.target = dst.inst.get_location();
-        measurements.add_measurement(usage);
-      }
     }
 
     void FillRequest::mark_completed(void)
@@ -3199,34 +3200,214 @@ namespace Realm {
       Operation::mark_completed();
     }
 
-    size_t FillRequest::optimize_fill_buffer(RegionInstanceImpl *inst_impl, int &fill_elmts)
+    bool CopyProfile::check_readiness(void)
     {
-      const size_t max_size = 1024; 
-      // Only do this optimization for "small" fields
-      // which are less than half a page
-      if (fill_size <= max_size)
-      {
-        // If we have a single-field instance or we have a set 
-        // of contiguous elmts then make a bulk buffer to use
-        if ((inst_impl->metadata.elmt_size == fill_size) ||
-            (inst_impl->metadata.block_size > 1)) 
-        {
-          fill_elmts = std::min(inst_impl->metadata.block_size,2*max_size/fill_size);
-          size_t fill_elmts_size = fill_elmts * fill_size;
-          char *next_buffer = (char*)malloc(fill_elmts_size);
-          char *next_ptr = next_buffer;
-          for (int idx = 0; idx < fill_elmts; idx++) {
-            memcpy(next_ptr, fill_buffer, fill_size);
-            next_ptr += fill_size;
+      if(state == STATE_INIT) {
+        state = STATE_BEFORE_EVENT;
+      }
+      // remember which queue we're going to be assigned to if we sleep
+      waiter.req = this;
+      if(state == STATE_BEFORE_EVENT) {
+        // has the before event triggered?  if not, wait on it
+        bool poisoned = false;
+        if(before_copy.has_triggered_faultaware(poisoned)) {
+          if(poisoned) {
+            log_dma.debug("request %p - poisoned precondition", this);
+            handle_poisoned_precondition(before_copy);
+            return true;  // not enqueued, but never going to be
+          } else {
+            log_dma.debug("request %p - before event triggered", this);
+            state = STATE_READY;
+            mark_ready();
+            mark_started();
           }
-          // Free the old buffer and replace it
-          free(fill_buffer);
-          fill_buffer = next_buffer;
-          return fill_elmts_size;
+        } else {
+          log_dma.debug("request %p - before event not triggered", this);
+          log_dma.debug("request %p - sleeping on before event", this);
+          waiter.sleep_on_event(before_copy);
+          return false;
         }
       }
-      return fill_size;
+      if(state == STATE_READY) {
+        if (measurements.wants_measurement<ProfilingMeasurements::OperationCopyInfo>())
+          {
+            measurements.add_measurement(cpinfo);
+          }
+        if (measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>())
+          {
+            ProfilingMeasurements::OperationMemoryUsage usage;
+            usage.source = src_mem;
+            usage.target = dst_mem;
+            usage.size = total_field_size;
+            measurements.add_measurement(usage);
+          }
+        state = STATE_QUEUED;
+      }
+      // this case we check if all the copies are done
+      if (state == STATE_QUEUED) {
+        bool poisoned = false;
+        if(end_copy.has_triggered_faultaware(poisoned)) {
+          if(poisoned) {
+            log_dma.debug("request %p - poisoned precondition", this);
+            handle_poisoned_precondition(end_copy);
+            return true;  // not enqueued, but never going to be
+          } else {
+            log_dma.debug("request %p - end copy triggered", this);
+            state = STATE_DONE;
+          }
+        } else {
+          log_dma.debug("request %p - end copy not triggered", this);
+          log_dma.debug("request %p - sleeping on end copy event", this);
+          waiter.sleep_on_event(end_copy);
+          return false;
+        }
+      }
+      if (state == STATE_DONE) {
+        // if we reach here - all the copies have finished
+        // we can record the end time
+        mark_finished(true /*successful*/);
+        return true;
+      }
+      // should never reach here
+      assert(0);
+      return false;
     }
+
+  CopyProfile::~CopyProfile() {
+  }
+
+    // copy entry
+  void CopyProfile::add_copy_entry(const OASByInst *oas_by_inst,
+                                   const TransferDomain *domain,
+                                   bool is_src_indirect,
+                                   bool is_dst_indirect)
+  {
+    ++num_requests;
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>())
+      {
+        // scatter/gather operations
+        if (is_src_indirect || is_dst_indirect) {
+          src_mem = Memory::NO_MEMORY;
+          dst_mem = Memory::NO_MEMORY;
+        }
+        else {
+          size_t field_size = 0;
+          for (OASByInst::const_iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+            for (size_t i = 0; i < it->second.size(); i++)
+              field_size += it->second[i].size;
+            total_field_size += field_size * domain->volume();
+            if (num_requests == 1) {
+              src_mem = it->first.first.get_location();
+              dst_mem = it->first.second.get_location();
+            }
+          }
+        }
+      }
+
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationCopyInfo>())
+      {
+        if (is_src_indirect || is_dst_indirect)
+          {
+            ProfilingMeasurements::OperationCopyInfo::InstInfo entry;
+            entry.src_inst_id = RegionInstance::NO_INST;
+            entry.dst_inst_id = RegionInstance::NO_INST;
+            entry.num_fields = 1;
+            entry.request_type =
+              ProfilingMeasurements::OperationCopyInfo::COPY;
+            cpinfo.inst_info.push_back(entry);
+            return;
+          }
+        size_t total_fields = 0;
+        CustomSerdezID serdez_id = 0;
+        const InstPair &pair = oas_by_inst->begin()->first;
+        for (OASByInst::const_iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+          serdez_id = it->second[0].serdez_id;
+          for (size_t i = 0; i < it->second.size(); i++)
+            total_fields += 1;
+        }
+        ProfilingMeasurements::OperationCopyInfo::InstInfo entry;
+        entry.src_inst_id = pair.first;
+        entry.dst_inst_id = pair.second;
+        entry.num_fields = total_fields;
+        entry.request_type =
+          ProfilingMeasurements::OperationCopyInfo::COPY;
+
+        if(pair.first.exists() && pair.second.exists()) {
+          Memory src_mem = pair.first.get_location();
+          Memory dst_mem = pair.second.get_location();
+          MemPathInfo path_info;
+          bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
+                                       path_info);
+          assert(ok);
+          entry.num_hops = path_info.xd_kinds.size();
+        }
+        else
+          assert(0);
+        cpinfo.inst_info.push_back(entry);
+      }
+  }
+
+  void CopyProfile::add_reduc_entry(const CopySrcDstField &src,
+                                    const CopySrcDstField &dst,
+                                    const TransferDomain *td)
+  {
+    ++num_requests;
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>())
+      {
+        total_field_size = total_field_size +
+          dst.size * td->volume();
+        if (num_requests == 1) {
+          src_mem = src.inst.get_location();
+          dst_mem = dst.inst.get_location();
+        }
+      }
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationCopyInfo>())
+      {
+        ProfilingMeasurements::OperationCopyInfo::InstInfo entry;
+        entry.src_inst_id = src.inst;
+        entry.dst_inst_id = dst.inst;
+        entry.num_fields = 1;
+        entry.num_hops = 1;
+        entry.request_type =
+          ProfilingMeasurements::OperationCopyInfo::REDUCE;
+        if(src.inst.exists() && dst.inst.exists()) {
+          Memory src_mem = src.inst.get_location();
+          Memory dst_mem = dst.inst.get_location();
+          MemPathInfo path_info;
+          CustomSerdezID serdez_id = 0;
+          bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
+                                       path_info);
+          assert(ok);
+          entry.num_hops = path_info.xd_kinds.size();
+          cpinfo.inst_info.push_back(entry);
+        }
+      }
+  }
+
+  void CopyProfile::add_fill_entry(const CopySrcDstField &dst, const TransferDomain *domain)
+  {
+    ++num_requests;
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>())
+      {
+        total_field_size = total_field_size +
+          dst.size * domain->volume();
+        if (num_requests == 1) {
+          src_mem = Memory::NO_MEMORY;
+          dst_mem = dst.inst.get_location();
+        }
+      }
+    if(measurements.wants_measurement<ProfilingMeasurements::OperationCopyInfo>())
+      {
+        ProfilingMeasurements::OperationCopyInfo::InstInfo entry;
+        entry.src_inst_id = RegionInstance::NO_INST;
+        entry.dst_inst_id = dst.inst;
+        entry.num_fields = 1;
+        entry.request_type =
+          ProfilingMeasurements::OperationCopyInfo::FILL;
+        entry.num_hops = 1;
+        cpinfo.inst_info.push_back(entry);
+      }
+  }
 
     // for now we use a single queue for all (local) dmas
     DmaRequestQueue *dma_queue = 0;

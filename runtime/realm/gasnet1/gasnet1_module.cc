@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,7 +54,7 @@ namespace Realm {
   // class GASNet1Memory
   //
 
-  class GASNet1Memory : public MemoryImpl {
+  class GASNet1Memory : public LocalManagedMemory {
   public:
     static const size_t MEMORY_STRIDE = 1024;
 
@@ -66,11 +66,7 @@ namespace Realm {
 
     virtual void put_bytes(off_t offset, const void *src, size_t size);
     
-    virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-				      size_t count, const void *entry_buffer);
-
     virtual void *get_direct_ptr(off_t offset, size_t size);
-    virtual int get_home_node(off_t offset, size_t size);
 
     void get_batch(size_t batch_size,
 		   const off_t *offsets, void * const *dsts, 
@@ -92,8 +88,8 @@ namespace Realm {
 
   GASNet1Memory::GASNet1Memory(Memory _me, size_t size_per_node,
 			       NetworkModule *_gasnet)
-    : MemoryImpl(_me, 0 /* we'll calculate it below */, MKIND_GLOBAL,
-		 MEMORY_STRIDE, Memory::GLOBAL_MEM)
+    : LocalManagedMemory(_me, 0 /* we'll calculate it below */, MKIND_GLOBAL,
+			 MEMORY_STRIDE, Memory::GLOBAL_MEM, 0)
     , gasnet(_gasnet)
   {
     num_nodes = Network::max_node_id + 1;
@@ -110,10 +106,6 @@ namespace Realm {
 
     size = size_per_node * num_nodes;
     memory_stride = MEMORY_STRIDE;
-      
-    free_blocks[0] = size;
-    // tell new allocator about the available memory too
-    current_allocator.add_range(0, size);
   }
 
   GASNet1Memory::~GASNet1Memory(void)
@@ -152,41 +144,9 @@ namespace Realm {
     }
   }
 
-  void GASNet1Memory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-					   size_t count, const void *entry_buffer)
-  {
-    assert(0);
-#ifdef NEED_TO_FIX_REDUCTION_LISTS_FOR_DEPPART
-    const char *entry = (const char *)entry_buffer;
-    unsigned ptr;
-
-    for(size_t i = 0; i < count; i++) {
-      redop->get_list_pointers(&ptr, entry, 1);
-      //printf("ptr[%d] = %d\n", i, ptr);
-      off_t elem_offset = offset + ptr * redop->sizeof_lhs;
-      off_t blkid = (elem_offset / memory_stride / num_nodes);
-      off_t node = (elem_offset / memory_stride) % num_nodes;
-      off_t blkoffset = elem_offset % memory_stride;
-      assert(node == Network::my_node_id);
-      char *tgt_ptr = ((char *)seginfos[node].addr)+(blkid * memory_stride)+blkoffset;
-      redop->apply_list_entry(tgt_ptr, entry, 1, ptr);
-      entry += redop->sizeof_list_entry;
-    }
-#endif
-  }
-
   void *GASNet1Memory::get_direct_ptr(off_t offset, size_t size)
   {
     return 0;  // can't give a pointer to the caller - have to use RDMA
-  }
-
-  int GASNet1Memory::get_home_node(off_t offset, size_t size)
-  {
-    off_t start_blk = offset / memory_stride;
-    off_t end_blk = (offset + size - 1) / memory_stride;
-    if(start_blk != end_blk) return -1;
-    
-    return start_blk % num_nodes;
   }
 
   void GASNet1Memory::get_batch(size_t batch_size,
@@ -318,7 +278,7 @@ namespace Realm {
     virtual void get_bytes(off_t offset, void *dst, size_t size);
     virtual void put_bytes(off_t offset, const void *src, size_t size);
 
-    virtual void *get_remote_addr(off_t offset);
+    virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
 
   protected:
     char *regbase;
@@ -344,12 +304,41 @@ namespace Realm {
 	       const_cast<void *>(src), size);
   }
 
-  void *GASNet1RemoteMemory::get_remote_addr(off_t offset)
+  bool GASNet1RemoteMemory::get_remote_addr(off_t offset, RemoteAddress& remote_addr)
   {
-    return (regbase + offset);
+    remote_addr.ptr = reinterpret_cast<uintptr_t>(regbase + offset);
+    return true;
   }
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class GASNet1IBMemory
+  //
+
+  class GASNet1IBMemory : public IBMemory {
+  public:
+    GASNet1IBMemory(Memory _me, size_t _size, Memory::Kind k, void *_regbase);
+
+    virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
+
+  protected:
+    char *regbase;
+  };
+
+  GASNet1IBMemory::GASNet1IBMemory(Memory _me, size_t _size, Memory::Kind k,
+				   void *_regbase)
+    : IBMemory(_me, _size, MKIND_REMOTE, k, 0, 0)
+    , regbase(static_cast<char *>(_regbase))
+  {}
+
+  bool GASNet1IBMemory::get_remote_addr(off_t offset, RemoteAddress& remote_addr)
+  {
+    remote_addr.ptr = reinterpret_cast<uintptr_t>(regbase + offset);
+    return true;
+  }
   
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class GASNet1MessageImpl
@@ -676,6 +665,8 @@ namespace Realm {
       if((*it)->bytes == 0) continue;
       // must not already be assigned an address
       if((*it)->base != 0) continue;
+      // must be host memory
+      if((*it)->memtype != NetworkSegmentInfo::HostMem) continue;
       // TODO: consider alignment
       inseg_bytes += (*it)->bytes;
     }
@@ -710,6 +701,8 @@ namespace Realm {
       if((*it)->bytes == 0) continue;
       // must not already be assigned an address
       if((*it)->base != 0) continue;
+      // must be host memory
+      if((*it)->memtype != NetworkSegmentInfo::HostMem) continue;
       // TODO: consider alignment
       (*it)->base = seg_base;
       // RDMA info for GASNet is just the local base pointer
@@ -790,6 +783,17 @@ namespace Realm {
     }
   }
   
+  IBMemory *GASNet1Module::create_remote_ib_memory(Memory m, size_t size, Memory::Kind kind,
+						   const ByteArray& rdma_info)
+  {
+    // rdma info should be the pointer in the remote address space
+    assert(rdma_info.size() == sizeof(void *));
+    void *regbase;
+    memcpy(&regbase, rdma_info.base(), sizeof(void *));
+
+    return new GASNet1IBMemory(m, size, kind, regbase);
+  }
+
   ActiveMessageImpl *GASNet1Module::create_active_message_impl(NodeID target,
 							       unsigned short msgid,
 							       size_t header_size,
@@ -797,7 +801,6 @@ namespace Realm {
 							       const void *src_payload_addr,
 							       size_t src_payload_lines,
 							       size_t src_payload_line_stride,
-							       void *dest_payload_addr,
 							       void *storage_base,
 							       size_t storage_size)
   {
@@ -809,7 +812,32 @@ namespace Realm {
 								    src_payload_addr,
 								    src_payload_lines,
 								    src_payload_line_stride,
-								    dest_payload_addr);
+								    0);
+    return impl;
+  }
+
+  ActiveMessageImpl *GASNet1Module::create_active_message_impl(NodeID target,
+							       unsigned short msgid,
+							       size_t header_size,
+							       size_t max_payload_size,
+							       const void *src_payload_addr,
+							       size_t src_payload_lines,
+							       size_t src_payload_line_stride,
+							       const RemoteAddress& dest_payload_addr,
+							       void *storage_base,
+							       size_t storage_size)
+  {
+    assert(storage_size >= sizeof(GASNet1MessageImpl));
+    void *dest_ptr = reinterpret_cast<void *>(dest_payload_addr.ptr);
+    assert(dest_ptr != 0);
+    GASNet1MessageImpl *impl = new(storage_base) GASNet1MessageImpl(target,
+								    msgid,
+								    header_size,
+								    max_payload_size,
+								    src_payload_addr,
+								    src_payload_lines,
+								    src_payload_line_stride,
+								    dest_ptr);
     return impl;
   }
 
@@ -834,5 +862,61 @@ namespace Realm {
     return impl;
   }
 
+  size_t GASNet1Module::recommended_max_payload(NodeID target,
+						bool with_congestion,
+						size_t header_size)
+  {
+    return gasnet_AMMaxMedium();
+  }
+
+  size_t GASNet1Module::recommended_max_payload(const NodeSet& targets,
+						bool with_congestion,
+						size_t header_size)
+  {
+    return gasnet_AMMaxMedium();
+  }
+
+  size_t GASNet1Module::recommended_max_payload(NodeID target,
+						const RemoteAddress& dest_payload_addr,
+						bool with_congestion,
+						size_t header_size)
+  {
+    // RDMA uses long, but don't go above 4MB per packet for responsiveness
+    size_t maxlong = gasnet_AMMaxLongRequest();
+    return std::min(maxlong, size_t(4 << 20));
+  }
+
+  size_t GASNet1Module::recommended_max_payload(NodeID target,
+						const void *data, size_t bytes_per_line,
+						size_t lines, size_t line_stride,
+						bool with_congestion,
+						size_t header_size)
+  {
+    return gasnet_AMMaxMedium();
+  }
+
+  size_t GASNet1Module::recommended_max_payload(const NodeSet& targets,
+							const void *data, size_t bytes_per_line,
+							size_t lines, size_t line_stride,
+						bool with_congestion,
+						size_t header_size)
+  {
+    return gasnet_AMMaxMedium();
+  }
+
+  size_t GASNet1Module::recommended_max_payload(NodeID target,
+						const void *data, size_t bytes_per_line,
+						size_t lines, size_t line_stride,
+						const RemoteAddress& dest_payload_addr,
+						bool with_congestion,
+						size_t header_size)
+  {
+    // RDMA uses long, but don't go above 4MB per packet for responsiveness
+    // we also need the source to be contiguous, so clamp at a single
+    //  line of the source data
+    size_t maxlong = gasnet_AMMaxLongRequest();
+    return std::min(maxlong, std::min(bytes_per_line, size_t(4 << 20)));
+  }
   
+
 }; // namespace Realm

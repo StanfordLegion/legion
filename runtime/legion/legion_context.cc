@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,15 +38,17 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TaskContext::TaskContext(Runtime *rt, TaskOp *owner, int d,
+    TaskContext::TaskContext(Runtime *rt, SingleTask *owner, int d,
                              const std::vector<RegionRequirement> &reqs,
-                             const std::vector<RegionRequirement> &out_reqs)
+                             const std::vector<RegionRequirement> &out_reqs,
+                             bool inline_t)
       : runtime(rt), owner_task(owner), regions(reqs),
         output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
         total_tunable_count(0), overhead_tracker(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
-        children_complete_invoked(false), children_commit_invoked(false)
+        children_complete_invoked(false), children_commit_invoked(false),
+        inline_task(inline_t)
     //--------------------------------------------------------------------------
     {
     }
@@ -54,7 +56,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(const TaskContext &rhs)
       : runtime(NULL), owner_task(NULL), regions(rhs.regions),
-        output_reqs(rhs.output_reqs), depth(-1)
+        output_reqs(rhs.output_reqs), depth(-1), inline_task(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -767,22 +769,7 @@ namespace Legion {
         finder->second++;
       else
         created_regions[handle] = 1;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::add_physical_region(const RegionRequirement &req,
-                                   bool mapped, MapperID mid, MappingTagID tag,
-                                   ApUserEvent unmap_event, bool virtual_mapped,
-                                   const InstanceSet &physical_instances)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
-          ApEvent::NO_AP_EVENT, mapped, this, mid, tag, 
-          is_leaf_context(), virtual_mapped, runtime);
-      physical_regions.push_back(PhysicalRegion(impl));
-      if (mapped)
-        impl->reset_references(physical_instances, unmap_event);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void TaskContext::add_output_region(const OutputRequirement &req,
@@ -1593,434 +1580,22 @@ namespace Legion {
     {
       // Should only be implemented by derived classes
       assert(false);
+    } 
+
+    //--------------------------------------------------------------------------
+    void TaskContext::raise_poison_exception(void)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: handle poisoned task
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
-    int TaskContext::has_conflicting_regions(MapOp *op, bool &parent_conflict,
-                                             bool &inline_conflict)
+    void TaskContext::raise_region_exception(PhysicalRegion region,bool nuclear)
     //--------------------------------------------------------------------------
     {
-      const RegionRequirement &req = op->get_requirement(); 
-      return has_conflicting_internal(req, parent_conflict, inline_conflict);
-    }
-
-    //--------------------------------------------------------------------------
-    int TaskContext::has_conflicting_regions(AttachOp *attach,
-                                             bool &parent_conflict,
-                                             bool &inline_conflict)
-    //--------------------------------------------------------------------------
-    {
-      const RegionRequirement &req = attach->get_requirement();
-      return has_conflicting_internal(req, parent_conflict, inline_conflict);
-    }
-
-    //--------------------------------------------------------------------------
-    int TaskContext::has_conflicting_internal(const RegionRequirement &req,
-                                              bool &parent_conflict,
-                                              bool &inline_conflict)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, HAS_CONFLICTING_INTERNAL_CALL);
-      parent_conflict = false;
-      inline_conflict = false;
-      // No need to hold our lock here because we are the only ones who
-      // could possibly be doing any mutating of the physical_regions data 
-      // structure but we are here so we aren't mutating
-      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
-      {
-        // skip any regions which are not mapped
-        if (!physical_regions[our_idx].is_mapped())
-          continue;
-        const RegionRequirement &our_req = 
-          physical_regions[our_idx].impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-        {
-          parent_conflict = true;
-          return our_idx;
-        }
-      }
-      for (std::list<PhysicalRegion>::const_iterator it = 
-            inline_regions.begin(); it != inline_regions.end(); it++)
-      {
-        if (!it->is_mapped())
-          continue;
-        const RegionRequirement &our_req = it->impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-        {
-          inline_conflict = true;
-          // No index for inline conflicts
-          return -1;
-        }
-      }
-      return -1;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_regions(TaskOp *task,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      // No need to hold our lock here because we are the only ones who
-      // could possibly be doing any mutating of the physical_regions data 
-      // structure but we are here so we aren't mutating
-      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
-      {
-        // Skip any regions which are not mapped
-        if (!physical_regions[our_idx].is_mapped())
-          continue;
-        const RegionRequirement &our_req = 
-          physical_regions[our_idx].impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        // Check to see if any region requirements from the child have
-        // a dependence on our region at location our_idx
-        for (unsigned idx = 0; idx < task->regions.size(); idx++)
-        {
-          const RegionRequirement &req = task->regions[idx];  
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-          {
-            conflicting.push_back(physical_regions[our_idx]);
-            // Once we find a conflict, we don't need to check
-            // against it anymore, so go onto our next region
-            break;
-          }
-        }
-      }
-      for (std::list<PhysicalRegion>::const_iterator it = 
-            inline_regions.begin(); it != inline_regions.end(); it++)
-      {
-        if (!it->is_mapped())
-          continue;
-        const RegionRequirement &our_req = it->impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        // Check to see if any region requirements from the child have
-        // a dependence on our region at location our_idx
-        for (unsigned idx = 0; idx < task->regions.size(); idx++)
-        {
-          const RegionRequirement &req = task->regions[idx];  
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-          {
-            conflicting.push_back(*it);
-            // Once we find a conflict, we don't need to check
-            // against it anymore, so go onto our next region
-            break;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_regions(CopyOp *copy,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      // No need to hold our lock here because we are the only ones who
-      // could possibly be doing any mutating of the physical_regions data 
-      // structure but we are here so we aren't mutating
-      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
-      {
-        // skip any regions which are not mapped
-        if (!physical_regions[our_idx].is_mapped())
-          continue;
-        const RegionRequirement &our_req = 
-          physical_regions[our_idx].impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        bool has_conflict = false;
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->src_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->src_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->dst_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->dst_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->src_indirect_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->src_indirect_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->dst_indirect_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->dst_indirect_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        if (has_conflict)
-          conflicting.push_back(physical_regions[our_idx]);
-      }
-      for (std::list<PhysicalRegion>::const_iterator it = 
-            inline_regions.begin(); it != inline_regions.end(); it++)
-      {
-        if (!it->is_mapped())
-          continue;
-        const RegionRequirement &our_req = it->impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        bool has_conflict = false;
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->src_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->src_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->dst_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->dst_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->src_indirect_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->src_indirect_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        for (unsigned idx = 0; !has_conflict &&
-              (idx < copy->dst_indirect_requirements.size()); idx++)
-        {
-          const RegionRequirement &req = copy->dst_indirect_requirements[idx];
-          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-            has_conflict = true;
-        }
-        if (has_conflict)
-          conflicting.push_back(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_regions(AcquireOp *acquire,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      const RegionRequirement &req = acquire->get_requirement();
-      find_conflicting_internal(req, conflicting); 
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_regions(ReleaseOp *release,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      const RegionRequirement &req = release->get_requirement();
-      find_conflicting_internal(req, conflicting);      
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_regions(DependentPartitionOp *partition,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      const RegionRequirement &req = partition->get_requirement();
-      find_conflicting_internal(req, conflicting);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_internal(const RegionRequirement &req,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      // No need to hold our lock here because we are the only ones who
-      // could possibly be doing any mutating of the physical_regions data 
-      // structure but we are here so we aren't mutating
-      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
-      {
-        // skip any regions which are not mapped
-        if (!physical_regions[our_idx].is_mapped())
-          continue;
-        const RegionRequirement &our_req = 
-          physical_regions[our_idx].impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-          conflicting.push_back(physical_regions[our_idx]);
-      }
-      for (std::list<PhysicalRegion>::const_iterator it = 
-            inline_regions.begin(); it != inline_regions.end(); it++)
-      {
-        if (!it->is_mapped())
-          continue;
-        const RegionRequirement &our_req = it->impl->get_requirement();
-#ifdef DEBUG_LEGION
-        // This better be true for a single task
-        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-        RegionTreeID our_tid = our_req.region.get_tree_id();
-        IndexSpace our_space = our_req.region.get_index_space();
-        RegionUsage our_usage(our_req);
-        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
-          conflicting.push_back(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::find_conflicting_regions(FillOp *fill,
-                                       std::vector<PhysicalRegion> &conflicting)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
-      const RegionRequirement &req = fill->get_requirement();
-      find_conflicting_internal(req, conflicting);
-    }
-
-    //--------------------------------------------------------------------------
-    bool TaskContext::check_region_dependence(RegionTreeID our_tid,
-                                             IndexSpace our_space,
-                                             const RegionRequirement &our_req,
-                                             const RegionUsage &our_usage,
-                                             const RegionRequirement &req,
-                                             bool check_privileges) const
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, CHECK_REGION_DEPENDENCE_CALL);
-      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
-          (req.handle_type == LEGION_REGION_PROJECTION))
-      {
-        // If the trees are different we're done 
-        if (our_tid != req.region.get_tree_id())
-          return false;
-        // Check to see if there is a path between
-        // the index spaces
-        std::vector<LegionColor> path;
-        if (!runtime->forest->compute_index_path(our_space,
-                         req.region.get_index_space(),path))
-          return false;
-      }
-      else
-      {
-        // Check if the trees are different
-        if (our_tid != req.partition.get_tree_id())
-          return false;
-        std::vector<LegionColor> path;
-        if (!runtime->forest->compute_partition_path(our_space,
-                     req.partition.get_index_partition(), path))
-          return false;
-      }
-      // Check to see if any privilege fields overlap
-      std::vector<FieldID> intersection(our_req.privilege_fields.size());
-      std::vector<FieldID>::iterator intersect_it = 
-        std::set_intersection(our_req.privilege_fields.begin(),
-                              our_req.privilege_fields.end(),
-                              req.privilege_fields.begin(),
-                              req.privilege_fields.end(),
-                              intersection.begin());
-      intersection.resize(intersect_it - intersection.begin());
-      if (intersection.empty())
-        return false;
-      // If we aren't supposed to check privileges then we're done
-      if (!check_privileges)
-        return true;
-      // Finally if everything has overlapped, do a dependence analysis
-      // on the privileges and coherence
-      RegionUsage usage(req);
-      switch (check_dependence_type<true>(our_usage,usage))
-      {
-        // Only allow no-dependence, or simultaneous dependence through
-        case LEGION_NO_DEPENDENCE:
-        case LEGION_SIMULTANEOUS_DEPENDENCE:
-          {
-            return false;
-          }
-        default:
-          break;
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_inline_mapped_region(PhysicalRegion &region)
-    //--------------------------------------------------------------------------
-    {
-      // Don't need the lock because this is only accessed from 
-      // the executing task context
-      //
-      // Because of 'remap_region', this method can be called
-      // both for inline regions as well as regions which were
-      // initally mapped for the task.  Do a quick check to see
-      // if it was an original region.  If it was then we're done.
-      for (unsigned idx = 0; idx < physical_regions.size(); idx++)
-      {
-        if (physical_regions[idx].impl == region.impl)
-          return;
-      }
-      inline_regions.push_back(region);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::unregister_inline_mapped_region(PhysicalRegion &region)
-    //--------------------------------------------------------------------------
-    {
-      // Don't need the lock because this is only accessed from the
-      // executed task context
-      for (std::list<PhysicalRegion>::iterator it = 
-            inline_regions.begin(); it != inline_regions.end(); it++)
-      {
-        if (it->impl == region.impl)
-        {
-          if (runtime->runtime_warnings && !has_inline_accessor)
-            has_inline_accessor = it->impl->created_accessor();
-          inline_regions.erase(it);
-          return;
-        }
-      }
+      // TODO: handle region exception
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -2312,7 +1887,7 @@ namespace Legion {
       // Otherwise we have privileges on these fields for all regions
       // so we are good on privileges
       return NO_ERROR;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     LegionErrorType TaskContext::check_privilege_internal(
@@ -2382,6 +1957,70 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool TaskContext::check_region_dependence(RegionTreeID our_tid,
+                                              IndexSpace our_space,
+                                              const RegionRequirement &our_req,
+                                              const RegionUsage &our_usage,
+                                              const RegionRequirement &req,
+                                              bool check_privileges) const
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, CHECK_REGION_DEPENDENCE_CALL);
+      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+          (req.handle_type == LEGION_REGION_PROJECTION))
+      {
+        // If the trees are different we're done 
+        if (our_tid != req.region.get_tree_id())
+          return false;
+        // Check to see if there is a path between
+        // the index spaces
+        std::vector<LegionColor> path;
+        if (!runtime->forest->compute_index_path(our_space,
+                         req.region.get_index_space(),path))
+          return false;
+      }
+      else
+      {
+        // Check if the trees are different
+        if (our_tid != req.partition.get_tree_id())
+          return false;
+        std::vector<LegionColor> path;
+        if (!runtime->forest->compute_partition_path(our_space,
+                     req.partition.get_index_partition(), path))
+          return false;
+      }
+      // Check to see if any privilege fields overlap
+      std::vector<FieldID> intersection(our_req.privilege_fields.size());
+      std::vector<FieldID>::iterator intersect_it = 
+        std::set_intersection(our_req.privilege_fields.begin(),
+                              our_req.privilege_fields.end(),
+                              req.privilege_fields.begin(),
+                              req.privilege_fields.end(),
+                              intersection.begin());
+      intersection.resize(intersect_it - intersection.begin());
+      if (intersection.empty())
+        return false;
+      // If we aren't supposed to check privileges then we're done
+      if (!check_privileges)
+        return true;
+      // Finally if everything has overlapped, do a dependence analysis
+      // on the privileges and coherence
+      RegionUsage usage(req);
+      switch (check_dependence_type<true>(our_usage,usage))
+      {
+        // Only allow no-dependence, or simultaneous dependence through
+        case LEGION_NO_DEPENDENCE:
+        case LEGION_SIMULTANEOUS_DEPENDENCE:
+          {
+            return false;
+          }
+        default:
+          break;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion TaskContext::find_logical_region(unsigned index)
     //--------------------------------------------------------------------------
     {
@@ -2420,7 +2059,8 @@ namespace Legion {
 #endif
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
-      pending_done = owner_task->get_context()->decrement_pending(owner_task);
+      if (!inline_task)
+        pending_done = find_parent_context()->decrement_pending(owner_task);
       return physical_regions;
     }
 
@@ -2453,7 +2093,7 @@ namespace Legion {
             "allocation so you must adjust the percentage of this memory "
             "dedicated for eager allocations with '-lg:eager_alloc_percentage' "
             "flag on the command line.", get_task_name(), get_unique_id(), 
-            mem_names[memory.kind()], memory.id) 
+            mem_names[memory.kind()], memory.id)
       }
       task_local_instances.insert(instance);
 #endif
@@ -2488,9 +2128,12 @@ namespace Legion {
 #ifdef LEGION_MALLOC_INSTANCES
       uintptr_t ptr = 0;
       std::vector<std::pair<PhysicalInstance,uintptr_t> > new_instances;
+#ifdef DEBUG_LEGION
+      assert(!task_local_instances.empty());
+#endif
+      new_instances.reserve(task_local_instances.size() - 1);
       for (std::vector<std::pair<PhysicalInstance,uintptr_t> >::iterator it =
-           task_local_instances.begin(); it !=
-           task_local_instances.end(); ++it)
+           task_local_instances.begin(); it != task_local_instances.end(); ++it)
         if (it->first == instance)
           ptr = it->second;
         else
@@ -2509,13 +2152,11 @@ namespace Legion {
 #endif
       // Remove the instance from the set of task local instances
       task_local_instances.erase(finder);
-
-      MemoryManager *manager = runtime->find_memory_manager(
-          instance.get_location());
-      // We also need to unlink the instance from the manager
-      // as we need to register the allocation with a different
-      // instance name later.
-      return manager->unlink_eager_instance(instance);
+      void *ptr = instance.pointer_untyped(0,0);
+#ifdef DEBUG_LEGION
+      assert(ptr != NULL);
+#endif
+      return reinterpret_cast<uintptr_t>(ptr);
 #endif
     }
 
@@ -2561,26 +2202,6 @@ namespace Legion {
 #endif
       overhead_tracker = new 
         Mapping::ProfilingMeasurements::RuntimeOverhead();
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::unmap_all_regions(void)
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<PhysicalRegion>::const_iterator it = 
-            physical_regions.begin(); it != physical_regions.end(); it++)
-      {
-        if (it->is_mapped())
-          it->impl->unmap_region();
-      }
-      // Also unmap any of our inline mapped physical regions
-      for (LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::
-            tracked::const_iterator it = inline_regions.begin();
-            it != inline_regions.end(); it++)
-      {
-        if (it->is_mapped())
-          it->impl->unmap_region();
-      }
     } 
 
     //--------------------------------------------------------------------------
@@ -2606,10 +2227,17 @@ namespace Legion {
       }
       // Wait for all the re-mapping operations to complete
       const ApEvent mapped_event = Runtime::merge_events(NULL, mapped_events);
-      if (mapped_event.has_triggered())
+      bool poisoned = false;
+      if (mapped_event.has_triggered_faultaware(poisoned))
+      {
+        if (poisoned)
+          raise_poison_exception();
         return;
+      }
       begin_task_wait(true/*from runtime*/);
-      mapped_event.wait();
+      mapped_event.wait_faultaware(poisoned);
+      if (poisoned)
+        raise_poison_exception();
       end_task_wait();
     }
 
@@ -2706,13 +2334,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Get the pointer and free it
-      MemoryManager *manager = 
+      MemoryManager *manager =
         runtime->find_memory_manager(instance.get_location());
 #ifdef LEGION_MALLOC_INSTANCES
 #ifdef DEBUG_LEGION
       assert(task_local_instances.size() == 1);
 #endif
-      const std::pair<PhysicalInstance,uintptr_t> &inst = 
+      const std::pair<PhysicalInstance,uintptr_t> &inst =
         task_local_instances.back();
 #ifdef DEBUG
       assert(inst.first == instance);
@@ -2766,20 +2394,20 @@ namespace Legion {
       if (!launch_domain.exists())
         runtime->forest->find_launch_space_domain(launcher.launch_space,
                                                   launch_domain);
-      FutureMapImpl *result = new FutureMapImpl(this, runtime, 
+      FutureMapImpl *result = new FutureMapImpl(this, runtime,
           launch_domain, runtime->get_available_distributed_id(),
           context_index, runtime->address_space, RtEvent::NO_RT_EVENT);
       if (launcher.predicate_false_future.impl != NULL)
       {
-        ApEvent ready_event = 
-          launcher.predicate_false_future.impl->get_ready_event(); 
-        if (ready_event.has_triggered())
+        ApEvent ready_event =
+          launcher.predicate_false_future.impl->get_ready_event();
+        if (ready_event.has_triggered_faultignorant())
         {
-          const void *f_result = 
+          const void *f_result =
             launcher.predicate_false_future.impl->get_untyped_result();
-          size_t f_result_size = 
+          size_t f_result_size =
             launcher.predicate_false_future.impl->get_untyped_size();
-          for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+          for (Domain::DomainPointIterator itr(launcher.launch_domain);
                 itr; itr++)
           {
             Future f = result->get_future(itr.p, true/*internal*/);
@@ -2795,7 +2423,7 @@ namespace Legion {
           launcher.predicate_false_future.impl->add_base_gc_ref(
                                               FUTURE_HANDLE_REF);
           TaskOp::DeferredFutureMapSetArgs args(result,
-              launcher.predicate_false_future.impl, 
+              launcher.predicate_false_future.impl,
               launcher.launch_domain, owner_task);
           runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                          Runtime::protect_event(ready_event));
@@ -2816,10 +2444,10 @@ namespace Legion {
                         "false.  Please set either the "
                         "'predicate_false_result' or "
                         "'predicate_false_future' fields of the "
-                        "IndexTaskLauncher struct.", impl->get_name(), 
+                        "IndexTaskLauncher struct.", impl->get_name(),
                         get_task_name(), get_unique_id())
         // Just initialize all the futures
-        for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+        for (Domain::DomainPointIterator itr(launcher.launch_domain);
               itr; itr++)
         {
           Future f = result->get_future(itr.p, true/*internal*/);
@@ -2830,7 +2458,7 @@ namespace Legion {
       {
         const void *ptr = launcher.predicate_false_result.get_ptr();
         size_t ptr_size = launcher.predicate_false_result.get_size();
-        for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+        for (Domain::DomainPointIterator itr(launcher.launch_domain);
               itr; itr++)
         {
           Future f = result->get_future(itr.p, true/*internal*/);
@@ -2903,20 +2531,80 @@ namespace Legion {
       return result;
     }
 
+    //--------------------------------------------------------------------------
+    VariantImpl* TaskContext::select_inline_variant(TaskOp *child,
+                              const std::vector<PhysicalRegion> &parent_regions,
+                              std::deque<InstanceSet> &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, SELECT_INLINE_VARIANT_CALL);
+      Mapper::SelectVariantInput input;
+      Mapper::SelectVariantOutput output;
+      input.processor = executing_processor;
+      input.chosen_instances.resize(parent_regions.size());
+      // Extract the specific field instances for each region requirement
+      for (unsigned idx1 = 0; idx1 < parent_regions.size(); idx1++)
+      {
+        const RegionRequirement &child_req = child->regions[idx1];
+        FieldSpaceNode *space = 
+          runtime->forest->get_node(child_req.parent.get_field_space());
+        FieldMask mask = space->get_field_mask(child_req.privilege_fields);
+        InstanceSet instances;
+        parent_regions[idx1].impl->get_references(instances);
+        for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
+        {
+          const InstanceRef &ref = instances[idx2];
+          const FieldMask overlap = mask & ref.get_valid_fields();
+          if (!overlap)
+            continue;
+          physical_instances[idx1].add_instance(
+              InstanceRef(ref.get_manager(), overlap, ref.get_ready_event()));
+          input.chosen_instances[idx1].push_back(
+              MappingInstance(ref.get_manager()));
+          mask -= overlap;
+          if (!mask)
+            break;
+        }
+#ifdef DEBUG_LEGION
+        assert(!mask);
+#endif
+      }
+      output.chosen_variant = 0;
+      // Always do this with the child mapper
+      MapperManager *child_mapper = 
+        runtime->find_mapper(executing_processor, child->map_id);
+      child_mapper->invoke_select_task_variant(child, &input, &output);
+      VariantImpl *variant_impl= runtime->find_variant_impl(child->task_id,
+                                  output.chosen_variant, true/*can fail*/);
+      if (variant_impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invoction of "
+                      "'select_task_variant' on mapper %s. Mapper selected "
+                      "an invalid variant ID %d for inlining of task %s "
+                      "(UID %lld).", child_mapper->get_mapper_name(),
+                      output.chosen_variant, child->get_task_name(), 
+                      child->get_unique_id())
+      if (!runtime->unsafe_mapper)
+        child->validate_variant_selection(child_mapper, variant_impl,
+         executing_processor.kind(), physical_instances, "select_task_variant");
+      return variant_impl;
+    }
+
     /////////////////////////////////////////////////////////////
     // Inner Context 
     /////////////////////////////////////////////////////////////
-
+    
     //--------------------------------------------------------------------------
-    InnerContext::InnerContext(Runtime *rt, TaskOp *owner,int d,bool full_inner,
+    InnerContext::InnerContext(Runtime *rt, SingleTask *owner,int d,bool finner,
                                const std::vector<RegionRequirement> &reqs,
                                const std::vector<RegionRequirement> &out_reqs,
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
-                               UniqueID uid, ApEvent exec_fence, bool remote)
-      : TaskContext(rt, owner, d, reqs, out_reqs),
+                               UniqueID uid, ApEvent exec_fence, bool remote,
+                               bool inline_task)
+      : TaskContext(rt, owner, d, reqs, out_reqs, inline_task),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
-        remote_context(remote), full_inner_context(full_inner),
+        remote_context(remote), full_inner_context(finner),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
         total_children_count(0), total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
@@ -2942,6 +2630,8 @@ namespace Legion {
       context_configuration.min_frames_to_schedule = 0;
       context_configuration.meta_task_vector_width = 
         runtime->initial_meta_task_vector_width;
+      context_configuration.max_templates_per_trace =
+        LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
       context_configuration.mutable_priority = false;
 #ifdef DEBUG_LEGION
       assert(tree_context.exists());
@@ -2971,7 +2661,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(const InnerContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs),
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs, false),
         tree_context(rhs.tree_context),
         context_uid(0), remote_context(false), full_inner_context(false),
         parent_req_indexes(rhs.parent_req_indexes), 
@@ -3320,11 +3010,11 @@ namespace Legion {
         for (std::vector<std::pair<FieldSpace,FieldID> >::const_iterator fit =
               fields.begin(); fit != fields.end(); fit++)
         {
-          std::set<std::pair<FieldSpace,FieldID> >::const_iterator 
+          std::set<std::pair<FieldSpace,FieldID> >::const_iterator
             field_finder = created_fields.find(*fit);
           if (field_finder == created_fields.end())
           {
-            std::map<std::pair<FieldSpace,FieldID>,bool>::iterator 
+            std::map<std::pair<FieldSpace,FieldID>,bool>::iterator
               local_finder = local_fields.find(*fit);
             if (local_finder != local_fields.end())
               REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
@@ -3344,19 +3034,19 @@ namespace Legion {
       }
       if (!delete_now.empty())
       {
-        for (std::map<FieldSpace,std::set<FieldID> >::const_iterator it = 
+        for (std::map<FieldSpace,std::set<FieldID> >::const_iterator it =
               delete_now.begin(); it != delete_now.end(); it++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
-          FieldAllocatorImpl *allocator = 
+          FieldAllocatorImpl *allocator =
             create_field_allocator(it->first, true/*unordered*/);
-          op->initialize_field_deletions(this, it->first, it->second, 
+          op->initialize_field_deletions(this, it->first, it->second,
              true/*unordered*/, allocator, false/*non owner shard*/);
           op->set_execution_precondition(precondition);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
           op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
+          for (std::map<Operation*,GenerationID>::const_iterator dit =
                 dependences.begin(); dit != dependences.end(); dit++)
             op->register_dependence(dit->first, dit->second);
           op->end_dependence_analysis();
@@ -3841,53 +3531,7 @@ namespace Legion {
       assert(handle.exists());
 #endif
       EquivalenceSet *root = NULL;
-      if (!symbolic && expr->is_empty())
-      {
-        // Special case for empty expression
-        {
-          const std::pair<RegionTreeID,IndexSpaceExprID> 
-            key(tree_id, expr->expr_id);
-          AutoLock tree_lock(tree_set_lock);
-          // Check to see if we already have an empty equivalence set
-          // and if not make it
-          std::map<std::pair<RegionTreeID,IndexSpaceExprID>,
-                   EquivalenceSet*>::const_iterator finder = 
-                     empty_equivalence_sets.find(key);
-          if (finder == empty_equivalence_sets.end())
-          {
-            const AddressSpaceID local_space = runtime->address_space;
-            IndexSpaceNode *node = runtime->forest->get_node(handle);
-            root = new EquivalenceSet(runtime,
-              runtime->get_available_distributed_id(),
-              local_space, local_space, expr, node, true/*register now*/); 
-            empty_equivalence_sets[key] = root;
-            root->add_base_resource_ref(CONTEXT_REF);
-          }
-          else
-            root = finder->second;
-        }
-        // Now that we have the empty equivalence set, either record it
-        // or send it back to the source node for the response
-        if (source != runtime->address_space)
-        {
-          // Not local so we need to send a message
-          RtUserEvent recorded_event = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(root->did);
-            rez.serialize(mask);
-            rez.serialize(manager);
-            rez.serialize(recorded_event);
-          }
-          runtime->send_equivalence_set_ray_trace_response(source, rez);
-          return recorded_event;
-        }
-        else
-          manager->record_equivalence_set(root, mask);
-        return RtEvent::NO_RT_EVENT;
-      }
-      else
+      if (symbolic || !expr->is_empty())
       {
         AutoLock tree_lock(tree_set_lock,1,false/*exclusive*/);
         std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder = 
@@ -3895,6 +3539,8 @@ namespace Legion {
         if (finder != tree_equivalence_sets.end())
           root = finder->second;
       }
+      else
+        return RtEvent::NO_RT_EVENT;
       if (root == NULL)
       {
         RegionNode *root_node = runtime->forest->get_tree(tree_id);
@@ -4072,7 +3718,6 @@ namespace Legion {
       rez.serialize<size_t>(virtual_indexes.size());
       for (unsigned idx = 0; idx < virtual_indexes.size(); idx++)
         rez.serialize(virtual_indexes[idx]);
-      rez.serialize(owner_task->get_task_completion());
       rez.serialize(find_parent_context()->get_context_uid());
       rez.serialize<size_t>(context_coordinates.size());
       for (std::vector<std::pair<size_t,DomainPoint> >::const_iterator it =
@@ -6196,6 +5841,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::add_physical_region(const RegionRequirement &req,
+          bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
+          bool virtual_mapped, const InstanceSet &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!unmap_event.exists());
+#endif
+      if (!virtual_mapped)
+        unmap_event = Runtime::create_ap_user_event(NULL);
+      PhysicalRegionImpl *impl = new PhysicalRegionImpl(req,
+          RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT,
+          mapped ? unmap_event : ApUserEvent::NO_AP_USER_EVENT, mapped, this,
+          mid, tag, false/*leaf region*/, virtual_mapped, runtime);
+      physical_regions.push_back(PhysicalRegion(impl));
+      if (!virtual_mapped)
+        impl->set_references(physical_instances, true/*safe*/); 
+    }
+
+    //--------------------------------------------------------------------------
     Future InnerContext::execute_task(const TaskLauncher &launcher,
                                       std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
@@ -6417,13 +6082,10 @@ namespace Legion {
       // if it is then we are done
       if (region.is_mapped())
         return ApEvent::NO_AP_EVENT;
-      // Make sure this region is valid before trying to remap it
-      if (!region.is_valid())
-        region.wait_until_valid(true/*silence warnings*/);
       MapOp *map_op = runtime->get_available_map_op();
       map_op->initialize(this, region);
       register_inline_mapped_region(region);
-      const ApEvent result = map_op->get_completion_event();
+      const ApEvent result = map_op->get_program_order_event();
       add_to_dependence_queue(map_op);
       return result;
     }
@@ -6435,9 +6097,35 @@ namespace Legion {
       AutoRuntimeCall call(this);
       if (!region.is_mapped())
         return;
-      // Do this first to make sure it is valid
       region.impl->unmap_region();
       unregister_inline_mapped_region(region);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::unmap_all_regions(bool external)
+    //--------------------------------------------------------------------------
+    {
+      if (external)
+      {
+        AutoRuntimeCall call(this);
+        unmap_all_regions(false);
+        return;
+      }
+      for (std::vector<PhysicalRegion>::const_iterator it = 
+            physical_regions.begin(); it != physical_regions.end(); it++)
+      {
+        if (it->is_mapped())
+          it->impl->unmap_region();
+      }
+      // Also unmap any of our inline mapped physical regions
+      AutoLock i_lock(inline_lock);
+      for (LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::
+            tracked::const_iterator it = inline_regions.begin();
+            it != inline_regions.end(); it++)
+      {
+        if (it->is_mapped())
+          it->impl->unmap_region();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6727,30 +6415,28 @@ namespace Legion {
                       launcher.handle.field_space.id, 
                       launcher.handle.tree_id, get_task_name(), 
                       get_unique_id(), launcher.file_name)
-      // If we're counting this region as mapped we need to register it
-      if (launcher.mapped)
+      // Add this region to the list of inline mapped regions if it is mapped
+      if (result.is_mapped())
         register_inline_mapped_region(result);
       add_to_dependence_queue(attach_op);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::detach_resource(PhysicalRegion region,const bool flush,
-                                         const bool unordered)
+    Future InnerContext::detach_resource(PhysicalRegion region,
+                                         const bool flush, const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      // Make sure this region is valid before we try to detach it
-      if (!region.is_valid())
-        region.wait_until_valid(true/*silence warnings*/);
-      DetachOp *op = runtime->get_available_detach_op();
-      Future result = op->initialize_detach(this,region,flush,unordered);
-      // If the region is still mapped, then unmap it
-      if (region.is_mapped())
+      // Unmap the region here so that it is safe for re-use
+      if (region.impl->is_mapped())
       {
-        unregister_inline_mapped_region(region);
         region.impl->unmap_region();
+        // Remove this region from the list of inline regions if it is mapped
+        unregister_inline_mapped_region(region);
       }
+      DetachOp *op = runtime->get_available_detach_op();
+      Future result = op->initialize_detach(this, region, flush, unordered);
       add_to_dependence_queue(op, unordered);
       return result;
     }
@@ -6776,7 +6462,7 @@ namespace Legion {
       }
       DependenceArgs args(op, this);
       const LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
-      runtime->issue_runtime_meta_task(args, priority, precondition); 
+      runtime->issue_runtime_meta_task(args, priority, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -7010,198 +6696,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApBarrier InnerContext::create_phase_barrier(unsigned arrivals,
-                                                 ReductionOpID redop,
-                                                 const void *init_value,
-                                                 size_t init_size)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Creating application barrier in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      return ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
-                                                      init_value, init_size));
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::destroy_phase_barrier(ApBarrier bar)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Destroying phase barrier in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      destroy_user_barrier(bar);
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier InnerContext::advance_phase_barrier(PhaseBarrier bar)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Advancing phase barrier in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      PhaseBarrier result = bar;
-      Runtime::advance_barrier(result);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(bar.phase_barrier, result.phase_barrier);
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::arrive_dynamic_collective(DynamicCollective dc,
-                                                 const void *buffer,
-                                                 size_t size, unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Arrive dynamic collective in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT, 
-                                    buffer, size);
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::defer_dynamic_collective_arrival(DynamicCollective dc,
-                                                        const Future &f,
-                                                        unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Defer dynamic collective arrival in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      // Record this future as a contribution to the collective
-      // for future dependence analysis
-      record_dynamic_collective_contribution(dc, f);
-      f.impl->contribute_to_collective(dc, count);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InnerContext::get_dynamic_collective_result(DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Get dynamic collective result in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      DynamicCollectiveOp *collective = 
-        runtime->get_available_dynamic_collective_op();
-      Future result = collective->initialize(this, dc);
-      add_to_dependence_queue(collective);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    DynamicCollective InnerContext::advance_dynamic_collective( 
-                                                           DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Advancing dynamic collective in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      DynamicCollective result = dc;
-      Runtime::advance_barrier(result);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(dc.phase_barrier, result.phase_barrier);
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t InnerContext::register_new_child_operation(Operation *op,
-                      const std::vector<StaticDependence> *dependences)
-    //--------------------------------------------------------------------------
-    {
-      // If we are performing a trace mark that the child has a trace
-      if (current_trace != NULL)
-        op->set_trace(current_trace, dependences);
-      size_t result = total_children_count++;
-      const size_t outstanding_count = 
-        __sync_add_and_fetch(&outstanding_children_count,1);
-      // Only need to check if we are not tracing by frames
-      if ((context_configuration.min_frames_to_schedule == 0) && 
-          (context_configuration.max_window_size > 0) && 
-            (outstanding_count > context_configuration.max_window_size))
-        perform_window_wait();
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_child_operation_index(get_context_uid(), result, 
-                                             op->get_unique_op_id()); 
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::register_new_internal_operation(InternalOp *op)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::insert_unordered_ops(AutoLock &d_lock, 
-                                       const bool end_task, const bool progress)
-    //--------------------------------------------------------------------------
-    {
-      // If there are no unordered ops then we're done
-      if (unordered_ops.empty())
-        return;
-      // If we're still in the middle of a trace then don't do any insertions
-      if (current_trace != NULL)
-        return;
-      for (std::list<Operation*>::const_iterator it = 
-            unordered_ops.begin(); it != unordered_ops.end(); it++)
-      {
-        (*it)->set_tracking_parent(total_children_count++);
-        dependence_queue.push_back(*it);
-      }
-      __sync_fetch_and_add(&outstanding_children_count, unordered_ops.size());
-      unordered_ops.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    size_t InnerContext::register_new_close_operation(CloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      // For now we just bump our counter
-      size_t result = total_close_count++;
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_close_operation_index(get_context_uid(), result, 
-                                             op->get_unique_op_id());
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t InnerContext::register_new_summary_operation(TraceSummaryOp *op)
-    //--------------------------------------------------------------------------
-    {
-      // For now we just bump our counter
-      size_t result = total_summary_count++;
-      const size_t outstanding_count = 
-        __sync_add_and_fetch(&outstanding_children_count,1);
-      // Only need to check if we are not tracing by frames
-      if ((context_configuration.min_frames_to_schedule == 0) && 
-          (context_configuration.max_window_size > 0) && 
-            (outstanding_count > context_configuration.max_window_size))
-        perform_window_wait();
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_child_operation_index(get_context_uid(), result, 
-                                             op->get_unique_op_id()); 
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::perform_window_wait(void)
     //--------------------------------------------------------------------------
     {
@@ -7348,7 +6842,12 @@ namespace Legion {
       
       bool issue_task = false;
       RtEvent precondition;
-      const ApEvent term_event = op->get_completion_event();
+      ApEvent term_event;
+      // We disable program order execution when we are replaying a
+      // fixed trace since it might not be sound to block
+      if (runtime->program_order_execution && !unordered && outermost &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+        term_event = op->get_program_order_event();
       {
         AutoLock d_lock(dependence_lock);
         if (unordered)
@@ -7374,13 +6873,13 @@ namespace Legion {
         DependenceArgs args(op, this);
         runtime->issue_runtime_meta_task(args, priority, precondition); 
       }
-      // We disable program order execution when we are replaying a
-      // fixed trace since it might not be sound to block
-      if (runtime->program_order_execution && !unordered && outermost && 
-          ((current_trace == NULL) || !current_trace->is_fixed()))
+      if (term_event.exists()) 
       {
         begin_task_wait(true/*from runtime*/);
-        term_event.wait();
+        bool poisoned = false;
+        term_event.wait_faultaware(poisoned);
+        if (poisoned)
+          raise_poison_exception();
         end_task_wait();
       }
       return term_event;
@@ -7513,7 +7012,7 @@ namespace Legion {
         if (!post_task_comp_queue.exists())
         {
           // No completion queue so go through and do this manually
-          for (std::list<PostTaskArgs>::const_iterator it = 
+          for (std::list<PostTaskArgs>::const_iterator it =
                 post_task_queue.begin(); it != post_task_queue.end(); it++)
           {
             if (it->wait_on.has_triggered())
@@ -7537,7 +7036,7 @@ namespace Legion {
           bool found = false;
           for (unsigned idx = 0; idx < num_ready; idx++)
           {
-            if (it->wait_on == ready_events[idx])  
+            if (it->wait_on == ready_events[idx])
             {
               found = true;
               break;
@@ -7560,7 +7059,7 @@ namespace Legion {
           {
             // Find the one with the minimum index
             size_t min_index = 0;
-            for (std::list<PostTaskArgs>::const_iterator it = 
+            for (std::list<PostTaskArgs>::const_iterator it =
                   post_task_queue.begin(); it != post_task_queue.end(); it++)
             {
               if (!precondition.exists() || (it->index < min_index))
@@ -7585,16 +7084,16 @@ namespace Legion {
       if (next_ctx != NULL)
       {
         PostEndArgs args(next_ctx->owner_task, this);
-        runtime->issue_runtime_meta_task(args, 
+        runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
       }
       // Now perform our operations
       if (!to_perform.empty())
       {
-        // Sort these into order by their index before we perform them 
+        // Sort these into order by their index before we perform them
         // so we do them in order or we could risk a hang
         std::sort(to_perform.begin(), to_perform.end());
-        for (std::vector<PostTaskArgs>::const_iterator it = 
+        for (std::vector<PostTaskArgs>::const_iterator it =
               to_perform.begin(); it != to_perform.end(); it++)
         {
           if (it->instance.exists())
@@ -7614,6 +7113,198 @@ namespace Legion {
       }
       // If we didn't launch a next op, then we can remove the reference
       return (next_ctx == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    ApBarrier InnerContext::create_phase_barrier(unsigned arrivals,
+                                                 ReductionOpID redop,
+                                                 const void *init_value,
+                                                 size_t init_size)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Creating application barrier in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      return ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
+                                                      init_value, init_size));
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_phase_barrier(ApBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Destroying phase barrier in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      destroy_user_barrier(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier InnerContext::advance_phase_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Advancing phase barrier in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      PhaseBarrier result = bar;
+      Runtime::advance_barrier(result);
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(bar.phase_barrier, result.phase_barrier);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::arrive_dynamic_collective(DynamicCollective dc,
+                                                 const void *buffer,
+                                                 size_t size, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Arrive dynamic collective in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT, 
+                                    buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::defer_dynamic_collective_arrival(DynamicCollective dc,
+                                                        const Future &f,
+                                                        unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Defer dynamic collective arrival in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      // Record this future as a contribution to the collective
+      // for future dependence analysis
+      record_dynamic_collective_contribution(dc, f);
+      f.impl->contribute_to_collective(dc, count);
+    }
+
+    //--------------------------------------------------------------------------
+    Future InnerContext::get_dynamic_collective_result(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Get dynamic collective result in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      DynamicCollectiveOp *collective = 
+        runtime->get_available_dynamic_collective_op();
+      Future result = collective->initialize(this, dc);
+      add_to_dependence_queue(collective);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective InnerContext::advance_dynamic_collective( 
+                                                           DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Advancing dynamic collective in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      DynamicCollective result = dc;
+      Runtime::advance_barrier(result);
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(dc.phase_barrier, result.phase_barrier);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t InnerContext::register_new_child_operation(Operation *op,
+                      const std::vector<StaticDependence> *dependences)
+    //--------------------------------------------------------------------------
+    {
+      // If we are performing a trace mark that the child has a trace
+      if (current_trace != NULL)
+        op->set_trace(current_trace, dependences);
+      size_t result = total_children_count++;
+      const size_t outstanding_count =
+        __sync_add_and_fetch(&outstanding_children_count,1);
+      // Only need to check if we are not tracing by frames
+      if ((context_configuration.min_frames_to_schedule == 0) &&
+          (context_configuration.max_window_size > 0) &&
+            (outstanding_count > context_configuration.max_window_size))
+        perform_window_wait();
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_child_operation_index(get_context_uid(), result,
+                                             op->get_unique_op_id());
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::register_new_internal_operation(InternalOp *op)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::insert_unordered_ops(AutoLock &d_lock, 
+                                       const bool end_task, const bool progress)
+    //--------------------------------------------------------------------------
+    {
+      // If there are no unordered ops then we're done
+      if (unordered_ops.empty())
+        return;
+      // If we're still in the middle of a trace then don't do any insertions
+      if (current_trace != NULL)
+        return;
+      for (std::list<Operation*>::const_iterator it = 
+            unordered_ops.begin(); it != unordered_ops.end(); it++)
+      {
+        (*it)->set_tracking_parent(total_children_count++);
+        dependence_queue.push_back(*it);
+      }
+      __sync_fetch_and_add(&outstanding_children_count, unordered_ops.size());
+      unordered_ops.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    size_t InnerContext::register_new_close_operation(CloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      // For now we just bump our counter
+      size_t result = total_close_count++;
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_close_operation_index(get_context_uid(), result, 
+                                             op->get_unique_op_id());
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t InnerContext::register_new_summary_operation(TraceSummaryOp *op)
+    //--------------------------------------------------------------------------
+    {
+      // For now we just bump our counter
+      size_t result = total_summary_count++;
+      const size_t outstanding_count = 
+        __sync_add_and_fetch(&outstanding_children_count,1);
+      // Only need to check if we are not tracing by frames
+      if ((context_configuration.min_frames_to_schedule == 0) && 
+          (context_configuration.max_window_size > 0) && 
+            (outstanding_count > context_configuration.max_window_size))
+        perform_window_wait();
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_child_operation_index(get_context_uid(), result, 
+                                             op->get_unique_op_id()); 
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -7672,6 +7363,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
+      std::set<ApEvent> child_completion_events;
       {
         AutoLock child_lock(child_op_lock);
         std::map<Operation*,GenerationID>::iterator finder = 
@@ -7685,15 +7377,25 @@ namespace Legion {
         complete_children.insert(*finder);
         executed_children.erase(finder);
         // See if we need to trigger the all children complete call
-        if (task_executed && executing_children.empty() && 
-            executed_children.empty() && !children_complete_invoked)
+        if (task_executed && (owner_task != NULL) && executing_children.empty()
+            && executed_children.empty() && !children_complete_invoked)
         {
           needs_trigger = true;
           children_complete_invoked = true;
+          for (LegionMap<Operation*,GenerationID,
+                COMPLETE_CHILD_ALLOC>::tracked::const_iterator it =
+                complete_children.begin(); it != complete_children.end(); it++)
+            child_completion_events.insert(it->first->get_completion_event());
         }
       }
-      if (needs_trigger && (owner_task != NULL))
-        owner_task->trigger_children_complete();
+      if (needs_trigger)
+      {
+        if (!child_completion_events.empty())
+          owner_task->trigger_children_complete(
+            Runtime::merge_events(NULL, child_completion_events));
+        else
+          owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7726,37 +7428,374 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::unregister_child_operation(Operation *op)
+    int InnerContext::has_conflicting_regions(MapOp *op, bool &parent_conflict,
+                                              bool &inline_conflict)
     //--------------------------------------------------------------------------
     {
-      RtUserEvent to_trigger;
+      const RegionRequirement &req = op->get_requirement(); 
+      return has_conflicting_internal(req, parent_conflict, inline_conflict);
+    }
+
+    //--------------------------------------------------------------------------
+    int InnerContext::has_conflicting_regions(AttachOp *attach,
+                                              bool &parent_conflict,
+                                              bool &inline_conflict)
+    //--------------------------------------------------------------------------
+    {
+      const RegionRequirement &req = attach->get_requirement();
+      return has_conflicting_internal(req, parent_conflict, inline_conflict);
+    }
+
+    //--------------------------------------------------------------------------
+    int InnerContext::has_conflicting_internal(const RegionRequirement &req,
+                                               bool &parent_conflict,
+                                               bool &inline_conflict)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, HAS_CONFLICTING_INTERNAL_CALL);
+      parent_conflict = false;
+      inline_conflict = false;
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the physical_regions data 
+      // structure but we are here so we aren't mutating
+      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
       {
-        AutoLock child_lock(child_op_lock);
-        // Remove it from everything and then see if we need to
-        // trigger the window wait event
-        executing_children.erase(op);
-        executed_children.erase(op);
-        complete_children.erase(op);
+        // skip any regions which are not mapped
+        if (!physical_regions[our_idx].is_mapped())
+          continue;
+        const RegionRequirement &our_req = 
+          physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_LEGION
-        outstanding_children.erase(op->get_ctx_index());
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
-        int diff = -1; // Need this for PGI dumbness
-        int outstanding_count = 
-          __sync_add_and_fetch(&outstanding_children_count, diff);
-#ifdef DEBUG_LEGION
-        assert(outstanding_count >= 0);
-#endif
-        if (valid_wait_event && (context_configuration.max_window_size > 0) &&
-            (outstanding_count <=
-             int((100 - context_configuration.hysteresis_percentage) *
-                 context_configuration.max_window_size / 100)))
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
         {
-          to_trigger = window_wait;
-          valid_wait_event = false;
+          parent_conflict = true;
+          return our_idx;
         }
       }
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
+      // Need lock here because of unordered detach operations
+      AutoLock i_lock(inline_lock,1,false/*exclusive*/);
+      for (std::list<PhysicalRegion>::const_iterator it = 
+            inline_regions.begin(); it != inline_regions.end(); it++)
+      {
+        if (!it->is_mapped())
+          continue;
+        const RegionRequirement &our_req = it->impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+        {
+          inline_conflict = true;
+          // No index for inline conflicts
+          return -1;
+        }
+      }
+      return -1;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(TaskOp *task,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the physical_regions data 
+      // structure but we are here so we aren't mutating
+      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
+      {
+        // Skip any regions which are not mapped
+        if (!physical_regions[our_idx].is_mapped())
+          continue;
+        const RegionRequirement &our_req = 
+          physical_regions[our_idx].impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        // Check to see if any region requirements from the child have
+        // a dependence on our region at location our_idx
+        for (unsigned idx = 0; idx < task->regions.size(); idx++)
+        {
+          const RegionRequirement &req = task->regions[idx];  
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+          {
+            conflicting.push_back(physical_regions[our_idx]);
+            // Once we find a conflict, we don't need to check
+            // against it anymore, so go onto our next region
+            break;
+          }
+        }
+      }
+      // Need lock here because of unordered detach operations
+      AutoLock i_lock(inline_lock,1,false/*exclusive*/);
+      for (std::list<PhysicalRegion>::const_iterator it = 
+            inline_regions.begin(); it != inline_regions.end(); it++)
+      {
+        if (!it->is_mapped())
+          continue;
+        const RegionRequirement &our_req = it->impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        // Check to see if any region requirements from the child have
+        // a dependence on our region at location our_idx
+        for (unsigned idx = 0; idx < task->regions.size(); idx++)
+        {
+          const RegionRequirement &req = task->regions[idx];  
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+          {
+            conflicting.push_back(*it);
+            // Once we find a conflict, we don't need to check
+            // against it anymore, so go onto our next region
+            break;
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(CopyOp *copy,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the physical_regions data 
+      // structure but we are here so we aren't mutating
+      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
+      {
+        // skip any regions which are not mapped
+        if (!physical_regions[our_idx].is_mapped())
+          continue;
+        const RegionRequirement &our_req = 
+          physical_regions[our_idx].impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        bool has_conflict = false;
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->src_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->src_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->dst_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->dst_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->src_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->src_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->dst_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->dst_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        if (has_conflict)
+          conflicting.push_back(physical_regions[our_idx]);
+      }
+      // Need lock here because of unordered detach operations
+      AutoLock i_lock(inline_lock,1,false/*exclusive*/);
+      for (std::list<PhysicalRegion>::const_iterator it = 
+            inline_regions.begin(); it != inline_regions.end(); it++)
+      {
+        if (!it->is_mapped())
+          continue;
+        const RegionRequirement &our_req = it->impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        bool has_conflict = false;
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->src_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->src_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->dst_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->dst_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->src_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->src_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->dst_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->dst_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        if (has_conflict)
+          conflicting.push_back(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(AcquireOp *acquire,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      const RegionRequirement &req = acquire->get_requirement();
+      find_conflicting_internal(req, conflicting); 
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(ReleaseOp *release,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      const RegionRequirement &req = release->get_requirement();
+      find_conflicting_internal(req, conflicting);      
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(DependentPartitionOp *partition,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      const RegionRequirement &req = partition->get_requirement();
+      find_conflicting_internal(req, conflicting);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_internal(const RegionRequirement &req,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      // No need to hold our lock here because we are the only ones who
+      // could possibly be doing any mutating of the physical_regions data 
+      // structure but we are here so we aren't mutating
+      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
+      {
+        // skip any regions which are not mapped
+        if (!physical_regions[our_idx].is_mapped())
+          continue;
+        const RegionRequirement &our_req = 
+          physical_regions[our_idx].impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+          conflicting.push_back(physical_regions[our_idx]);
+      }
+      // Need lock here because of unordered detach operations
+      AutoLock i_lock(inline_lock,1,false/*exclusive*/);
+      for (std::list<PhysicalRegion>::const_iterator it = 
+            inline_regions.begin(); it != inline_regions.end(); it++)
+      {
+        if (!it->is_mapped())
+          continue;
+        const RegionRequirement &our_req = it->impl->get_requirement();
+#ifdef DEBUG_LEGION
+        // This better be true for a single task
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        RegionTreeID our_tid = our_req.region.get_tree_id();
+        IndexSpace our_space = our_req.region.get_index_space();
+        RegionUsage our_usage(our_req);
+        if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+          conflicting.push_back(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(FillOp *fill,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      const RegionRequirement &req = fill->get_requirement();
+      find_conflicting_internal(req, conflicting);
+    } 
+
+    //--------------------------------------------------------------------------
+    void InnerContext::register_inline_mapped_region(PhysicalRegion &region)
+    //--------------------------------------------------------------------------
+    {
+      // Because of 'remap_region', this method can be called
+      // both for inline regions as well as regions which were
+      // initally mapped for the task.  Do a quick check to see
+      // if it was an original region.  If it was then we're done.
+      for (unsigned idx = 0; idx < physical_regions.size(); idx++)
+      {
+        if (physical_regions[idx].impl == region.impl)
+          return;
+      }
+      // Need lock because of unordered detach operations
+      AutoLock i_lock(inline_lock);
+      inline_regions.push_back(region);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::unregister_inline_mapped_region(PhysicalRegion &region)
+    //--------------------------------------------------------------------------
+    {
+      // Need lock because of unordered detach operations
+      AutoLock i_lock(inline_lock);
+      for (std::list<PhysicalRegion>::iterator it = 
+            inline_regions.begin(); it != inline_regions.end(); it++)
+      {
+        if (it->impl == region.impl)
+        {
+          if (runtime->runtime_warnings && !has_inline_accessor)
+            has_inline_accessor = it->impl->created_accessor();
+          inline_regions.erase(it);
+          return;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7830,7 +7869,7 @@ namespace Legion {
 #endif
       }
 #ifdef LEGION_SPY
-      previous_completion_events.insert(op->get_completion_event());
+      previous_completion_events.insert(op->get_program_order_event());
       // Periodically merge these to keep this data structure from exploding
       // when we have a long-running task, although don't do this for fence
       // operations in case we have to prune ourselves out of the set
@@ -7861,15 +7900,20 @@ namespace Legion {
         // We can't have internal operations pruning out fences
         // because we can't test if they are memoizing or not
         // Their 'get_memoizable' method will always return NULL
-        if (current_execution_fence_event.has_triggered() &&
-            !op->is_internal_op())
+        bool poisoned = false;
+        if (current_execution_fence_event.has_triggered_faultaware(poisoned))
         {
-          // We can only do this optimization safely if we're not 
-          // recording a physical trace, otherwise the physical
-          // trace needs to see this dependence
-          Memoizable *memo = op->get_memoizable();
-          if ((memo == NULL) || !memo->is_recording())
-            current_execution_fence_event = ApEvent::NO_AP_EVENT;
+          if (poisoned)
+            raise_poison_exception();
+          if (!op->is_internal_op())
+          {
+            // We can only do this optimization safely if we're not 
+            // recording a physical trace, otherwise the physical
+            // trace needs to see this dependence
+            Memoizable *memo = op->get_memoizable();
+            if ((memo == NULL) || !memo->is_recording())
+              current_execution_fence_event = ApEvent::NO_AP_EVENT;
+          }
         }
         return current_execution_fence_event;
       }
@@ -7965,7 +8009,7 @@ namespace Legion {
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(it->first->get_program_order_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
@@ -7978,7 +8022,7 @@ namespace Legion {
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(it->first->get_program_order_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
@@ -7991,7 +8035,7 @@ namespace Legion {
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(it->first->get_program_order_event());
         }
       }
       else
@@ -8010,7 +8054,7 @@ namespace Legion {
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(it->first->get_program_order_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
@@ -8024,7 +8068,7 @@ namespace Legion {
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(it->first->get_program_order_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
@@ -8038,7 +8082,7 @@ namespace Legion {
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+            previous_events.insert(it->first->get_program_order_event());
         }
       }
 
@@ -8074,7 +8118,7 @@ namespace Legion {
         previous_events.insert(previous_completion_events.begin(),
                                previous_completion_events.end());
         // Don't include ourselves though
-        previous_events.erase(op->get_completion_event());
+        previous_events.erase(op->get_program_order_event());
       }
 #endif
       // Also include the current execution fence in case the operation
@@ -8253,7 +8297,7 @@ namespace Legion {
                                      LegionTrace *trace, Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      if (previous_trace != NULL && previous_trace != trace)
+      if ((previous_trace != NULL) && (previous_trace != trace))
         previous_trace->invalidate_trace_cache(invalidator);
     }
 
@@ -8300,8 +8344,11 @@ namespace Legion {
         frame_events.push_back(frame_termination); 
       }
       frame->set_previous(previous);
-      if (!wait_on.has_triggered())
-        wait_on.wait();
+      bool poisoned = false;
+      if (!wait_on.has_triggered_faultaware(poisoned))
+        wait_on.wait_faultaware(poisoned);
+      if (poisoned)
+        raise_poison_exception();
     }
 
     //--------------------------------------------------------------------------
@@ -8635,6 +8682,13 @@ namespace Legion {
                       "Invalid mapper output from call 'configure context' "
                       "on mapper %s for task %s (ID %lld). The "
                       "'meta_task_vector_width' must be a non-zero value.",
+                      mapper->get_mapper_name(),
+                      get_task_name(), get_unique_id())
+      if (context_configuration.max_templates_per_trace == 0)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from call 'configure context' "
+                      "on mapper %s for task %s (ID %lld). The "
+                      "'max_templates_per_trace' must be a non-zero value.",
                       mapper->get_mapper_name(),
                       get_task_name(), get_unique_id())
 
@@ -9240,7 +9294,7 @@ namespace Legion {
           "Task %s (UID %lld) failed to end trace before exiting!",
                         get_task_name(), get_unique_id()) 
       // Unmap any of our mapped regions before issuing any close operations
-      unmap_all_regions();
+      unmap_all_regions(false/*external*/);
       const std::deque<InstanceSet> &physical_instances = 
         single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions
@@ -9304,7 +9358,7 @@ namespace Legion {
       // Tell the parent context that we are ready for post-end
       // Make a copy of the results if necessary
       TaskContext *parent_ctx = owner_task->get_context();
-      RtEvent effects_done(!external_implicit_task ? 
+      RtEvent effects_done(!external_implicit_task && !inline_task ? 
           Processor::get_current_finish_event() : Realm::Event::NO_EVENT); 
       if (last_registration.exists() && !last_registration.has_triggered())
         effects_done = Runtime::merge_events(effects_done, last_registration);
@@ -9341,11 +9395,12 @@ namespace Legion {
       }
       else
         parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size);
+      if (!inline_task)
 #ifdef DEBUG_LEGION
-      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                     false/*meta*/);
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
 #else
-      runtime_ptr->decrement_total_outstanding_tasks();
+        runtime_ptr->decrement_total_outstanding_tasks();
 #endif
     }
 
@@ -9372,42 +9427,45 @@ namespace Legion {
       // are done executing
       bool need_complete = false;
       bool need_commit = false;
+      std::set<RtEvent> preconditions;
+      std::set<ApEvent> child_completion_events;
       {
-        std::set<RtEvent> preconditions;
+        AutoLock child_lock(child_op_lock);
+        // Only need to do this for executing and executed children
+        // We know that any complete children are done
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              executing_children.begin(); it != 
+              executing_children.end(); it++)
         {
-          AutoLock child_lock(child_op_lock);
-          // Only need to do this for executing and executed children
-          // We know that any complete children are done
-          for (std::map<Operation*,GenerationID>::const_iterator it = 
-                executing_children.begin(); it != 
-                executing_children.end(); it++)
-          {
-            preconditions.insert(it->first->get_mapped_event());
-          }
-          for (std::map<Operation*,GenerationID>::const_iterator it = 
-                executed_children.begin(); it != executed_children.end(); it++)
-          {
-            preconditions.insert(it->first->get_mapped_event());
-          }
+          preconditions.insert(it->first->get_mapped_event());
+        }
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              executed_children.begin(); it != executed_children.end(); it++)
+        {
+          preconditions.insert(it->first->get_mapped_event());
+        }
 #ifdef DEBUG_LEGION
-          assert(!task_executed);
+        assert(!task_executed);
 #endif
-          // Now that we know the last registration has taken place we
-          // can mark that we are done executing
-          task_executed = true;
-          if (executing_children.empty() && executed_children.empty())
+        // Now that we know the last registration has taken place we
+        // can mark that we are done executing
+        task_executed = true;
+        if (executing_children.empty() && executed_children.empty())
+        {
+          if (!children_complete_invoked)
           {
-            if (!children_complete_invoked)
-            {
-              need_complete = true;
-              children_complete_invoked = true;
-            }
-            if (complete_children.empty() && 
-                !children_commit_invoked)
-            {
-              need_commit = true;
-              children_commit_invoked = true;
-            }
+            need_complete = true;
+            children_complete_invoked = true;
+            for (LegionMap<Operation*,GenerationID,
+                  COMPLETE_CHILD_ALLOC>::tracked::const_iterator it =
+                 complete_children.begin(); it != complete_children.end(); it++)
+              child_completion_events.insert(it->first->get_completion_event());
+          }
+          if (complete_children.empty() && 
+              !children_commit_invoked)
+          {
+            need_commit = true;
+            children_commit_invoked = true;
           }
         }
         if (!preconditions.empty())
@@ -9415,9 +9473,15 @@ namespace Legion {
               Runtime::merge_events(preconditions));
         else
           single_task->handle_post_mapped(false/*deferral*/);
-      } 
+      }
       if (need_complete)
-        owner_task->trigger_children_complete();
+      {
+        if (!child_completion_events.empty())
+          owner_task->trigger_children_complete(
+              Runtime::merge_events(NULL, child_completion_events));
+        else
+          owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
+      }
       if (need_commit)
         owner_task->trigger_children_committed();
     }
@@ -9581,14 +9645,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::inline_child_task(TaskOp *child)
+    bool InnerContext::inline_child_task(TaskOp *child)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INLINE_CHILD_TASK_CALL);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_inline_task(child->get_unique_id());
-      // Remove this child from our context
-      unregister_child_operation(child);
       // Check to see if the child is predicated
       // If it is wait for it to resolve
       if (child->is_predicated_op())
@@ -9596,147 +9658,84 @@ namespace Legion {
         // See if the predicate speculates false, if so return false
         // and then we are done.
         if (!child->get_predicate_value(executing_processor))
-          return;
+          return true;
       }
-      // Save the state of our physical regions
-      std::vector<bool> phy_regions_mapped(physical_regions.size());
-      for (unsigned idx = 0; idx < physical_regions.size(); idx++)
-        phy_regions_mapped[idx] = is_region_mapped(idx);
-      // Inline the child task
-      child->perform_inlining(this);
-      // Now see if the mapping state of any of our
-      // originally mapped regions has changed
-      std::set<ApEvent> wait_events;
-      for (unsigned idx = 0; idx < phy_regions_mapped.size(); idx++)
+      // Find the mapped physical regions associated with each of the
+      // child task's region requirements. If we don't have one then
+      // it's not legal to inline the child task
+      std::vector<PhysicalRegion> child_regions(child->regions.size());
+      for (unsigned childidx = 0; childidx < child_regions.size(); childidx++)
       {
-        if (phy_regions_mapped[idx] && !is_region_mapped(idx))
+        const RegionRequirement &child_req = child->regions[childidx]; 
+        bool found = false;
+        for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
         {
-          // Need to remap
-          MapOp *op = runtime->get_available_map_op();
-          op->initialize(this, physical_regions[idx]);
-          wait_events.insert(op->get_completion_event());
-          add_to_dependence_queue(op);
-        }
-        else if (!phy_regions_mapped[idx] && is_region_mapped(idx))
-        {
-          // Need to unmap
-          physical_regions[idx].impl->unmap_region();
-        }
-        // Otherwise everything is still the same
-      }
-      if (!wait_events.empty())
-      {
-        RtEvent wait_on = Runtime::protect_merge_events(wait_events);
-        wait_on.wait();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    VariantImpl* InnerContext::select_inline_variant(TaskOp *child)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, SELECT_INLINE_VARIANT_CALL);
-      Mapper::SelectVariantInput input;
-      Mapper::SelectVariantOutput output;
-      input.processor = executing_processor;
-      input.chosen_instances.resize(child->regions.size());
-      // Compute the parent indexes since we're going to need them
-      child->compute_parent_indexes();
-      // Find the instances for this child
-      for (unsigned idx = 0; idx < child->regions.size(); idx++)
-      {
-        // We can get access to physical_regions without the
-        // lock because we know we are running in the application
-        // thread in order to do this inlining
-        unsigned local_index = child->find_parent_index(idx); 
-        if (local_index < physical_regions.size())
-        {
-          // Check to see if it is still mapped
-          if (physical_regions[local_index].is_mapped())
-          {
-            InstanceSet instances;
-            physical_regions[local_index].impl->get_references(instances);
-            std::vector<MappingInstance> &mapping_instances = 
-              input.chosen_instances[idx];
-            mapping_instances.resize(instances.size());
-            for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
-            {
-              mapping_instances[idx2] = 
-                MappingInstance(instances[idx2].get_manager());
-            }
+          if (!physical_regions[our_idx].is_mapped())
             continue;
-          }
-          // Otherwise fall through
+          const RegionRequirement &our_req = regions[our_idx];
+          const RegionTreeID our_tid = our_req.region.get_tree_id();
+          const IndexSpace our_space = our_req.region.get_index_space();
+          const RegionUsage our_usage(our_req);
+          if (!check_region_dependence(our_tid, our_space, our_req,
+                  our_usage, child_req, false/*ignore privileges*/))
+            continue;
+          child_regions[childidx] = physical_regions[our_idx];
+          found = true;
+          break;
         }
-        const RegionRequirement &child_req = child->regions[idx];
-        std::map<FieldID,MappingInstance> mapped_fields;
-        // Next check to see if which overlapping fields are mapped
-        for (std::list<PhysicalRegion>::const_iterator it = 
+        if (found)
+          continue;
+        // Need the lock here because of unordered detach operations
+        AutoLock i_lock(inline_lock,1,false/*exclusive*/);
+        for (std::list<PhysicalRegion>::const_iterator it =
               inline_regions.begin(); it != inline_regions.end(); it++)
         {
-          if (!it->is_mapped())
+#ifdef DEBUG_LEGION
+          assert(it->is_mapped());
+#endif
+          const RegionRequirement &our_req = it->impl->get_requirement();
+          const RegionTreeID our_tid = our_req.region.get_tree_id();
+          const IndexSpace our_space = our_req.region.get_index_space();
+          const RegionUsage our_usage(our_req);
+          if (!check_region_dependence(our_tid, our_space, our_req,
+                  our_usage, child_req, false/*ignore privileges*/))
             continue;
-          const RegionRequirement &inline_req = it->impl->get_requirement();
-          const RegionUsage inline_usage(inline_req);
-          // Don't both checking the privilege, we want to know if the
-          // fields and index spaces overlap
-          if (!check_region_dependence(inline_req.region.get_tree_id(),
-                inline_req.region.get_index_space(), inline_req, 
-                inline_usage, child_req, false/*check privileges*/))
-            continue;
-          InstanceSet instances;
-          it->impl->get_references(instances);
-          FieldSpaceNode *fs_node = 
-            runtime->forest->get_node(child_req.parent.get_field_space());
-          // Find all the fields that we can that overlap
-          for (std::set<FieldID>::const_iterator fit = 
-                child_req.privilege_fields.begin(); fit !=
-                child_req.privilege_fields.end(); fit++)
-          {
-            if (inline_req.privilege_fields.find(*fit) ==
-                inline_req.privilege_fields.end())
-              continue;
-            const unsigned fidx = fs_node->get_field_index(*fit);
-            for (unsigned inst_idx = 0; inst_idx < instances.size(); inst_idx++)
-            {
-              const InstanceRef &ref = instances[inst_idx];
-              if (ref.get_valid_fields().is_set(fidx))
-                mapped_fields[*fit] = MappingInstance(ref.get_manager());
-            }
-          }
+          child_regions[childidx] = *it;
+          found = true;
+          break;
         }
-        // If all the fields are mapped then we can create a physical
-        // instance mapping, otherwise give it a virtual mapping
-        if (mapped_fields.size() == child_req.privilege_fields.size())
+        // If we didn't find any physical region then report the warning
+        // and return because we couldn't find a mapped physical region
+        if (!found)
         {
-          std::vector<MappingInstance> &mapping_instances = 
-              input.chosen_instances[idx];
-          mapping_instances.reserve(mapped_fields.size());
-          for (std::map<FieldID,MappingInstance>::const_iterator it = 
-                mapped_fields.begin(); it != mapped_fields.end(); it++) 
-            mapping_instances.push_back(it->second);
+          REPORT_LEGION_WARNING(LEGION_WARNING_FAILED_INLINING,
+              "Failed to inline task %s (UID %lld) into parent task "
+              "%s (UID %lld) because there was no mapped region for "
+              "region requirement %d to use. Currently all regions "
+              "must be mapped in the parent task in order to allow "
+              "for inlining. If you believe you have a compelling use "
+              "case for inline a task with virtually mapped regions "
+              "then please contact the Legion developers.", 
+              child->get_task_name(), child->get_unique_id(), 
+              owner_task->get_task_name(), owner_task->get_unique_id(),childidx)
+          return false;
         }
-        else
-          input.chosen_instances[idx].push_back(
-              MappingInstance(runtime->virtual_manager)); 
       }
-      output.chosen_variant = 0;
-      // Always do this with the child mapper
-      MapperManager *child_mapper = runtime->find_mapper(executing_processor,
-                                                         child->map_id);
-      child_mapper->invoke_select_task_variant(child, &input, &output);
-      VariantImpl *variant_impl= runtime->find_variant_impl(child->task_id,
-                                  output.chosen_variant, true/*can fail*/);
-      if (variant_impl == NULL)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invoction of "
-                      "'select_task_variant' on mapper %s. Mapper selected "
-                      "an invalid variant ID %d for inlining of task %s "
-                      "(UID %lld).", child_mapper->get_mapper_name(),
-                      output.chosen_variant, child->get_task_name(), 
-                      child->get_unique_id())
-      return variant_impl;
-    }
+      register_executing_child(child);
+      const ApEvent child_done = child->get_completion_event();
+      // Now select the variant for task based on the regions 
+      std::deque<InstanceSet> physical_instances(child_regions.size());
+      VariantImpl *variant = 
+        select_inline_variant(child, child_regions, physical_instances); 
+      child->perform_inlining(variant, physical_instances);
+      // Then wait for the child operation to be finished
+      bool poisoned = false;
+      if (!child_done.has_triggered_faultaware(poisoned))
+        child_done.wait_faultaware(poisoned);
+      if (poisoned)
+        raise_poison_exception();
+      return true;
+    } 
 
     //--------------------------------------------------------------------------
     void InnerContext::handle_registration_callback_effects(RtEvent effects)
@@ -9842,14 +9841,7 @@ namespace Legion {
         inline_task = task->select_task_options(true/*prioritize*/);
       // Now check to see if we're inling the task or just performing
       // a normal asynchronous task launch
-      if (inline_task)
-      {
-        inline_child_task(task);
-        // After we're done we can deactivate it since we
-        // know that it will never be used again
-        task->deactivate();
-      }
-      else
+      if (!inline_task || !inline_child_task(task))
       {
         // Normal task launch, iterate over the context task's
         // regions and see if we need to unmap any of them
@@ -9934,6 +9926,17 @@ namespace Legion {
         }
       }
       return result;
+    }
+#endif
+
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    void InnerContext::register_implicit_replay_dependence(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_mapping_dependence(get_unique_id(), 
+          current_fence_uid, 0/*idx*/, op->get_unique_op_id(),
+          0/*idx*/, LEGION_TRUE_DEPENDENCE);
     }
 #endif
 
@@ -10035,9 +10038,9 @@ namespace Legion {
                                  const std::vector<unsigned> &parent_indexes,
                                  const std::vector<bool> &virt_mapped,
                                  UniqueID ctx_uid, ApEvent exec_fence,
-                                 ShardManager *manager)
+                                 ShardManager *manager, bool inline_task)
       : InnerContext(rt, owner, d, full, reqs, out_reqs, parent_indexes,
-                     virt_mapped, ctx_uid, exec_fence),
+         virt_mapped, ctx_uid, exec_fence, false/*remote*/, inline_task),
         owner_shard(owner), shard_manager(manager),
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_indirection_bar_index(0),
@@ -10234,7 +10237,8 @@ namespace Legion {
                      RtEvent global_done, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_PERFORM_REGISTRATION_CALLBACK);
@@ -10304,7 +10308,8 @@ namespace Legion {
                                        size_t num_elements, size_t element_size)
     //--------------------------------------------------------------------------
     {
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CONSENSUS_MATCH);
@@ -10369,7 +10374,8 @@ namespace Legion {
       if (inside_registration_callback)
         return TaskContext::register_variant(registrar, user_data, 
             user_data_size, desc, ret, vid, check_task_id);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_REGISTER_TASK_VARIANT);
@@ -10417,13 +10423,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    VariantImpl* ReplicateContext::select_inline_variant(TaskOp *child,
+                              const std::vector<PhysicalRegion> &parent_regions,
+                              std::deque<InstanceSet> &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+      VariantImpl *variant_impl = TaskContext::select_inline_variant(child,
+                                        parent_regions, physical_instances);
+      if (!variant_impl->is_replicable())
+      {
+        MapperManager *child_mapper = 
+          runtime->find_mapper(executing_processor, child->map_id);
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invoction of "
+                      "'select_task_variant' on mapper %s. Mapper selected "
+                      "an invalid variant ID %d for inlining of task %s "
+                      "(UID %lld). Parent task %s (UID %lld) is a control-"
+                      "replicated task but mapper selected non-replicable "
+                      "variant %d for task %s.",child_mapper->get_mapper_name(),
+                      variant_impl->vid, child->get_task_name(), 
+                      child->get_unique_id(), owner_task->get_task_name(),
+                      owner_task->get_unique_id(), variant_impl->vid,
+                      child->get_task_name())
+      }
+      return variant_impl;
+    }
+
+    //--------------------------------------------------------------------------
     TraceID ReplicateContext::generate_dynamic_trace_id(void)
     //--------------------------------------------------------------------------
     {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_trace_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_TRACE_ID);
@@ -10455,7 +10489,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_mapper_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_MAPPER_ID);
@@ -10487,7 +10522,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_projection_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_PROJECTION_ID);
@@ -10520,7 +10556,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_sharding_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_SHARDING_ID);
@@ -10552,7 +10589,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_task_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_TASK_ID);
@@ -10584,7 +10622,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_reduction_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_REDUCTION_ID);
@@ -10616,7 +10655,8 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_serdez_id();
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_GENERATE_DYNAMIC_SERDEZ_ID);
@@ -11170,7 +11210,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
@@ -11265,7 +11306,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_UNBOUND_INDEX_SPACE);
@@ -11321,7 +11363,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
@@ -11416,7 +11459,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
@@ -11453,7 +11497,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
@@ -11489,7 +11534,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_UNION_INDEX_SPACES);
@@ -11592,7 +11638,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_INTERSECT_INDEX_SPACES);
@@ -11695,7 +11742,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_SUBTRACT_INDEX_SPACES);
@@ -11787,7 +11835,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_SHARED_OWNERSHIP);
@@ -11824,7 +11873,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_INDEX_SPACE);
@@ -11910,7 +11960,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_SHARED_OWNERSHIP);
@@ -11939,7 +11990,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_INDEX_PARTITION);
@@ -12154,7 +12206,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_EQUAL_PARTITION);
@@ -12198,7 +12251,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_WEIGHTS);
@@ -12244,7 +12298,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_UNION);
@@ -12345,7 +12400,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_INTERSECTION);
@@ -12444,7 +12500,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_INTERSECTION);
@@ -12526,7 +12583,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_DIFFERENCE);
@@ -12615,7 +12673,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_CROSS_PRODUCT_PARTITIONS);
@@ -12760,7 +12819,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_ASSOCIATION);
@@ -12816,7 +12876,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_RESTRICTED_PARTITION);
@@ -12876,7 +12937,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_DOMAIN);
@@ -12960,7 +13022,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_DOMAIN);
@@ -13020,7 +13083,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_FIELD);
@@ -13103,7 +13167,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_IMAGE);
@@ -13196,7 +13261,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_IMAGE_RANGE);
@@ -13288,7 +13354,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_PREIMAGE);
@@ -13395,7 +13462,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_PREIMAGE_RANGE);
@@ -13482,7 +13550,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PENDING_PARTITION);
@@ -13556,7 +13625,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_UNION);
@@ -13592,7 +13662,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_UNION);
@@ -13626,7 +13697,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_INTERSECTION);
@@ -13662,7 +13734,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_INTERSECTION);
@@ -13697,7 +13770,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE_DIFFERENCE);
@@ -13977,7 +14051,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_FIELD_SPACE);
@@ -14074,7 +14149,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_FIELD_SPACE);
@@ -14169,7 +14245,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_FIELD_SPACE);
@@ -14330,7 +14407,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_FIELD_SPACE);
@@ -14415,7 +14493,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ALLOCATE_FIELD);
@@ -14537,7 +14616,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ALLOCATE_FIELD);
@@ -14634,7 +14714,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_FREE_FIELD);
@@ -14681,7 +14762,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ALLOCATE_FIELDS);
@@ -14780,7 +14862,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ALLOCATE_FIELDS);
@@ -14889,7 +14972,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_FREE_FIELDS);
@@ -14946,7 +15030,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_LOGICAL_REGION);
@@ -15071,7 +15156,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_SHARED_OWNERSHIP);
@@ -15107,7 +15193,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_LOGICAL_REGION);
@@ -15185,7 +15272,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_FIELD_ALLOCATOR);
@@ -15265,7 +15353,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_FIELD_ALLOCATOR);
@@ -15419,7 +15508,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_EXECUTE_TASK);
@@ -15506,7 +15596,8 @@ namespace Legion {
         return result;
       }
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE);
@@ -15641,7 +15732,8 @@ namespace Legion {
             "all future values. This feature is not currently implemented.",
             get_task_name(), get_unique_id())
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE);
@@ -15723,7 +15815,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_REDUCE_FUTURE_MAP);
@@ -15752,7 +15845,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_MAP_REGION);
@@ -15819,7 +15913,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_REMAP_REGION);
@@ -15848,7 +15943,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_FILL_FIELDS);
@@ -15919,7 +16015,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_FILL_FIELDS);
@@ -16001,7 +16098,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ISSUE_COPY);
@@ -16070,7 +16168,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ISSUE_COPY);
@@ -16176,7 +16275,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ATTACH_RESOURCE);
@@ -16253,7 +16353,7 @@ namespace Legion {
                       launcher.handle.tree_id, get_task_name(), 
                       get_unique_id(), launcher.file_name)
       // If we're counting this region as mapped we need to register it
-      if (launcher.mapped)
+      if (result.is_mapped())
         register_inline_mapped_region(result);
       add_to_dependence_queue(attach_op);
       return result;
@@ -16265,7 +16365,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication && !unordered)
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DETACH_RESOURCE);
@@ -16277,15 +16378,16 @@ namespace Legion {
         hasher.hash<bool>(flush);
         verify_replicable(hasher, "detach_resource"); 
       }
+      // Unmap the region here so that it is safe for re-use
+      if (region.impl->is_mapped())
+      {
+        region.impl->unmap_region();
+        // Remove this region from the list of inline regions if it is mapped
+        unregister_inline_mapped_region(region);
+      }
       ReplDetachOp *op = runtime->get_available_repl_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
       op->initialize_replication(this, external_resource_barrier); 
-      // If the region is still mapped, then unmap it
-      if (region.is_mapped())
-      {
-        unregister_inline_mapped_region(region);
-        region.impl->unmap_region();
-      }
       add_to_dependence_queue(op, unordered);
       return result;
     }
@@ -16302,7 +16404,8 @@ namespace Legion {
       issue_execution_fence(); 
 #endif
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication && 
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_MUST_EPOCH);
@@ -16359,7 +16462,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_TIMING_MEASUREMENT);
@@ -16390,7 +16494,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication && 
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_MAPPING_FENCE);
@@ -16413,7 +16518,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_EXECUTION_FENCE);
@@ -16772,7 +16878,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication && 
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PHASE_BARRIER);
@@ -16801,7 +16908,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication && 
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_PHASE_BARRIER);
@@ -16820,7 +16928,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ADVANCE_PHASE_BARRIER);
@@ -16883,7 +16992,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication)
+      if (runtime->safe_control_replication && 
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ADVANCE_DYNAMIC_COLLECTIVE);
@@ -17251,7 +17361,10 @@ namespace Legion {
       std::vector<std::pair<IndexSpace,bool> > 
           deleted_is(num_deleted_index_spaces);
       for (unsigned idx = 0; idx < num_deleted_index_spaces; idx++)
-        derez.deserialize(deleted_is[idx]);
+      {
+        derez.deserialize(deleted_is[idx].first);
+        derez.deserialize(deleted_is[idx].second);
+      }
       size_t num_created_index_partitions;
       derez.deserialize(num_created_index_partitions);
       std::map<IndexPartition,unsigned> created_partitions;
@@ -17266,7 +17379,10 @@ namespace Legion {
       std::vector<std::pair<IndexPartition,bool> > 
           deleted_partitions(num_deleted_index_partitions);
       for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
-        derez.deserialize(deleted_partitions[idx]);
+      {
+        derez.deserialize(deleted_partitions[idx].first);
+        derez.deserialize(deleted_partitions[idx].second);
+      }
       // Send this down to the base class to avoid re-broadcasting
       receive_replicate_resources(return_index, created_regs, deleted_regs,
           created_fids, deleted_fids, created_fs, latent_fs, deleted_fs,
@@ -17492,7 +17608,10 @@ namespace Legion {
       {
         for (std::vector<std::pair<IndexSpace,bool> >::const_iterator it = 
               deleted_is.begin(); it != deleted_is.end(); it++)
-          rez.serialize(*it);
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
       }
       rez.serialize<size_t>(created_partitions.size());
       if (!created_partitions.empty())
@@ -17510,7 +17629,10 @@ namespace Legion {
       {
         for (std::vector<std::pair<IndexPartition,bool> >::const_iterator it = 
               deleted_partitions.begin(); it != deleted_partitions.end(); it++)
-          rez.serialize(*it);
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
       }
       shard_manager->broadcast_resource_update(owner_shard, rez, preconditions);
       // Now we can handle this for ourselves
@@ -18511,6 +18633,22 @@ namespace Legion {
     {
       context_index = index;
     }
+
+    //--------------------------------------------------------------------------
+    bool RemoteTask::has_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (get_depth() > 0);
+    }
+
+    //--------------------------------------------------------------------------
+    const Task* RemoteTask::get_parent_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if ((parent_task == NULL) && has_parent_task())
+        parent_task = owner->get_parent_task();
+      return parent_task;
+    }
     
     //--------------------------------------------------------------------------
     int RemoteTask::get_depth(void) const
@@ -18901,7 +19039,6 @@ namespace Legion {
         derez.deserialize(index);
         local_virtual_mapped[index] = true;
       }
-      derez.deserialize(remote_completion_event);
       derez.deserialize(parent_context_uid);
       size_t num_coordinates;
       derez.deserialize(num_coordinates);
@@ -18929,6 +19066,18 @@ namespace Legion {
       parent_ctx = runtime->find_context(parent_context_uid, true/*can fail*/);
       if (parent_ctx != NULL)
         remote_task.parent_task = parent_ctx->get_task();
+    }
+
+    //--------------------------------------------------------------------------
+    const Task* RemoteContext::get_parent_task(void)
+    //--------------------------------------------------------------------------
+    {
+      // Note that it safe to actually perform the find_context call here
+      // because we are no longer in the virtual channel for unpacking
+      // remote contexts therefore we can page in the context
+      if (parent_ctx == NULL)
+        parent_ctx = runtime->find_context(parent_context_uid);
+      return parent_ctx->get_task();
     }
 
     //--------------------------------------------------------------------------
@@ -19096,9 +19245,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LeafContext::LeafContext(Runtime *rt, TaskOp *owner)
+    LeafContext::LeafContext(Runtime *rt, SingleTask *owner, bool inline_task)
       : TaskContext(rt, owner, owner->get_depth(), owner->regions,
-                    owner->output_regions),
+                    owner->output_regions, inline_task),
         inlined_tasks(0)
     //--------------------------------------------------------------------------
     {
@@ -19106,7 +19255,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LeafContext::LeafContext(const LeafContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs)
+      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs, false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -19219,60 +19368,76 @@ namespace Legion {
     void LeafContext::inline_child_task(TaskOp *child)
     //--------------------------------------------------------------------------
     {
+      if (runtime->check_privileges)
+        child->perform_privilege_checks();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_inline_task(child->get_unique_id());
-      child->perform_inlining(this);
+      // Find the mapped physical regions associated with each of the
+      // child task's region requirements. If they aren't mapped then
+      // we need a mapping fence to ensure that all the mappings are
+      // done before we attempt to run this task. If they are all mapped
+      // though then we can run this right away.
+      std::vector<PhysicalRegion> child_regions(child->regions.size());
+      for (unsigned childidx = 0; childidx < child_regions.size(); childidx++)
+      {
+        const RegionRequirement &child_req = child->regions[childidx];
+#ifdef DEBUG_LEGION
+        bool found = false;
+#endif
+        for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
+        {
+          if (!physical_regions[our_idx].is_mapped())
+            continue;
+          const RegionRequirement &our_req = regions[our_idx];
+          const RegionTreeID our_tid = our_req.region.get_tree_id();
+          const IndexSpace our_space = our_req.region.get_index_space();
+          const RegionUsage our_usage(our_req);
+          if (!check_region_dependence(our_tid, our_space, our_req,
+                  our_usage, child_req, false/*ignore privileges*/))
+            continue;
+          child_regions[childidx] = physical_regions[our_idx];
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
+      }
+      // Now select the variant for task based on the regions 
+      std::deque<InstanceSet> physical_instances(child_regions.size());
+      VariantImpl *variant = 
+        select_inline_variant(child, child_regions, physical_instances); 
+      child->perform_inlining(variant, physical_instances);
+      // No need to wait here, we know everything are leaves all the way
+      // down from here so there is no way for there to be effects
     }
 
     //--------------------------------------------------------------------------
-    VariantImpl* LeafContext::select_inline_variant(TaskOp *child)
+    VariantImpl* LeafContext::select_inline_variant(TaskOp *child,
+                              const std::vector<PhysicalRegion> &parent_regions,
+                              std::deque<InstanceSet> &physical_instances)
     //--------------------------------------------------------------------------
     {
-      Mapper::SelectVariantInput input;
-      Mapper::SelectVariantOutput output;
-      input.processor = executing_processor;
-      input.chosen_instances.resize(child->regions.size());
-      // Compute the parent indexes since we're going to need them
-      // Make sure we use ourselves here so that we know we get the
-      // right indexes when doing computations
-      child->compute_parent_indexes(this);
-      // Find the instances for this child
-      for (unsigned idx = 0; idx < child->regions.size(); idx++)
+      VariantImpl *variant_impl = TaskContext::select_inline_variant(child,
+                                        parent_regions, physical_instances);
+      if (!variant_impl->is_leaf())
       {
-        // We can get access to physical_regions without the
-        // lock because we know we are running in the application
-        // thread in order to do this inlining
-        unsigned local_index = child->find_parent_index(idx); 
-#ifdef DEBUG_LEGION
-        assert(local_index <= physical_regions.size());
-        assert(physical_regions[local_index].is_mapped());
-#endif
-        InstanceSet instances;
-        physical_regions[local_index].impl->get_references(instances);
-        std::vector<MappingInstance> &mapping_instances = 
-          input.chosen_instances[idx];
-        mapping_instances.resize(instances.size());
-        for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
-        {
-          mapping_instances[idx2] = 
-            MappingInstance(instances[idx2].get_manager());
-        }
-      }
-      output.chosen_variant = 0;
-      // Always do this with the child mapper
-      MapperManager *child_mapper = runtime->find_mapper(executing_processor,
-                                                         child->map_id);
-      child_mapper->invoke_select_task_variant(child, &input, &output);
-      VariantImpl *variant_impl= runtime->find_variant_impl(child->task_id,
-                                  output.chosen_variant, true/*can fail*/);
-      if (variant_impl == NULL)
+        MapperManager *child_mapper = 
+          runtime->find_mapper(executing_processor, child->map_id);
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invoction of "
                       "'select_task_variant' on mapper %s. Mapper selected "
-                      "an invalidate variant ID %d for inlining of task %s "
-                      "(UID %lld).", child_mapper->get_mapper_name(),
-                      output.chosen_variant, child->get_task_name(), 
-                      child->get_unique_id())
+                      "an invalid variant ID %d for inlining of task %s "
+                      "(UID %lld). Parent task %s (UID %lld) is a leaf task "
+                      "but mapper selected non-leaf variant %d for task %s.",
+                      child_mapper->get_mapper_name(),
+                      variant_impl->vid, child->get_task_name(), 
+                      child->get_unique_id(), owner_task->get_task_name(),
+                      owner_task->get_unique_id(), variant_impl->vid,
+                      child->get_task_name())
+      }
       return variant_impl;
     }
 
@@ -20048,6 +20213,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::add_physical_region(const RegionRequirement &req,
+          bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
+          bool virtual_mapped, const InstanceSet &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!unmap_event.exists());
+#endif
+      PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
+          RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, 
+          ApUserEvent::NO_AP_USER_EVENT, mapped, this, mid, tag, 
+          true/*leaf region*/, virtual_mapped, runtime);
+      physical_regions.push_back(PhysicalRegion(impl));
+      if (mapped)
+        impl->set_references(physical_instances, true/*safe*/);
+    }
+
+    //--------------------------------------------------------------------------
     Future LeafContext::execute_task(const TaskLauncher &launcher,
                                      std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
@@ -20060,7 +20243,6 @@ namespace Legion {
         InnerContext *parent = owner_task->get_context();
         Future result = task->initialize_task(parent, launcher, outputs);
         inline_child_task(task);
-        task->deactivate();
         return result;
       }
       else
@@ -20090,7 +20272,6 @@ namespace Legion {
         FutureMap result = 
           task->initialize_task(parent, launcher, launch_space, outputs);
         inline_child_task(task);
-        task->deactivate();
         return result;
       }
       else
@@ -20120,7 +20301,6 @@ namespace Legion {
         Future result = task->initialize_task(parent, launcher, launch_space, 
                                               redop, deterministic, outputs);
         inline_child_task(task);
-        task->deactivate();
         return result;
       }
       else
@@ -20181,6 +20361,15 @@ namespace Legion {
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_UNMAP_OPERATION,
         "Illegal unmap operation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::unmap_all_regions(bool external)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_UNMAP_OPERATION,
+        "Illegal unmap_all_regions call performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id())
     }
 
@@ -20580,13 +20769,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::unregister_child_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-    }
-
-    //--------------------------------------------------------------------------
     ApEvent LeafContext::register_implicit_dependences(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -20805,6 +20987,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Nothing to do
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      for (unsigned idx = 0; idx < unmap_events.size(); idx++)
+        assert(!unmap_events[idx].exists());
+#endif
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -20844,16 +21032,10 @@ namespace Legion {
       }
       if (!task_local_instances.empty())
         release_task_local_instances(deferred_result_instance);
-      // Unmap any physical regions that we mapped
-      for (std::vector<PhysicalRegion>::const_iterator it = 
-            physical_regions.begin(); it != physical_regions.end(); it++)
-      {
-        if (it->is_mapped())
-          it->impl->unmap_region();
-      }
       // Finalize output regions by setting realm instances created during
       // task execution to the output regions' physical managers
       finalize_output_regions();
+      // No need to unmap the physical regions, they never had events
       if (!execution_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(execution_events);
@@ -20876,7 +21058,8 @@ namespace Legion {
       // Tell the parent context that we are ready for post-end
       // Make a copy of the results if necessary
       TaskContext *parent_ctx = owner_task->get_context();
-      const RtEvent effects_done(Processor::get_current_finish_event());
+      const RtEvent effects_done(!inline_task ?
+          Processor::get_current_finish_event() : Realm::Event::NO_EVENT);
       if (deferred_result_instance.exists())
         parent_ctx->add_to_post_task_queue(this, effects_done,
                                            res, res_size, 
@@ -20910,11 +21093,12 @@ namespace Legion {
       }
       else
         parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size);
+      if (!inline_task)
 #ifdef DEBUG_LEGION
-      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                     false/*meta*/);
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
 #else
-      runtime_ptr->decrement_total_outstanding_tasks();
+        runtime_ptr->decrement_total_outstanding_tasks();
 #endif
     }
 
@@ -20956,7 +21140,7 @@ namespace Legion {
         }
       } 
       if (need_complete)
-        owner_task->trigger_children_complete();
+        owner_task->trigger_children_complete(ApEvent::NO_AP_EVENT);
       if (need_commit)
         owner_task->trigger_children_committed();
     }
@@ -20990,1400 +21174,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Inline Context 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    InlineContext::InlineContext(Runtime *rt, TaskContext *enc, TaskOp *child)
-      : TaskContext(rt, child, enc->get_depth(), child->regions,
-                    child->output_regions),
-        enclosing(enc), inline_task(child)
-    //--------------------------------------------------------------------------
-    {
-      executing_processor = enclosing->get_executing_processor();
-      physical_regions.resize(regions.size());
-      parent_req_indexes.resize(regions.size());
-      // Now update the parent regions so that they are valid with
-      // respect to the outermost context
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        int index = enclosing->find_parent_region_req(regions[idx]);
-        if (index < 0)
-          REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE,
-                        "Parent task %s (ID %lld) of inline task %s "
-                        "(ID %lld) does not have a region "
-                        "requirement for region (%x,%x,%x) "
-                        "as a parent of child task's region "
-                        "requirement at index %d", enclosing->get_task_name(),
-                        enclosing->get_unique_id(), get_task_name(),
-                        get_unique_id(), regions[idx].region.index_space.id,
-                        regions[idx].region.field_space.id, 
-                        regions[idx].region.tree_id, idx)
-        parent_req_indexes[idx] = index;
-        if (((unsigned)index) < enclosing->regions.size())
-        {
-          child->regions[idx].parent = enclosing->regions[index].parent;
-          physical_regions[idx] = enclosing->get_physical_region(index);
-        }
-        else
-        {
-          // This is a created requirements, so we have to make a copy
-          RegionRequirement copy;
-          enclosing->clone_requirement(index, copy);
-          child->regions[idx].parent = copy.parent;
-          // physical regions are empty becaue they are virtual
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    InlineContext::InlineContext(const InlineContext &rhs)
-      : TaskContext(NULL, NULL, 0, rhs.regions, rhs.output_reqs),
-        enclosing(NULL), inline_task(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    InlineContext::~InlineContext(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    InlineContext& InlineContext::operator=(const InlineContext &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::receive_resources(size_t return_index,
-              std::map<LogicalRegion,unsigned> &created_regs,
-              std::vector<LogicalRegion> &deleted_regs,
-              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
-              std::map<FieldSpace,unsigned> &created_fs,
-              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
-              std::vector<FieldSpace> &deleted_fs,
-              std::map<IndexSpace,unsigned> &created_is,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
-              std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
-              std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->receive_resources(return_index, created_regs, deleted_regs,
-          created_fids, deleted_fids, created_fs, latent_fs, deleted_fs,
-          created_is, deleted_is, created_partitions, deleted_partitions,
-          preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    RegionTreeContext InlineContext::get_context(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_context();
-    }
-
-    //--------------------------------------------------------------------------
-    ContextID InlineContext::get_context_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_context_id();
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID InlineContext::get_context_uid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return owner_task->get_unique_id();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::pack_remote_context(Serializer &rez,
-                                          AddressSpaceID target, bool replicate)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::compute_task_tree_coordinates(
-                       std::vector<std::pair<size_t,DomainPoint> > &coordinates)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->compute_task_tree_coordinates(coordinates);
-      coordinates.push_back(std::make_pair(
-            owner_task->get_context_index(), owner_task->index_point));
-    }
-
-    //--------------------------------------------------------------------------
-    bool InlineContext::attempt_children_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool InlineContext::attempt_children_commit(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::inline_child_task(TaskOp *child)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->inline_child_task(child);
-    }
-
-    //--------------------------------------------------------------------------
-    VariantImpl* InlineContext::select_inline_variant(TaskOp *child)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->select_inline_variant(child);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::handle_registration_callback_effects(RtEvent effects)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->handle_registration_callback_effects(effects);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(const Domain &domain, 
-                                                 TypeTag type_tag)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space(domain, type_tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(const Future &f, TypeTag tag)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space(f, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(
-                                         const std::vector<DomainPoint> &points)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space(points);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(
-                                               const std::vector<Domain> &rects)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space(rects);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::union_index_spaces(
-                                          const std::vector<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->union_index_spaces(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::intersect_index_spaces(
-                                          const std::vector<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->intersect_index_spaces(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::subtract_index_spaces(
-                                              IndexSpace left, IndexSpace right)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->subtract_index_spaces(left, right);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::create_shared_ownership(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->create_shared_ownership(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_index_space(IndexSpace handle, 
-                                       const bool unordered, const bool recurse)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->destroy_index_space(handle, unordered, recurse);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::create_shared_ownership(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->create_shared_ownership(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_index_partition(IndexPartition handle,
-                                       const bool unordered, const bool recurse)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->destroy_index_partition(handle, unordered, recurse);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_equal_partition(
-                                                IndexSpace parent,
-                                                IndexSpace color_space,
-                                                size_t granularity, Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_equal_partition(parent, color_space,
-                                               granularity, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_weights(IndexSpace parent,
-                                                const FutureMap &weights,
-                                                IndexSpace color_space,
-                                                size_t granularity, Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_weights(parent, weights, 
-                                    color_space, granularity, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_union(
-                                      IndexSpace parent,
-                                      IndexPartition handle1,
-                                      IndexPartition handle2,
-                                      IndexSpace color_space,
-                                      PartitionKind kind, Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_union(parent, handle1, handle2, 
-                                                  color_space, kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_intersection(
-                                      IndexSpace parent,
-                                      IndexPartition handle1,
-                                      IndexPartition handle2,
-                                      IndexSpace color_space,
-                                      PartitionKind kind, Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_intersection(parent,
-                                          handle1, handle2, color_space, 
-                                          kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_intersection(
-                                      IndexSpace parent,
-                                      IndexPartition partition,
-                                      PartitionKind kind, Color color,
-                                      bool dominates)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_intersection(parent,
-                                        partition, kind, color, dominates);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_difference(
-                                      IndexSpace parent,
-                                      IndexPartition handle1,
-                                      IndexPartition handle2,
-                                      IndexSpace color_space,
-                                      PartitionKind kind, Color color)   
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_difference(parent,
-                          handle1, handle2, color_space, kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    Color InlineContext::create_cross_product_partitions(
-                                                       IndexPartition handle1,
-                                                       IndexPartition handle2,
-                                  std::map<IndexSpace,IndexPartition> &handles,
-                                                       PartitionKind kind,
-                                                       Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_cross_product_partitions(handle1, handle2,
-                                                        handles, kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::create_association(LogicalRegion domain,
-                                           LogicalRegion domain_parent,
-                                           FieldID domain_fid,
-                                           IndexSpace range,
-                                           MapperID id, MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->create_association(domain, domain_parent, domain_fid, 
-                                    range, id, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_restricted_partition(
-                                                IndexSpace parent,
-                                                IndexSpace color_space,
-                                                const void *transform,
-                                                size_t transform_size,
-                                                const void *extent,
-                                                size_t extent_size,
-                                                PartitionKind part_kind,
-                                                Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_restricted_partition(parent, color_space,
-                                 transform, transform_size, extent, extent_size,
-                                 part_kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_domain(
-                                                IndexSpace parent,
-                                    const std::map<DomainPoint,Domain> &domains,
-                                                IndexSpace color_space,
-                                                bool perform_intersections,
-                                                PartitionKind part_kind,
-                                                Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_domain(parent, domains,
-              color_space, perform_intersections, part_kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_domain(
-                                                IndexSpace parent,
-                                                const FutureMap &domains,
-                                                IndexSpace color_space,
-                                                bool perform_intersections,
-                                                PartitionKind part_kind,
-                                                Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_domain(parent, domains,
-                      color_space, perform_intersections, part_kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_field(
-                                                      LogicalRegion handle,
-                                                      LogicalRegion parent_priv,
-                                                      FieldID fid,
-                                                      IndexSpace color_space,
-                                                      Color color,
-                                                      MapperID id, 
-                                                      MappingTagID tag,
-                                                      PartitionKind part_kind)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_field(handle, parent_priv,
-                                  fid, color_space, color, id, tag, part_kind);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_image(
-                                                    IndexSpace handle,
-                                                    LogicalPartition projection,
-                                                    LogicalRegion parent,
-                                                    FieldID fid,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color,
-                                                    MapperID id,
-                                                    MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_image(handle, projection,
-                          parent, fid, color_space, part_kind, color, id, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_image_range(
-                                                    IndexSpace handle,
-                                                    LogicalPartition projection,
-                                                    LogicalRegion parent,
-                                                    FieldID fid,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color,
-                                                    MapperID id, 
-                                                    MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_image_range(handle, 
-              projection, parent, fid, color_space, part_kind, color, id, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_preimage(
-                                                    IndexPartition projection,
-                                                    LogicalRegion handle,
-                                                    LogicalRegion parent,
-                                                    FieldID fid,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color,
-                                                    MapperID id,
-                                                    MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_preimage(projection, handle,
-                           parent, fid, color_space, part_kind, color, id, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_preimage_range(
-                                                    IndexPartition projection,
-                                                    LogicalRegion handle,
-                                                    LogicalRegion parent,
-                                                    FieldID fid,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color,
-                                                    MapperID id,
-                                                    MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_preimage_range(projection, 
-                  handle, parent, fid, color_space, part_kind, color, id, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_pending_partition(
-                                                    IndexSpace parent,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_pending_partition(parent, color_space,
-                                                 part_kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space_union(
-                                                  IndexPartition parent,
-                                                  const void *realm_color,
-                                                  size_t color_size,
-                                                  TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space_union(parent, realm_color, 
-                                                 color_size, type_tag, handles);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space_union(
-                                                  IndexPartition parent,
-                                                  const void *realm_color,
-                                                  size_t color_size,
-                                                  TypeTag type_tag,
-                                                  IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space_union(parent, realm_color, 
-                                                 color_size, type_tag, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space_intersection(
-                                                  IndexPartition parent,
-                                                  const void *realm_color,
-                                                  size_t color_size,
-                                                  TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space_intersection(parent, realm_color, 
-                                              color_size, type_tag, handles);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space_intersection(
-                                                  IndexPartition parent,
-                                                  const void *realm_color,
-                                                  size_t color_size,
-                                                  TypeTag type_tag,
-                                                  IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space_intersection(parent, realm_color, 
-                                              color_size, type_tag, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space_difference(
-                                                  IndexPartition parent,
-                                                  const void *realm_color,
-                                                  size_t color_size,
-                                                  TypeTag type_tag,
-                                                  IndexSpace initial,
-                                        const std::vector<IndexSpace> &handles)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space_difference(parent, realm_color, 
-                                  color_size, type_tag, initial, handles);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldSpace InlineContext::create_field_space(void)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_field_space();
-    }
-
-    //--------------------------------------------------------------------------
-    FieldSpace InlineContext::create_field_space(
-                                         const std::vector<size_t> &sizes,
-                                         std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_field_space(sizes, resulting_fields, serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldSpace InlineContext::create_field_space(
-                                         const std::vector<Future> &sizes,
-                                         std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_field_space(sizes, resulting_fields, serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::create_shared_ownership(FieldSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->create_shared_ownership(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_field_space(FieldSpace handle,
-                                            const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->destroy_field_space(handle, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldID InlineContext::allocate_field(FieldSpace space, size_t field_size,
-                                          FieldID fid, bool local,
-                                          CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->allocate_field(space, field_size, fid, local,serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::free_field(FieldAllocatorImpl *allocator, 
-                            FieldSpace space, FieldID fid, const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->free_field(allocator, space, fid, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::allocate_fields(FieldSpace space,
-                                        const std::vector<size_t> &sizes,
-                                        std::vector<FieldID> &resulting_fields,
-                                        bool local, CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->allocate_fields(space, sizes,resulting_fields,local,serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::free_fields(FieldAllocatorImpl *allocator, 
-                                    FieldSpace space, 
-                                    const std::set<FieldID> &to_free,
-                                    const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->free_fields(allocator, space, to_free, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldID InlineContext::allocate_field(FieldSpace space, 
-                                          const Future &field_size,
-                                          FieldID fid, bool local,
-                                          CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->allocate_field(space, field_size, fid, local,serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::allocate_local_field(FieldSpace space,size_t size,
-                                     FieldID fid, CustomSerdezID serdez_id,
-                                     std::set<RtEvent> &done_events)
-    //--------------------------------------------------------------------------
-    {
-      // Should never get here
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::allocate_fields(FieldSpace space,
-                                        const std::vector<Future> &sizes,
-                                        std::vector<FieldID> &resulting_fields,
-                                        bool local, CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->allocate_fields(space, sizes, resulting_fields, 
-                                        local, serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::allocate_local_fields(FieldSpace space,
-                                   const std::vector<size_t> &sizes,
-                                   const std::vector<FieldID> &resuling_fields,
-                                   CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events)
-    //--------------------------------------------------------------------------
-    {
-      // Should never get here
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegion InlineContext::create_logical_region(RegionTreeForest *forest,
-                                                       IndexSpace index_space,
-                                                       FieldSpace field_space,
-                                                       bool task_local)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_logical_region(forest, index_space, field_space,
-                                              task_local);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::create_shared_ownership(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->create_shared_ownership(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_logical_region(LogicalRegion handle,
-                                               const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->destroy_logical_region(handle, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldAllocatorImpl* InlineContext::create_field_allocator(FieldSpace handle,
-                                                              bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_field_allocator(handle, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_field_allocator(FieldSpaceNode *node)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->destroy_field_allocator(node);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::get_local_field_set(const FieldSpace handle,
-                                            const std::set<unsigned> &indexes,
-                                            std::set<FieldID> &to_set) const
-    //--------------------------------------------------------------------------
-    {
-      enclosing->get_local_field_set(handle, indexes, to_set);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::get_local_field_set(const FieldSpace handle,
-                                            const std::set<unsigned> &indexes,
-                                            std::vector<FieldID> &to_set) const
-    //--------------------------------------------------------------------------
-    {
-      enclosing->get_local_field_set(handle, indexes, to_set);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::execute_task(const TaskLauncher &launcher,
-                                       std::vector<OutputRequirement> *outputs)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->execute_task(launcher, outputs);
-    }
-
-    //--------------------------------------------------------------------------
-    FutureMap InlineContext::execute_index_space(
-                                        const IndexTaskLauncher &launcher,
-                                        std::vector<OutputRequirement> *outputs)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->execute_index_space(launcher, outputs);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::execute_index_space(const IndexTaskLauncher &launcher,
-                                        ReductionOpID redop, bool deterministic,
-                                        std::vector<OutputRequirement> *outputs)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->execute_index_space(
-                                       launcher, redop, deterministic, outputs);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::reduce_future_map(const FutureMap &future_map,
-                                        ReductionOpID redop, bool deterministic)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->reduce_future_map(future_map, redop, deterministic);
-    }
-
-    //--------------------------------------------------------------------------
-    FutureMap InlineContext::construct_future_map(const Domain &domain,
-                                    const std::map<DomainPoint,Future> &futures,
-                                    RtUserEvent domain_deletion, bool internal)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->construct_future_map(domain, futures, 
-                                             domain_deletion, internal);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalRegion InlineContext::map_region(const InlineLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->map_region(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent InlineContext::remap_region(PhysicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->remap_region(region);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::unmap_region(PhysicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->unmap_region(region);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::fill_fields(const FillLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->fill_fields(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::fill_fields(const IndexFillLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->fill_fields(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::issue_copy(const CopyLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->issue_copy(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::issue_copy(const IndexCopyLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->issue_copy(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::issue_acquire(const AcquireLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->issue_acquire(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::issue_release(const ReleaseLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->issue_release(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalRegion InlineContext::attach_resource(
-                                                 const AttachLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->attach_resource(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::detach_resource(PhysicalRegion region, 
-                                          const bool flush,const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->detach_resource(region, flush, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::progress_unordered_operations(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->progress_unordered_operations();
-    }
-
-    //--------------------------------------------------------------------------
-    FutureMap InlineContext::execute_must_epoch(
-                                              const MustEpochLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->execute_must_epoch(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::issue_timing_measurement(
-                                                 const TimingLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->issue_timing_measurement(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::issue_mapping_fence(void)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->issue_mapping_fence();
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::issue_execution_fence(void)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->issue_execution_fence();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::complete_frame(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->complete_frame();
-    }
-
-    //--------------------------------------------------------------------------
-    Predicate InlineContext::create_predicate(const Future &f)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_predicate(f);
-    }
-
-    //--------------------------------------------------------------------------
-    Predicate InlineContext::predicate_not(const Predicate &p)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->predicate_not(p);
-    }
-
-    //--------------------------------------------------------------------------
-    Predicate InlineContext::create_predicate(const PredicateLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_predicate(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::get_predicate_future(const Predicate &p)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_predicate_future(p);
-    }
-
-    //--------------------------------------------------------------------------
-    ApBarrier InlineContext::create_phase_barrier(unsigned arrivals,
-                                                  ReductionOpID redop,
-                                                  const void *init_value,
-                                                  size_t init_size)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_phase_barrier(arrivals, redop, 
-                                             init_value, init_size);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_phase_barrier(ApBarrier bar)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->destroy_phase_barrier(bar);
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier InlineContext::advance_phase_barrier(PhaseBarrier bar)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->advance_phase_barrier(bar);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::arrive_dynamic_collective(DynamicCollective dc,
-                                                  const void *buffer,
-                                                  size_t size, unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->arrive_dynamic_collective(dc, buffer, size, count);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::defer_dynamic_collective_arrival(DynamicCollective dc,
-                                                         const Future &f,
-                                                         unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->defer_dynamic_collective_arrival(dc, f, count);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InlineContext::get_dynamic_collective_result(DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_dynamic_collective_result(dc);
-    }
-
-    //--------------------------------------------------------------------------
-    DynamicCollective InlineContext::advance_dynamic_collective( 
-                                                           DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->advance_dynamic_collective(dc);
-    }
-
-    //--------------------------------------------------------------------------
-    size_t InlineContext::register_new_child_operation(Operation *op,
-                      const std::vector<StaticDependence> *dependences)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->register_new_child_operation(op, dependences);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_new_internal_operation(InternalOp *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_new_internal_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    size_t InlineContext::register_new_close_operation(CloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->register_new_close_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    size_t InlineContext::register_new_summary_operation(TraceSummaryOp *op)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->register_new_summary_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent InlineContext::add_to_dependence_queue(Operation *op, 
-                                                 bool unordered, bool outermost)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->add_to_dependence_queue(op, unordered, outermost);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::add_to_post_task_queue(TaskContext *ctx,RtEvent wait_on, 
-                                               const void *result, size_t size, 
-                                               PhysicalInstance inst,
-                                               FutureFunctor *callback_functor,
-                                               bool own_functor)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->add_to_post_task_queue(ctx, wait_on, result, size, inst,
-                                        callback_functor, own_functor);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_executing_child(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_executing_child(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_child_executed(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_child_executed(op);
-    }
-    
-    //--------------------------------------------------------------------------
-    void InlineContext::register_child_complete(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_child_complete(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_child_commit(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_child_commit(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::unregister_child_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->unregister_child_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent InlineContext::register_implicit_dependences(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->register_implicit_dependences(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::perform_fence_analysis(Operation *op, 
-                 std::set<ApEvent> &preconditions, bool mapping, bool execution)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->perform_fence_analysis(op, preconditions, mapping, execution);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::update_current_fence(FenceOp *op, 
-                                             bool mapping, bool execution)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->update_current_fence(op, mapping, execution);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::update_current_implicit(Operation *op) 
-    //--------------------------------------------------------------------------
-    {
-      enclosing->update_current_implicit(op);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent InlineContext::get_current_mapping_fence_event(void)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_current_mapping_fence_event();
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent InlineContext::get_current_execution_fence_event(void)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_current_execution_fence_event();
-    }
-
-
-    //--------------------------------------------------------------------------
-    void InlineContext::begin_trace(TraceID tid, bool logical_only,
-        bool static_trace, const std::set<RegionTreeID> *trees, bool deprecated)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->begin_trace(tid, logical_only, static_trace, trees,deprecated);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::end_trace(TraceID tid, bool deprecated)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->end_trace(tid, deprecated);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::record_previous_trace(LegionTrace *trace)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->record_previous_trace(trace);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::invalidate_trace_cache(
-                                     LegionTrace *trace, Operation *invalidator)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->invalidate_trace_cache(trace, invalidator);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::record_blocking_call(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->record_blocking_call();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::issue_frame(FrameOp *frame, ApEvent frame_termination)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->issue_frame(frame, frame_termination);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::perform_frame_issue(FrameOp *frame, ApEvent frame_term)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->perform_frame_issue(frame, frame_term);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::finish_frame(ApEvent frame_termination)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->finish_frame(frame_termination);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::increment_outstanding(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->increment_outstanding();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::decrement_outstanding(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->decrement_outstanding();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::increment_pending(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->increment_pending();
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent InlineContext::decrement_pending(TaskOp *child)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->decrement_pending(child);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent InlineContext::decrement_pending(bool need_deferral)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->decrement_pending(need_deferral);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::increment_frame(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->increment_frame();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::decrement_frame(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->decrement_frame();
-    }
-
-    //--------------------------------------------------------------------------
-#ifdef DEBUG_LEGION_COLLECTIVES
-    MergeCloseOp* InlineContext::get_merge_close_op(const LogicalUser &user,
-                                                    RegionTreeNode *node)
-#else
-    MergeCloseOp* InlineContext::get_merge_close_op(void)
-#endif
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION_COLLECTIVES
-      return enclosing->get_merge_close_op(user, node);
-#else
-      return enclosing->get_merge_close_op();
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_parent_logical_context(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(index < parent_req_indexes.size());
-#endif
-      return enclosing->find_parent_logical_context(parent_req_indexes[index]);
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_parent_physical_context(unsigned index,
-                                                           LogicalRegion parent)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(index < parent_req_indexes.size());
-#endif
-      return enclosing->find_parent_physical_context(
-                    parent_req_indexes[index], parent);
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_outermost_local_context(InnerContext *pre)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->find_outermost_local_context(pre);
-    }
-    
-    //--------------------------------------------------------------------------
-    InnerContext* InlineContext::find_top_context(InnerContext *previous)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->find_top_context(previous);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::initialize_region_tree_contexts(
-                       const std::vector<RegionRequirement> &clone_requirements,
-                       const std::vector<ApUserEvent> &unmap_events,
-                       std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::invalidate_region_tree_contexts(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::send_back_created_state(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceView* InlineContext::create_instance_top_view(
-                                PhysicalManager *manager, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& InlineContext::begin_task(
-                                                           Legion::Runtime *&rt)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(implicit_context == enclosing);
-      assert(implicit_runtime == this->runtime);
-#endif
-      rt = this->runtime->external;
-      executing_processor = Processor::get_executing_processor();
-      owner_task->current_proc = executing_processor;
-#ifdef DEBUG_LEGION
-      log_task.debug("Task %s (ID %lld) inlining on processor " IDFMT "",
-                    get_task_name(), get_unique_id(), executing_processor.id);
-      assert(regions.size() == physical_regions.size());
-#endif
-      return physical_regions;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalInstance InlineContext::create_task_local_instance(Memory memory, 
-                                           Realm::InstanceLayoutGeneric *layout)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_task_local_instance(memory, layout);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::end_task(const void *res, size_t res_size, bool owned,
-     PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!deferred_result_instance.exists());
-#endif
-      inline_task->end_inline_task(res, res_size, owned, callback_functor);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::post_end_task(const void *res, size_t res_size, 
-                                    bool owned, FutureFunctor *callback_functor)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::record_dynamic_collective_contribution(
-                                          DynamicCollective dc, const Future &f)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->record_dynamic_collective_contribution(dc, f);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::find_collective_contributions(DynamicCollective dc, 
-                                             std::vector<Future> &contributions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->find_collective_contributions(dc, contributions);
-    }
-
-    //--------------------------------------------------------------------------
-    TaskPriority InlineContext::get_current_priority(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_current_priority();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::set_current_priority(TaskPriority priority)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->set_current_priority(priority);
     }
 
   };

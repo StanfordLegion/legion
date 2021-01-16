@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1670,7 +1670,6 @@ namespace Legion {
     class ReplicateContext;
     class RemoteContext;
     class LeafContext;
-    class InlineContext;
 
     // Nasty global variable for TLS support of figuring out
     // our context implicitly
@@ -1975,7 +1974,6 @@ namespace Legion {
     friend class Internal::TopLevelContext;                 \
     friend class Internal::RemoteContext;                   \
     friend class Internal::LeafContext;                     \
-    friend class Internal::InlineContext;                   \
     friend class Internal::ReplicateContext;                \
     friend class Internal::InstanceBuilder;                 \
     friend class Internal::FutureNameExchange;              \
@@ -2301,14 +2299,14 @@ namespace Legion {
       static const LgEvent NO_LG_EVENT;
     public:
       LgEvent(void) { id = 0; }
-      LgEvent(const LgEvent &rhs) { id = rhs.id; }
+      LgEvent(const LgEvent &rhs) = default;
       explicit LgEvent(const Realm::Event e) { id = e.id; }
     public:
-      inline LgEvent& operator=(const LgEvent &rhs)
-        { id = rhs.id; return *this; }
+      inline LgEvent& operator=(const LgEvent &rhs) = default;
     public:
       // Override the wait method so we can have our own implementation
       inline void wait(void) const;
+      inline void wait_faultaware(bool &poisoned) const;
     };
 
     class PredEvent : public LgEvent {
@@ -2316,11 +2314,10 @@ namespace Legion {
       static const PredEvent NO_PRED_EVENT;
     public:
       PredEvent(void) : LgEvent() { } 
-      PredEvent(const PredEvent &rhs) { id = rhs.id; }
+      PredEvent(const PredEvent &rhs) = default;
       explicit PredEvent(const Realm::UserEvent &e) : LgEvent(e) { }
     public:
-      inline PredEvent& operator=(const PredEvent &rhs)
-        { id = rhs.id; return *this; }
+      inline PredEvent& operator=(const PredEvent &rhs) = default;
       inline operator Realm::UserEvent() const
         { Realm::UserEvent e; e.id = id; return e; }
     };
@@ -2330,14 +2327,24 @@ namespace Legion {
       static const ApEvent NO_AP_EVENT;
     public:
       ApEvent(void) : LgEvent() { }
-      ApEvent(const ApEvent &rhs) { id = rhs.id; }
+      ApEvent(const ApEvent &rhs) = default;
       explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
       explicit ApEvent(const PredEvent &e) { id = e.id; }
     public:
-      inline ApEvent& operator=(const ApEvent &rhs)
-        { id = rhs.id; return *this; }
+      inline ApEvent& operator=(const ApEvent &rhs) = default;
       inline bool has_triggered_faultignorant(void) const
-        { bool poisoned; return has_triggered_faultaware(poisoned); }
+        { bool poisoned = false; 
+          return has_triggered_faultaware(poisoned); }
+      inline void wait_faultignorant(void) const
+        { bool poisoned = false; LgEvent::wait_faultaware(poisoned); }
+      // TODO: enable this to ensure we are always checking for faults
+#if 0
+    private:
+      // Make these private because we always want to be conscious of faults
+      // when testing or waiting on application events
+      inline bool has_triggered(void) const { return LgEvent::has_triggered(); }
+      inline void wait(void) const { LgEvent::wait(); }
+#endif
     };
 
     class ApUserEvent : public ApEvent {
@@ -2345,11 +2352,10 @@ namespace Legion {
       static const ApUserEvent NO_AP_USER_EVENT;
     public:
       ApUserEvent(void) : ApEvent() { }
-      ApUserEvent(const ApUserEvent &rhs) : ApEvent(rhs) { }
+      ApUserEvent(const ApUserEvent &rhs) = default;
       explicit ApUserEvent(const Realm::UserEvent &e) : ApEvent(e) { }
     public:
-      inline ApUserEvent& operator=(const ApUserEvent &rhs)
-        { id = rhs.id; return *this; }
+      inline ApUserEvent& operator=(const ApUserEvent &rhs) = default;
       inline operator Realm::UserEvent() const
         { Realm::UserEvent e; e.id = id; return e; }
     };
@@ -2359,13 +2365,11 @@ namespace Legion {
       static const ApBarrier NO_AP_BARRIER;
     public:
       ApBarrier(void) : ApEvent(), timestamp(0) { }
-      ApBarrier(const ApBarrier &rhs) 
-        : ApEvent(rhs), timestamp(rhs.timestamp) { }
+      ApBarrier(const ApBarrier &rhs) = default; 
       explicit ApBarrier(const Realm::Barrier &b) 
         : ApEvent(b), timestamp(b.timestamp) { }
     public:
-      inline ApBarrier& operator=(const ApBarrier &rhs)
-        { id = rhs.id; timestamp = rhs.timestamp; return *this; }
+      inline ApBarrier& operator=(const ApBarrier &rhs) = default;
       inline operator Realm::Barrier() const
         { Realm::Barrier b; b.id = id; 
           b.timestamp = timestamp; return b; }
@@ -2385,12 +2389,11 @@ namespace Legion {
       static const RtEvent NO_RT_EVENT;
     public:
       RtEvent(void) : LgEvent() { }
-      RtEvent(const RtEvent &rhs) { id = rhs.id; }
+      RtEvent(const RtEvent &rhs) = default;
       explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
       explicit RtEvent(const PredEvent &e) { id = e.id; }
     public:
-      inline RtEvent& operator=(const RtEvent &rhs)
-        { id = rhs.id; return *this; }
+      inline RtEvent& operator=(const RtEvent &rhs) = default;
     };
 
     class RtUserEvent : public RtEvent {
@@ -2398,11 +2401,10 @@ namespace Legion {
       static const RtUserEvent NO_RT_USER_EVENT;
     public:
       RtUserEvent(void) : RtEvent() { }
-      RtUserEvent(const RtUserEvent &rhs) : RtEvent(rhs) { }
+      RtUserEvent(const RtUserEvent &rhs) = default;
       explicit RtUserEvent(const Realm::UserEvent &e) : RtEvent(e) { }
     public:
-      inline RtUserEvent& operator=(const RtUserEvent &rhs)
-        { id = rhs.id; return *this; }
+      inline RtUserEvent& operator=(const RtUserEvent &rhs) = default;
       inline operator Realm::UserEvent() const
         { Realm::UserEvent e; e.id = id; return e; }
     };
@@ -2412,13 +2414,11 @@ namespace Legion {
       static const RtBarrier NO_RT_BARRIER;
     public:
       RtBarrier(void) : RtEvent(), timestamp(0) { }
-      RtBarrier(const RtBarrier &rhs)
-        : RtEvent(rhs), timestamp(rhs.timestamp) { }
+      RtBarrier(const RtBarrier &rhs) = default;
       explicit RtBarrier(const Realm::Barrier &b)
         : RtEvent(b), timestamp(b.timestamp) { }
     public:
-      inline RtBarrier& operator=(const RtBarrier &rhs)
-        { id = rhs.id; timestamp = rhs.timestamp; return *this; }
+      inline RtBarrier& operator=(const RtBarrier &rhs) = default;
       inline operator Realm::Barrier() const
         { Realm::Barrier b; b.id = id; 
           b.timestamp = timestamp; return b; } 
@@ -2696,6 +2696,56 @@ namespace Legion {
       if (((stop - start) >= LIMIT) && (local_meta_task_id == BAD_TASK_ID))
         assert(false);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline void LgEvent::wait_faultaware(bool &poisoned) const
+    //--------------------------------------------------------------------------
+    {
+      // Save the context locally
+      Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      // Save the task provenance information
+      UniqueID local_provenance = Internal::implicit_provenance;
+      // Save whether we are in a registration callback
+      unsigned local_callback = Internal::inside_registration_callback;
+      // Check to see if we have any local locks to notify
+      if (Internal::local_lock_list != NULL)
+      {
+        // Make a copy of the local locks here
+        AutoLock *local_lock_list_copy = Internal::local_lock_list;
+        // Set this back to NULL until we are done waiting
+        Internal::local_lock_list = NULL;
+        // Make a user event and notify all the thread locks
+        const Realm::UserEvent done = Realm::UserEvent::create_user_event();
+        local_lock_list_copy->advise_sleep_entry(done);
+        // Now we can do the wait
+        if (external_implicit_task)
+          Realm::Event::external_wait_faultaware(poisoned);
+        else
+          Realm::Event::wait_faultaware(poisoned);
+        // When we wake up, notify that we are done and exited the wait
+        local_lock_list_copy->advise_sleep_exit();
+        // Trigger the user-event
+        done.trigger();
+        // Restore our local lock list
+#ifdef DEBUG_LEGION
+        assert(Internal::local_lock_list == NULL); 
+#endif
+        Internal::local_lock_list = local_lock_list_copy; 
+      }
+      else // Just do the normal wait
+      {
+        if (external_implicit_task)
+          Realm::Event::external_wait_faultaware(poisoned);
+        else
+          Realm::Event::wait_faultaware(poisoned);
+      }
+      // Write the context back
+      Internal::implicit_context = local_ctx;
+      // Write the provenance information back
+      Internal::implicit_provenance = local_provenance;
+      // Write the registration callback information back
+      Internal::inside_registration_callback = local_callback;
     }
 
 #ifdef LEGION_SPY

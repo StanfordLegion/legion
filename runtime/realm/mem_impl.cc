@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -80,15 +80,12 @@ namespace Realm {
   // class MemoryImpl
   //
 
-    MemoryImpl::MemoryImpl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Memory::Kind _lowlevel_kind)
-      : me(_me), size(_size), kind(_kind), alignment(_alignment), lowlevel_kind(_lowlevel_kind)
-      , cur_release_seqid(0)
-      , usage(stringbuilder() << "realm/mem " << _me << "/usage")
-      , peak_usage(stringbuilder() << "realm/mem " << _me << "/peak_usage")
-      , peak_footprint(stringbuilder() << "realm/mem " << _me << "/peak_footprint")
-    {
-      current_allocator.add_range(0, _size);
-    }
+    MemoryImpl::MemoryImpl(Memory _me, size_t _size,
+			   MemoryKind _kind, Memory::Kind _lowlevel_kind,
+			   NetworkSegment *_segment)
+      : me(_me), size(_size), kind(_kind), lowlevel_kind(_lowlevel_kind)
+      , segment(_segment)
+    {}
 
     MemoryImpl::~MemoryImpl(void)
     {
@@ -108,13 +105,65 @@ namespace Realm {
 	    delete *it2;
 	delete it->second;
       }
+    }
 
-#ifdef REALM_PROFILE_MEMORY_USAGE
-      printf("Memory " IDFMT " usage: peak=%zd (%.1f MB) footprint=%zd (%.1f MB)\n",
-	     me.id, 
-	     (size_t)peak_usage, peak_usage / 1048576.0,
-	     (size_t)peak_footprint, peak_footprint / 1048576.0);
-#endif
+    // default implementation handles deferral, but falls through to
+    //  allocate_storage_immediate for any actual allocation
+    MemoryImpl::AllocationResult MemoryImpl::allocate_storage_deferrable(RegionInstanceImpl *inst,
+									 bool need_alloc_result,
+									 Event precondition)
+    {
+      // all allocation requests are handled by the memory's owning node for
+      //  now - local caching might be possible though
+      NodeID target = ID(me).memory_owner_node();
+      assert(target == Network::my_node_id);
+
+      // check precondition on allocation
+      bool alloc_poisoned = false;
+      if(precondition.has_triggered_faultaware(alloc_poisoned)) {
+	// attempt immediate allocation (it'll handle poison)
+	return allocate_storage_immediate(inst, need_alloc_result,
+					  alloc_poisoned,
+					  TimeLimit::responsive());
+      } else {
+	// defer allocation attempt
+	inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC;
+	inst->deferred_create.defer(inst, this,
+				    need_alloc_result,
+				    precondition);
+	return ALLOC_DEFERRED /*asynchronous notification*/;
+      }
+    }
+
+    void MemoryImpl::release_storage_deferrable(RegionInstanceImpl *inst,
+						Event precondition)
+    {
+      // all allocation requests are handled by the memory's owning node for
+      //  now - local caching might be possible though
+      NodeID target = ID(me).memory_owner_node();
+      assert(target == Network::my_node_id);
+
+      bool poisoned = false;
+      if(precondition.has_triggered_faultaware(poisoned)) {
+	// fall through to immediate storage release
+	release_storage_immediate(inst, poisoned,
+				  TimeLimit::responsive());
+      } else {
+	// ask the instance to tell us when the precondition is satisified
+	inst->deferred_destroy.defer(inst, this, precondition);
+      }
+    }
+
+#if 0
+    off_t MemoryImpl::alloc_bytes_local(size_t size)
+    {
+      assert(0);
+      return 0;
+    }
+
+    void MemoryImpl::free_bytes_local(off_t offset, size_t size)
+    {
+      assert(0);
     }
 
     // make bad offsets really obvious (+1 PB)
@@ -257,6 +306,7 @@ namespace Realm {
 	free_blocks[offset] = size;
       }
     }
+#endif
 
     Memory::Kind MemoryImpl::get_kind(void) const
     {
@@ -373,57 +423,271 @@ namespace Realm {
       }
     }
 
+    void *MemoryImpl::get_inst_ptr(RegionInstanceImpl *inst,
+				   off_t offset, size_t size)
+    {
+      // fall through to old memory-wide implementation
+      return get_direct_ptr(inst->metadata.inst_offset + offset, size);
+    }
+
+    const ByteArray *MemoryImpl::get_rdma_info(NetworkModule *network) const
+    {
+      return (segment ? segment->get_rdma_info(network) : 0);
+    }
+
+    bool MemoryImpl::get_remote_addr(off_t offset, RemoteAddress& remote_addr)
+    {
+      // any ability to convert to remote addresses will come from subclasses
+      return false;
+    }
+
+    NetworkSegment *MemoryImpl::get_network_segment()
+    {
+      return segment;
+    }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class IBMemory
+  //
+
+    IBMemory::IBMemory(Memory _me, size_t _size,
+		       MemoryKind _kind, Memory::Kind _lowlevel_kind,
+		       void *prealloc_base, NetworkSegment *_segment)
+      : MemoryImpl(_me, _size, _kind, _lowlevel_kind, _segment)
+      , base(static_cast<char *>(prealloc_base))
+    {
+      free_blocks[0] = _size;
+    }
+
+    IBMemory::~IBMemory()
+    {
+    }
+
+    // old-style allocation used by IB memories
+    // make bad offsets really obvious (+1 PB)
+    static const off_t ZERO_SIZE_INSTANCE_OFFSET = 1ULL << ((sizeof(off_t) == 8) ? 50 : 30);
+
+    off_t IBMemory::alloc_bytes_local(size_t size)
+    {
+      AutoLock<> al(mutex);
+
+      // for zero-length allocations, return a special "offset"
+      if(size == 0) {
+	return this->size + ZERO_SIZE_INSTANCE_OFFSET;
+      }
+
+      const size_t alignment = 256;
+
+      if(alignment > 0) {
+	off_t leftover = size % alignment;
+	if(leftover > 0) {
+	  log_malloc.info("padding allocation from %zd to %zd",
+			  size, (size_t)(size + (alignment - leftover)));
+	  size += (alignment - leftover);
+	}
+      }
+      // HACK: pad the size by a bit to see if we have people falling off
+      //  the end of their allocations
+      size += 0;
+
+      // try to minimize footprint by allocating at the highest address possible
+      if(!free_blocks.empty()) {
+	std::map<off_t, off_t>::iterator it = free_blocks.end();
+	do {
+	  --it;  // predecrement since we started at the end
+
+	  if(it->second == (off_t)size) {
+	    // perfect match
+	    off_t retval = it->first;
+	    free_blocks.erase(it);
+	    log_malloc.info("alloc full block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, (ssize_t)retval);
+#if 0
+	    usage += size;
+	    if(usage > peak_usage) peak_usage = usage;
+	    size_t footprint = this->size - retval;
+	    if(footprint > peak_footprint) peak_footprint = footprint;
+#endif
+	    return retval;
+	  }
+	
+	  if(it->second > (off_t)size) {
+	    // some left over
+	    off_t leftover = it->second - size;
+	    off_t retval = it->first + leftover;
+	    it->second = leftover;
+	    log_malloc.info("alloc partial block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, (ssize_t)retval);
+#if 0
+	    usage += size;
+	    if(usage > peak_usage) peak_usage = usage;
+	    size_t footprint = this->size - retval;
+	    if(footprint > peak_footprint) peak_footprint = footprint;
+#endif
+	    return retval;
+	  }
+	} while(it != free_blocks.begin());
+      }
+
+      // no blocks large enough - boo hoo
+      log_malloc.info("alloc FAILED: mem=" IDFMT " size=%zd", me.id, size);
+      return -1;
+    }
+
+    void IBMemory::free_bytes_local(off_t offset, size_t size)
+    {
+      log_malloc.info() << "free block: mem=" << me << " size=" << size << " ofs=" << offset;
+      AutoLock<> al(mutex);
+
+      // frees of zero bytes should have the special offset
+      if(size == 0) {
+	assert((size_t)offset == this->size + ZERO_SIZE_INSTANCE_OFFSET);
+	return;
+      }
+
+      const size_t alignment = 256;
+
+      if(alignment > 0) {
+	off_t leftover = size % alignment;
+	if(leftover > 0) {
+	  log_malloc.info("padding free from %zd to %zd",
+			  size, (size_t)(size + (alignment - leftover)));
+	  size += (alignment - leftover);
+	}
+      }
+
+#if 0
+      usage -= size;
+      // only made things smaller, so can't impact the peak usage
+#endif
+
+      if(free_blocks.size() > 0) {
+	// find the first existing block that comes _after_ us
+	std::map<off_t, off_t>::iterator after = free_blocks.lower_bound(offset);
+	if(after != free_blocks.end()) {
+	  // found one - is it the first one?
+	  if(after == free_blocks.begin()) {
+	    // yes, so no "before"
+	    assert((offset + (off_t)size) <= after->first); // no overlap!
+	    if((offset + (off_t)size) == after->first) {
+	      // merge the ranges by eating the "after"
+	      size += after->second;
+	      free_blocks.erase(after);
+	    }
+	    free_blocks[offset] = size;
+	  } else {
+	    // no, get range that comes before us too
+	    std::map<off_t, off_t>::iterator before = after; before--;
+
+	    // if we're adjacent to the after, merge with it
+	    assert((offset + (off_t)size) <= after->first); // no overlap!
+	    if((offset + (off_t)size) == after->first) {
+	      // merge the ranges by eating the "after"
+	      size += after->second;
+	      free_blocks.erase(after);
+	    }
+
+	    // if we're adjacent with the before, grow it instead of adding
+	    //  a new range
+	    assert((before->first + before->second) <= offset);
+	    if((before->first + before->second) == offset) {
+	      before->second += size;
+	    } else {
+	      free_blocks[offset] = size;
+	    }
+	  }
+	} else {
+	  // nothing's after us, so just see if we can merge with the range
+	  //  that's before us
+
+	  std::map<off_t, off_t>::iterator before = after; before--;
+
+	  // if we're adjacent with the before, grow it instead of adding
+	  //  a new range
+	  assert((before->first + before->second) <= offset);
+	  if((before->first + before->second) == offset) {
+	    before->second += size;
+	  } else {
+	    free_blocks[offset] = size;
+	  }
+	}
+      } else {
+	// easy case - nothing was free, so now just our block is
+	free_blocks[offset] = size;
+      }
+    }
+
+    void *IBMemory::get_direct_ptr(off_t offset, size_t size)
+    {
+      assert(NodeID(ID(me).memory_owner_node()) == Network::my_node_id);
+      assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
+      return (base + offset);
+    }
+
+    // not used by IB memories
+    MemoryImpl::AllocationResult IBMemory::allocate_storage_immediate(RegionInstanceImpl *inst,
+							bool need_alloc_result,
+							bool poisoned,
+							TimeLimit work_until)
+    {
+      abort();
+    }
+
+    void IBMemory::release_storage_immediate(RegionInstanceImpl *inst,
+					     bool poisoned,
+					     TimeLimit work_until)
+    {
+      abort();
+    }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class LocalManagedMemory
+  //
+
+    LocalManagedMemory::LocalManagedMemory(Memory _me, size_t _size,
+					   MemoryKind _kind, size_t _alignment,
+					   Memory::Kind _lowlevel_kind,
+					   NetworkSegment *_segment)
+      : MemoryImpl(_me, _size, _kind, _lowlevel_kind, _segment)
+      , alignment(_alignment)
+      , cur_release_seqid(0)
+      , usage(stringbuilder() << "realm/mem " << _me << "/usage")
+      , peak_usage(stringbuilder() << "realm/mem " << _me << "/peak_usage")
+      , peak_footprint(stringbuilder() << "realm/mem " << _me << "/peak_footprint")
+    {
+      current_allocator.add_range(0, _size);
+    }
+
+    LocalManagedMemory::~LocalManagedMemory(void)
+    {
+#ifdef REALM_PROFILE_MEMORY_USAGE
+      printf("Memory " IDFMT " usage: peak=%zd (%.1f MB) footprint=%zd (%.1f MB)\n",
+	     me.id, 
+	     (size_t)peak_usage, peak_usage / 1048576.0,
+	     (size_t)peak_footprint, peak_footprint / 1048576.0);
+#endif
+    }
+
     // attempt to allocate storage for the specified instance
-    MemoryImpl::AllocationResult MemoryImpl::allocate_instance_storage(RegionInstance i,
-								       size_t bytes,
-								       size_t alignment,
-								       bool need_alloc_result,
-								       Event precondition,
-								       size_t offset /*=0*/)
+    MemoryImpl::AllocationResult LocalManagedMemory::allocate_storage_deferrable(RegionInstanceImpl *inst,
+										 bool need_alloc_result,
+										 Event precondition)
     {
       // all allocation requests are handled by the memory's owning node for
       //  now - local caching might be possible though
       NodeID target = ID(me).memory_owner_node();
-      if(target != Network::my_node_id) {
-	ActiveMessage<MemStorageAllocRequest> amsg(target);
-	amsg->memory = me;
-	amsg->inst = i;
-	amsg->bytes = bytes;
-	// this is a 64->32 bit copy, so ensure nothing was lost in truncation
-	amsg->alignment = alignment;
-	assert(amsg->alignment == alignment);
-	amsg->need_alloc_result = need_alloc_result;
-	amsg->precondition = precondition;
-	assert(offset==0);
-	amsg.commit();
-	return ALLOC_DEFERRED /*asynchronous notification*/;
-      }
-
-      RegionInstanceImpl *inst = get_instance(i);
+      assert(target == Network::my_node_id);
 
       // check precondition on allocation
       bool alloc_poisoned = false;
       if(precondition.has_triggered_faultaware(alloc_poisoned)) {
 	if(alloc_poisoned) {
 	  // a poisoned creation works a lot like a failed creation
-	  NodeID creator_node = ID(i).instance_creator_node();
-	  if(creator_node == Network::my_node_id) {
-	    // local notification of result
-	    inst->notify_allocation(ALLOC_CANCELLED,
-				    RegionInstanceImpl::INSTOFFSET_FAILED,
-				    TimeLimit::responsive());
-	  } else {
-	    // we have to at least have the correct offset on our local
-	    //  instance impl (even if we don't have the rest of the metadata)
-	    inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_FAILED;
-	  
-	    // remote notification
-	    ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
-	    amsg->inst = i;
-	    amsg->offset = RegionInstanceImpl::INSTOFFSET_FAILED;
-	    amsg->result = ALLOC_CANCELLED;
-	    amsg.commit();
-	  }
+	  inst->notify_allocation(ALLOC_CANCELLED,
+				  RegionInstanceImpl::INSTOFFSET_FAILED,
+				  TimeLimit::responsive());
 	  return ALLOC_INSTANT_FAILURE;
 	} else {
 	  // attempt allocation below
@@ -432,42 +696,43 @@ namespace Realm {
 	// defer allocation attempt
 	inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC;
 	inst->deferred_create.defer(inst, this,
-				    bytes, alignment, need_alloc_result,
+				    need_alloc_result,
 				    precondition);
 	return ALLOC_DEFERRED /*asynchronous notification*/;
       }
 
       AllocationResult result;
-      // offer up (hopefully non-zero) offset for external allocations
-      size_t inst_offset = offset;
-      {
+      size_t inst_offset = 0;
+      if(inst->metadata.ext_resource != 0) {
+	// this is an external allocation - it had better be a memory resource
+	ExternalMemoryResource *res = dynamic_cast<ExternalMemoryResource *>(inst->metadata.ext_resource);
+	if(res != 0) {
+	  // automatic success - make the "offset" be the difference between the
+	  //  base address we were given and our own allocation's base
+	  void *mem_base = get_direct_ptr(0, 0); // only our subclasses know this
+	  assert(mem_base != 0);
+	  // underflow is ok here - it'll work itself out when we add the mem_base
+	  //  back in on accesses
+	  inst_offset = res->base - reinterpret_cast<uintptr_t>(mem_base);
+	  result = ALLOC_INSTANT_SUCCESS;
+	} else {
+	  log_inst.warning() << "attempt to register non-memory resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
+	  result = ALLOC_INSTANT_FAILURE;
+	}
+      } else {
+	// normal allocation from our managed pool
 	AutoLock<> al(allocator_mutex);
 
-	result = attempt_deferrable_allocation(inst, bytes, alignment,
+	result = attempt_deferrable_allocation(inst,
+					       inst->metadata.layout->bytes_used,
+					       inst->metadata.layout->alignment_reqd,
 					       inst_offset);
       }
 
       // if we needed an alloc result, send deferred responses too
       if((result != ALLOC_DEFERRED) || need_alloc_result) {
-	NodeID creator_node = ID(i).instance_creator_node();
-	if(creator_node == Network::my_node_id) {
-	  // local notification of result
-	  inst->notify_allocation(result, inst_offset,
-				  TimeLimit::responsive());
-	} else {
-	  // we have to at least have the correct offset on our local
-	  //  instance impl (even if we don't have the rest of the metadata)
-	  inst->metadata.inst_offset = ((result == ALLOC_INSTANT_SUCCESS) ?
-					  inst_offset :
-					  RegionInstanceImpl::INSTOFFSET_FAILED);
-	  
-	  // remote notification
-	  ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
-	  amsg->inst = i;
-	  amsg->offset = inst_offset;
-	  amsg->result = result;
-	  amsg.commit();
-	}
+	inst->notify_allocation(result, inst_offset,
+				TimeLimit::responsive());
       }
 
       return result;
@@ -475,10 +740,10 @@ namespace Realm {
 
     // for internal use by allocation routines - must be called with
     //  allocator_mutex held!
-    MemoryImpl::AllocationResult MemoryImpl::attempt_deferrable_allocation(RegionInstanceImpl *inst,
-									   size_t bytes,
-									   size_t alignment,
-									   size_t& inst_offset)
+    MemoryImpl::AllocationResult LocalManagedMemory::attempt_deferrable_allocation(RegionInstanceImpl *inst,
+										   size_t bytes,
+										   size_t alignment,
+										   size_t& inst_offset)
     {
       // as long as there aren't any pending allocations, we can attempt to
       //  satisfy the allocation based on the current state
@@ -543,20 +808,13 @@ namespace Realm {
     }
   
     // release storage associated with an instance
-    void MemoryImpl::release_instance_storage(RegionInstanceImpl *inst,
-					      Event precondition)
+    void LocalManagedMemory::release_storage_deferrable(RegionInstanceImpl *inst,
+							Event precondition)
     {
       // all allocation requests are handled by the memory's owning node for
       //  now - local caching might be possible though
       NodeID target = ID(me).memory_owner_node();
-      if(target != Network::my_node_id) {
-	ActiveMessage<MemStorageReleaseRequest> amsg(target);
-	amsg->memory = me;
-	amsg->inst = inst->me;
-	amsg->precondition = precondition;
-	amsg.commit();
-	return;
-      }
+      assert(target == Network::my_node_id);
 
       bool poisoned = false;
       bool triggered = precondition.has_triggered_faultaware(poisoned);
@@ -567,91 +825,80 @@ namespace Realm {
       if(triggered && poisoned)
 	return;
 
-      // this release may satisfy pending allocation requests
-      std::vector<std::pair<RegionInstanceImpl *, size_t> > successful_allocs;
+      // ignore external instances here - we can't reuse their memory for
+      //  future allocations
+      if(inst->metadata.ext_resource == 0) {
+	// this release may satisfy pending allocation requests
+	std::vector<std::pair<RegionInstanceImpl *, size_t> > successful_allocs;
 
-      do { // so we can 'break' out early below
-	AutoLock<> al(allocator_mutex);
+	do { // so we can 'break' out early below
+	  AutoLock<> al(allocator_mutex);
 
-	// special case: we can get a (deferred only!) destruction of an
-	//  instance whose creation precondition hasn't even been satisfied -
-	//  it won't be represented in the heap state, so we can't do a
-	//  "future release of it" - wait until the creation precondition is
-	//  satisfied
-	if(inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC) {
-	  assert(!triggered);
-	  inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY;
-	  break;
-	}
-
-	if(pending_allocs.empty()) {
-	  if(triggered) {
-	    // we can apply the destruction directly to current state
-	    if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
-	      current_allocator.deallocate(inst->me);
-	  } else {
-	    // push the op, but we're not maintaining a future state yet
-	    pending_releases.push_back(PendingRelease(inst,
-						      false /*!triggered*/,
-						      ++cur_release_seqid));
+	  // special case: we can get a (deferred only!) destruction of an
+	  //  instance whose creation precondition hasn't even been satisfied -
+	  //  it won't be represented in the heap state, so we can't do a
+	  //  "future release of it" - wait until the creation precondition is
+	  //  satisfied
+	  if(inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC) {
+	    assert(!triggered);
+	    inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY;
+	    break;
 	  }
-	} else {
-	  // even if this destruction is ready, we can't update current
-	  //  state because older pending ops exist
-	  // TODO: pushing past a single pending alloc should always be safe
-	  if(triggered) {
-	    if(inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_FAILED) {
-	      // (exception: a ready destruction of a failed allocation need not
-	      //  be deferred)
+
+	  if(pending_allocs.empty()) {
+	    if(triggered) {
+	      // we can apply the destruction directly to current state
+	      if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
+		current_allocator.deallocate(inst->me);
 	    } else {
-	      // event is known to have triggered, so these must not fail
-	      release_allocator.deallocate(inst->me);
-	      future_allocator.deallocate(inst->me);
-	      // see if we can reorder this (and maybe other) releases to
-	      //  satisfy the pending allocs
-	      if(attempt_release_reordering(successful_allocs)) {
-		// we'll notify the successful allocations below, after we've
-		//  released the mutex
-	      } else {
-		// nope, stick ourselves on the back of the (unreordered)
-		//  pending release list
-		pending_releases.push_back(PendingRelease(inst,
-							  true /*triggered*/,
-							  ++cur_release_seqid));
-	      }
+	      // push the op, but we're not maintaining a future state yet
+	      pending_releases.push_back(PendingRelease(inst,
+							false /*!triggered*/,
+							++cur_release_seqid));
 	    }
 	  } else {
-	    // TODO: is it safe to test for failedness yet?
-	    if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
-	      future_allocator.deallocate(inst->me, true /*missing ok*/);
-	    pending_releases.push_back(PendingRelease(inst,
-						      false /*!triggered*/,
-						      ++cur_release_seqid));
+	    // even if this destruction is ready, we can't update current
+	    //  state because older pending ops exist
+	    // TODO: pushing past a single pending alloc should always be safe
+	    if(triggered) {
+	      if(inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_FAILED) {
+		// (exception: a ready destruction of a failed allocation need not
+		//  be deferred)
+	      } else {
+		// event is known to have triggered, so these must not fail
+		release_allocator.deallocate(inst->me);
+		future_allocator.deallocate(inst->me);
+		// see if we can reorder this (and maybe other) releases to
+		//  satisfy the pending allocs
+		if(attempt_release_reordering(successful_allocs)) {
+		  // we'll notify the successful allocations below, after we've
+		  //  released the mutex
+		} else {
+		  // nope, stick ourselves on the back of the (unreordered)
+		  //  pending release list
+		  pending_releases.push_back(PendingRelease(inst,
+							    true /*triggered*/,
+							    ++cur_release_seqid));
+		}
+	      }
+	    } else {
+	      // TODO: is it safe to test for failedness yet?
+	      if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
+		future_allocator.deallocate(inst->me, true /*missing ok*/);
+	      pending_releases.push_back(PendingRelease(inst,
+							false /*!triggered*/,
+							++cur_release_seqid));
+	    }
 	  }
-	}
-      } while(0);
+	} while(0);
 
-      if(!successful_allocs.empty()) {
-	for(std::vector<std::pair<RegionInstanceImpl *, size_t> >::iterator it = successful_allocs.begin();
-	    it != successful_allocs.end();
-	    ++it) {
-	  NodeID creator_node = ID(it->first->me).instance_creator_node();
-	  if(creator_node == Network::my_node_id) {
-	    // local notification of result
+	if(!successful_allocs.empty()) {
+	  for(std::vector<std::pair<RegionInstanceImpl *, size_t> >::iterator it = successful_allocs.begin();
+	      it != successful_allocs.end();
+	      ++it) {
 	    it->first->notify_allocation(ALLOC_EVENTUAL_SUCCESS,
 					 it->second,
 					 TimeLimit::responsive());
-	  } else {
-	    // we have to at least have the correct offset on our local
-	    //  instance impl (even if we don't have the rest of the metadata)
-	    it->first->metadata.inst_offset = it->second;
-
-	    // remote notification
-	    ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
-	    amsg->inst = it->first->me;
-	    amsg->offset = it->second;
-	    amsg->result = ALLOC_EVENTUAL_SUCCESS;
-	    amsg.commit();
 	  }
 	}
       }
@@ -659,17 +906,7 @@ namespace Realm {
       // even if we don't apply the destruction to the heap state right away,
       //  we always ack a triggered destruction
       if(triggered) {
-	// issue notifications
-	NodeID creator_node = ID(inst->me).instance_creator_node();
-	if(creator_node == Network::my_node_id) {
-	  // local notification of result
-	  inst->notify_deallocation();
-	} else {
-	  // remote notification
-	  ActiveMessage<MemStorageReleaseResponse> amsg(creator_node);
-	  amsg->inst = inst->me;
-	  amsg.commit();
-	}
+	inst->notify_deallocation();
       } else {
 	// ask the instance to tell us when the precondition is satisified
 	inst->deferred_destroy.defer(inst, this, precondition);
@@ -677,11 +914,10 @@ namespace Realm {
     }
 
     // should only be called by RegionInstance::DeferredCreate
-    void MemoryImpl::deferred_creation_triggered(RegionInstanceImpl *inst,
-						 size_t bytes, size_t alignment,
-						 bool need_alloc_result,
-						 bool poisoned,
-						 TimeLimit work_until)
+    MemoryImpl::AllocationResult LocalManagedMemory::allocate_storage_immediate(RegionInstanceImpl *inst,
+							 bool need_alloc_result,
+							 bool poisoned,
+							 TimeLimit work_until)
     {
       AllocationResult result;
       size_t inst_offset = 0;
@@ -700,13 +936,33 @@ namespace Realm {
 	  result = ALLOC_CANCELLED;
 	  inst_offset = RegionInstanceImpl::INSTOFFSET_FAILED;
 	} else {
-	  result = attempt_deferrable_allocation(inst, bytes, alignment,
-						 inst_offset);
+	  if(inst->metadata.ext_resource != 0) {
+	    // this is an external allocation - it had better be a memory resource
+	    ExternalMemoryResource *res = dynamic_cast<ExternalMemoryResource *>(inst->metadata.ext_resource);
+	    if(res != 0) {
+	      // automatic success - make the "offset" be the difference between the
+	      //  base address we were given and our own allocation's base
+	      void *mem_base = get_direct_ptr(0, 0); // only our subclasses know this
+	      assert(mem_base != 0);
+	      // underflow is ok here - it'll work itself out when we add the mem_base
+	      //  back in on accesses
+	      inst_offset = res->base - reinterpret_cast<uintptr_t>(mem_base);
+	      result = ALLOC_INSTANT_SUCCESS;
+	    } else {
+	      log_inst.warning() << "attempt to register non-memory resource: mem=" << me << " resource=" << *res;
+	      result = ALLOC_INSTANT_FAILURE;
+	    }
+	  } else {
+	    result = attempt_deferrable_allocation(inst,
+						   inst->metadata.layout->bytes_used,
+						   inst->metadata.layout->alignment_reqd,
+						   inst_offset);
+	  }
 	}
 
 	// success or fail, if a deferred destruction is in flight, we have to
 	//  add it to our list so that we can find it later
-	if(deferred_destroy_exists) {
+	if(deferred_destroy_exists && (inst->metadata.ext_resource == 0)) {
 	  // a successful (now or later) allocation should update the future
 	  //  state, if we have one
 	  if(((result == ALLOC_INSTANT_SUCCESS) || (result == ALLOC_DEFERRED)) &&
@@ -721,25 +977,10 @@ namespace Realm {
 	    
       // if we needed an alloc result, send deferred responses too
       if((result != ALLOC_DEFERRED) || need_alloc_result) {
-	NodeID creator_node = ID(inst->me).instance_creator_node();
-	if(creator_node == Network::my_node_id) {
-	  // local notification of result
-	  inst->notify_allocation(result, inst_offset, work_until);
-	} else {
-	  // we have to at least have the correct offset on our local
-	  //  instance impl (even if we don't have the rest of the metadata)
-	  inst->metadata.inst_offset = ((result == ALLOC_INSTANT_SUCCESS) ?
-					  inst_offset :
-					  RegionInstanceImpl::INSTOFFSET_FAILED);
-	  
-	  // remote notification
-	  ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
-	  amsg->inst = inst->me;
-	  amsg->offset = inst_offset;
-	  amsg->result = result;
-	  amsg.commit();
-	}
+	inst->notify_allocation(result, inst_offset, work_until);
       }
+
+      return result;
     }
 
   //define DEBUG_DEFERRED_ALLOCATIONS
@@ -769,7 +1010,7 @@ namespace Realm {
   // attempts to satisfy pending allocations based on reordering releases to
   //  move the ready ones first - assumes 'release_allocator' has been
   //  properly maintained
-  bool MemoryImpl::attempt_release_reordering(std::vector<std::pair<RegionInstanceImpl *, size_t> >& successful_allocs)
+  bool LocalManagedMemory::attempt_release_reordering(std::vector<std::pair<RegionInstanceImpl *, size_t> >& successful_allocs)
   {
     PendingAlloc& oldest = pending_allocs.front();
     if(!release_allocator.can_allocate(oldest.inst->me,
@@ -876,10 +1117,18 @@ namespace Realm {
   }
   
     // should only be called by RegionInstance::DeferredDestroy
-    void MemoryImpl::deferred_destruction_triggered(RegionInstanceImpl *inst,
-						    bool poisoned,
-						    TimeLimit work_until)
+    void LocalManagedMemory::release_storage_immediate(RegionInstanceImpl *inst,
+						       bool poisoned,
+						       TimeLimit work_until)
     {
+      // for external instances, all we have to do is ack the destruction (assuming
+      //  it wasn't poisoned)
+      if(inst->metadata.ext_resource != 0) {
+	if(!poisoned)
+	  inst->notify_deallocation();
+	return;
+      }
+
       std::vector<std::pair<RegionInstanceImpl *, size_t> > successful_allocs;
       std::vector<RegionInstanceImpl *> failed_allocs;
       //std::vector<RegionInstanceImpl *> deallocs;
@@ -1080,73 +1329,34 @@ namespace Realm {
 	for(std::vector<std::pair<RegionInstanceImpl *, size_t> >::iterator it = successful_allocs.begin();
 	    it != successful_allocs.end();
 	    ++it) {
-	  NodeID creator_node = ID(it->first->me).instance_creator_node();
-	  if(creator_node == Network::my_node_id) {
-	    // local notification of result
-	    it->first->notify_allocation(ALLOC_EVENTUAL_SUCCESS, it->second,
-					 work_until);
-	  } else {
-	    // we have to at least have the correct offset on our local
-	    //  instance impl (even if we don't have the rest of the metadata)
-	    it->first->metadata.inst_offset = it->second;
-	  
-	    // remote notification
-	    ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
-	    amsg->inst = it->first->me;
-	    amsg->offset = it->second;
-	    amsg->result = ALLOC_EVENTUAL_SUCCESS;
-	    amsg.commit();
-	  }
+	  it->first->notify_allocation(ALLOC_EVENTUAL_SUCCESS, it->second,
+				       work_until);
 	}
 
       if(!failed_allocs.empty())
 	for(std::vector<RegionInstanceImpl *>::iterator it = failed_allocs.begin();
 	    it != failed_allocs.end();
 	    ++it) {
-	  NodeID creator_node = ID((*it)->me).instance_creator_node();
-	  if(creator_node == Network::my_node_id) {
-	    // local notification of result
-	    (*it)->notify_allocation(ALLOC_EVENTUAL_FAILURE,
-				     RegionInstanceImpl::INSTOFFSET_FAILED,
-				     work_until);
-	  } else {
-	    // we have to at least have the correct offset on our local
-	    //  instance impl (even if we don't have the rest of the metadata)
-	    (*it)->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_FAILED;
-	  
-	    // remote notification
-	    ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
-	    amsg->inst = (*it)->me;
-	    amsg->offset = RegionInstanceImpl::INSTOFFSET_FAILED;
-	    amsg->result = ALLOC_EVENTUAL_FAILURE;
-	    amsg.commit();
-	  }
+	  (*it)->notify_allocation(ALLOC_EVENTUAL_FAILURE,
+				   RegionInstanceImpl::INSTOFFSET_FAILED,
+				   work_until);
 	}
 
       // even if we don't apply the destruction to the heap state right away,
       //  we always ack a triggered (but not poisoned) destruction now
       if(!poisoned) {
-	NodeID creator_node = ID(inst->me).instance_creator_node();
-	if(creator_node == Network::my_node_id) {
-	  // local notification of result
-	  inst->notify_deallocation();
-	} else {
-	  // remote notification
-	  ActiveMessage<MemStorageReleaseResponse> amsg(creator_node);
-	  amsg->inst = inst->me;
-	  amsg.commit();
-	}
+	inst->notify_deallocation();
       }
     }
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class MemoryImpl::PendingAlloc
+  // class LocalManagedMemory::PendingAlloc
   //
 
-  MemoryImpl::PendingAlloc::PendingAlloc(RegionInstanceImpl *_inst,
-					 size_t _bytes, size_t _align,
-					 unsigned _release_seqid)
+  LocalManagedMemory::PendingAlloc::PendingAlloc(RegionInstanceImpl *_inst,
+						 size_t _bytes, size_t _align,
+						 unsigned _release_seqid)
     : inst(_inst), bytes(_bytes), alignment(_align)
     , last_release_seqid(_release_seqid)
   {}
@@ -1154,11 +1364,11 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class MemoryImpl::PendingRelease
+  // class LocalManagedMemory::PendingRelease
   //
 
-  MemoryImpl::PendingRelease::PendingRelease(RegionInstanceImpl *_inst,
-					     bool _ready, unsigned _seqid)
+  LocalManagedMemory::PendingRelease::PendingRelease(RegionInstanceImpl *_inst,
+						     bool _ready, unsigned _seqid)
     : inst(_inst), is_ready(_ready), seqid(_seqid)
   {}
 
@@ -1171,9 +1381,10 @@ namespace Realm {
   LocalCPUMemory::LocalCPUMemory(Memory _me, size_t _size, 
                                  int _numa_node, Memory::Kind _lowlevel_kind,
 				 void *prealloc_base /*= 0*/,
-				 const NetworkSegment *_segment /*= 0*/)
-    : MemoryImpl(_me, _size, MKIND_SYSMEM, ALIGNMENT, _lowlevel_kind),
-      numa_node(_numa_node), segment(_segment)
+				 NetworkSegment *_segment /*= 0*/)
+    : LocalManagedMemory(_me, _size, MKIND_SYSMEM, ALIGNMENT,
+			 _lowlevel_kind, _segment),
+      numa_node(_numa_node)
   {
     if(prealloc_base) {
       base = (char *)prealloc_base;
@@ -1194,11 +1405,17 @@ namespace Realm {
 	base = base_orig;
       }
       prealloced = false;
+
+      // we should not have been given a NetworkSegment by our caller
+      assert(!segment);
+      // advertise our allocation in case the network can register it
+      local_segment.assign(NetworkSegmentInfo::HostMem,
+			   base, _size);
+      segment = &local_segment;
     }
     log_malloc.debug("CPU memory at %p, size = %zd%s%s", base, _size, 
 		     prealloced ? " (prealloced)" : "",
 		     (segment && segment->single_network) ? " (registered)" : "");
-    free_blocks[0] = _size;
   }
 
   LocalCPUMemory::~LocalCPUMemory(void)
@@ -1223,16 +1440,6 @@ namespace Realm {
     return (base + offset);
   }
 
-  int LocalCPUMemory::get_home_node(off_t offset, size_t size)
-  {
-    return Network::my_node_id;
-  }
-
-  const ByteArray *LocalCPUMemory::get_rdma_info(NetworkModule *network)
-  {
-    return (segment ? segment->get_rdma_info(network) : 0);
-  }
-
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1241,11 +1448,69 @@ namespace Realm {
 
     RemoteMemory::RemoteMemory(Memory _me, size_t _size, Memory::Kind k,
 			       MemoryKind mk /*= MKIND_REMOTE */)
-      : MemoryImpl(_me, _size, mk, 0, k)
+      : MemoryImpl(_me, _size, mk, k, nullptr /*no segment*/)
     {}
 
     RemoteMemory::~RemoteMemory(void)
     {}
+
+    // forward the requests immediately and let the owner node handle deferrals
+    MemoryImpl::AllocationResult RemoteMemory::allocate_storage_deferrable(RegionInstanceImpl *inst,
+									   bool need_alloc_result,
+									   Event precondition)
+    {
+      NodeID target = ID(me).memory_owner_node();
+      assert(target != Network::my_node_id);
+
+      // we need to send the layout information to the memory's owner node - see
+      //  how big that'll be
+      Serialization::ByteCountSerializer bcs;
+      bool ok = bcs << *inst->metadata.layout;
+      if(ok && (inst->metadata.ext_resource != 0))
+	ok = bcs << *inst->metadata.ext_resource;
+      assert(ok);
+      size_t layout_bytes = bcs.bytes_used();
+      
+      ActiveMessage<MemStorageAllocRequest> amsg(target, layout_bytes);
+      amsg->memory = me;
+      amsg->inst = inst->me;
+      amsg->need_alloc_result = need_alloc_result;
+      amsg->precondition = precondition;
+      amsg << *inst->metadata.layout;
+      if(inst->metadata.ext_resource != 0)
+	amsg << *inst->metadata.ext_resource;
+      amsg.commit();
+      return ALLOC_DEFERRED /*asynchronous notification*/;
+    }
+
+    // release storage associated with an instance
+    void RemoteMemory::release_storage_deferrable(RegionInstanceImpl *inst,
+						  Event precondition)
+    {
+      NodeID target = ID(me).memory_owner_node();
+      assert(target != Network::my_node_id);
+      
+      ActiveMessage<MemStorageReleaseRequest> amsg(target);
+      amsg->memory = me;
+      amsg->inst = inst->me;
+      amsg->precondition = precondition;
+      amsg.commit();
+    }
+
+    MemoryImpl::AllocationResult RemoteMemory::allocate_storage_immediate(RegionInstanceImpl *inst,
+						   bool need_alloc_result,
+						   bool poisoned, TimeLimit work_until)
+    {
+      // actual allocation/release should always happen on the owner node
+      abort();
+    }
+
+    void RemoteMemory::release_storage_immediate(RegionInstanceImpl *inst,
+						 bool poisoned, TimeLimit work_until)
+    {
+      // actual allocation/release should always happen on the owner node
+      abort();
+    }
 
     off_t RemoteMemory::alloc_bytes_local(size_t size)
     {
@@ -1275,16 +1540,6 @@ namespace Realm {
       return 0;
     }
 
-    int RemoteMemory::get_home_node(off_t offset, size_t size)
-    {
-      return ID(me).memory_owner_node();
-    }
-
-    void *RemoteMemory::get_remote_addr(off_t offset)
-    {
-      return(0);
-    }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1295,11 +1550,23 @@ namespace Realm {
 							 const void *data, size_t datalen)
   {
     MemoryImpl *impl = get_runtime()->get_memory_impl(args.memory);
+    RegionInstanceImpl *inst = impl->get_instance(args.inst);
 
-    impl->allocate_instance_storage(args.inst,
-				    args.bytes, args.alignment,
-				    args.need_alloc_result,
-				    args.precondition);
+    // deserialize the layout
+    Serialization::FixedBufferDeserializer fbd(data, datalen);
+    InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::deserialize_new(fbd);
+    assert(ilg != 0);
+    ExternalInstanceResource *res = 0;
+    if(fbd.bytes_left() > 0) {
+      res = ExternalInstanceResource::deserialize_new(fbd);
+      assert((res != 0) && (fbd.bytes_left() == 0));
+    }
+    inst->metadata.layout = ilg;  // TODO: mark metadata valid?
+    inst->metadata.ext_resource = res;
+
+    impl->allocate_storage_deferrable(inst,
+				      args.need_alloc_result,
+				      args.precondition);
   }
 
 
@@ -1329,8 +1596,8 @@ namespace Realm {
     MemoryImpl *impl = get_runtime()->get_memory_impl(args.memory);
     RegionInstanceImpl *inst = impl->get_instance(args.inst);
 
-    impl->release_instance_storage(inst,
-				   args.precondition);
+    impl->release_storage_deferrable(inst,
+				     args.precondition);
   }
 
 
@@ -1674,41 +1941,6 @@ namespace Realm {
   }
 
   
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class RemoteReduceListMessage
-  //
-
-  /*static*/ void RemoteReduceListMessage::handle_message(NodeID sender,
-							  const RemoteReduceListMessage &args,
-							  const void *data, size_t datalen)
-  {
-    MemoryImpl *impl = get_runtime()->get_memory_impl(args.mem);
-    
-    log_copy.debug("received remote reduction list request: mem=" IDFMT ", offset=%zd, size=%zd, redopid=%d",
-		   args.mem.id, (ssize_t)args.offset, datalen, args.redopid);
-
-    switch(impl->kind) {
-    case MemoryImpl::MKIND_SYSMEM:
-    case MemoryImpl::MKIND_ZEROCOPY:
-    case MemoryImpl::MKIND_GPUFB:
-    default:
-      assert(0);
-
-    case MemoryImpl::MKIND_GLOBAL:
-      {
-	const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(args.redopid, 0);
-	assert(redop != 0);
-	assert((datalen % redop->sizeof_list_entry) == 0);
-	impl->apply_reduction_list(args.offset,
-				   redop,
-				   datalen / redop->sizeof_list_entry,
-				   data);
-      }
-    }
-  }
-  
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class RemoteWriteFence
@@ -2213,18 +2445,6 @@ namespace Realm {
       }
     }
 
-    void do_remote_apply_red_list(int node, Memory mem, off_t offset,
-				  ReductionOpID redopid,
-				  const void *data, size_t datalen)
-    {
-      ActiveMessage<RemoteReduceListMessage> amsg(node, datalen);
-      amsg->mem = mem;
-      amsg->offset = offset;
-      amsg->redopid = redopid;
-      amsg.add_payload(data, datalen);
-      amsg.commit();
-    }
-
     void do_remote_fence(Memory mem, unsigned sequence_id, unsigned num_writes,
                          RemoteWriteFence *fence)
     {
@@ -2247,10 +2467,8 @@ namespace Realm {
   ActiveMessageHandlerReg<RemoteWriteFenceAckMessage> remote_write_fence_ack_message_handler;
 
   ActiveMessageHandlerReg<MemStorageAllocRequest> mem_storage_alloc_request_handler;
-  ActiveMessageHandlerReg<MemStorageAllocResponse>mem_storage_alloc_response_handler;
+  ActiveMessageHandlerReg<MemStorageAllocResponse> mem_storage_alloc_response_handler;
   ActiveMessageHandlerReg<MemStorageReleaseRequest> mem_storage_release_request_handler;
   ActiveMessageHandlerReg<MemStorageReleaseResponse> mem_storage_release_response_handler;
 
-  ActiveMessageHandlerReg<RemoteReduceListMessage> mem_remote_reduce_list_handler;
-  
 }; // namespace Realm

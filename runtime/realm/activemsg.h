@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,7 +52,7 @@ namespace Realm {
 
   class ActiveMessageImpl;
  
-  template <typename T>
+  template <typename T, size_t INLINE_STORAGE = 256>
     class ActiveMessage {
   public:
     // constructs an INACTIVE message object - call init(...) as needed
@@ -62,19 +62,24 @@ namespace Realm {
     //  of recipients
     // in addition to the header struct (T), a message can include a variable
     //  payload which can be delivered to a particular destination address
-    ActiveMessage(NodeID _target,
-		  size_t _max_payload_size = 0, void *_dest_payload_addr = 0);
+    ActiveMessage(NodeID _target, size_t _max_payload_size = 0);
+    ActiveMessage(NodeID _target, size_t _max_payload_size,
+		  const RemoteAddress& _dest_payload_addr);
     ActiveMessage(const Realm::NodeSet &_targets, size_t _max_payload_size = 0);
 
     // providing the payload (as a 1D or 2D reference, which must be PAYLOAD_KEEP)
     //  up front can avoid a copy if the source location is directly accessible
     //  by the networking hardware
+    ActiveMessage(NodeID _target, const void *_data, size_t _datalen);
     ActiveMessage(NodeID _target, const void *_data, size_t _datalen,
-		  void *_dest_payload_addr = 0);
+		  const RemoteAddress& _dest_payload_addr);
     ActiveMessage(const Realm::NodeSet &_targets,
 		  const void *_data, size_t _datalen);
     ActiveMessage(NodeID _target, const void *_data, size_t _bytes_per_line,
-		  size_t _lines, size_t _line_stride, void *_dest_payload_addr = 0);
+		  size_t _lines, size_t _line_stride);
+    ActiveMessage(NodeID _target, const void *_data, size_t _bytes_per_line,
+		  size_t _lines, size_t _line_stride,
+		  const RemoteAddress& _dest_payload_addr);
     ActiveMessage(const Realm::NodeSet &_targets,
 		  const void *_data, size_t _bytes_per_line,
 		  size_t _lines, size_t _line_stride);
@@ -83,16 +88,50 @@ namespace Realm {
 
     // a version of `init` for each constructor above
     void init(NodeID _target,
-	      size_t _max_payload_size = 0, void *_dest_payload_addr = 0);
+	      size_t _max_payload_size = 0);
+    void init(NodeID _target,
+	      size_t _max_payload_size, const RemoteAddress& _dest_payload_addr);
     void init(const Realm::NodeSet &_targets, size_t _max_payload_size = 0);
+    void init(NodeID _target, const void *_data, size_t _datalen);
     void init(NodeID _target, const void *_data, size_t _datalen,
-	      void *_dest_payload_addr = 0);
+	      const RemoteAddress& _dest_payload_addr);
     void init(const Realm::NodeSet &_targets, const void *_data, size_t _datalen);
     void init(NodeID _target, const void *_data, size_t _bytes_per_line,
-	      size_t _lines, size_t _line_stride, void *_dest_payload_addr = 0);
+	      size_t _lines, size_t _line_stride);
+    void init(NodeID _target, const void *_data, size_t _bytes_per_line,
+	      size_t _lines, size_t _line_stride,
+	      const RemoteAddress& _dest_payload_addr);
     void init(const Realm::NodeSet &_targets,
 	      const void *_data, size_t _bytes_per_line,
 	      size_t _lines, size_t _line_stride);
+
+    // large messages may need to be fragmented, so use cases that can
+    //  handle the fragmentation at a higher level may want to know the
+    //  largest size that is fragmentation-free - the answer can depend
+    //  on whether the data is to be delivered to a known RemoteAddress
+    //  and/or whether the source data location is known
+    // a call that sets `with_congestion` may get a smaller value (maybe
+    //  even 0) if the path to the named target(s) is getting full
+    static size_t recommended_max_payload(NodeID target,
+					  bool with_congestion);
+    static size_t recommended_max_payload(const NodeSet& targets,
+					  bool with_congestion);
+    static size_t recommended_max_payload(NodeID target,
+					  const RemoteAddress &dest_payload_addr,
+					  bool with_congestion);
+    static size_t recommended_max_payload(NodeID target,
+					  const void *data, size_t bytes_per_line,
+					  size_t lines, size_t line_stride,
+					  bool with_congestion);
+    static size_t recommended_max_payload(const NodeSet& targets,
+					  const void *data, size_t bytes_per_line,
+					  size_t lines, size_t line_stride,
+					  bool with_congestion);
+    static size_t recommended_max_payload(NodeID target,
+					  const void *data, size_t bytes_per_line,
+					  size_t lines, size_t line_stride,
+					  const RemoteAddress &dest_payload_addr,
+					  bool with_congestion);
 
     // operator-> gives access to the header structure
     T *operator->(void);
@@ -131,7 +170,6 @@ namespace Realm {
     ActiveMessageImpl *impl;
     T *header;
     Realm::Serialization::FixedBufferSerializer fbs;
-    static const size_t INLINE_STORAGE = 256;
     uint64_t inline_capacity[INLINE_STORAGE / sizeof(uint64_t)];
   };
 
@@ -300,7 +338,7 @@ namespace Realm {
     ~IncomingMessageManager(void);
 
     typedef uintptr_t CallbackData;
-    typedef void (*CallbackFnptr)(NodeID, CallbackData);
+    typedef void (*CallbackFnptr)(NodeID, CallbackData, CallbackData);
 
     // adds an incoming message to the queue
     // returns true if the call was handled immediately (in which case the
@@ -313,7 +351,8 @@ namespace Realm {
 			      const void *payload, size_t payload_size,
 			      int payload_mode,
 			      CallbackFnptr callback_fnptr,
-			      CallbackData callback_data,
+			      CallbackData callback_data1,
+			      CallbackData callback_data2,
 			      TimeLimit work_until);
 
     void start_handler_threads(size_t stack_size);
@@ -342,7 +381,7 @@ namespace Realm {
       size_t payload_size;
       bool payload_needs_free;
       CallbackFnptr callback_fnptr;
-      CallbackData callback_data;
+      CallbackData callback_data1, callback_data2;
     };
 
     struct MessageBlock {

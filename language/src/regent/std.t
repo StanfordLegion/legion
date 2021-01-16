@@ -1,4 +1,4 @@
--- Copyright 2020 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -4121,8 +4121,14 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
             local layouts = layouts_from_annotations[param_type] or terralib.newlist { layout_normal[dim] }
             if std.is_reduction_op(privilege) then
               local op = std.get_reduction_op(privilege)
-              assert(#field_types == 1)
-              local field_type = field_types[1]
+              local field_type
+              for _, t in ipairs(field_types) do
+                if field_type then
+                  assert(std.type_eq(field_type, t))
+                else
+                  field_type = t
+                end
+              end
               layouts = terralib.newlist { layout_reduction[dim][op][field_type] }
             end
             if options.inner or variant:is_external() then

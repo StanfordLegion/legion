@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -270,6 +270,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
       virtual Memoizable* get_memoizable(void) { return NULL; }
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { exec_fence = false; return true; }
     protected:
       // Base call
       void activate_operation(void);
@@ -445,6 +447,9 @@ namespace Legion {
       virtual void handle_profiling_update(int count);
       // Compute the initial precondition for this operation
       virtual ApEvent compute_init_precondition(const TraceInfo &info); 
+      // Return the event to use for waiting for program order execution
+      virtual ApEvent get_program_order_event(void) const 
+        { return completion_event; }
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
@@ -484,6 +489,9 @@ namespace Legion {
         {
           if (!runtime->program_order_execution)
           {
+#ifdef DEBUG_LEGION
+            assert(need_completion_trigger);
+#endif
             need_completion_trigger = false;
             __sync_synchronize();
             Runtime::trigger_event(NULL, completion_event, chain_event);
@@ -496,6 +504,9 @@ namespace Legion {
         {
           if (!runtime->program_order_execution)
           {
+#ifdef DEBUG_LEGION
+            assert(need_completion_trigger);
+#endif
             need_completion_trigger = false;
             __sync_synchronize();
             to_trigger = completion_event;
@@ -801,6 +812,8 @@ namespace Legion {
       void remove_predicate_reference(void);
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     public:
       bool register_waiter(PredicateWaiter *waiter, 
                            GenerationID gen, bool &value);
@@ -995,7 +1008,7 @@ namespace Legion {
       void activate_memoizable(void);
     public:
       virtual void execute_dependence_analysis(void);
-      virtual void replay_analysis(void) = 0;
+      virtual void trigger_replay(void) = 0;
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
@@ -1094,7 +1107,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const unsigned index,
@@ -1106,11 +1118,13 @@ namespace Legion {
       virtual void update_atomic_locks(const unsigned index,
                                        Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
+      virtual ApEvent get_program_order_event(void) const;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -1126,7 +1140,8 @@ namespace Legion {
       virtual DomainPoint get_shard_point(void) const;
     protected:
       bool remap_region;
-      ApUserEvent termination_event;
+      ApUserEvent ready_event;
+      ApEvent termination_event;
       PhysicalRegion region;
       RegionTreePath privilege_path;
       unsigned parent_req_index;
@@ -1273,6 +1288,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
     protected:
       void check_copy_privileges(const bool permit_projection);
       void check_copy_privilege(const RegionRequirement &req, unsigned idx,
@@ -1294,7 +1310,7 @@ namespace Legion {
       static void handle_deferred_across(const void *args);
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       // From Memoizable
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
@@ -1397,7 +1413,7 @@ namespace Legion {
           LegionVector<IndirectRecord>::aligned &records, const bool sources); 
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode* get_collective_space(void) const 
@@ -1516,18 +1532,22 @@ namespace Legion {
                         bool need_future, bool track=true);
       inline void add_mapping_applied_condition(RtEvent precondition)
         { map_applied_conditions.insert(precondition); }
+      inline void record_execution_precondition(ApEvent precondition)
+        { execution_preconditions.insert(precondition); }
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { exec_fence = (fence_kind == EXECUTION_FENCE); return exec_fence; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
 #ifdef LEGION_SPY
       virtual void trigger_complete(void);
 #endif
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
     protected:
@@ -1794,6 +1814,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
       virtual Mappable* get_mappable(void);
     public:
       void activate_close(void);
@@ -2016,11 +2037,12 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       // From Memoizable
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
@@ -2129,11 +2151,12 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       // From Memoizable
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
@@ -2202,6 +2225,7 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const { return unique_op_id; }
       virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
       virtual MappableType get_mappable_type(void) const
         { return DYNAMIC_COLLECTIVE_MAPPABLE; }
       virtual const Task* as_task(void) const { return NULL; }
@@ -2221,7 +2245,7 @@ namespace Legion {
         { assert(false); return *(new RegionRequirement()); }
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2461,6 +2485,7 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
     public:
       FutureMap initialize(InnerContext *ctx,const MustEpochLauncher &launcher);
       // Make this a virtual method so it can be overridden for
@@ -2512,7 +2537,7 @@ namespace Legion {
     public:
       // Methods for keeping track of when we can complete and commit
       void register_subop(Operation *op);
-      void notify_subop_complete(Operation *op);
+      void notify_subop_complete(Operation *op, RtEvent precondition);
       void notify_subop_commit(Operation *op);
     public:
       RtUserEvent find_slice_versioning_event(UniqueID slice_id, bool &first);
@@ -2581,6 +2606,8 @@ namespace Legion {
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     protected:
       std::map<UniqueID,RtUserEvent> slice_version_events;
+    protected:
+      std::set<RtEvent> completion_preconditions;
     };
 
     /**
@@ -3117,6 +3144,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void activate(void);
@@ -3306,6 +3334,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
       virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
@@ -3339,7 +3368,7 @@ namespace Legion {
         { return get_requirement(); }
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -3386,7 +3415,7 @@ namespace Legion {
       virtual void trigger_commit(void);
     public:
       // From MemoizableOp
-      virtual void replay_analysis(void);
+      virtual void trigger_replay(void);
     public:
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode* get_collective_space(void) const 
@@ -3517,6 +3546,7 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       LayoutConstraintSet layout_constraint_set;
       size_t footprint;
+      ApEvent termination_event;
       bool restricted;
       bool mapping;
       bool local_files;
@@ -3595,6 +3625,8 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     protected:
       void activate_timing(void);
       void deactivate_timing(void);
@@ -3627,6 +3659,8 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
     protected:
       void activate_all_reduce(void);
       void deactivate_all_reduce(void);
@@ -3736,6 +3770,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -3765,6 +3800,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -3794,6 +3830,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -3823,6 +3860,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -3852,6 +3890,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -3881,6 +3920,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -3910,6 +3950,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual const Task* get_parent_task(void) const;
       virtual PartitionKind get_partition_kind(void) const;
     public:
       virtual const char* get_logging_name(void) const;

@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,6 +52,10 @@
 #include "realm/indexspace.h"
 #include "realm/codedesc.h"
 #include "realm/subgraph.h"
+
+#ifdef REALM_USE_HDF5
+#include "realm/hdf5/hdf5_access.h"
+#endif
 
 #endif // ifndef REALM_H
 #endif // ifdef REALM_ENABLE_CXX_BINDINGS

@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,6 +56,9 @@ namespace Realm {
 			      size_t block_size);
     InstanceLayoutConstraints(const std::vector<size_t>& field_sizes,
 			      size_t block_size);
+    InstanceLayoutConstraints(const std::vector<FieldID>& field_ids,
+			      const std::vector<size_t>& field_sizes,
+			      size_t block_size);
 
     struct FieldInfo {
       FieldID field_id;
@@ -86,6 +89,44 @@ namespace Realm {
       };
 
       std::map<FieldID, PerField> fields;
+    };
+
+    // this is a namespace instead of an enum so that it can be extended elsewhere
+    namespace Opcodes {
+      typedef unsigned char Opcode;
+
+      static const Opcode OP_INVALID = 0;
+      static const Opcode OP_SPLIT1 = 1;  // this is a SplitPlane<N,T>
+    }
+
+    // some processors are limited in which instruction types they can
+    //  support, so we build masks to describe usage/capabilities
+    static const unsigned ALLOW_SPLIT1 = 1U << Opcodes::OP_SPLIT1;
+
+    struct REALM_INTERNAL_API_EXTERNAL_LINKAGE Instruction {
+      // all instructions are at least 4 bytes and aligned to 16 bytes, but
+      //  the only data common to all is the opcode, which appears in the low
+      //  8 bits
+      REALM_ALIGNED_TYPE_CONST(uint32_aligned_16, uint32_t, 16);
+      uint32_aligned_16 data;
+
+      Instruction(uint32_t _data);
+
+      REALM_CUDA_HD
+      Opcodes::Opcode opcode() const;
+
+      // two helper methods that get you to another instruction
+
+      // skip() gets the next instruction in sequence, which requires knowing
+      //  the size of the current instruction - instructions below take care
+      //  of this in most cases
+      REALM_CUDA_HD
+      const Instruction *skip(size_t bytes) const;
+
+      // jump(N) jumps forward in the instruction stream by N 16-B chunks
+      //   special case: a delta of 0 is "end of program" and returns null
+      REALM_CUDA_HD
+      const Instruction *jump(unsigned delta) const;
     };
 
   };
@@ -157,17 +198,20 @@ namespace Realm {
     virtual InstanceLayoutGeneric *clone(void) const;
   };
 
-  template <int N, typename T>
+  namespace PieceLayoutTypes {
+    typedef unsigned char LayoutType;
+
+    static const LayoutType InvalidLayoutType = 0;
+    static const LayoutType AffineLayoutType = 1;
+  };
+
+  template <int N, typename T = int>
   class REALM_PUBLIC_API InstanceLayoutPiece {
   public:
-    enum LayoutType {
-      InvalidLayoutType,
-      AffineLayoutType,
-      HDF5LayoutType,
-    };
-
     InstanceLayoutPiece(void);
-    InstanceLayoutPiece(LayoutType _layout_type);
+    InstanceLayoutPiece(PieceLayoutTypes::LayoutType _layout_type);
+    InstanceLayoutPiece(PieceLayoutTypes::LayoutType _layout_type,
+			const Rect<N,T>& _bounds);
 
     template <typename S>
     static InstanceLayoutPiece<N,T> *deserialize_new(S& deserializer);
@@ -182,7 +226,12 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const = 0;
 
-    LayoutType layout_type;
+    // used for constructing lookup programs
+    virtual size_t lookup_inst_size() const = 0;
+    virtual PieceLookup::Instruction *create_lookup_inst(void *ptr,
+							 unsigned next_delta) const = 0;
+
+    PieceLayoutTypes::LayoutType layout_type;
     Rect<N,T> bounds;
   };
 
@@ -190,7 +239,7 @@ namespace Realm {
   REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const InstanceLayoutPiece<N,T>& ilp);
 
-  template <int N, typename T>
+  template <int N, typename T = int>
   class REALM_PUBLIC_API AffineLayoutPiece : public InstanceLayoutPiece<N,T> {
   public:
     AffineLayoutPiece(void);
@@ -206,6 +255,11 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
+    // used for constructing lookup programs
+    virtual size_t lookup_inst_size() const;
+    virtual PieceLookup::Instruction *create_lookup_inst(void *ptr,
+							 unsigned next_delta) const;
+
     static Serialization::PolymorphicSerdezSubclass<InstanceLayoutPiece<N,T>, AffineLayoutPiece<N,T> > serdez_subclass;
 
     template <typename S>
@@ -215,7 +269,7 @@ namespace Realm {
     size_t offset;
   };
 
-  template <int N, typename T>
+  template <int N, typename T = int>
   class REALM_PUBLIC_API InstancePieceList {
   public:
     InstancePieceList(void);
@@ -238,7 +292,7 @@ namespace Realm {
   REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const InstancePieceList<N,T>& ipl);
 
-  template <int N, typename T>
+  template <int N, typename T = int>
   class REALM_PUBLIC_API InstanceLayout : public InstanceLayoutGeneric {
   public:
     InstanceLayout(void);
@@ -276,47 +330,18 @@ namespace Realm {
 
   namespace PieceLookup {
 
-    struct REALM_INTERNAL_API_EXTERNAL_LINKAGE Instruction {
-      // all instructions are at least 4 bytes and aligned to 16 bytes, but
-      //  the only data common to all is the opcode, which appears in the low
-      //  8 bits
-      REALM_ALIGNED_TYPE_CONST(uint32_aligned_16, uint32_t, 16);
-      uint32_aligned_16 data;
+    namespace Opcodes {
+      static const Opcode OP_AFFINE_PIECE = 2;  // this is a AffinePiece<N,T>
+    }
 
-      enum Opcode {
-	OP_INVALID = 0,
-	OP_AFFINE_PIECE = 1,  // this is an AffinePiece<N,T>
-	OP_SPLIT1 = 2,        // this is a SplitPlane<N,T>
-	OP_HDF5_PIECE = 3,    // this is an HDF5Piece<N,T>
-      };
-
-      // some processors are limited in which instruction types they can
-      //  support, so we build masks to describe usage/capabilities
-      static const unsigned ALLOW_AFFINE_PIECE = 1U << OP_AFFINE_PIECE;
-      static const unsigned ALLOW_SPLIT1       = 1U << OP_SPLIT1;
-      static const unsigned ALLOW_HDF5_PIECE   = 1U << OP_HDF5_PIECE;
-
-      REALM_CUDA_HD
-      Opcode opcode() const;
-
-      // two helper methods that get you to another instruction
-
-      // skip() gets the next instruction in sequence, which requires knowing
-      //  the size of the current instruction - instructions below take care
-      //  of this in most cases
-      REALM_CUDA_HD
-      const Instruction *skip(size_t bytes) const;
-
-      // jump(N) jumps forward in the instruction stream by N 16-B chunks
-      //   special case: a delta of 0 is "end of program" and returns null
-      REALM_CUDA_HD
-      const Instruction *jump(unsigned delta) const;
-    };
+    static const unsigned ALLOW_AFFINE_PIECE = 1U << Opcodes::OP_AFFINE_PIECE;
 
     template <int N, typename T>
     struct REALM_INTERNAL_API_EXTERNAL_LINKAGE AffinePiece : public Instruction {
       // data is: { delta[23:0], opcode[7:0] }
       // top 24 bits of data is jump delta
+      AffinePiece(unsigned next_delta);
+
       REALM_CUDA_HD
       unsigned delta() const;
 
@@ -331,6 +356,10 @@ namespace Realm {
     template <int N, typename T>
     struct REALM_INTERNAL_API_EXTERNAL_LINKAGE SplitPlane : public Instruction {
       // data is: { delta[15:0], dim[7:0], opcode[7:0] }
+      SplitPlane(int _split_dim, T _split_plane, unsigned _next_delta);
+
+      void set_delta(unsigned _next_delta);
+
       REALM_CUDA_HD
       unsigned delta() const;
       REALM_CUDA_HD

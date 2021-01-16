@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,6 +66,13 @@
 #endif
 
 namespace Realm {
+
+  namespace NetworkSegmentInfo {
+    // CUDA device memory - extra is a uintptr_t'd pointer to the GPU
+    //  object
+    static const MemoryType CudaDeviceMem = 2;
+  };
+
   namespace Cuda {
 
     class GPU;
@@ -116,6 +123,7 @@ namespace Realm {
       unsigned cfg_skip_gpu_count;
       bool cfg_skip_busy_gpus;
       size_t cfg_min_avail_mem;
+      int cfg_max_ctxsync_threads;
 
       // "global" variables live here too
       GPUWorker *shared_worker;
@@ -200,6 +208,10 @@ namespace Realm {
 
       virtual void print(std::ostream& os) const;
 
+      IntrusiveListLink<GPUWorkFence> fence_list_link;
+      REALM_PMTA_DEFN(GPUWorkFence,IntrusiveListLink<GPUWorkFence>,fence_list_link);
+      typedef IntrusiveList<GPUWorkFence, REALM_PMTA_USE(GPUWorkFence,fence_list_link), DummyLock> FenceList;
+
     protected:
       static void cuda_callback(CUstream stream, CUresult res, void *data);
     };
@@ -213,6 +225,8 @@ namespace Realm {
       void enqueue_on_stream(GPUStream *stream);
 
       virtual void print(std::ostream& os) const;
+
+      void mark_gpu_work_start();
 
     protected:
       static void cuda_start_callback(CUstream stream, CUresult res, void *data);
@@ -411,6 +425,7 @@ namespace Realm {
 #else
       std::deque<GPUMemcpy *> pending_copies;
 #endif
+      bool issuing_copies;
 
       struct PendingEvent {
 	CUevent event;
@@ -485,6 +500,36 @@ namespace Realm {
       Mutex mutex;
       int batch_size, current_size, total_size, external_count;
       std::vector<CUevent> available_events;
+    };
+
+    // when the runtime hijack is not enabled/active, a cuCtxSynchronize
+    //  is required to ensure a task's completion event covers all of its
+    //  actions - rather than blocking an important thread, we create a
+    //  small thread pool to handle these
+    class ContextSynchronizer {
+    public:
+      ContextSynchronizer(GPU *_gpu, CUcontext _context,
+			  CoreReservationSet& crs,
+			  int _max_threads);
+      ~ContextSynchronizer();
+
+      void add_fence(GPUWorkFence *fence);
+
+      void shutdown_threads();
+
+      void thread_main();
+
+    protected:
+      GPU *gpu;
+      CUcontext context;
+      int max_threads;
+      Mutex mutex;
+      CondVar condvar;
+      bool shutdown_flag;
+      GPUWorkFence::FenceList fences;
+      int total_threads, sleeping_threads, syncing_threads;
+      std::vector<Thread *> worker_threads;
+      CoreReservation *core_rsrv;
     };
 
     struct FatBin;
@@ -731,11 +776,12 @@ namespace Realm {
       std::vector<char> kernel_args;
       std::vector<CallConfig> call_configs;
       bool block_on_synchronize;
+      ContextSynchronizer ctxsync;
     protected:
       Realm::CoreReservation *core_rsrv;
     };
 
-    class GPUFBMemory : public MemoryImpl {
+    class GPUFBMemory : public LocalManagedMemory {
     public:
       GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size);
 
@@ -747,14 +793,13 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
-      virtual int get_home_node(off_t offset, size_t size);
-
     public:
       GPU *gpu;
       CUdeviceptr base;
+      NetworkSegment local_segment;
     };
 
-    class GPUZCMemory : public MemoryImpl {
+    class GPUZCMemory : public LocalManagedMemory {
     public:
       GPUZCMemory(Memory _me, CUdeviceptr _gpu_base, void *_cpu_base, size_t _size);
 
@@ -766,11 +811,10 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
-      virtual int get_home_node(off_t offset, size_t size);
-
     public:
       CUdeviceptr gpu_base;
       char *cpu_base;
+      NetworkSegment local_segment;
     };
 
   }; // namespace Cuda

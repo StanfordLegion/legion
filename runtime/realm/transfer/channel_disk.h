@@ -1,5 +1,5 @@
-/* Copyright 2020 Stanford University
- * Copyright 2020 Los Alamos National Laboratory
+/* Copyright 2021 Stanford University
+ * Copyright 2021 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,9 +56,7 @@ namespace Realm {
 
     private:
       FileRequest* file_reqs;
-      std::string filename;
-      int fd; // The file that stores the physical instance
-      //const char *buf_base;
+      FileMemory::OpenFileInfo *file_info;
     };
 
     class DiskXferDes : public XferDes {

@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2020 Kitware, Inc.
+# Copyright 2021 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,6 +34,9 @@ add_subdirectory(spmd_cgsolver)
 add_subdirectory(virtual_map)
 add_subdirectory(attach_2darray_c_fortran_layout)
 add_subdirectory(attach_array_daxpy)
+add_subdirectory(predication)
+add_subdirectory(inline_tasks)
+add_subdirectory(layout_constraints)
 add_subdirectory(implicit_top_task)
 
 if(Legion_MPI_INTEROP)

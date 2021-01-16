@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2141,7 +2141,6 @@ namespace Legion {
                                const char *log_name,
                                UniqueID uid,
 #endif
-                               const bool track_effects,
                                const bool record_valid,
                                const bool check_initialized,
                                const bool defer_copies,
@@ -2184,8 +2183,7 @@ namespace Legion {
       analysis = new UpdateAnalysis(runtime, op, index, version_info, req, 
                                     region_node, targets, target_views, 
                                     trace_info, precondition, term_event, 
-                                    track_effects, check_initialized,
-                                    record_valid, skip_output);
+                                    check_initialized,record_valid,skip_output);
       analysis->add_reference();
       // Iterate over all the equivalence classes and perform the analysis
       // Only need to check for uninitialized data for things not discarding
@@ -2310,7 +2308,6 @@ namespace Legion {
                                        const char *log_name,
                                        UniqueID uid,
 #endif
-                                       const bool track_effects,
                                        const bool record_valid,
                                        const bool check_initialized)
     //--------------------------------------------------------------------------
@@ -2322,7 +2319,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
          log_name, uid,
 #endif
-         track_effects, record_valid, check_initialized, false/*defer copies*/);
+         record_valid, check_initialized, false/*defer copies*/);
       if (registration_precondition.exists() && 
           !registration_precondition.has_triggered())
         registration_precondition.wait();
@@ -8221,7 +8218,7 @@ namespace Legion {
         rez.serialize(handle);
         rez.serialize(c);
         if (defer == NULL)
-          rez.serialize(handle_ptr);
+          rez.serialize(const_cast<IndexPartition*>(handle_ptr));
         else
           rez.serialize<IndexPartition*>(NULL);
         rez.serialize(ready_event);
@@ -8506,6 +8503,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
+      bool pack_space = false;
       bool still_valid = false;
       bool has_reference = false;
       // Do our check to see if we're still valid
@@ -8518,7 +8516,7 @@ namespace Legion {
         // First see if we are still valid
         if (tree_valid && ((parent == NULL) || (send_references > 0)))
         {
-          still_valid = true;
+          still_valid = true; 
           // Grab a reference on the parent to keep it from being deleted
           if (parent != NULL)
           {
@@ -8533,6 +8531,8 @@ namespace Legion {
         }
         else if (above)
           return false;
+        // Have to record this atomically with recording as a remote instance
+        pack_space = realm_index_space_set.has_triggered();
       }
       // If we have a parent check to see if it is the owner
       // If it is then we can continue traversing up
@@ -8576,7 +8576,7 @@ namespace Legion {
             rez.serialize(index_space_ready);
             rez.serialize(expr_id);
             rez.serialize(initialized);
-            if (realm_index_space_set.has_triggered())
+            if (pack_space)
               pack_index_space(rez, true/*include size*/);
             else
               rez.serialize<size_t>(0);
@@ -9618,7 +9618,7 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize(c);
           if (defer == NULL)
-            rez.serialize(handle_ptr);
+            rez.serialize(const_cast<IndexSpace*>(handle_ptr));
           else
             rez.serialize<IndexSpace*>(NULL);
           rez.serialize(ready_event);

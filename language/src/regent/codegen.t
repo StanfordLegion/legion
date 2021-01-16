@@ -1,4 +1,4 @@
--- Copyright 2020 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -3112,8 +3112,14 @@ local function expr_call_setup_region_arg(
     local reduction_op
     if std.is_reduction_op(privilege) then
       local op = std.get_reduction_op(privilege)
-      assert(#field_types == 1)
-      local field_type = field_types[1]
+      local field_type
+      for _, t in ipairs(field_types) do
+        if field_type then
+          assert(std.type_eq(field_type, t))
+        else
+          field_type = t
+        end
+      end
       reduction_op = std.reduction_op_ids[op][field_type]
     end
 
@@ -3392,8 +3398,14 @@ local function expr_call_setup_partition_arg(
     local reduction_op
     if std.is_reduction_op(privilege) then
       local op = std.get_reduction_op(privilege)
-      assert(#field_types == 1)
-      local field_type = field_types[1]
+      local field_type
+      for _, t in ipairs(field_types) do
+        if field_type then
+          assert(std.type_eq(field_type, t))
+        else
+          field_type = t
+        end
+      end
       reduction_op = std.reduction_op_ids[op][field_type]
     end
 

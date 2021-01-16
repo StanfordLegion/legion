@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2020 Stanford University
+# Copyright 2021 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -64,6 +64,9 @@ legion_cxx_tests = [
     ['examples/virtual_map/virtual_map', []],
     ['examples/attach_2darray_c_fortran_layout/attach_2darray', []],
     ['examples/attach_array_daxpy/attach_array_daxpy', []],
+    ['examples/predication/predication', []],
+    ['examples/layout_constraints/transpose', []],
+    ['examples/inline_tasks/inline_tasks', []],
     # Comment this test out until it works everywhere
     #['examples/implicit_top_task/implicit_top_task', []],
 
@@ -1017,7 +1020,7 @@ def run_tests(test_modules=None,
         if test_fuzzer:
             with Stage('fuzzer'):
                 run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
-        if test_realm:
+        if test_realm and not test_ctest:
             with Stage('realm'):
                 run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_external:

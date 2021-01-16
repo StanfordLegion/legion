@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,13 +49,14 @@
  * Legion C++ API
  */
 
+#if __cplusplus < 201103L
+#error "Legion requires C++11 as the minimum standard version"
+#endif
+
 #include "legion/legion_types.h"
 #include "legion/legion_domain.h"
 #include "legion/legion_constraint.h"
 #include "legion/legion_redop.h"
-
-// temporary helper macro to turn link errors into runtime errors
-#define UNIMPLEMENTED_METHOD(retval) do { assert(0); return retval; } while(0)
 
 #define LEGION_PRINT_ONCE(runtime, ctx, file, fmt, ...)   \
 {                                                         \
@@ -475,6 +476,7 @@ namespace Legion {
     public:
       FieldAllocator(void);
       FieldAllocator(const FieldAllocator &allocator);
+      FieldAllocator(FieldAllocator &&allocator);
       ~FieldAllocator(void);
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
@@ -482,6 +484,7 @@ namespace Legion {
       FieldAllocator(Internal::FieldAllocatorImpl *impl);
     public:
       FieldAllocator& operator=(const FieldAllocator &allocator);
+      FieldAllocator& operator=(FieldAllocator &&allocator);
       inline bool operator<(const FieldAllocator &rhs) const;
       inline bool operator==(const FieldAllocator &rhs) const;
     public:
@@ -630,10 +633,12 @@ namespace Legion {
       ArgumentMap(void);
       ArgumentMap(const FutureMap &rhs);
       ArgumentMap(const ArgumentMap &rhs);
+      ArgumentMap(ArgumentMap &&rhs);
       ~ArgumentMap(void);
     public:
       ArgumentMap& operator=(const FutureMap &rhs);
       ArgumentMap& operator=(const ArgumentMap &rhs);
+      ArgumentMap& operator=(ArgumentMap &&rhs);
       inline bool operator==(const ArgumentMap &rhs) const
         { return (impl == rhs.impl); }
       inline bool operator<(const ArgumentMap &rhs) const
@@ -722,6 +727,7 @@ namespace Legion {
     public:
       Predicate(void);
       Predicate(const Predicate &p);
+      Predicate(Predicate &&p);
       explicit Predicate(bool value);
       ~Predicate(void);
     protected:
@@ -731,6 +737,7 @@ namespace Legion {
       explicit Predicate(Internal::PredicateImpl *impl);
     public:
       Predicate& operator=(const Predicate &p);
+      Predicate& operator=(Predicate &&p);
       inline bool operator==(const Predicate &p) const;
       inline bool operator<(const Predicate &p) const;
       inline bool operator!=(const Predicate &p) const;
@@ -1044,7 +1051,7 @@ namespace Legion {
       const void* get_projection_args(size_t *size) const;
       void set_projection_args(const void *args, size_t size, bool own = false);
     public:
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
       unsigned get_accessor_privilege(void) const;
 #endif
       bool has_field_privilege(FieldID fid) const;
@@ -1216,6 +1223,7 @@ namespace Legion {
     public:
       Future(void);
       Future(const Future &f);
+      Future(Future &&f);
       ~Future(void);
     private:
       Internal::FutureImpl *impl;
@@ -1230,6 +1238,7 @@ namespace Legion {
       bool operator<(const Future &f) const
         { return impl < f.impl; }
       Future& operator=(const Future &f);
+      Future& operator=(Future &&f);
     public:
       /**
        * Wait on the result of this future.  Return
@@ -1350,6 +1359,7 @@ namespace Legion {
     public:
       FutureMap(void);
       FutureMap(const FutureMap &map);
+      FutureMap(FutureMap &&map);
       ~FutureMap(void);
     private:
       Internal::FutureMapImpl *impl;
@@ -1366,6 +1376,7 @@ namespace Legion {
       inline Future operator[](const DomainPoint &point) const
         { return get_future(point); }
       FutureMap& operator=(const FutureMap &f);
+      FutureMap& operator=(FutureMap &&f);
     public:
       /**
        * Block until we can return the result for the
@@ -2231,6 +2242,7 @@ namespace Legion {
     public:
       PhysicalRegion(void);
       PhysicalRegion(const PhysicalRegion &rhs);
+      PhysicalRegion(PhysicalRegion &&rhs);
       ~PhysicalRegion(void);
     private:
       Internal::PhysicalRegionImpl *impl;
@@ -2239,6 +2251,7 @@ namespace Legion {
       explicit PhysicalRegion(Internal::PhysicalRegionImpl *impl);
     public:
       PhysicalRegion& operator=(const PhysicalRegion &rhs);
+      PhysicalRegion& operator=(PhysicalRegion &&rhs);
       inline bool operator==(const PhysicalRegion &reg) const
         { return (impl == reg.impl); }
       inline bool operator<(const PhysicalRegion &reg) const
@@ -2303,7 +2316,9 @@ namespace Legion {
       /**
        * Return the memories where the underlying physical instances locate.
        */
-      void get_memories(std::set<Memory>& memories) const;
+      void get_memories(std::set<Memory>& memories,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL) const;
       /**
        * Return a list of fields that the physical region contains.
        */
@@ -2402,7 +2417,7 @@ namespace Legion {
      */
     template<PrivilegeMode MODE, typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<FT,N,COORD_T>,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
              bool CHECK_BOUNDS = true>
 #else
              bool CHECK_BOUNDS = false>
@@ -2493,7 +2508,7 @@ namespace Legion {
      */
     template<typename REDOP, bool EXCLUSIVE, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<typename REDOP::RHS,N,COORD_T>,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
              bool CHECK_BOUNDS = true>
 #else
              bool CHECK_BOUNDS = false>
@@ -2572,12 +2587,12 @@ namespace Legion {
      */
     template<typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<FT,N,COORD_T>,
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
              bool CHECK_BOUNDS = true,
 #else
              bool CHECK_BOUNDS = false,
 #endif
-#ifdef PRIVILEGE_CHECKS
+#ifdef LEGION_PRIVILEGE_CHECKS
              bool CHECK_PRIVILEGES = true,
 #else
              bool CHECK_PRIVILEGES = false,
@@ -2741,11 +2756,15 @@ namespace Legion {
     public:
       PieceIterator(void);
       PieceIterator(const PieceIterator &rhs);
+      PieceIterator(PieceIterator &&rhs);
       PieceIterator(const PhysicalRegion &region, FieldID fid,
-                    bool privilege_only);
+                    bool privilege_only,
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL);
       ~PieceIterator(void);
     public:
       PieceIterator& operator=(const PieceIterator &rhs);
+      PieceIterator& operator=(PieceIterator &&rhs);
     public:
       inline bool valid(void) const;
       bool step(void);
@@ -2777,10 +2796,14 @@ namespace Legion {
     public:
       PieceIteratorT(void);
       PieceIteratorT(const PieceIteratorT &rhs);
+      PieceIteratorT(PieceIteratorT &&rhs);
       PieceIteratorT(const PhysicalRegion &region, FieldID fid,
-                     bool privilege_only);
+                     bool privilege_only,
+                     bool silence_warnings = false,
+                     const char *warning_string = NULL);
     public:
       PieceIteratorT<DIM,COORD_T>& operator=(const PieceIteratorT &rhs);
+      PieceIteratorT<DIM,COORD_T>& operator=(PieceIteratorT &&rhs);
     public:
       inline bool step(void);
       inline const Rect<DIM,COORD_T>& operator*(void) const;
@@ -2913,7 +2936,7 @@ namespace Legion {
      * fastest), but can be switched to fortran order (e.g. first fastest).
      */
     template<typename T, int DIM, typename COORD_T = coord_t, 
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
              bool CHECK_BOUNDS = true>
 #else
              bool CHECK_BOUNDS = false>
@@ -2983,7 +3006,7 @@ namespace Legion {
       friend class OutputRegion;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
       DomainT<DIM,COORD_T> bounds;
 #endif
     };
@@ -3299,6 +3322,8 @@ namespace Legion {
       virtual size_t get_context_index(void) const = 0;
       // Return the depth of this operation in the task tree
       virtual int get_depth(void) const = 0;
+      // Get the parent task associated with this mappable  
+      virtual const Task* get_parent_task(void) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const = 0;
       virtual const Task* as_task(void) const = 0;
@@ -3314,6 +3339,11 @@ namespace Legion {
     public:
       MapperID                                  map_id;
       MappingTagID                              tag;
+    public:
+      // The 'parent_task' member is here for backwards compatibility
+      // It's better to use the 'get_parent_task' method
+      // as this may be NULL until that method is called
+      mutable const Task*                       parent_task;
     public:
       // Mapper annotated data 
       void*                                     mapper_data;
@@ -3354,6 +3384,8 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       Task(void);
     public:
+      // Check whether this task has a parent task
+      virtual bool has_parent_task(void) const = 0;
       virtual const char* get_task_name(void) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3398,9 +3430,6 @@ namespace Legion {
       unsigned                            steal_count;
       bool                                stealable;
       bool                                speculated;
-    public:
-      // Parent task (only guaranteed to be good for one recursion)
-      const Task*                         parent_task;
     };
 
     /**
@@ -3441,9 +3470,6 @@ namespace Legion {
       Domain                            index_domain;
       DomainPoint                       index_point;
       IndexSpace                        sharding_space;
-    public:
-      // Parent task for the copy operation
-      const Task*                       parent_task;
     };
 
     /**
@@ -3476,9 +3502,6 @@ namespace Legion {
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
       LayoutConstraintID                layout_constraint_id; 
-    public:
-      // Parent task for the inline operation
-      const Task*                       parent_task;
     };
 
     /**
@@ -3512,9 +3535,6 @@ namespace Legion {
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
-    public:
-      // Parent task for the acquire operation
-      const Task*                       parent_task;
     };
 
     /**
@@ -3548,9 +3568,6 @@ namespace Legion {
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
-    public:
-      // Parent task for the release operation
-      const Task*                       parent_task;
     };
 
     /**
@@ -3583,9 +3600,6 @@ namespace Legion {
     public:
       // Synthesized region requirement
       RegionRequirement                 requirement;
-    public:
-      // Parent task for the inline operation
-      const Task*                       parent_task;
     };
 
     /**
@@ -3624,9 +3638,6 @@ namespace Legion {
       Domain                            index_domain;
       DomainPoint                       index_point;
       IndexSpace                        sharding_space;
-    public:
-      // Parent task for the fill operation
-      const Task*                       parent_task;
     };
 
     /**
@@ -3672,9 +3683,6 @@ namespace Legion {
       bool                                is_index_space;
       Domain                              index_domain;
       DomainPoint                         index_point;
-    public:
-      // Parent task for the partition operation
-      const Task*                         parent_task;
     };
 
     /**
@@ -3708,9 +3716,6 @@ namespace Legion {
       // Index space of points for the must epoch operation
       Domain                                    launch_domain;
       IndexSpace                                sharding_space;
-    public:
-      // Parent task for the must epoch operation
-      const Task*                               parent_task;
     };
 
     //==========================================================================

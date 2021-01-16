@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -549,9 +549,10 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PHYSICAL_REGION_ALLOC;
     public:
-      PhysicalRegionImpl(const RegionRequirement &req, ApEvent mapped_event,
-                         bool mapped, TaskContext *ctx, MapperID mid,
-                         MappingTagID tag, bool leaf, bool virt, Runtime *rt);
+      PhysicalRegionImpl(const RegionRequirement &req, RtEvent mapped_event,
+            ApEvent ready_event, ApUserEvent term_event, bool mapped, 
+            TaskContext *ctx, MapperID mid, MappingTagID tag, bool leaf, 
+            bool virt, Runtime *rt);
       PhysicalRegionImpl(const PhysicalRegionImpl &rhs);
       ~PhysicalRegionImpl(void);
     public:
@@ -566,7 +567,6 @@ namespace Legion {
                             bool warn = false, const char *src = NULL);
       bool is_valid(void) const;
       bool is_mapped(void) const;
-      bool is_external_region(void) const;
       LogicalRegion get_logical_region(void) const;
       PrivilegeMode get_privilege(void) const;
       LegionRuntime::Accessor::RegionAccessor<
@@ -577,28 +577,28 @@ namespace Legion {
           get_field_accessor(FieldID field, bool silence_warnings = true);
     public:
       void unmap_region(void);
-      void remap_region(ApEvent new_mapped_event);
+      ApEvent remap_region(ApEvent new_ready_event);
       const RegionRequirement& get_requirement(void) const;
-      void set_reference(const InstanceRef &references);
-      void reset_references(const InstanceSet &instances,ApUserEvent term_event,
-                            ApEvent wait_for = ApEvent::NO_AP_EVENT);
-      ApEvent get_mapped_event(void) const;
+      void set_reference(const InstanceRef &references, bool safe = false);
+      void set_references(const InstanceSet &instances, bool safe = false);
       bool has_references(void) const;
       void get_references(InstanceSet &instances) const;
-      void get_memories(std::set<Memory>& memories) const;
+      void get_memories(std::set<Memory>& memories, 
+          bool silence_warnings, const char *warning_string) const;
       void get_fields(std::vector<FieldID>& fields) const;
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
     public:
       const char* get_task_name(void) const;
 #endif
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
     public:
       bool contains_ptr(ptr_t ptr);
       bool contains_point(const DomainPoint &dp);
 #endif
     public:
       void get_bounds(void *realm_is, TypeTag type_tag);
-      PieceIteratorImpl* get_piece_iterator(FieldID fid, bool privilege_only);
+      PieceIteratorImpl* get_piece_iterator(FieldID fid, bool privilege_only,
+                          bool silence_warnings, const char *warning_string);
       PhysicalInstance get_instance_info(PrivilegeMode mode, 
                                          FieldID fid, size_t field_size, 
                                          void *realm_is, TypeTag type_tag,
@@ -628,22 +628,32 @@ namespace Legion {
       const bool virtual_mapped;
       const bool replaying;
     private:
-      // Event for when the instance ref is ready
-      ApEvent mapped_event;
-      // Instance ref
+      const RegionRequirement req;
+      // Event for when the 'references' are set by the producer op
+      // can only be accessed in "application" side code
+      // There should only be one of these triggered by the producer
+      const RtEvent mapped_event;
+      // Event for when it is safe to use the physical instances
+      // can only be accessed in "application" side code
+      // triggered by mapping stage code
+      ApEvent ready_event;
+      // Event for when the mapped application code is done accessing
+      // the physical region, set in "application" side code 
+      // should only be accessed there as well
+      ApUserEvent termination_event;
+      // Physical instances for this mapping
+      // written by the "mapping stage" code of whatever operation made this
+      // can be accessed in "application" side code after 'mapped' triggers
       InstanceSet references;
-      RegionRequirement req;
       // Only used for control replication
       ShardedView *sharded_view;
-      bool mapped; // whether it is currently mapped
-      bool valid; // whether it is currently valid
-      // whether to trigger the termination event
-      // upon unmap
-      bool trigger_on_unmap;
+      // "appliciation side" state
+      // whether it is currently mapped
+      bool mapped; 
+      // whether it is currently valid -> mapped and ready_event has triggered
+      bool valid; 
       bool made_accessor;
-      ApUserEvent termination_event;
-      ApEvent wait_for_unmap;
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
     private:
       Domain bounds;
 #endif
@@ -723,6 +733,7 @@ namespace Legion {
       InstanceSet instance_set;
       // Output data batched during task execution
       std::map<FieldID,ExternalInstanceInfo> returned_instances;
+      std::vector<PhysicalInstance> escaped_instances;
       size_t num_elements;
       const unsigned index;
       const bool created_region;
@@ -1284,8 +1295,6 @@ namespace Legion {
       RtEvent create_eager_instance(PhysicalInstance &instance,
                                     Realm::InstanceLayoutGeneric *layout);
       void free_eager_instance(PhysicalInstance instance, RtEvent defer);
-      void link_eager_instance(PhysicalInstance instance, uintptr_t ptr);
-      uintptr_t unlink_eager_instance(PhysicalInstance instance);
       static void handle_free_eager_instance(const void *args);
     public:
       void free_external_allocation(uintptr_t ptr, size_t size);
@@ -1324,10 +1333,8 @@ namespace Legion {
       size_t eager_remaining_capacity;
       // Allocation counter
       size_t next_allocation_id;
-      // Map each eager instance to its pointer and allocation id
-      std::map<PhysicalInstance,std::pair<uintptr_t,size_t> > eager_instances;
-      // Map unlinked eager allocation to its allocation id
-      std::map<uintptr_t,size_t> unlinked_allocations;
+      // Mapping from pointers to their allocation ids
+      std::map<uintptr_t,size_t> eager_allocations;
     protected:
       // Lock for controlling access to the data
       // structures in this memory manager
@@ -1717,7 +1724,7 @@ namespace Legion {
       ApEvent dispatch_task(Processor target, SingleTask *task, 
           TaskContext *ctx, ApEvent precondition, PredEvent pred,
           int priority, Realm::ProfilingRequestSet &requests);
-      void dispatch_inline(Processor current, InlineContext *ctx);
+      void dispatch_inline(Processor current, TaskContext *ctx);
     public:
       bool can_use(Processor::Kind kind, bool warn) const;
     public:
@@ -2482,7 +2489,6 @@ namespace Legion {
                                 MapperID id = 0, MappingTagID tag = 0);
       void remap_region(Context ctx, PhysicalRegion region);
       void unmap_region(Context ctx, PhysicalRegion region);
-      void unmap_all_regions(Context ctx);
     public:
       void fill_fields(Context ctx, const FillLauncher &launcher);
       void fill_fields(Context ctx, const IndexFillLauncher &launcher);
@@ -2554,10 +2560,6 @@ namespace Legion {
       MappingCallInfo* begin_mapper_call(Context ctx, MapperID id, 
                                          Processor target);
       void end_mapper_call(MappingCallInfo *info);
-      Processor get_executing_processor(Context ctx);
-      void raise_region_exception(Context ctx, PhysicalRegion region, 
-                                  bool nuclear);
-      void yield(Context ctx);
     public:
       void print_once(Context ctx, FILE *f, const char *message);
       void log_once(Context ctx, Realm::LoggerMessage &message);
@@ -4166,11 +4168,11 @@ namespace Legion {
                                          const char *file_name, 
                                          const int line_number,
                                          const char *message);
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+#if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
     public:
       static const char* find_privilege_task_name(void *impl);
 #endif
-#ifdef BOUNDS_CHECKS
+#ifdef LEGION_BOUNDS_CHECKS
     public:
       static void check_bounds(void *impl, ptr_t ptr);
       static void check_bounds(void *impl, const DomainPoint &dp);

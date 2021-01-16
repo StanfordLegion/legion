@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -680,6 +680,8 @@ namespace Legion {
      * of a task.
      */
     class LayoutConstraintSet {
+    public:
+      LayoutConstraintSet(void) { } // provided for dumb c++ compilers
     public: 
       LayoutConstraintSet&
         add_constraint(const SpecializedConstraint &constraint);

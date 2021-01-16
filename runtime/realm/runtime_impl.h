@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,7 @@ namespace Realm {
 
   class ProcessorGroupImpl;
   class MemoryImpl;
+  class IBMemory;
   class ProcessorImpl;
   class RegionInstanceImpl;
   class NetworkSegment;
@@ -124,7 +125,7 @@ namespace Realm {
 
       // not currently resizable
       std::vector<MemoryImpl *> memories;
-      std::vector<MemoryImpl *> ib_memories;
+      std::vector<IBMemory *> ib_memories;
       std::vector<ProcessorImpl *> processors;
       std::vector<DMAChannel *> dma_channels;
 
@@ -261,6 +262,7 @@ namespace Realm {
 
       ReservationImpl *get_lock_impl(ID id);
       MemoryImpl *get_memory_impl(ID id);
+      IBMemory *get_ib_memory_impl(ID id);
       ProcessorImpl *get_processor_impl(ID id);
       ProcessorGroupImpl *get_procgroup_impl(ID id);
       RegionInstanceImpl *get_instance_impl(ID id);
@@ -339,7 +341,7 @@ namespace Realm {
     public:
       // used by modules to add processors, memories, etc.
       void add_memory(MemoryImpl *m);
-      void add_ib_memory(MemoryImpl *m);
+      void add_ib_memory(IBMemory *m);
       void add_processor(ProcessorImpl *p);
       void add_dma_channel(DMAChannel *c);
       void add_code_translator(CodeTranslator *t);

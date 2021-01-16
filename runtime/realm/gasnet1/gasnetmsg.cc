@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2506,11 +2506,11 @@ typedef union {
   gasnet_handlerarg_t args[16];
 } MessageHeader;
 
-static void incoming_message_handled(NodeID sender, uintptr_t data)
+static void incoming_message_handled(NodeID sender,
+				     uintptr_t comp_info,
+				     uintptr_t msgptr_index)
 {
   endpoint_manager->count_handled_message(sender);
-  uintptr_t comp_info = data >> 8;
-  int msgptr_index = data & 255;
   handle_long_msgptr(sender, msgptr_index);
   if(comp_info != 0)
     CHECK_GASNET( gasnet_AMRequestShort1(sender, MSGID_COMPLETION_REPLY,
@@ -2591,9 +2591,7 @@ static void handle_new_activemsg(gasnet_token_t token,
       deferred_comp_info = 0;
 
     int msgptr_index = endpoint_manager->long_msgptr_to_index(src, buf);
-    assert((msgptr_index >= 0) && (msgptr_index <= 255));
-    uintptr_t callback_data = (deferred_comp_info << 8) + msgptr_index;
-	
+
     bool handled = 
       incoming_message_manager->add_incoming_message(src, msgid,
 						     &header.args[6], 10*4,
@@ -2601,7 +2599,8 @@ static void handle_new_activemsg(gasnet_token_t token,
 						     buf, nbytes,
 						     PAYLOAD_KEEP,
 						     incoming_message_handled,
-						     callback_data,
+						     deferred_comp_info,
+						     msgptr_index,
 						     ((ThreadLocal::gasnet_work_until != 0) ?
 						        *ThreadLocal::gasnet_work_until :
 						        TimeLimit()));
@@ -2609,7 +2608,7 @@ static void handle_new_activemsg(gasnet_token_t token,
       // we need to call the callback ourselves - we'll both local and remote
       //  completions as a gasnet reply (incoming_message_handled would use a
       //  request, which is not legal here)
-      incoming_message_handled(src, msgptr_index);
+      incoming_message_handled(src, 0, msgptr_index);
       if(comp_info != 0)
 	CHECK_GASNET( gasnet_AMReplyShort1(token, MSGID_COMPLETION_REPLY,
 					   comp_info) );
