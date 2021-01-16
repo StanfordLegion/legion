@@ -3655,7 +3655,6 @@ namespace Legion {
           context->owner_task->get_unique_op_id(),
           instance.get_location().id, manager->get_memory().id);
 
-
       // The realm instance backing a deferred buffer is currently tagged as
       // a task local instance, so we need to tell the runtime that the instance
       // now escapes the context.
@@ -3671,6 +3670,9 @@ namespace Legion {
                           : layout->space.bounds.volume();
 
       return_data(num_elements, field_id, ptr, layout->alignment_reqd, true);
+      // This instance was escaped so the context is no longer responsible
+      // for destroying it when the task is done, we take that responsibility
+      escaped_instances.push_back(instance);
     }
 
     //--------------------------------------------------------------------------
@@ -3837,16 +3839,13 @@ namespace Legion {
                                   PhysicalManager::EXTERNAL_OWNED_INSTANCE_KIND,
                                           bytes_used,
                                           info.ptr);
-
-        // If this is an allocation drawn from the eager pool,
-        // we need to link the pointer back to the memory manager with a
-        // new instance name so that the manager can keep track of this
-        // instance.
-        if (info.eager_pool)
-          manager->memory_manager->link_eager_instance(instance, info.ptr);
         if (delete_now)
           delete manager;
       }
+      // Lasty destroy our physical instance objects since the task is done
+      for (std::vector<PhysicalInstance>::const_iterator it =
+            escaped_instances.begin(); it != escaped_instances.end(); it++)
+        it->destroy();
     }
 
     //--------------------------------------------------------------------------
@@ -8764,9 +8763,9 @@ namespace Legion {
         wait_on = RtEvent(Realm::RegionInstance::create_external_instance(
               instance, memory, layout, resource, no_requests));
 #ifdef DEBUG_LEGION
-        assert(eager_instances.find(instance) == eager_instances.end());
+        assert(eager_allocations.find(ptr) == eager_allocations.end());
 #endif
-        eager_instances[instance] = std::make_pair(ptr, allocation_id);
+        eager_allocations[ptr] = allocation_id;
         log_eager.debug("allocate instance " IDFMT
                         " (%p+%zd, %zd) on memory " IDFMT ", %zd bytes left",
                         instance.id,
@@ -8803,17 +8802,26 @@ namespace Legion {
       }
       else
       {
+        // Technically realm could return us a null pointer here if the 
+        // instance is not directly accessible on this node, but that
+        // should never happen because all eager allocations are done
+        // locally and to memories for which loads and stores are safe
+        void *base = instance.pointer_untyped(0,0);
+#ifdef DEBUG_LEGION
+        assert(base != NULL);
+#endif
+        const uintptr_t ptr = reinterpret_cast<uintptr_t>(base);
         {
           AutoLock lock(manager_lock);
-          std::map<PhysicalInstance,std::pair<uintptr_t,size_t> >::iterator
-            finder = eager_instances.find(instance);
+          std::map<uintptr_t,size_t>::iterator finder = 
+            eager_allocations.find(ptr);
 #ifdef DEBUG_LEGION
-          assert(finder != eager_instances.end());
+          assert(finder != eager_allocations.end());
 #endif
-          const size_t size = eager_allocator->get_size(finder->second.second);
+          const size_t size = eager_allocator->get_size(finder->second);
           eager_remaining_capacity += size;
-          eager_allocator->deallocate(finder->second.second);
-          eager_instances.erase(finder);
+          eager_allocator->deallocate(finder->second);
+          eager_allocations.erase(finder);
           log_eager.debug(
             "deallocate instance " IDFMT " of size %zd on memory " IDFMT
             ", %zd bytes left", instance.id, size, memory.id,
@@ -8821,51 +8829,6 @@ namespace Legion {
         }
         instance.destroy();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::link_eager_instance(
-                                       PhysicalInstance instance, uintptr_t ptr)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock lock(manager_lock);
-      std::map<uintptr_t,size_t>::iterator finder =
-        unlinked_allocations.find(ptr);
-#ifdef DEBUG_LEGION
-      assert(finder != unlinked_allocations.end());
-#endif
-      log_eager.debug("link instance " IDFMT " (%p, %zd) on memory " IDFMT,
-                      instance.id, reinterpret_cast<void*>(ptr),
-                      finder->second, memory.id);
-      eager_instances[instance] = std::make_pair(finder->first, finder->second);
-      unlinked_allocations.erase(finder);
-    }
-
-    //--------------------------------------------------------------------------
-    uintptr_t MemoryManager::unlink_eager_instance(PhysicalInstance instance)
-    //--------------------------------------------------------------------------
-    {
-      // Note that this function removes the instance from the manager without
-      // deallocating it. It's the caller's responsibility to link
-      // the allocation back in the memory manager
-      AutoLock lock(manager_lock);
-      std::map<PhysicalInstance,std::pair<uintptr_t,size_t> >::iterator
-        finder = eager_instances.find(instance);
-#ifdef DEBUG_LEGION
-      assert(finder != eager_instances.end());
-#endif
-      eager_instances.erase(finder);
-      uintptr_t ptr = finder->second.first;
-      size_t allocation_id = finder->second.second;
-      log_eager.debug("unlink instance " IDFMT " (%p, %zd) on memory " IDFMT,
-                      instance.id, reinterpret_cast<void*>(ptr),
-                      allocation_id, memory.id);
-
-#ifdef DEBUG_LEGION
-      assert(unlinked_allocations.find(ptr) == unlinked_allocations.end());
-#endif
-      unlinked_allocations[ptr] = allocation_id;
-      return ptr;
     }
 
     //--------------------------------------------------------------------------

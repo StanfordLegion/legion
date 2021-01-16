@@ -506,11 +506,11 @@ namespace Legion {
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                         Realm::InstanceLayoutGeneric *layout);
       virtual void destroy_task_local_instance(PhysicalInstance instance);
-      virtual uintptr_t escape_task_local_instance(PhysicalInstance instance);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                     PhysicalInstance inst, FutureFunctor *callback_functor) = 0;
       virtual void post_end_task(const void *res, size_t res_size, 
                                bool owned, FutureFunctor *callback_functor) = 0;
+      uintptr_t escape_task_local_instance(PhysicalInstance instance);
       void begin_misspeculation(void);
       void end_misspeculation(const void *res, size_t res_size);
     public:
