@@ -8147,6 +8147,10 @@ class Task(object):
 
     __repr__ = __str__
 
+    @property
+    def html_safe_name(self):
+        return str(self).replace('<','&lt;').replace('>','&gt;')
+
     def add_operation(self, operation):
         self.operations.append(operation)
 
@@ -8732,7 +8736,7 @@ class Task(object):
             return
         if not top:
             # Start the cluster 
-            title = str(self)+' (UID: '+str(self.op.uid)+')'
+            title = self.html_safe_name + ' (UID: '+str(self.op.uid)+')'
             if self.point.dim > 0:
                 title += ' Point: ' + self.point.to_string()
             if self.op.replayed:

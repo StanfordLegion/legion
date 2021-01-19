@@ -733,6 +733,7 @@ namespace Legion {
       InstanceSet instance_set;
       // Output data batched during task execution
       std::map<FieldID,ExternalInstanceInfo> returned_instances;
+      std::vector<PhysicalInstance> escaped_instances;
       size_t num_elements;
       const unsigned index;
       const bool created_region;
@@ -1294,8 +1295,6 @@ namespace Legion {
       RtEvent create_eager_instance(PhysicalInstance &instance,
                                     Realm::InstanceLayoutGeneric *layout);
       void free_eager_instance(PhysicalInstance instance, RtEvent defer);
-      void link_eager_instance(PhysicalInstance instance, uintptr_t ptr);
-      uintptr_t unlink_eager_instance(PhysicalInstance instance);
       static void handle_free_eager_instance(const void *args);
     public:
       void free_external_allocation(uintptr_t ptr, size_t size);
@@ -1334,10 +1333,8 @@ namespace Legion {
       size_t eager_remaining_capacity;
       // Allocation counter
       size_t next_allocation_id;
-      // Map each eager instance to its pointer and allocation id
-      std::map<PhysicalInstance,std::pair<uintptr_t,size_t> > eager_instances;
-      // Map unlinked eager allocation to its allocation id
-      std::map<uintptr_t,size_t> unlinked_allocations;
+      // Mapping from pointers to their allocation ids
+      std::map<uintptr_t,size_t> eager_allocations;
     protected:
       // Lock for controlling access to the data
       // structures in this memory manager

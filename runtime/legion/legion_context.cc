@@ -2106,9 +2106,12 @@ namespace Legion {
 #ifdef LEGION_MALLOC_INSTANCES
       uintptr_t ptr = 0;
       std::vector<std::pair<PhysicalInstance,uintptr_t> > new_instances;
+#ifdef DEBUG_LEGION
+      assert(!task_local_instances.empty());
+#endif
+      new_instances.reserve(task_local_instances.size() - 1);
       for (std::vector<std::pair<PhysicalInstance,uintptr_t> >::iterator it =
-           task_local_instances.begin(); it !=
-           task_local_instances.end(); ++it)
+           task_local_instances.begin(); it != task_local_instances.end(); ++it)
         if (it->first == instance)
           ptr = it->second;
         else
@@ -2127,13 +2130,11 @@ namespace Legion {
 #endif
       // Remove the instance from the set of task local instances
       task_local_instances.erase(finder);
-
-      MemoryManager *manager = runtime->find_memory_manager(
-          instance.get_location());
-      // We also need to unlink the instance from the manager
-      // as we need to register the allocation with a different
-      // instance name later.
-      return manager->unlink_eager_instance(instance);
+      void *ptr = instance.pointer_untyped(0,0);
+#ifdef DEBUG_LEGION
+      assert(ptr != NULL);
+#endif
+      return reinterpret_cast<uintptr_t>(ptr);
 #endif
     }
 
