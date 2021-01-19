@@ -73,12 +73,12 @@ namespace Realm {
     PyThreadState *(*PyThreadState_New)(PyInterpreterState *);
     void (*PyThreadState_Clear)(PyThreadState *);
     void (*PyThreadState_Delete)(PyThreadState *);
-    PyThreadState *(*PyThreadState_Get)(void);
 #endif
     void (*PyEval_RestoreThread)(PyThreadState *);
     PyThreadState *(*PyEval_SaveThread)(void);
 
     PyThreadState *(*PyThreadState_Swap)(PyThreadState *);
+    PyThreadState *(*PyThreadState_Get)(void);
 
     void (*PyErr_PrintEx)(int set_sys_last_vars);
 
