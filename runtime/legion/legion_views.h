@@ -111,8 +111,7 @@ namespace Legion {
      */
     class InstanceView : public LogicalView {
     public:
-      typedef LegionMap<ApEvent,
-                FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs; 
+      typedef LegionMap<ApEvent,FieldMask>::aligned EventFieldMap;
       typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> >::aligned 
                                                               EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
@@ -188,7 +187,7 @@ namespace Legion {
                                     const FieldMask &copy_mask,
                                     IndexSpaceExpression *copy_expr,
                                     UniqueID op_id, unsigned index,
-                                    EventFieldExprs &preconditions,
+                                    EventFieldMap &preconditions,
                                     const bool trace_recording,
                                     const AddressSpaceID source) = 0;
       virtual void add_copy_user(bool reading, ReductionOpID redop,
@@ -304,8 +303,7 @@ namespace Legion {
     class ExprView : public LegionHeapify<ExprView>, 
                      public CollectableView, public Collectable {
     public:
-      typedef LegionMap<ApEvent,
-                FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs; 
+      typedef LegionMap<ApEvent,FieldMask>::aligned EventFieldMap;
       typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> >::aligned 
                                                               EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
@@ -334,7 +332,7 @@ namespace Legion {
                                    const bool copy_dominates,
                                    const FieldMask &copy_mask,
                                    UniqueID op_id, unsigned index,
-                                   EventFieldExprs &preconditions,
+                                   EventFieldMap &preconditions,
                                    const bool trace_recording);
       // Check to see if there is any view with the same shape already
       // in the ExprView tree, if so return it
@@ -406,7 +404,7 @@ namespace Legion {
                                       const UniqueID op_id,
                                       const unsigned index,
                                       const bool user_covers,
-                                      EventFieldExprs &preconditions,
+                                      EventFieldMap &preconditions,
                                       std::set<ApEvent> &dead_events,
                                       EventFieldUsers &filter_events,
                                       FieldMask &observed, 
@@ -418,7 +416,7 @@ namespace Legion {
                                       const UniqueID op_id,
                                       const unsigned index,
                                       const bool user_covers,
-                                      EventFieldExprs &preconditions,
+                                      EventFieldMap &preconditions,
                                       std::set<ApEvent> &dead_events,
                                       const bool trace_recording);
       template<bool COPY_USER>
@@ -622,7 +620,7 @@ namespace Legion {
                                     const FieldMask &copy_mask,
                                     IndexSpaceExpression *copy_expr,
                                     UniqueID op_id, unsigned index,
-                                    EventFieldExprs &preconditions,
+                                    EventFieldMap &preconditions,
                                     const bool trace_recording,
                                     const AddressSpaceID source);
       virtual void add_copy_user(bool reading, ReductionOpID redop,
@@ -799,7 +797,7 @@ namespace Legion {
                                     const FieldMask &copy_mask,
                                     IndexSpaceExpression *copy_expr,
                                     UniqueID op_id, unsigned index,
-                                    EventFieldExprs &preconditions,
+                                    EventFieldMap &preconditions,
                                     const bool trace_recording,
                                     const AddressSpaceID source);
       virtual void add_copy_user(bool reading, ReductionOpID redop,
@@ -819,15 +817,15 @@ namespace Legion {
       void find_initializing_preconditions(const FieldMask &user_mask,
                                            IndexSpaceExpression *user_expr,
                                            UniqueID op_id,
-                                           EventFieldExprs &preconditions);
+                                           EventFieldMap &preconditions);
       void find_reducing_preconditions(const FieldMask &user_mask,
                                        IndexSpaceExpression *user_expr,
                                        UniqueID op_id,
-                                       EventFieldExprs &preconditions) const;
+                                       EventFieldMap &preconditions) const;
       void find_reading_preconditions(const FieldMask &user_mask,
                                       IndexSpaceExpression *user_expr,
                                       UniqueID op_id,
-                                      EventFieldExprs &preconditions) const;
+                                      EventFieldMap &preconditions) const;
       bool add_user(const RegionUsage &usage,
                     IndexSpaceExpression *user_expr,
                     const FieldMask &user_mask,
@@ -912,6 +910,8 @@ namespace Legion {
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
+                           EquivalenceSet *tracing_eq,
+                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper) = 0;
     };
 
@@ -971,6 +971,8 @@ namespace Legion {
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
+                           EquivalenceSet *tracing_eq,
+                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
@@ -1043,6 +1045,8 @@ namespace Legion {
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
+                           EquivalenceSet *tracign_eq,
+                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
       void record_true_view(LogicalView *view, const FieldMask &view_mask,
@@ -1108,7 +1112,10 @@ namespace Legion {
     public:
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
-                           IndexSpaceExpression *expr,CopyAcrossHelper *helper);
+                           IndexSpaceExpression *expr,
+                           EquivalenceSet *tracing_eq,
+                           std::set<RtEvent> &applied,
+                           CopyAcrossHelper *helper);
     public:
       void initialize(LegionMap<DistributedID,FieldMask>::aligned &views,
                       const InstanceSet &local_instances,

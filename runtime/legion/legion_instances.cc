@@ -178,6 +178,52 @@ namespace Legion {
       return src_mask;
     }
 
+    //--------------------------------------------------------------------------
+    unsigned CopyAcrossHelper::convert_src_to_dst(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      if (forward_map.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(src_indexes.size() == dst_indexes.size());
+#endif
+        for (unsigned idx = 0; idx < src_indexes.size(); idx++)
+        {
+#ifdef DEBUG_LEGION
+          assert(forward_map.find(src_indexes[idx]) == forward_map.end());
+#endif
+          forward_map[src_indexes[idx]] = dst_indexes[idx];
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(forward_map.find(index) != forward_map.end());
+#endif
+      return forward_map[index];
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CopyAcrossHelper::convert_dst_to_src(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      if (backward_map.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(src_indexes.size() == dst_indexes.size());
+#endif
+        for (unsigned idx = 0; idx < dst_indexes.size(); idx++)
+        {
+#ifdef DEBUG_LEGION
+          assert(backward_map.find(dst_indexes[idx]) == backward_map.end());
+#endif
+          backward_map[dst_indexes[idx]] = src_indexes[idx];
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(backward_map.find(index) != backward_map.end());
+#endif
+      return backward_map[index];
+    }
+
     /////////////////////////////////////////////////////////////
     // Layout Description 
     /////////////////////////////////////////////////////////////
@@ -1410,8 +1456,8 @@ namespace Legion {
 #endif
                                                  precondition, predicate_guard);
       if (trace_info.recording)
-        trace_info.record_fill_views(result, fill_expression,
-              *tracing_srcs, *tracing_dsts, effects_applied, (redop > 0));
+        trace_info.record_fill_views(result, fill_expression, *tracing_srcs, 
+            *                        tracing_dsts, effects_applied,(redop > 0));
       return result;
     }
 
@@ -1458,8 +1504,8 @@ namespace Legion {
               finder->second, this, source_manager, precondition, 
               predicate_guard, reduction_op_id, false/*fold*/);
           if (trace_info.recording)
-            trace_info.record_copy_views(result, copy_expression,
-                  *tracing_srcs, *tracing_dsts, effects_applied);
+            trace_info.record_copy_views(result, copy_expression, *tracing_srcs,
+                                         *tracing_dsts, effects_applied);
           return result;
         }
       }
@@ -1473,8 +1519,8 @@ namespace Legion {
                                          precondition, predicate_guard,
                                          reduction_op_id, false/*fold*/); 
       if (trace_info.recording)
-        trace_info.record_copy_views(result, copy_expression,
-              *tracing_srcs, *tracing_dsts, effects_applied);
+        trace_info.record_copy_views(result, copy_expression, *tracing_srcs, 
+                                     *tracing_dsts, effects_applied);
       return result;
     }
 

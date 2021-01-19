@@ -366,6 +366,9 @@ namespace Legion {
       FieldMask convert_src_to_dst(const FieldMask &src_mask);
       FieldMask convert_dst_to_src(const FieldMask &dst_mask);
     public:
+      unsigned convert_src_to_dst(unsigned index);
+      unsigned convert_dst_to_src(unsigned index);
+    public:
       std::vector<CopySrcDstField> offsets; 
       LegionDeque<std::pair<FieldMask,FieldMask> >::aligned compressed_cache;
     };

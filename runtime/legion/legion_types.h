@@ -336,6 +336,7 @@ namespace Legion {
       LG_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       LG_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
       LG_DEFER_FIELD_INFOS_TASK_ID,
+      LG_DEFER_COMPUTE_EQ_SETS_TASK_ID,
       LG_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_DEFER_CHILD_TASK_ID,
@@ -349,6 +350,7 @@ namespace Legion {
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
       LG_DEFER_LAUNCH_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
+      LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID,
       LG_DEFER_FIND_COPY_PRE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_DEFER_REDUCTION_VIEW_TASK_ID,
@@ -363,15 +365,10 @@ namespace Legion {
       LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
       LG_REPLAY_SLICE_ID,
       LG_DELETE_TEMPLATE_ID,
-      LG_REFINEMENT_TASK_ID,
-      LG_REMOTE_REF_TASK_ID,
-      LG_DEFER_RAY_TRACE_TASK_ID,
-      LG_DEFER_RAY_TRACE_FINISH_TASK_ID,
-      LG_DEFER_SUBSET_REQUEST_TASK_ID,
       LG_DEFER_MAKE_OWNER_TASK_ID,
-      LG_DEFER_MERGE_OR_FORWARD_TASK_ID,
-      LG_DEFER_EQ_RESPONSE_TASK_ID,
-      LG_DEFER_REMOVE_EQ_REF_TASK_ID,
+      LG_DEFER_PENDING_REPLICATION_TASK_ID,
+      LG_DEFER_APPLY_STATE_TASK_ID,
+      LG_DEFER_RELEASE_REF_TASK_ID,
       LG_DEFER_REMOTE_REF_UPDATE_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
@@ -394,14 +391,20 @@ namespace Legion {
       LG_DEFER_DELETE_INDIVIDUAL_MANAGER_TASK_ID,
       LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
+      LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
+      LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
+      LG_DEFER_FINALIZE_PENDING_SET_TASK_ID,
       LG_FREE_EAGER_INSTANCE_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
+      LG_DEFER_TRACE_PRECONDITION_TASK_ID,
+      LG_DEFER_TRACE_POSTCONDITION_TASK_ID,
+      LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID,
+      LG_DEFER_TRACE_UPDATE_TASK_ID,
+      LG_FINALIZE_OUTPUT_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_YIELD_TASK_ID,
-      LG_DEFER_TRACE_UPDATE_TASK_ID,
-      LG_FIANLIZE_OUTPUT_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
       LG_BEGIN_SHUTDOWN_TASK_IDS,
       LG_RETRY_SHUTDOWN_TASK_ID = LG_BEGIN_SHUTDOWN_TASK_IDS,
@@ -457,6 +460,7 @@ namespace Legion {
         "Field Space Semantic Request",                           \
         "Field Semantic Request",                                 \
         "Defer Field Infos Request",                              \
+        "Defer Compute Equivalence Sets",                         \
         "Region Semantic Request",                                \
         "Partition Semantic Request",                             \
         "Defer Index Space Child Request",                        \
@@ -470,6 +474,7 @@ namespace Legion {
         "Defer Task Perform Mapping",                             \
         "Defer Task Launch",                                      \
         "Handle Mapping Misspeculation",                          \
+        "Defer Trigger Task Complete",                            \
         "Defer Find Copy Preconditions",                          \
         "Defer Materialized View Registration",                   \
         "Defer Reduction View Registration",                      \
@@ -484,15 +489,10 @@ namespace Legion {
         "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
         "Delete Physical Template",                               \
-        "Refinement",                                             \
-        "Remove Remote References",                               \
-        "Defer Ray Trace",                                        \
-        "Defer Ray Trace Finish",                                 \
-        "Defer Subset Request",                                   \
-        "Defer Make Owner",                                       \
-        "Defer Merge or Forward",                                 \
-        "Defer Equivalence Set Response",                         \
-        "Defer Remove Equivalence Set Expression References",     \
+        "Defer Equivalence Set Make Owner",                       \
+        "Defer Pending Equivalence Set Replication",              \
+        "Defer Equivalence Set Apply State",                      \
+        "Defer Equivalence Set Remove References",                \
         "Defer Remote Reference Update",                          \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \
@@ -515,14 +515,20 @@ namespace Legion {
         "Defer Instance Manager Deletion",                        \
         "Defer Reduction Manager Registration",                   \
         "Defer Verify Partition",                                 \
+        "Defer Remove Remote Region Tree Flow Back References",   \
         "Defer Release Acquired Instances",                       \
+        "Defer Disjoint Complete Response",                       \
+        "Defer Finalize Pending Equivalence Set",                 \
         "Free Eager Instance",                                    \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
-        "Defer Consensus Match",                                  \
-        "Yield",                                                  \
+        "Defer Trace Precondition Test",                          \
+        "Defer Trace Postcondition Test",                         \
+        "Defer Trace Finalize Condition Set Updates",             \
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
+        "Defer Consensus Match",                                  \
+        "Yield",                                                  \
         "Retry Shutdown",                                         \
         "Remote Message",                                         \
       };
@@ -728,6 +734,10 @@ namespace Legion {
       SEND_INDEX_PARTITION_CHILD_REQUEST,
       SEND_INDEX_PARTITION_CHILD_RESPONSE,
       SEND_INDEX_PARTITION_DISJOINT_UPDATE,
+      SEND_INDEX_PARTITION_SHARD_RECTS_REQUEST,
+      SEND_INDEX_PARTITION_SHARD_RECTS_RESPONSE,
+      SEND_INDEX_PARTITION_REMOTE_INTERFERENCE_REQUEST,
+      SEND_INDEX_PARTITION_REMOTE_INTERFERENCE_RESPONSE,
       SEND_FIELD_SPACE_NODE,
       SEND_FIELD_SPACE_REQUEST,
       SEND_FIELD_SPACE_RETURN,
@@ -771,7 +781,7 @@ namespace Legion {
       DISTRIBUTED_UNREGISTER,
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
-      SEND_BACK_LOGICAL_STATE,
+      SEND_CREATED_REGION_CONTEXTS,
       SEND_MATERIALIZED_VIEW,
       SEND_FILL_VIEW,
       SEND_PHI_VIEW,
@@ -804,10 +814,10 @@ namespace Legion {
       SEND_REPL_FUTURE_MAP_RESPONSE,
       SEND_REPL_TOP_VIEW_REQUEST,
       SEND_REPL_TOP_VIEW_RESPONSE,
-      SEND_REPL_EQ_REQUEST,
-      SEND_REPL_EQ_RESPONSE,
+      SEND_REPL_DISJOINT_COMPLETE_REQUEST,
+      SEND_REPL_DISJOINT_COMPLETE_RESPONSE,
       SEND_REPL_INTRA_SPACE_DEP,
-      SEND_REPL_RESOURCE_UPDATE,
+      SEND_REPL_BROADCAST_UPDATE,
       SEND_REPL_TRACE_EVENT_REQUEST,
       SEND_REPL_TRACE_EVENT_RESPONSE,
       SEND_REPL_TRACE_UPDATE,
@@ -831,23 +841,27 @@ namespace Legion {
       SEND_LOGICAL_PARTITION_SEMANTIC_INFO,
       SEND_REMOTE_CONTEXT_REQUEST,
       SEND_REMOTE_CONTEXT_RESPONSE,
-      SEND_REMOTE_CONTEXT_RELEASE,
       SEND_REMOTE_CONTEXT_FREE,
       SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
+      SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
       SEND_EQUIVALENCE_SET_REQUEST,
       SEND_EQUIVALENCE_SET_RESPONSE,
-      SEND_EQUIVALENCE_SET_SUBSET_REQUEST,
-      SEND_EQUIVALENCE_SET_SUBSET_RESPONSE,
-      SEND_EQUIVALENCE_SET_SUBSET_UPDATE,
-      SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST,
-      SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
+      SEND_EQUIVALENCE_SET_INVALIDATE_TRACKERS,
+      SEND_EQUIVALENCE_SET_REPLICATION_REQUEST,
+      SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE,
+      SEND_EQUIVALENCE_SET_REPLICATION_UPDATE,
       SEND_EQUIVALENCE_SET_MIGRATION,
       SEND_EQUIVALENCE_SET_OWNER_UPDATE,
-      SEND_EQUIVALENCE_SET_REMOTE_REFINEMENT,
+      SEND_EQUIVALENCE_SET_MAKE_OWNER,
+      SEND_EQUIVALENCE_SET_CLONE_REQUEST,
+      SEND_EQUIVALENCE_SET_CLONE_RESPONSE,
+      SEND_EQUIVALENCE_SET_CAPTURE_REQUEST,
+      SEND_EQUIVALENCE_SET_CAPTURE_RESPONSE,
       SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES,
       SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INVALID,
+      SEND_EQUIVALENCE_SET_REMOTE_REQUEST_ANTIVALID,
       SEND_EQUIVALENCE_SET_REMOTE_UPDATES,
       SEND_EQUIVALENCE_SET_REMOTE_ACQUIRES,
       SEND_EQUIVALENCE_SET_REMOTE_RELEASES,
@@ -855,7 +869,6 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES,
       SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
-      SEND_EQUIVALENCE_SET_STALE_UPDATE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_CREATE_REQUEST,
@@ -898,8 +911,6 @@ namespace Legion {
       SEND_REMOTE_OP_PROFILING_COUNT_UPDATE,
       SEND_REMOTE_TRACE_UPDATE,
       SEND_REMOTE_TRACE_RESPONSE,
-      SEND_REMOTE_TRACE_EQ_REQUEST,
-      SEND_REMOTE_TRACE_EQ_RESPONSE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -935,6 +946,10 @@ namespace Legion {
         "Send Index Partition Child Request",                         \
         "Send Index Partition Child Response",                        \
         "Send Index Partition Disjoint Update",                       \
+        "Send Index Partition Shard Rects Request",                   \
+        "Send Index Partition Shard Rects Response",                  \
+        "Send Index Partition Remote Interference Request",           \
+        "Send Index Partition Remote Interference Response",          \
         "Send Field Space Node",                                      \
         "Send Field Space Request",                                   \
         "Send Field Space Return",                                    \
@@ -978,7 +993,7 @@ namespace Legion {
         "Distributed Unregister",                                     \
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \
-        "Send Back Logical State",                                    \
+        "Send Created Region Contexts",                               \
         "Send Materialized View",                                     \
         "Send Fill View",                                             \
         "Send Phi View",                                              \
@@ -1011,10 +1026,10 @@ namespace Legion {
         "Send Replicate Future Map Response",                         \
         "Send Replicate Top View Request",                            \
         "Send Replicate Top View Response",                           \
-        "Send Replicate Equivalence Set Request",                     \
-        "Send Replicate Equivalence Set Response",                    \
+        "Send Replicate Disjoint Complete Request",                   \
+        "Send Replicate Disjoint Complete Response",                  \
         "Send Replicate Intra Space Dependence",                      \
-        "Send Replicate Resource Update",                             \
+        "Send Replicate Broadcast Update",                            \
         "Send Replicate Trace Event Request",                         \
         "Send Replicate Trace Event Response",                        \
         "Send Replicate Trace Update",                                \
@@ -1038,23 +1053,27 @@ namespace Legion {
         "Send Logical Partition Semantic Info",                       \
         "Send Remote Context Request",                                \
         "Send Remote Context Response",                               \
-        "Send Remote Context Release",                                \
         "Send Remote Context Free",                                   \
         "Send Remote Context Physical Request",                       \
         "Send Remote Context Physical Response",                      \
-        "Compute Equivalence Sets Request",                           \
+        "Send Compute Equivalence Sets Request",                      \
+        "Send Compute Equivalence Sets Response",                     \
         "Send Equivalence Set Request",                               \
         "Send Equivalence Set Response",                              \
-        "Send Equivalence Set Subset Request",                        \
-        "Send Equivalence Set Subset Response",                       \
-        "Send Equivalence Set Subset Update",                         \
-        "Send Equivalence Set Ray Trace Request",                     \
-        "Send Equivalence Set Ray Trace Response",                    \
+        "Send Equivalence Set Invalidate Trackers",                   \
+        "Send Equivalence Set Replication Request",                   \
+        "Send Equivalence Set Replication Response",                  \
+        "Send Equivalence Set Replication Update",                    \
         "Send Equivalence Set Migration",                             \
         "Send Equivalence Set Owner Update",                          \
-        "Send Equivalence Set Remote Refinement",                     \
+        "Send Equivalence Set Make Owner",                            \
+        "Send Equivalence Set Clone Request",                         \
+        "Send Equivalence Set Clone Response",                        \
+        "Send Equivalence Set Tracing Capture Request",               \
+        "Send Equivalence Set Tracing Capture Response",              \
         "Send Equivalence Set Remote Request Instances",              \
         "Send Equivalence Set Remote Request Invalid",                \
+        "Send Equivalence Set Remote Request Antivalid",              \
         "Send Equivalence Set Remote Updates",                        \
         "Send Equivalence Set Remote Acquires",                       \
         "Send Equivalence Set Remote Releases",                       \
@@ -1062,7 +1081,6 @@ namespace Legion {
         "Send Equivalence Set Remote Overwrites",                     \
         "Send Equivalence Set Remote Filters",                        \
         "Send Equivalence Set Remote Instances",                      \
-        "Send Equivalence Set Stale Update",                          \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Create Request",                               \
@@ -1105,8 +1123,6 @@ namespace Legion {
         "Remote Op Profiling Count Update",                           \
         "Send Remote Trace Update",                                   \
         "Send Remote Trace Response",                                 \
-        "Send Remote Trace Equivalence Sets Request",                 \
-        "Send Remote Trace Equivalence Sets Response",                \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1460,13 +1476,13 @@ namespace Legion {
       COLLECTIVE_LOC_15 = 15,
       COLLECTIVE_LOC_16 = 16,
       COLLECTIVE_LOC_17 = 17, 
-      //COLLECTIVE_LOC_18 = 18, 
-      //COLLECTIVE_LOC_19 = 19,
-      //COLLECTIVE_LOC_20 = 20,
-      //COLLECTIVE_LOC_21 = 21, 
-      //COLLECTIVE_LOC_22 = 22, 
-      //COLLECTIVE_LOC_23 = 23,
-      //COLLECTIVE_LOC_24 = 24,
+      COLLECTIVE_LOC_18 = 18, 
+      COLLECTIVE_LOC_19 = 19,
+      COLLECTIVE_LOC_20 = 20,
+      COLLECTIVE_LOC_21 = 21, 
+      COLLECTIVE_LOC_22 = 22, 
+      COLLECTIVE_LOC_23 = 23,
+      COLLECTIVE_LOC_24 = 24,
       //COLLECTIVE_LOC_25 = 25,
       //COLLECTIVE_LOC_26 = 26,
       //COLLECTIVE_LOC_27 = 27, 
@@ -1540,8 +1556,6 @@ namespace Legion {
       COLLECTIVE_LOC_95 = 95,
       COLLECTIVE_LOC_96 = 96,
       COLLECTIVE_LOC_97 = 97,
-      COLLECTIVE_LOC_98 = 98,
-      COLLECTIVE_LOC_99 = 99,
     };
 
     // legion_types.h
@@ -1620,6 +1634,8 @@ namespace Legion {
     class MergeCloseOp;
     class PostCloseOp;
     class VirtualCloseOp;
+    class RefinementOp;
+    class AdvisementOp;
     class AcquireOp;
     class ReleaseOp;
     class DynamicCollectiveOp;
@@ -1776,6 +1792,7 @@ namespace Legion {
     class ProjectionEpoch;
     class LogicalState;
     class EquivalenceSet;
+    class PendingEquivalenceSet;
     class VersionManager;
     class VersionInfo;
     class RayTracer;
@@ -1842,6 +1859,7 @@ namespace Legion {
     class ReplIndividualTask;
     class ReplIndexTask;
     class ReplMergeCloseOp;
+    class ReplRefinementOp;
     class ReplFillOp;
     class ReplIndexFillOp;
     class ReplCopyOp;
@@ -1863,6 +1881,7 @@ namespace Legion {
     class ReplTraceBeginOp;
     class ReplTraceSummaryOp;
     class ShardMapping;
+    class CollectiveMapping;
     class ShardManager;
     class ShardCollective;
     class GatherCollective;
@@ -1902,6 +1921,8 @@ namespace Legion {
     friend class Internal::MergeCloseOp;                    \
     friend class Internal::PostCloseOp;                     \
     friend class Internal::VirtualCloseOp;                  \
+    friend class Internal::RefinementOp;                    \
+    friend class Internal::AdvisementOp;                    \
     friend class Internal::AcquireOp;                       \
     friend class Internal::ReleaseOp;                       \
     friend class Internal::PredicateImpl;                   \

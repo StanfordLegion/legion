@@ -3901,6 +3901,37 @@ namespace Legion {
                           std::vector<DomainPoint> &ordered_points);
       ///@}
       
+      ///@{
+      /**
+       * Indicate to the runtime whether this projection function 
+       * invoked on the given upper bound node in the region tree with
+       * the given index space domain will completely "cover" the
+       * all the upper bound points. Specifically will each point in
+       * the upper bound node exist in at least one logical region that
+       * is projected to be one of the points in the domain. It is always
+       * sound to return 'false' even if the projection will ultimately
+       * turn out to be complete. The only cost will be in additional
+       * runtime analysis overhead. It is unsound to return 'true' if
+       * the resulting projection is not complete. Undefined behavior
+       * in this scenario. In general users only need to worry about 
+       * implementing these functions if they have a projection functor
+       * that has depth greater than zero.
+       * @param mappable the mappable oject for non-functional functors
+       * @param index index of region requirement for non-functional functors
+       * @param upper_bound the upper bound region/partition to consider
+       * @param launch_domain the set of points for the projection
+       * @return bool indicating whether this projection is complete
+       */
+      virtual bool is_complete(LogicalRegion upper_bound, 
+                               const Domain &launch_domain);
+      virtual bool is_complete(LogicalPartition upper_bound,
+                               const Domain &launch_domain);
+      virtual bool is_complete(Mappable *mappable, unsigned index,
+            LogicalRegion upper_bound, const Domain &launch_domain);
+      virtual bool is_complete(Mappable *mappable, unsigned index,
+            LogicalPartition upper_bound, const Domain &launch_domain); 
+      ///@}
+      
       /**
        * Indicate whether calls to this projection functor
        * must be serialized or can be performed in parallel.
@@ -5771,6 +5802,30 @@ namespace Legion {
           "logical region or their index spartition are destroyed.")
       void destroy_logical_partition(Context ctx, LogicalPartition handle,
                                      const bool unordered = false);
+
+      /**
+       * Internally the runtime selects sets of disjoint and complete
+       * partitions to use for guiding the dependence analysis that it
+       * performs on region trees. The runtime has heuristics for selecting
+       * these partitions, but users may want to suggest specific regions and
+       * partitions to use to aid improve runtime performance. This method
+       * allows users to suggest specific regions and partitions to use for
+       * this analysis. The suggested regions and partitions must all be from
+       * the same region tree and must constitute a covering of the parent
+       * region. Furthermore all the partitions in the tree must be disjoint
+       * and complete and any ancestor partitions must also be disjoint
+       * and complete. This call will have no bearing on correctness, but
+       * will influence the amount of runtime overhead observed.
+       * @param ctx enclosing task context
+       * @param parent the logical region where privileges are derived from
+       * @param regions recommended analysis regions
+       * @param parts recommended analysis partitions
+       * @param fields the fields for which these should apply
+       */
+      void advise_analysis_subtree(Context ctx, LogicalRegion parent,
+                                   const std::set<LogicalRegion> &regions,
+                                   const std::set<LogicalPartition> &parts,
+                                   const std::set<FieldID> &fields);
     public:
       //------------------------------------------------------------------------
       // Logical Region Tree Traversal Operations

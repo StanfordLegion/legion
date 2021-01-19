@@ -568,6 +568,18 @@ namespace Legion {
 		      context, unique_id, is_intermediate_close_op ? 1 : 0);
       }
 
+      static inline void log_refinement_operation(UniqueID context,
+                                                  UniqueID unique_id)
+      {
+        log_spy.print("Refinement Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_advisement_operation(UniqueID context,
+                                                  UniqueID unique_id)
+      {
+        log_spy.print("Advisement Operation %llu %llu", context, unique_id);
+      }
+
       static inline void log_internal_op_creator(UniqueID internal_op_id,
                                                  UniqueID creator_op_id,
                                                  int idx)

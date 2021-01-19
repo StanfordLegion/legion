@@ -3484,6 +3484,38 @@ namespace Legion {
       assert(false);
     }
 
+    //--------------------------------------------------------------------------
+    bool ProjectionFunctor::is_complete(LogicalRegion upper_bound,
+                                        const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunctor::is_complete(LogicalPartition upper_bound,
+                                        const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunctor::is_complete(Mappable *mappable, unsigned index,
+                         LogicalRegion upper_bound, const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunctor::is_complete(Mappable *mappable, unsigned index,
+                      LogicalPartition upper_bound, const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
     /////////////////////////////////////////////////////////////
     // ShardingFunctor 
     /////////////////////////////////////////////////////////////
@@ -5265,6 +5297,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // This is a no-op now
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::advise_analysis_subtree(Context ctx, LogicalRegion parent,
+                                        const std::set<LogicalRegion> &regions,
+                                        const std::set<LogicalPartition> &parts,
+                                        const std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      ctx->advise_analysis_subtree(parent, regions, parts, fields);
     }
 
     //--------------------------------------------------------------------------
