@@ -8541,15 +8541,25 @@ function codegen.stat_for_list(cx, node)
       args:insertall(counts)
       args:insertall(device_ptrs)
 
-      -- Sort arguments in descending order of sizes to avoid misalignment
-      -- (which causes a segfault inside the driver API)
-      args:sort(function(s1, s2)
-          local t1 = s1.type
-          if t1:isarray() then t1 = t1.type end
-          local t2 = s2.type
-          if t2:isarray() then t2 = t2.type end
-          return sizeof(t1) > sizeof(t2)
-      end)
+      local need_spiil = cudahelper.check_arguments_need_spill(args)
+
+      local kernel_param_pack = quote end
+      local kernel_param_unpack = quote end
+      if need_spiil then
+        local arg = nil
+        kernel_param_pack, kernel_param_unpack, arg = cudahelper.generate_argument_spill(args)
+        args = terralib.newlist({arg})
+      else
+        -- Sort arguments in descending order of sizes to avoid misalignment
+        -- (which causes a segfault inside the driver API)
+        args:sort(function(s1, s2)
+            local t1 = s1.type
+            if t1:isarray() then t1 = t1.type end
+            local t2 = s2.type
+            if t2:isarray() then t2 = t2.type end
+            return sizeof(t1) > sizeof(t2)
+        end)
+      end
 
       -- Reconstruct indices from the global thread id
       local index_inits = terralib.newlist()
@@ -8578,6 +8588,7 @@ function codegen.stat_for_list(cx, node)
         end)
       end
       local terra kernel([args])
+        [kernel_param_unpack]
         [kernel_preamble]
         [index_inits]
         [body]
@@ -8602,6 +8613,7 @@ function codegen.stat_for_list(cx, node)
 
       body = quote
         [bounds_setup]
+        [kernel_param_pack]
         [kernel_call]
       end
 
