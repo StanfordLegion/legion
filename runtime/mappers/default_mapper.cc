@@ -2017,16 +2017,21 @@ namespace Legion {
     {
       bool prefer_rdma = ((req.tag & DefaultMapper::PREFER_RDMA_MEMORY) != 0);
 
-      // TODO: deal with the updates in machine model which will
-      //       invalidate this cache
-      std::map<Processor,Memory>::iterator it;
-      if (prefer_rdma)
+      // Consult the processor-memory mapping cache, but only if the search is
+      // not constrained.
+      if (!mc.is_valid())
       {
-	it = cached_rdma_target_memory.find(target_proc);
-	if (it != cached_rdma_target_memory.end()) return it->second;
-      } else {
-        it = cached_target_memory.find(target_proc);
-	if (it != cached_target_memory.end()) return it->second;
+        // TODO: deal with the updates in machine model which will
+        //       invalidate this cache
+        std::map<Processor,Memory>::iterator it;
+        if (prefer_rdma)
+        {
+          it = cached_rdma_target_memory.find(target_proc);
+          if (it != cached_rdma_target_memory.end()) return it->second;
+        } else {
+          it = cached_target_memory.find(target_proc);
+          if (it != cached_target_memory.end()) return it->second;
+        }
       }
 
       // Find the visible memories from the processor for the given kind
@@ -2071,15 +2076,20 @@ namespace Legion {
           << mc.get_kind() << " connected to processor " << target_proc;
         assert(false);
       }
-      if (prefer_rdma)
+      if (!best_rdma_memory.exists())
+        best_rdma_memory = best_memory;
+
+      // Cache best memory for target processor, but only if the search wasn't
+      // constrained.
+      if (!mc.is_valid())
       {
-	if (!best_rdma_memory.exists()) best_rdma_memory = best_memory;
-	cached_rdma_target_memory[target_proc] = best_rdma_memory;
-	return best_rdma_memory;
-      } else {
-	cached_target_memory[target_proc] = best_memory;
-	return best_memory;
+        if (prefer_rdma)
+          cached_rdma_target_memory[target_proc] = best_rdma_memory;
+        else
+          cached_target_memory[target_proc] = best_memory;
       }
+
+      return prefer_rdma ? best_rdma_memory : best_memory;
     }
 
     //--------------------------------------------------------------------------
