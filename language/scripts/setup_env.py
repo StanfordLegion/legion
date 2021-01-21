@@ -266,6 +266,8 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
         extract(llvm_dir, clang_tarball, 'xz')
         if llvm_version == '35':
             apply_patch(llvm_source_dir, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'llvm-3.5-gcc.patch'))
+        elif llvm_version == '38':
+            apply_patch(llvm_source_dir, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'llvm-3.8-gcc.patch'))
         os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
 
         llvm_build_dir = tempfile.mkdtemp(prefix='setup_env_llvm_build', dir=scratch_dir or llvm_dir)
