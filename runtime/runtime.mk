@@ -23,7 +23,7 @@ LD_FLAGS ?=
 SO_FLAGS ?=
 INC_FLAGS ?=
 # Make sure that NVCC_FLAGS are simple expanded since later we use shell to append to it (performance).
-NVCC_FLAGS := $(NVCC_FLAGS)
+NVCC_FLAGS := $(NVCC_FLAGS) -ccbin $(CXX)
 # These flags are NOT passed on the command line, but are used to
 # generate the public-facing legion/realm_defines.h files.
 # (Additional flags will be picked up from environment variables of
@@ -651,6 +651,12 @@ SKIP_MACHINES= titan% daint% excalibur% cori%
 ifeq ($(strip $(USE_MPI)),1)
   # Skip any machines on this list list
   ifeq ($(filter-out $(SKIP_MACHINES),$(shell uname -n)),$(shell uname -n))
+    export OMPI_CC  := $(CC)
+    export OMPI_CXX := $(CXX)
+    export OMPI_FC  := $(FC)
+    export MPICH_CC  := $(CC)
+    export MPICH_CXX := $(CXX)
+    export MPICH_FC  := $(FC)
     CC		:= mpicc
     CXX		:= mpicxx
     FC		:= mpif90

@@ -11419,6 +11419,7 @@ namespace Legion {
           rez.serialize(applied_event);
         }
         runtime->send_slice_collective_instance_request(orig_proc, rez);
+        AutoLock o_lock(op_lock);
         map_applied_conditions.insert(applied_event);
       }
       else

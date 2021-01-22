@@ -334,7 +334,7 @@ namespace Realm {
 	PreimageOperation<N2,T2,N,T> *op = reinterpret_cast<PreimageOperation<N2,T2,N,T> *>(approx_output_op);
 	op->provide_sparse_image(approx_output_index, &approx_rects.rects[0], approx_rects.rects.size());
       } else {
-	size_t payload_size = approx_rects.rects.size() * sizeof(Rect<N2,T2>);
+	size_t payload_size = approx_rects.rects.size() * sizeof(Rect<N,T>);
 	ActiveMessage<ApproxImageResponseMessage<PreimageOperation<N2,T2,N,T> > > amsg(requestor, payload_size);
 	amsg->approx_output_op = approx_output_op;
 	amsg->approx_output_index = approx_output_index;
