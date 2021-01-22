@@ -6070,7 +6070,7 @@ namespace Legion {
           }
         }
         // Check for the case where we can't find a splitting plane
-        if (split_max == subrects.size())
+        if (split_max == (subrects.size() - 1))
           continue;
         // Sort the subsets into left and right
         Rect<DIM,T> left_bounds(bounds);
