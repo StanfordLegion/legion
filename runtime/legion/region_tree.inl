@@ -6040,6 +6040,10 @@ namespace Legion {
           if (it->start)
             count++;
         }
+        // If all the lines exist at the same value
+        // then we'll never have a splitting plane
+        if (left_exclusive.size() == 1)
+          continue;
         count = 0;
         for (typename std::set<KDLine>::const_reverse_iterator it =
               lines.rbegin(); it != lines.rend(); it++)
@@ -6070,7 +6074,7 @@ namespace Legion {
           }
         }
         // Check for the case where we can't find a splitting plane
-        if (split_max == (subrects.size() - 1))
+        if (split_max == subrects.size())
           continue;
         // Sort the subsets into left and right
         Rect<DIM,T> left_bounds(bounds);
