@@ -230,11 +230,13 @@ namespace Legion {
     public:
       // Wait without subscribing to the payload
       void wait(bool silence_warnings, const char *warning_string);
-      void* get_untyped_result(bool silence_warnings = true,
-                               const char *warning_string = NULL,
-                               bool internal = false,
-                               bool check_size = false,
-                               size_t future_size = 0);
+      const void* get_buffer(Processor proc, Memory::Kind memory,
+                             size_t *extent_in_bytes = NULL, 
+                             bool check_extent = false,
+                             bool silence_warnings = false, 
+                             const char *warning_string = NULL);
+      const void *get_internal_buffer(size_t &expected_size);
+      FutureInstance* get_canonical_instance(void);
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
                     bool internal = false);
@@ -242,9 +244,13 @@ namespace Legion {
       ApEvent get_ready_event(void) const { return future_complete; }
     public:
       // This will simply save the value of the future
-      void set_result(const void *args, size_t arglen, bool own);
+      void set_result(FutureInstance *instance);
+      void set_results(const std::vector<FutureInstance*> &instances);
       void set_result(FutureFunctor *callback_functor, bool own,
                       Processor functor_proc);
+      // This is the same as above but for data that we know is visible
+      // in the system memory and should always make a local FutureInstance
+      void set_local(const void *value, size_t size, bool own = false);
       // This will save the value of the future locally
       void unpack_future(Deserializer &derez);
       // Reset the future in case we need to restart the
@@ -334,6 +340,54 @@ namespace Legion {
     private:
       volatile bool empty;
       volatile bool sampled;
+    };
+
+    /**
+     * \class FutureInstance
+     * A future instance wraps a Realm instance that is storing the
+     * data for the future. Current future instances are immutable
+     * after they are initially written, but are designed so that
+     * we might easily be able to relax that later so we can support
+     * mutable future values.
+     */
+    class FutureInstance {
+    public:
+      FutureInstance(const void *data, size_t size, Memory memory, 
+                     ApEvent ready_event, bool eager, bool external, 
+                     bool own_allocation = true,
+                     PhysicalInstance inst = PhysicalInstance::NO_INST,
+                     void (*freefunc)(void*,size_t) = NULL,
+                     Processor free_proc = Processor::NO_PROC);
+      FutureInstance(const FutureInstance &rhs);
+      ~FutureInstance(void);
+    public:
+      FutureInstance& operator=(const FutureInstance &rhs);
+    public:
+      ApEvent initialize(const ReductionOp *redop);
+      ApEvent initialize(const FutureInstance *source); 
+      ApEvent copy_from(const FutureInstance *source, ApEvent precondition);
+      ApEvent reduce_from(const FutureInstance *source,
+                          const ReductionOp *redop, bool exclusive,
+                          ApEvent precondition = ApEvent::NO_AP_EVENT);
+    public:
+      void pack_instance(Serializer &rez, ApEvent ready = ApEvent::NO_AP_EVENT);
+      static FutureInstance* unpack_instance(Deserializer &derez, Runtime *rt);
+    public:
+      static FutureInstance* create_local(const void *value, size_t size, 
+                                          bool own, Runtime *runtime);
+    public:
+      const void *const data;
+      const size_t size;
+      const Memory memory;
+      void (*const freefunc)(void*,size_t);
+      const Processor free_proc;
+      const bool eager_allocation;
+      const bool external_allocation;
+      const bool is_meta_visible;
+    protected:
+      bool own_allocation;
+      PhysicalInstance instance;
+      ApEvent ready_event;
     };
 
     /**
@@ -1227,6 +1281,8 @@ namespace Legion {
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority, bool remote);
+      FutureInstance* create_future_instance(Operation *op, ApEvent ready_event,
+                                             size_t size, bool eager);
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
@@ -1281,7 +1337,7 @@ namespace Legion {
                                           LayoutConstraintKind *unsat_kind,
                                           unsigned *unsat_index,
                                           CollectiveManager *collective = NULL,
-                                          DomainPoint *collective_point = NULL);
+                                          DomainPoint *collective_point = NULL); 
     public:
       bool delete_by_size_and_state(const size_t needed_size,
                                     const InstanceState state,
@@ -2246,7 +2302,8 @@ namespace Legion {
       };
     public:
       Runtime(Machine m, const LegionConfiguration &config,
-              bool background, InputArgs input_args, AddressSpaceID space_id,
+              bool background, InputArgs input_args, 
+              AddressSpaceID space_id, Memory sysmem,
               const std::set<Processor> &local_procs,
               const std::set<Processor> &local_util_procs,
               const std::set<AddressSpaceID> &address_spaces,
@@ -2263,6 +2320,7 @@ namespace Legion {
       Legion::Mapping::MapperRuntime *const mapper_runtime;
       // The machine object for this runtime
       const Machine machine;
+      const Memory runtime_system_memory;
       const AddressSpaceID address_space; 
       const unsigned total_address_spaces;
       // stride for uniqueness, may or may not be the same depending
@@ -3650,7 +3708,9 @@ namespace Legion {
     public:
       bool is_local(Processor proc) const;
       bool is_visible_memory(Processor proc, Memory mem);
+      bool is_meta_visible_memory(Memory memory);
       void find_visible_memories(Processor proc, std::set<Memory> &visible);
+      Memory find_local_memory(Processor proc, Memory::Kind mem_kind);
     public:
       IndexSpaceID       get_unique_index_space_id(void);
       IndexPartitionID   get_unique_index_partition_id(void);

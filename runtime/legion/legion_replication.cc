@@ -553,7 +553,8 @@ namespace Legion {
       activate_index_task();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      reduction_collective = NULL;
+      serdez_redop_collective = NULL;
+      all_reduce_collective = NULL;
       output_size_collective = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
@@ -565,10 +566,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_index_task();
-      if (reduction_collective != NULL)
+      if (serdez_redop_collective != NULL)
       {
-        delete reduction_collective;
-        reduction_collective = NULL;
+        delete serdez_redop_collective;
+        serdez_redop_collective = NULL;
+      }
+      if (all_reduce_collective != NULL)
+      {
+        delete all_reduce_collective;
+        all_reduce_collective = NULL;
       }
       if (output_size_collective != NULL)
       {
@@ -690,7 +696,7 @@ namespace Legion {
 #endif
         // We have no local points, so we can just trigger
         complete_mapping();
-        complete_execution(prepare_index_task_complete());
+        complete_execution(finish_index_task_complete());
         trigger_children_complete();
         trigger_children_committed();
       }
@@ -748,7 +754,7 @@ namespace Legion {
 #endif
         // We have no local points, so we can just trigger
         complete_mapping();
-        complete_execution(prepare_index_task_complete());
+        complete_execution(finish_index_task_complete());
         resolve_speculation();
         trigger_children_complete();
         trigger_children_committed();
@@ -777,43 +783,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ReplIndexTask::prepare_index_task_complete(void)
+    RtEvent ReplIndexTask::finish_index_task_reduction(
+                                                     std::set<ApEvent> &effects)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> preconditions;
+#ifdef DEBUG_LEGION
+      assert(redop != 0);
+#endif
       // Set the future if we actually ran the task or we speculated
-      if ((redop > 0) && 
-          ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
+      if ((speculation_state == RESOLVE_FALSE_STATE) && !false_guard.exists())
+        return RtEvent::NO_RT_EVENT;
+      if (serdez_redop_fns != NULL)
       {
-        // First time through so start the exchange
-        if (deterministic_redop)
-        {
-          // We have to do the fold of our values here now before
-          // we can send them all remotely to the other nodes
-          for (std::map<DomainPoint,std::pair<void*,size_t> >::const_iterator
-                it = temporary_futures.begin();
-                it != temporary_futures.end(); it++)
-          {
-            fold_reduction_future(it->second.first, it->second.second,
-                                  false/*owner*/, true/*exclusive*/);
-            legion_free(FUTURE_RESULT_ALLOC, 
-                        it->second.first, it->second.second);
-          }
-          // Clear these out so we don't apply them twice when 
-          // we call the base-class version of this method
-          temporary_futures.clear();
-        }
-        // The collective takes ownership of the buffer here
-        const RtEvent futures_ready = 
-          reduction_collective->exchange_futures(reduction_state);
-        // Reinitialize the reduction state buffer so
-        // that all the shards can be applied to it in the same order 
-        // so that we have bit equivalence across the shards
-        reduction_state = NULL;
-        initialize_reduction_state();
-        if (futures_ready.exists())
-          preconditions.insert(futures_ready);
+#ifdef DEBUG_LEGION
+        assert(serdez_redop_collective != NULL);
+#endif
+        // Exchange the remote buffers from other shards
+        return serdez_redop_collective->exchange_buffers_async(
+            serdez_redop_state, serdez_redop_state_size, deterministic_redop);
       }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(all_reduce_collective != NULL);
+        assert(!reduction_instances.empty());
+        assert(reduction_instance == reduction_instances.front());
+#endif
+        ApEvent local_precondition;
+        if (!effects.empty())
+        {
+          local_precondition = Runtime::merge_events(NULL, effects);
+          effects.clear();
+        }
+        const RtEvent collective_done =all_reduce_collective->async_reduce(
+                                    reduction_instance, local_precondition);
+        if (local_precondition.exists())
+          effects.insert(local_precondition);
+        return collective_done;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplIndexTask::finish_index_task_complete(void)
+    //--------------------------------------------------------------------------
+    {
       if ((output_size_collective != NULL) &&
           ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
       {
@@ -821,13 +834,9 @@ namespace Legion {
         local_output_sizes = all_output_sizes;
         // We need to gather output region sizes from all the other shards
         // to determine the sizes of globally indexed output regions
-        const RtEvent ready = output_size_collective->exchange_output_sizes();
-        if (ready.exists())
-          preconditions.insert(ready);
+        return output_size_collective->exchange_output_sizes();
       }
-      if (preconditions.empty())
-        return RtEvent::NO_RT_EVENT;
-      return Runtime::merge_events(preconditions);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -835,12 +844,46 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // If we have a reduction operator finalize the exchange of future results
-      if (redop > 0)
+      if (serdez_redop_fns != NULL)
       {
 #ifdef DEBUG_LEGION
-        assert(reduction_collective != NULL);
+        assert(serdez_redop_collective != NULL);
 #endif
-        reduction_collective->reduce_futures(this);
+        const std::map<ShardID,std::pair<void*,size_t> > &remote_buffers =
+                serdez_redop_collective->sync_buffers(deterministic_redop);
+        if (deterministic_redop)
+        {
+          // Reset this back to empty so we can reduce in order across shards
+          // Note the serdez_redop_collective took ownership of deleting
+          // the buffer in this case so we know that it is not leaking
+          serdez_redop_state = NULL;
+          for (std::map<ShardID,std::pair<void*,size_t> >::const_iterator it =
+                remote_buffers.begin(); it != remote_buffers.end(); it++)
+          {
+            if (serdez_redop_state == NULL)
+            {
+              serdez_redop_state_size = it->second.second;
+              serdez_redop_state = malloc(serdez_redop_state_size);
+              memcpy(serdez_redop_state, it->second.first, 
+                     serdez_redop_state_size);
+            }
+            else
+              (*(serdez_redop_fns->fold_fn))(reduction_op, serdez_redop_state,
+                                    serdez_redop_state_size, it->second.first);
+          }
+        }
+        else
+        {
+          for (std::map<ShardID,std::pair<void*,size_t> >::const_iterator it =
+                remote_buffers.begin(); it != remote_buffers.end(); it++)
+          {
+#ifdef DEBUG_LEGION
+            assert(it->first != serdez_redop_collective->local_shard);
+#endif
+            (*(serdez_redop_fns->fold_fn))(reduction_op, serdez_redop_state,
+                                  serdez_redop_state_size, it->second.first);
+          }
+        }
       }
       // Then we do the base class thing
       IndexTask::trigger_task_complete();
@@ -903,12 +946,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(reduction_collective == NULL);
+      assert(serdez_redop_collective == NULL);
+      assert(all_reduce_collective == NULL);
 #endif
       // If we have a reduction op then we need an exchange
       if (redop > 0)
-        reduction_collective = 
-          new FutureExchange(ctx, reduction_state_size, COLLECTIVE_LOC_53);
+      {
+        if (serdez_redop_fns != NULL)
+          serdez_redop_collective = new BufferExchange(ctx, COLLECTIVE_LOC_53);
+        else
+          all_reduce_collective = new FutureAllReduceCollective(
+              COLLECTIVE_LOC_53, ctx, reduction_op, deterministic_redop);
+      }
       bool has_output_region = false;
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
         if (!output_region_options[idx].valid_requirement())
@@ -5096,7 +5145,7 @@ namespace Legion {
       if (repl_ctx->owner_shard->shard_id > 0)     
       {
         long long value = timing_collective->get_value(false/*already waited*/);
-        result.impl->set_result(&value, sizeof(value), false);
+        result.impl->set_local(&value, sizeof(value));
       }
       else
       {
@@ -5107,7 +5156,7 @@ namespace Legion {
           case LEGION_MEASURE_SECONDS:
             {
               double value = Realm::Clock::current_time();
-              result.impl->set_result(&value, sizeof(value), false);
+              result.impl->set_local(&value, sizeof(value));
               long long *ptr = reinterpret_cast<long long*>(&value);
               timing_collective->broadcast(*ptr);
               break;
@@ -5115,14 +5164,14 @@ namespace Legion {
           case LEGION_MEASURE_MICRO_SECONDS:
             {
               long long value = Realm::Clock::current_time_in_microseconds();
-              result.impl->set_result(&value, sizeof(value), false);
+              result.impl->set_local(&value, sizeof(value));
               timing_collective->broadcast(value);
               break;
             }
           case LEGION_MEASURE_NANO_SECONDS:
             {
               long long value = Realm::Clock::current_time_in_nanoseconds();
-              result.impl->set_result(&value, sizeof(value), false);
+              result.impl->set_local(&value, sizeof(value));
               timing_collective->broadcast(value);
               break;
             }
@@ -5179,15 +5228,14 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(redop != NULL);
-      assert(exchange_collective == NULL);
+      assert(serdez_redop_collective == NULL);
       assert(all_reduce_collective == NULL);
 #endif
-      if (deterministic)
-        exchange_collective = 
-          new FutureExchange(ctx, redop->sizeof_rhs, COLLECTIVE_LOC_97);
+      if (serdez_redop_fns != NULL)
+        serdez_redop_collective = new BufferExchange(ctx, COLLECTIVE_LOC_97);
       else
-        all_reduce_collective = 
-          new AllReduceOpCollective(COLLECTIVE_LOC_97, ctx, redop);
+        all_reduce_collective = new FutureAllReduceCollective(COLLECTIVE_LOC_97,
+                                                     ctx, redop, deterministic);
     }
 
     //--------------------------------------------------------------------------
@@ -5195,8 +5243,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_all_reduce();
-      result_buffer = NULL;
-      exchange_collective = NULL;
+      serdez_redop_collective = NULL;
       all_reduce_collective = NULL;
     }
 
@@ -5205,82 +5252,170 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_all_reduce();
-      if (exchange_collective != NULL)
-        delete exchange_collective;
+      if (serdez_redop_collective != NULL)
+        delete serdez_redop_collective;
       if (all_reduce_collective != NULL)
         delete all_reduce_collective;
       runtime->free_repl_all_reduce_op(this);
     }
 
     //--------------------------------------------------------------------------
-    void ReplAllReduceOp::deferred_execute(void)
+    void ReplAllReduceOp::all_reduce_serdez(void)
     //--------------------------------------------------------------------------
     {
-      // See if this is our first pass through to perform the reduction
-      if (result_buffer == NULL)
-      { 
-        // First perform the reduction on our shard local futures
-        std::map<DomainPoint,FutureImpl*> futures;
-        future_map.impl->get_shard_local_futures(futures);
-        result_buffer = malloc(redop->sizeof_rhs);
-        redop->init(result_buffer, 1/*count*/);
-        for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
-              futures.begin(); it != futures.end(); it++)
-        {
-          FutureImpl *impl = it->second;
-          const size_t future_size = impl->get_untyped_size(true/*internal*/);
-          if (future_size != redop->sizeof_rhs)
-            REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_REDOP_TYPE_MISMATCH,
-                "Future in future map reduction in task %s (UID %lld) does not "
-                "have the right input size for the given reduction operator. "
-                "Future has size %zd bytes but reduction operator expects "
-                "RHS inputs of %zd bytes.", parent_ctx->get_task_name(),
-                parent_ctx->get_unique_id(), future_size, redop->sizeof_rhs)
-          const void *data = 
-                        impl->get_untyped_result(true,NULL,true/*internal*/);
-          redop->fold(result_buffer, data, 1/*count*/, true/*exclusive*/);
-        }
+#ifdef DEBUG_LEGION
+      assert(serdez_redop_fns != NULL);
+#endif
+      std::map<DomainPoint,FutureImpl*> futures;
+      future_map.impl->get_shard_local_futures(futures);
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
+            futures.begin(); it != futures.end(); it++)
+      {
+        FutureImpl *impl = it->second;
+        size_t src_size = 0;
+        const void *source = impl->get_internal_buffer(src_size);
+        (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
+                                       future_result_size, source);
         if (runtime->legion_spy_enabled)
         {
-          for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
-                futures.begin(); it != futures.end(); it++)
-          {
-            FutureImpl *impl = it->second;
-            const ApEvent ready_event = impl->get_ready_event();
-            if (ready_event.exists())
-              LegionSpy::log_future_use(unique_op_id, ready_event);
-          }
-        }
-        // Now do the exchange across the shards
-        RtEvent defer;
-        if (deterministic)
-          defer = exchange_collective->exchange_futures(result_buffer);
-        else
-          defer = all_reduce_collective->async_reduce(result_buffer);
-        if (defer.exists() && !defer.has_triggered())
-        {
-          DeferredExecuteArgs args(this);
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_DEFERRED_PRIORITY, defer);
-          return;
+          const ApEvent ready_event = impl->get_ready_event();
+          if (ready_event.exists())
+            LegionSpy::log_future_use(unique_op_id, ready_event);
         }
       }
-      // If we make it here then we can get the results of the
-      // reductions across the shards
+      // Now we need an all-to-all to get the values from other shards
+      const std::map<ShardID,std::pair<void*,size_t> > &remote_buffers =
+        serdez_redop_collective->exchange_buffers(serdez_redop_buffer,
+                                    future_result_size, deterministic);
       if (deterministic)
-        exchange_collective->reduce_futures(redop, result_buffer);
+      {
+        // Reset this back to empty so we can reduce in order across shards
+        // Note the serdez_redop_collective took ownership of deleting
+        // the buffer in this case so we know that it is not leaking
+        serdez_redop_buffer = NULL;
+        for (std::map<ShardID,std::pair<void*,size_t> >::const_iterator it =
+              remote_buffers.begin(); it != remote_buffers.end(); it++)
+        {
+          if (serdez_redop_buffer == NULL)
+          {
+            future_result_size = it->second.second;
+            serdez_redop_buffer = malloc(future_result_size);
+            memcpy(serdez_redop_buffer, it->second.first, future_result_size);
+          }
+          else
+            (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer,
+                                future_result_size, it->second.first);
+        }
+      }
       else
-        all_reduce_collective->sync_result(result_buffer);
-      // Tell the future about the final result which it will own
-      result.impl->set_result(result_buffer, redop->sizeof_rhs, true/*own*/);
-#ifdef LEGION_SPY
-      // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
+      {
+        for (std::map<ShardID,std::pair<void*,size_t> >::const_iterator it =
+              remote_buffers.begin(); it != remote_buffers.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->first != serdez_redop_collective->local_shard);
 #endif
-      // Mark that we are done executing which will complete the future
-      // as soon as this operation is complete
-      complete_execution();
+          (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer,
+                              future_result_size, it->second.first);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplAllReduceOp::all_reduce_redop(void)
+    //--------------------------------------------------------------------------
+    {
+      std::map<DomainPoint,Future> futures;
+      future_map.impl->get_all_futures(futures);
+      std::vector<FutureInstance*> sources;
+      sources.reserve(futures.size());
+      for (std::map<DomainPoint,Future>::const_iterator it = 
+            futures.begin(); it != futures.end(); it++)
+      {
+        FutureImpl *impl = it->second.impl;
+        FutureInstance *instance = impl->get_canonical_instance();
+        if (instance->size != redop->sizeof_rhs)
+          REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_REDOP_TYPE_MISMATCH,
+              "Future in future map reduction in task %s (UID %lld) does not "
+              "have the right input size for the given reduction operator. "
+              "Future has size %zd bytes but reduction operator expects "
+              "RHS inputs of %zd bytes.", parent_ctx->get_task_name(),
+              parent_ctx->get_unique_id(), instance->size, redop->sizeof_rhs)
+        sources.push_back(instance);
+        if (runtime->legion_spy_enabled)
+        {
+          const ApEvent ready_event = impl->get_ready_event();
+          if (ready_event.exists())
+            LegionSpy::log_future_use(unique_op_id, ready_event);
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(!targets.empty());
+#endif
+      // We're going to need to do an all-reduce between the shards so
+      // we'll just do our local reductions into the first target initially
+      // and then we'll broadcast the result to the targets afterwards
+      FutureInstance *local_target = targets.front();
+      ApEvent local_precondition = local_target->initialize(redop);
+      if (deterministic)
+      {
+        for (std::vector<FutureInstance*>::const_iterator it =
+              sources.begin(); it != sources.end(); it++)
+          local_precondition = local_target->reduce_from(*it, redop,
+                        true/*exclusive*/, local_precondition);
+      }
+      else
+      {
+        std::set<ApEvent> postconditions;
+        for (std::vector<FutureInstance*>::const_iterator it =
+              sources.begin(); it != sources.end(); it++)
+        {
+          const ApEvent postcondition = local_target->reduce_from(*it, redop,
+                                      false/*exclusive*/, local_precondition);
+          if (postcondition.exists())
+            postconditions.insert(postcondition);
+        }
+        if (!postconditions.empty())
+          local_precondition = Runtime::merge_events(NULL, postconditions);
+      }
+      const RtEvent collective_done =
+       all_reduce_collective->async_reduce(targets.front(), local_precondition);
+      // Finally do the copy out to all the other targets
+      if (targets.size() > 1)
+      {
+        std::vector<ApEvent> broadcast_events(targets.size());
+        broadcast_events[0] = local_precondition;
+        broadcast_events[1] =
+          targets[1]->copy_from(local_target, broadcast_events[0]);
+        for (unsigned idx = 1; idx < targets.size(); idx++)
+        {
+          if (targets.size() <= (2*idx))
+            break;
+          broadcast_events[2*idx] = 
+            targets[2*idx]->copy_from(targets[idx], broadcast_events[idx]);
+          if (targets.size() <= (2*idx+1))
+            break;
+          broadcast_events[2*idx+1] =
+            targets[2*idx+1]->copy_from(targets[idx], broadcast_events[idx]);
+        }
+        std::set<ApEvent> postconditions;
+        for (std::vector<ApEvent>::const_iterator it =
+              broadcast_events.begin(); it != broadcast_events.end(); it++)
+          if (it->exists())
+            postconditions.insert(*it);
+        if (!postconditions.empty())
+          local_precondition = Runtime::merge_events(NULL, postconditions);
+      }
+      if (!request_early_complete(local_precondition) &&
+          local_precondition.exists())
+      {
+        const RtEvent local_done = Runtime::protect_event(local_precondition);
+        if (collective_done.exists())
+          return Runtime::merge_events(local_done, collective_done);
+        else
+          return local_done;
+      }
+      return collective_done;
     }
 
     /////////////////////////////////////////////////////////////
@@ -8457,6 +8592,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ShardManager::handle_post_execution(const void *res, size_t res_size, 
                                              bool owned, bool local)
@@ -8533,6 +8669,7 @@ namespace Legion {
       if (owned && !future_claimed)
         free(const_cast<void*>(res));
     }
+#endif
 
     //--------------------------------------------------------------------------
     RtEvent ShardManager::trigger_task_complete(bool local, ApEvent effects) 
@@ -10349,45 +10486,38 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // All Reduce Op Collective 
+    // Future All Reduce Collective 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    AllReduceOpCollective::AllReduceOpCollective(CollectiveIndexLocation loc,
-                                  ReplicateContext *ctx, const ReductionOp *op)
-      : AllGatherCollective(loc, ctx), redop(op), current_stage(-1),
-        value(malloc(op->sizeof_rhs))
+    FutureAllReduceCollective::FutureAllReduceCollective(
+                            CollectiveIndexLocation loc, ReplicateContext *ctx, 
+                            const ReductionOp *op, bool determin)
+      : AllGatherCollective(loc, ctx), redop(op), deterministic(determin),
+        instance(NULL), current_stage(-1)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    AllReduceOpCollective::AllReduceOpCollective(ReplicateContext *ctx,
-                                         CollectiveID id, const ReductionOp* op)
-      : AllGatherCollective(ctx, id), redop(op), current_stage(-1),
-        value(malloc(op->sizeof_rhs))
+    FutureAllReduceCollective::FutureAllReduceCollective(ReplicateContext *ctx,
+                          CollectiveID id, const ReductionOp* op, bool determin)
+      : AllGatherCollective(ctx, id), redop(op), deterministic(determin),
+        instance(NULL), current_stage(-1)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    AllReduceOpCollective::~AllReduceOpCollective(void)
+    FutureAllReduceCollective::~FutureAllReduceCollective(void)
     //--------------------------------------------------------------------------
     {
-      while (!future_values.empty())
-      {
-        std::map<int,std::vector<void*> >::iterator next = 
-          future_values.begin();
-        for (std::vector<void*>::iterator it = 
-              next->second.begin(); it != next->second.end(); it++)
-          free(*it);
-        future_values.erase(next);
-      }
-      free(value);
     }
 
+#if 0
     //--------------------------------------------------------------------------
-    void AllReduceOpCollective::pack_collective_stage(Serializer &rez,int stage)
+    void FutureAllReduceCollective::pack_collective_stage(
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       // The first time we pack a stage we merge any values that we had
@@ -10416,7 +10546,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllReduceOpCollective::unpack_collective_stage(
+    void FutureAllReduceCollective::unpack_collective_stage(
                                                  Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
@@ -10429,20 +10559,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent AllReduceOpCollective::async_reduce(const void *input)
+    RtEvent FutureAllReduceCollective::async_reduce(FutureInstance *inst,
+                                                    ApEvent ready)
     //--------------------------------------------------------------------------
     {
-      memcpy(value, input, redop->sizeof_rhs);
+#ifdef DEBUG_LEGION
+      assert(instance == NULL);
+#endif
+      instance = inst;
+      ready_event = ready;
       perform_collective_async();
       return perform_collective_wait(false/*block*/);
     }
     
     //--------------------------------------------------------------------------
-    void AllReduceOpCollective::sync_result(void *result)
+    ApEvent FutureAllReduceCollective::sync_result(void)
     //--------------------------------------------------------------------------
     {
       perform_collective_wait(true/*block*/); 
-      // Need to avoid races here so we have to always recompute the last stage
+      // Need to avoid races here so we have to always compute the last stage
       memcpy(result, value, redop->sizeof_rhs);
       if (!future_values.empty())
       {
@@ -10470,6 +10605,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // All Reduce Collective 
@@ -11629,14 +11765,16 @@ namespace Legion {
       return *this;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void FutureBroadcast::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      const size_t result_size = impl->get_untyped_size(true/*internal*/); 
+      size_t result_size = 0;
+      const void *data = impl->get_buffer_internal(result_size);
       rez.serialize(result_size);
       if (result_size > 0)
-        rez.serialize(impl->get_untyped_result(true, NULL, true), result_size);
+        rez.serialize(data, result_size);
     }
 
     //--------------------------------------------------------------------------
@@ -11654,6 +11792,7 @@ namespace Legion {
       else
         impl->set_result(NULL, 0, false/*owned*/);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void FutureBroadcast::broadcast_future(void)
@@ -11669,16 +11808,16 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FutureExchange::FutureExchange(ReplicateContext *ctx, size_t size,
+    BufferExchange::BufferExchange(ReplicateContext *ctx,
                                    CollectiveIndexLocation loc)
-      : AllGatherCollective(loc, ctx), future_size(size)
+      : AllGatherCollective(loc, ctx)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    FutureExchange::FutureExchange(const FutureExchange &rhs)
-      : AllGatherCollective(rhs), future_size(0)
+    BufferExchange::BufferExchange(const BufferExchange &rhs)
+      : AllGatherCollective(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11686,18 +11825,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureExchange::~FutureExchange(void)
+    BufferExchange::~BufferExchange(void)
     //--------------------------------------------------------------------------
     {
-      // Delete all the futures except our local shard one since we know
-      // that we don't actually own that memory
-      for (std::map<ShardID,void*>::const_iterator it = results.begin();
-            it != results.end(); it++)
-        free(it->second);
+      for (std::map<ShardID,std::pair<void*,size_t> >::const_iterator it = 
+            results.begin(); it != results.end(); it++)
+        free(it->second.first);
     }
 
     //--------------------------------------------------------------------------
-    FutureExchange& FutureExchange::operator=(const FutureExchange &rhs)
+    BufferExchange& BufferExchange::operator=(const BufferExchange &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11706,20 +11843,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureExchange::pack_collective_stage(Serializer &rez, int stage)
+    void BufferExchange::pack_collective_stage(Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(results.size());
-      for (std::map<ShardID,void*>::const_iterator it = results.begin();
-            it != results.end(); it++)
+      for (std::map<ShardID,std::pair<void*,size_t> >::const_iterator it =
+            results.begin(); it != results.end(); it++)
       {
         rez.serialize(it->first);
-        rez.serialize(it->second, future_size);
+        rez.serialize(it->second.second);
+        rez.serialize(it->second.first, it->second.second);
       }
     }
 
     //--------------------------------------------------------------------------
-    void FutureExchange::unpack_collective_stage(Deserializer &derez, int stage)
+    void BufferExchange::unpack_collective_stage(Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
       size_t num_results;
@@ -11728,60 +11866,53 @@ namespace Legion {
       {
         ShardID shard;
         derez.deserialize(shard);
+        size_t size;
+        derez.deserialize(size);
         if (results.find(shard) != results.end())
         {
-          derez.advance_pointer(future_size);
+          derez.advance_pointer(size);
           continue;
         }
-        void *buffer = malloc(future_size);
-        derez.deserialize(buffer, future_size);
-        results[shard] = buffer;
+        void *buffer = malloc(size);
+        derez.deserialize(buffer, size);
+        results[shard] = std::make_pair(buffer, size);
       }
     }
 
     //--------------------------------------------------------------------------
-    RtEvent FutureExchange::exchange_futures(void *value)
+    const std::map<ShardID,std::pair<void*,size_t> >& 
+      BufferExchange::exchange_buffers(void *value, size_t size, bool keep_self)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock c_lock(collective_lock);
-#ifdef DEBUG_LEGION
-        assert(results.find(local_shard) == results.end());
-#endif
-        results[local_shard] = value;
-      }
+      // Can put this in without the lock since we haven't started yet
+      results[local_shard] = std::make_pair(value, size);
+      perform_collective_sync();
+      // Remove ourselves after we're done
+      if (!keep_self)
+        results.erase(local_shard);
+      return results;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent BufferExchange::exchange_buffers_async(void *value, size_t size,
+                                                   bool keep_self)
+    //--------------------------------------------------------------------------
+    {
+      // Can put this in without the lock since we haven't started yet
+      results[local_shard] = std::make_pair(value, size);
       perform_collective_async();
       return perform_collective_wait(false/*block*/);
     }
 
     //--------------------------------------------------------------------------
-    void FutureExchange::reduce_futures(ReplIndexTask *target)
+    const std::map<ShardID,std::pair<void*,size_t> >& 
+                                    BufferExchange::sync_buffers(bool keep_self)
     //--------------------------------------------------------------------------
     {
-      // Now we apply the shard results in order to ensure that we get
-      // the same bitwise order across all the shards
-      // No need for the lock anymore since we know we're done
-      for (std::map<ShardID,void*>::const_iterator it = results.begin();
-            it != results.end(); it++)
-        target->fold_reduction_future(it->second, future_size, 
-                                      false/*owner*/, true/*exclusive*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureExchange::reduce_futures(const ReductionOp *redop,
-                                        void *result_buffer)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(future_size == redop->sizeof_rhs);
-#endif
-      redop->init(result_buffer, 1/*count*/);
-      // Now we apply the shard results in order to ensure that we get
-      // the same bitwise order across all the shards
-      // No need for the lock anymore since we know we're done
-      for (std::map<ShardID,void*>::const_iterator it = results.begin();
-            it != results.end(); it++)
-        redop->fold(result_buffer, it->second, 1/*count*/, true/*exclusive*/);
+      perform_collective_wait(true/*block*/);
+      if (!keep_self)
+        results.erase(local_shard);
+      return results;
     }
 
     /////////////////////////////////////////////////////////////

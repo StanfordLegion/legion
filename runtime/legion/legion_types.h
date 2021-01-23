@@ -316,8 +316,6 @@ namespace Legion {
       LG_MUST_MAP_ID,
       LG_MUST_DIST_ID,
       LG_MUST_LAUNCH_ID,
-      LG_DEFERRED_FUTURE_SET_ID,
-      LG_DEFERRED_FUTURE_MAP_SET_ID,
       LG_RESOLVE_FUTURE_PRED_ID,
       LG_CONTRIBUTE_COLLECTIVE_ID,
       LG_FUTURE_CALLBACK_TASK_ID,
@@ -440,8 +438,6 @@ namespace Legion {
         "Must Task Physical Dependence Analysis",                 \
         "Must Task Distribution",                                 \
         "Must Task Launch",                                       \
-        "Deferred Future Set",                                    \
-        "Deferred Future Map Set",                                \
         "Resolve Future Predicate",                               \
         "Contribute Collective",                                  \
         "Future Callback",                                        \
@@ -1581,6 +1577,7 @@ namespace Legion {
     class FieldAllocatorImpl;
     class ArgumentMapImpl;
     class FutureImpl;
+    class FutureInstance;
     class FutureMapImpl;
     class ReplFutureMapImpl;
     class PhysicalRegionImpl;

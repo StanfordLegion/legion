@@ -362,8 +362,9 @@ namespace Legion {
       std::map<DomainPoint,Future>::const_iterator finder=arguments.find(point);
       if ((finder == arguments.end()) || (finder->second.impl == NULL))
         return TaskArgument();
-      return TaskArgument(finder->second.impl->get_untyped_result(),
-                          finder->second.impl->get_untyped_size());
+      size_t arg_size = 0;
+      const void *ptr = finder->second.impl->get_internal_buffer(arg_size);
+      return TaskArgument(ptr, arg_size);
     }
 
     //--------------------------------------------------------------------------
@@ -778,6 +779,7 @@ namespace Legion {
       mark_sampled();
     }
     
+#if 0
     //--------------------------------------------------------------------------
     void* FutureImpl::get_untyped_result(bool silence_warnings,
                                       const char *warning_string, bool internal, 
@@ -854,13 +856,19 @@ namespace Legion {
       mark_sampled();
       return result;
     }
+#endif
 
     //--------------------------------------------------------------------------
     size_t FutureImpl::get_untyped_size(bool internal)
     //--------------------------------------------------------------------------
     {
       // Call this first to make sure the future is ready
-      get_untyped_result(true, NULL, internal);
+      size_t result_size = 0;
+      if (internal)
+        get_internal_buffer(result_size);
+      else
+        get_buffer(implicit_context->get_executing_processor(), 
+            Memory::SYSTEM_MEM, &result_size, false, true/*silence warnings*/);
       return result_size;
     }
 
@@ -912,6 +920,7 @@ namespace Legion {
       return empty;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void FutureImpl::set_result(const void *args, size_t arglen, bool own)
     //--------------------------------------------------------------------------
@@ -937,6 +946,7 @@ namespace Legion {
       }
       finish_set_future();
     }
+#endif
 
     //--------------------------------------------------------------------------
     void FutureImpl::set_result(FutureFunctor *functor, bool own,Processor proc)
@@ -958,6 +968,22 @@ namespace Legion {
       callback_proc = proc;
       finish_set_future();
     }
+
+#if 0
+    //--------------------------------------------------------------------------
+    void FutureImpl::set_local(const void *value, size_t size, bool owned)
+    //--------------------------------------------------------------------------
+    {
+      Memory memory = runtime->
+      if (!owned)
+      {
+
+      }
+      else
+        set_result(new FutureInstance(
+
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void FutureImpl::finish_set_future(void)
@@ -2693,6 +2719,8 @@ namespace Legion {
             context->end_task_wait();
         }
       }
+      if (poisoned)
+        context->raise_poison_exception();
       valid = true;
     }
 
@@ -13847,7 +13875,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Runtime::Runtime(Machine m, const LegionConfiguration &config, 
-                     bool background, InputArgs args, AddressSpaceID unique,
+                     bool background, InputArgs args, 
+                     AddressSpaceID unique, Memory system,
                      const std::set<Processor> &locals,
                      const std::set<Processor> &local_utilities,
                      const std::set<AddressSpaceID> &address_spaces,
@@ -13855,7 +13884,7 @@ namespace Legion {
                      bool default_mapper)
       : external(new Legion::Runtime(this)),
         mapper_runtime(new Legion::Mapping::MapperRuntime()),
-        machine(m), address_space(unique), 
+        machine(m), runtime_system_memory(system), address_space(unique), 
         total_address_spaces(address_spaces.size()),
         runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), virtual_manager(NULL), 
@@ -14069,8 +14098,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Runtime::Runtime(const Runtime &rhs)
       : external(NULL), mapper_runtime(NULL), machine(rhs.machine), 
-        address_space(0), total_address_spaces(0), runtime_stride(0), 
-        profiler(NULL), forest(NULL), 
+        runtime_system_memory(Memory::NO_MEMORY), address_space(0), 
+        total_address_spaces(0), runtime_stride(0), profiler(NULL),forest(NULL),
         num_utility_procs(rhs.num_utility_procs), input_args(rhs.input_args),
         initial_task_window_size(rhs.initial_task_window_size),
         initial_task_window_hysteresis(rhs.initial_task_window_hysteresis),
@@ -16907,8 +16936,8 @@ namespace Legion {
             args->tunable_index, output.value, output.size);
       // Set and complete the future
       if ((output.value != NULL) && (output.size > 0))
-        args->result->set_result(output.value, output.size, 
-                                 output.take_ownership);
+        args->result->set_local(output.value, output.size, 
+                                output.take_ownership);
       Runtime::trigger_event(NULL, args->to_trigger);
     }
 
@@ -27191,7 +27220,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // this is just a normal finish operation
-      ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, NULL);
+      ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, 
+          NULL/*callback functor*/, Memory::SYSTEM_MEM, NULL/*freefunc*/);
       // Record that this is no longer an implicit external task
       external_implicit_task = false; 
       implicit_runtime = NULL;
@@ -27418,14 +27448,27 @@ namespace Legion {
           }
         }
         if (local_procs.empty())
-          REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, 
+          REPORT_LEGION_ERROR(ERROR_NO_STARTUP_RESOURCES, 
                         "Machine model contains no local processors!")
       }
       // Check to make sure we have something to do startup
       if (startup_kind == Processor::NO_KIND)
-        REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, "Machine model contains "
-            "no CPU processors and no utility processors! At least one "
+        REPORT_LEGION_ERROR(ERROR_NO_STARTUP_RESOURCES, "Machine model contains"
+            " no CPU processors and no utility processors! At least one "
             "CPU or one utility processor is required for Legion.")
+      // Find the local system memory for our runtime
+      Memory system_memory;
+      {
+        Machine::MemoryQuery local_sysmems(machine);
+        local_sysmems.local_address_space();
+        local_sysmems.only_kind(Memory::SYSTEM_MEM);
+        if (local_sysmems.count() == 0)
+          REPORT_LEGION_ERROR(ERROR_NO_STARTUP_RESOURCES, "Machine model "
+              "contains no local system memories! At least one system memory "
+              "must exist in each process for Legion.")
+        system_memory = local_sysmems.first();
+      }
+
       Realm::ProfilingRequestSet no_requests;
       // Keep track of all the registration events
       std::set<RtEvent> registered_events;
@@ -27487,7 +27530,7 @@ namespace Legion {
           std::set<Processor> fake_local_procs;
           fake_local_procs.insert(*it);
           Runtime *runtime = new Runtime(machine, config, background,
-                                         input_args, local_space,
+                                         input_args, local_space, system_memory,
                                          fake_local_procs, local_util_procs,
                                          address_spaces, proc_spaces,
                                          supply_default_mapper);
@@ -27517,7 +27560,7 @@ namespace Legion {
         input_args.argc = argc;
         input_args.argv = argv;
         Runtime *runtime = new Runtime(machine, config, background,
-                                       input_args, local_space,
+                                       input_args, local_space, system_memory,
                                        local_procs, local_util_procs,
                                        address_spaces, proc_spaces,
                                        supply_default_mapper);
@@ -28621,45 +28664,6 @@ namespace Legion {
         case LG_MUST_LAUNCH_ID:
           {
             MustEpochOp::handle_launch_task(args);
-            break;
-          }
-        case LG_DEFERRED_FUTURE_SET_ID:
-          {
-            TaskOp::DeferredFutureSetArgs *future_args =  
-              (TaskOp::DeferredFutureSetArgs*)args;
-            const size_t result_size = 
-              future_args->task_op->check_future_size(future_args->result);
-            if (result_size > 0)
-              future_args->target->set_result(
-                  future_args->result->get_untyped_result(),
-                  result_size, false/*own*/);
-            if (future_args->target->remove_base_gc_ref(DEFERRED_TASK_REF))
-              delete (future_args->target);
-            if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF)) 
-              delete (future_args->result);
-            break;
-          }
-        case LG_DEFERRED_FUTURE_MAP_SET_ID:
-          {
-            TaskOp::DeferredFutureMapSetArgs *future_args = 
-              (TaskOp::DeferredFutureMapSetArgs*)args;
-            const size_t result_size = 
-              future_args->task_op->check_future_size(future_args->result);
-            const void *result = future_args->result->get_untyped_result();
-            for (Domain::DomainPointIterator itr(future_args->domain); 
-                  itr; itr++)
-            {
-              Future f = 
-                future_args->future_map->get_future(itr.p, true/*internal*/);
-              if (result_size > 0)
-                f.impl->set_result(result, result_size, false/*own*/);
-            }
-            if (future_args->future_map->remove_base_gc_ref(
-                                                        DEFERRED_TASK_REF))
-              delete (future_args->future_map);
-            if (future_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF))
-              delete (future_args->result);
-            future_args->task_op->complete_execution();
             break;
           }
         case LG_RESOLVE_FUTURE_PRED_ID:

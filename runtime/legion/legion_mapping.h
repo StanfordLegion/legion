@@ -405,6 +405,7 @@ namespace Legion {
         std::map<unsigned,std::vector<PhysicalInstance> >  premapped_sources;
         ProfilingRequest                                   copy_prof_requests;
         TaskPriority                                       profiling_priority;
+        std::vector<Memory>                                reduction_futures;
       };
       //------------------------------------------------------------------------
       virtual void premap_task(const MapperContext      ctx,
@@ -497,6 +498,11 @@ namespace Legion {
        * for garbage collection after the task is done mapping. Only the
        * indexes of read-only region requirements should be specified.
        *
+       * In addition to mapping regions for the task, the mapper can also
+       * specify a memory to use for each of the futures of the task. The
+       * entries in this vector will be zipped with the vector of futures
+       * in the 'Task' object to determine which memory to map each future.
+       *
        * The mapper must also select a set of 'target_procs'
        * that specifies the target processor(s) on which the task can run.
        * If a single processor is chosen then the task is guaranteed to 
@@ -542,6 +548,7 @@ namespace Legion {
         std::vector<Memory>                         output_targets;
         std::vector<LayoutConstraintSet>            output_constraints;
         std::set<unsigned>                          untracked_valid_regions;
+        std::vector<Memory>                         future_targets;
         std::vector<Processor>                      target_procs;
         VariantID                                   chosen_variant; // = 0 
         TaskPriority                                task_priority;  // = 0
@@ -2152,6 +2159,10 @@ namespace Legion {
                           const std::vector<PhysicalInstance> &instances) const;
       void release_instances(MapperContext ctx,
             const std::vector<std::vector<PhysicalInstance> > &instances) const;
+    public:
+      // Futures can also be acquired to ensure that they are available in
+      // particular memories prior to running a task.
+      bool acquire_future(MapperContext ctx, const Future &f, Memory mem) const;
     public:
       //------------------------------------------------------------------------
       // Methods for creating index spaces which mappers need to do

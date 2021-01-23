@@ -2744,8 +2744,6 @@ namespace Legion {
       void add_mapping_dependence(RtEvent precondition);
       void register_single_task(SingleTask *single, unsigned index);
       void register_slice_task(SliceTask *slice);
-      void set_future(const DomainPoint &point,
-                      const void *result, size_t result_size, bool owned);
     public:
       // Methods for keeping track of when we can complete and commit
       void register_subop(Operation *op);
@@ -3869,7 +3867,8 @@ namespace Legion {
       AllReduceOp& operator=(const AllReduceOp &rhs);
     public:
       Future initialize(InnerContext *ctx, const FutureMap &future_map,
-                        ReductionOpID redop, bool deterministic);
+                        ReductionOpID redop, bool deterministic,
+                        MapperID mapper_id, MappingTagID tag);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -3880,14 +3879,26 @@ namespace Legion {
     protected:
       void activate_all_reduce(void);
       void deactivate_all_reduce(void);
+      void invoke_mapper(std::set<Memory> &targets);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_complete(void);
+    protected:
+      // These are virtual methods to override for control replication
+      virtual void all_reduce_serdez(void);
+      virtual RtEvent all_reduce_redop(void);
     protected:
       FutureMap future_map;
       const ReductionOp *redop; 
+      const SerdezRedopFns *serdez_redop_fns;
       Future result;
+      std::vector<FutureInstance*> targets;
+      size_t future_result_size;
+      void *serdez_redop_buffer;
+      MapperID mapper_id;
+      MappingTagID tag;
       bool deterministic;
     };
 

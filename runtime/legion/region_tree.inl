@@ -4447,12 +4447,13 @@ namespace Legion {
                                         color_space->handle.get_type_tag());
           IndexSpaceNodeT<DIM,T> *child = static_cast<IndexSpaceNodeT<DIM,T>*>(
                                             partition->get_child(child_color));
-          if (it->second->get_untyped_size(true/*internal*/) != sizeof(Domain))
+          size_t future_size = 0;
+          const Domain *domain = static_cast<const Domain*>(
+              it->second->get_internal_buffer(future_size));
+          if (future_size != sizeof(Domain))
             REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
                 "An invalid future size was found in a partition by domain "
                 "call. All futures must contain Domain objects.")
-          const Domain *domain = static_cast<Domain*>(
-              it->second->get_untyped_result(true, NULL, true/*internal*/));
           const DomainT<DIM,T> domaint = *domain;
           Realm::IndexSpace<DIM,T> child_space = domaint;
           if (perform_intersections)
@@ -4515,13 +4516,13 @@ namespace Legion {
             Realm::IndexSpace<DIM,T> child_space;
             if (future != NULL)
             {
-              if (future->get_untyped_size(true/*internal*/) != 
-                    sizeof(Domain))
+              size_t future_size = 0;
+              const Domain *domain = static_cast<const Domain*>(
+                  future->get_internal_buffer(future_size));
+              if (future_size != sizeof(Domain))
                 REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
                     "An invalid future size was found in a partition by domain "
                     "call. All futures must contain Domain objects.")
-              const Domain *domain = static_cast<Domain*>(
-                  future->get_untyped_result(true, NULL, true/*internal*/));
               const DomainT<DIM,T> domaint = *domain;
               child_space = domaint;
               if (perform_intersections)
@@ -4586,7 +4587,8 @@ namespace Legion {
                 "A partition by weight call is missing an entry for a "
                 "color in the color space. All colors must be present.")
           FutureImpl *future = future_map->unpack_future(finder->second);
-          const size_t future_size = future->get_untyped_size(true/*internal*/);
+          size_t future_size = 0;
+          const void *data = future->get_internal_buffer(future_size);
           if (future_size == sizeof(int))
           {
             if (weights.empty())
@@ -4597,8 +4599,7 @@ namespace Legion {
                   "call. All futures must be consistent int or size_t values.")
               weights.resize(count);
             }
-            weights[color_index] = *(static_cast<int*>(
-              future->get_untyped_result(true, NULL, true/*internal*/)));
+            weights[color_index] = *(static_cast<const int*>(data));
           }
           else if (future_size == sizeof(size_t))
           {
@@ -4610,8 +4611,7 @@ namespace Legion {
                   "call. All futures must be consistent int or size_t values.")
               long_weights.resize(count);
             }
-            long_weights[color_index] = *(static_cast<size_t*>(
-              future->get_untyped_result(true, NULL, true/*internal*/)));
+            long_weights[color_index] = *(static_cast<const size_t*>(data));
           }
           else
             REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_WEIGHT_VALUE,

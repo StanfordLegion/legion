@@ -2552,8 +2552,7 @@ namespace Legion {
           can_result_future_complete = true;
       }
       if (set_future)
-        result_future.impl->set_result(&predicate_value, 
-                                       sizeof(predicate_value), false/*own*/);
+        result_future.impl->set_local(&predicate_value,sizeof(predicate_value));
       complete_operation();
     }
 
@@ -2708,8 +2707,7 @@ namespace Legion {
         }
       }
       if (set_future)
-        result_future.impl->set_result(&predicate_value, 
-                                sizeof(predicate_value), false/*owned*/);
+        result_future.impl->set_local(&predicate_value,sizeof(predicate_value));
       return result_future;
     }
 
@@ -8009,7 +8007,7 @@ namespace Legion {
               runtime->address_space, completion_event, track ? this : NULL));
         // We can set the future result right now because we know that it
         // will not be complete until we are complete ourselves
-        result.impl->set_result(NULL, 0, true/*own*/); 
+        result.impl->set_result(NULL);
       }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
@@ -8558,7 +8556,9 @@ namespace Legion {
             // Pull the pointer for the domain out of the future and assign 
             // it to the index space node
             FutureImpl *impl = futures[0].impl;
-            const size_t future_size = impl->get_untyped_size(true/*internal*/);
+            size_t future_size = 0;
+            const Domain *domain =
+             static_cast<const Domain*>(impl->get_internal_buffer(future_size));
             if (future_size != sizeof(Domain))
               REPORT_LEGION_ERROR(ERROR_CREATION_FUTURE_TYPE_MISMATCH,
                   "Future for index space creation in task %s (UID %lld) does "
@@ -8566,8 +8566,6 @@ namespace Legion {
                   "The type of futures for index space domains must be a "
                   "Domain.", parent_ctx->get_task_name(), 
                   parent_ctx->get_unique_id(), sizeof(Domain))
-            const Domain *domain = static_cast<Domain*>(
-                impl->get_untyped_result(true,NULL,true/*internal*/));
             if (owner && index_space_node->set_domain(*domain, 
                   runtime->address_space, shard_mapping))
               delete index_space_node;
@@ -8578,8 +8576,9 @@ namespace Legion {
             for (unsigned idx = 0; idx < futures.size(); idx++)
             {
               FutureImpl *impl = futures[idx].impl;
-               const size_t future_size = 
-                 impl->get_untyped_size(true/*internal*/);
+              size_t future_size = 0;
+              const size_t *field_size = static_cast<const size_t*>(
+                              impl->get_internal_buffer(future_size));
               if (future_size != sizeof(size_t))
                 REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
                     "Size of future passed into dynamic field allocation for "
@@ -8587,13 +8586,11 @@ namespace Legion {
                     " (%zd bytes). Futures passed into field allocation calls "
                     "must contain data of the type size_t.",
                     fields[idx], future_size, sizeof(size_t))
-              const size_t field_size = 
-                  *((const size_t*)impl->get_untyped_result(true, NULL, true));
-              field_space_node->update_field_size(fields[idx], field_size,
+              field_space_node->update_field_size(fields[idx], *field_size,
                           complete_preconditions, runtime->address_space);
               if (runtime->legion_spy_enabled && owner)
                 LegionSpy::log_field_creation(field_space_node->handle.id,
-                                              fields[idx], field_size);
+                                              fields[idx], *field_size);
             }
             break;
           }
@@ -13112,7 +13109,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result);
 #endif
-      future.impl->set_result(result_buffer, result_size, true/*own*/);
+      future.impl->set_local(result_buffer, result_size, true/*own*/);
       complete_execution();
     }
 
@@ -14952,15 +14949,6 @@ namespace Legion {
     {
       AutoLock o_lock(op_lock);
       slice_tasks.insert(slice);
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochOp::set_future(const DomainPoint &point, const void *result, 
-                                 size_t result_size, bool owner)
-    //--------------------------------------------------------------------------
-    {
-      Future f = result_map.impl->get_future(point, true/*internal*/);
-      f.impl->set_result(result, result_size, owner);
     }
 
     //--------------------------------------------------------------------------
@@ -17715,7 +17703,7 @@ namespace Legion {
       // will want to take ownership of the buffer
       size_t result_size = future.impl->get_untyped_size();
       void *result = malloc(result_size);
-      memcpy(result, future.impl->get_untyped_result(), result_size);
+      memcpy(result, future.impl->get_internal_buffer(result_size),result_size);
       // This is NULL for now until we implement tracing for fills
       ApEvent init_precondition = compute_init_precondition(trace_info);
       // Ask the enclosing context to find or create the fill view
@@ -19597,7 +19585,7 @@ namespace Legion {
     void DetachOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      result.impl->set_result(NULL, 0, true/*own*/);
+      result.impl->set_result(NULL);
       InstanceSet references;
       region.impl->get_references(references);
 #ifdef DEBUG_LEGION
@@ -19830,19 +19818,19 @@ namespace Legion {
         case LEGION_MEASURE_SECONDS:
           {
             double value = Realm::Clock::current_time();
-            result.impl->set_result(&value, sizeof(value), false);
+            result.impl->set_local(&value, sizeof(value));
             break;
           }
         case LEGION_MEASURE_MICRO_SECONDS:
           {
             long long value = Realm::Clock::current_time_in_microseconds();
-            result.impl->set_result(&value, sizeof(value), false);
+            result.impl->set_local(&value, sizeof(value));
             break;
           }
         case LEGION_MEASURE_NANO_SECONDS:
           {
             long long value = Realm::Clock::current_time_in_nanoseconds();
-            result.impl->set_result(&value, sizeof(value), false);
+            result.impl->set_local(&value, sizeof(value));
             break;
           }
         default:
@@ -19894,15 +19882,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future AllReduceOp::initialize(InnerContext *ctx, const FutureMap &fm, 
-                                   ReductionOpID redop_id,bool is_deterministic)
+                                   ReductionOpID redop_id,bool is_deterministic,
+                                   MapperID map_id, MappingTagID t)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
       future_map = fm;
       redop = runtime->get_reduction(redop_id);
+      serdez_redop_fns = Runtime::get_serdez_redop_fns(redop_id);
       result = Future(new FutureImpl(runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, get_completion_event(), this));
+      mapper_id = map_id;
+      tag = t;
       deterministic = is_deterministic;
       if (runtime->legion_spy_enabled)
       {
@@ -19948,6 +19940,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation(); 
+      future_result_size = 0;
+      serdez_redop_buffer = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -19957,6 +19951,9 @@ namespace Legion {
       deactivate_operation();
       future_map = FutureMap();
       result = Future();
+      targets.clear();
+      if (serdez_redop_buffer != NULL)
+        free(serdez_redop_buffer);
     }
 
     //--------------------------------------------------------------------------
@@ -19964,69 +19961,228 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       future_map.impl->register_dependence(this);
+    } 
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (serdez_redop_fns != NULL)
+        enqueue_ready_operation(future_map.impl->get_ready_event());
+      else
+        enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::all_reduce_serdez(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(serdez_redop_fns != NULL);
+#endif
+      std::map<DomainPoint,Future> futures;
+      future_map.impl->get_all_futures(futures);
+      for (std::map<DomainPoint,Future>::const_iterator it = 
+            futures.begin(); it != futures.end(); it++)
+      {
+        FutureImpl *impl = it->second.impl;
+        size_t src_size = 0;
+        const void *source = impl->get_internal_buffer(src_size);
+        (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
+                                       future_result_size, source);
+        if (runtime->legion_spy_enabled)
+        {
+          const ApEvent ready_event = impl->get_ready_event();
+          if (ready_event.exists())
+            LegionSpy::log_future_use(unique_op_id, ready_event);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
     void AllReduceOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      complete_mapping();
-      const RtEvent ready = future_map.impl->get_ready_event();
-      if (ready.exists() && !ready.has_triggered())
+      if (serdez_redop_fns != NULL)
       {
-        DeferredExecuteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, ready);
-        return;
+        // Serdez redop functions are nasty, we need to actually do the 
+        // computation inline here to figure out how big the output buffer
+        // needs to be for the future instances before we can do the
+        // mapper call which might try to actually make the instances.
+        future_result_size = 0;
+        (*(serdez_redop_fns->init_fn))(redop, serdez_redop_buffer, 
+                                       future_result_size);
+        all_reduce_serdez();
       }
-      // If we make it here we can just do this now
-      deferred_execute();
+      else
+        future_result_size = redop->sizeof_rhs;
+      // Invoke the mapper to do figure out where to put the data
+      std::set<Memory> target_memories;
+      invoke_mapper(target_memories);
+      // Remove any memories which already have instances made
+      if (!targets.empty())
+      {
+        for (std::vector<FutureInstance*>::const_iterator it =
+              targets.begin(); it != targets.end(); it++)
+          target_memories.erase((*it)->memory);
+      }
+      // Make the instances if they haven't already been made
+      if (!target_memories.empty())
+      {
+        targets.reserve(targets.size() + target_memories.size());
+        for (std::set<Memory>::const_iterator it =
+              target_memories.begin(); it != target_memories.end(); it++)
+        {
+          MemoryManager *manager = runtime->find_memory_manager(*it);
+          FutureInstance *instance = manager->create_future_instance(this, 
+                    completion_event, future_result_size, false/*eager*/);
+          targets.push_back(instance);
+        }
+      }
+      // We're done with our mapping at the point we've made all the instances
+      complete_mapping();
+      if (serdez_redop_fns != NULL)
+      {
+        // Now that we've got the output instances we copy the result to
+        // each of the targets, we're done when the copies are done
+        // create an external instance for the current allocation
+        const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
+        const std::vector<size_t> sizes(1, future_result_size);
+        const int dim_order[1] = { 0 };
+        const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
+        const Realm::IndexSpace<1,coord_t> rect_space(
+            Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
+                                   Realm::Point<1,coord_t>(0)));
+        Realm::InstanceLayoutGeneric *ilg =
+          Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
+              rect_space, constraints, dim_order);
+        PhysicalInstance source_instance;
+        const ApEvent src_ready(
+            PhysicalInstance::create_external_instance(
+              source_instance, runtime->runtime_system_memory, ilg, 
+              Realm::ExternalMemoryResource(
+               reinterpret_cast<uintptr_t>(serdez_redop_buffer), 
+               future_result_size, true/*read only*/),
+              Realm::ProfilingRequestSet()));
+        FutureInstance source(serdez_redop_buffer, future_result_size, 
+            runtime->runtime_system_memory, ApEvent::NO_AP_EVENT, 
+            false/*eager*/, false/*external*/,
+            false/*own alloc*/, source_instance);
+        std::set<ApEvent> done_events;
+        for (std::vector<FutureInstance*>::const_iterator it =
+              targets.begin(); it != targets.end(); it++)
+        {
+          ApEvent done = (*it)->initialize(&source);
+          if (done.exists())
+            done_events.insert(done);
+        }
+        if (!done_events.empty())
+        {
+          const ApEvent done = Runtime::merge_events(NULL, done_events);
+          const RtEvent ready = Runtime::protect_event(done);
+          source_instance.destroy(ready);
+          if (!request_early_complete(done))
+            complete_execution(ready);
+          else
+            complete_execution();
+        }
+        else
+        {
+          source_instance.destroy();
+          request_early_complete(ApEvent::NO_AP_EVENT);
+          complete_execution();
+        }
+      }
+      else // Trigger completion once all the futures are ready to be accessed
+        complete_execution(future_map.impl->get_ready_event());
     }
 
     //--------------------------------------------------------------------------
-    void AllReduceOp::deferred_execute(void)
+    RtEvent AllReduceOp::all_reduce_redop(void)
     //--------------------------------------------------------------------------
     {
+      RtEvent completion_precondition;
       std::map<DomainPoint,Future> futures;
       future_map.impl->get_all_futures(futures);
-      void *result_buffer = malloc(redop->sizeof_rhs);
-      redop->init(result_buffer, 1/*count*/);
+      std::vector<FutureInstance*> sources;
+      sources.reserve(futures.size());
       for (std::map<DomainPoint,Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
       {
         FutureImpl *impl = it->second.impl;
-        const size_t future_size = impl->get_untyped_size(true/*internal*/);
-        if (future_size != redop->sizeof_rhs)
+        FutureInstance *instance = impl->get_canonical_instance();
+        if (instance->size != redop->sizeof_rhs)
           REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_REDOP_TYPE_MISMATCH,
               "Future in future map reduction in task %s (UID %lld) does not "
               "have the right input size for the given reduction operator. "
               "Future has size %zd bytes but reduction operator expects "
               "RHS inputs of %zd bytes.", parent_ctx->get_task_name(),
-              parent_ctx->get_unique_id(), future_size, redop->sizeof_rhs)
-        const void *data = impl->get_untyped_result(true,NULL,true/*internal*/);
-        redop->fold(result_buffer, data, 1/*count*/, true/*exclusive*/);
-      }
-      if (runtime->legion_spy_enabled)
-      {
-        for (std::map<DomainPoint,Future>::const_iterator it = 
-              futures.begin(); it != futures.end(); it++)
+              parent_ctx->get_unique_id(), instance->size, redop->sizeof_rhs)
+        sources.push_back(instance);
+        if (runtime->legion_spy_enabled)
         {
-          FutureImpl *impl = it->second.impl;
           const ApEvent ready_event = impl->get_ready_event();
           if (ready_event.exists())
             LegionSpy::log_future_use(unique_op_id, ready_event);
         }
       }
-      // Tell the future about the final result which it will own
-      result.impl->set_result(result_buffer, redop->sizeof_rhs, true/*own*/);
+      std::vector<ApEvent> preconditions(targets.size());
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+        preconditions[idx] = targets[idx]->initialize(redop);
+      std::set<ApEvent> postconditions;
+      if (deterministic)
+      {
+        for (std::vector<FutureInstance*>::const_iterator it =
+              sources.begin(); it != sources.end(); it++)
+        {
+          for (unsigned idx = 0; idx < targets.size(); idx++)
+            preconditions[idx] = targets[idx]->reduce_from(*it, redop,
+                                true/*exclusive*/, preconditions[idx]);
+        }
+        for (std::vector<ApEvent>::const_iterator it =
+              preconditions.begin(); it != preconditions.end(); it++)
+          if (it->exists())
+            postconditions.insert(*it);
+      }
+      else
+      {
+        for (std::vector<FutureInstance*>::const_iterator it =
+              sources.begin(); it != sources.end(); it++)
+        {
+          for (unsigned idx = 0; idx < targets.size(); idx++)
+          {
+            const ApEvent done = targets[idx]->reduce_from(*it, redop,
+                              false/*exclusive*/, preconditions[idx]);
+            if (done.exists())
+              postconditions.insert(done);
+          }
+        }
+      }
+      if (!postconditions.empty())
+      {
+        const ApEvent done = Runtime::merge_events(NULL, postconditions); 
+        if (!request_early_complete(done))
+          completion_precondition = Runtime::protect_event(done);
+      }
+      else
+        request_early_complete(ApEvent::NO_AP_EVENT);
+      return completion_precondition;
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent completion_precondition;
+      if (serdez_redop_fns == NULL)
+        completion_precondition = all_reduce_redop();
+      result.impl->set_results(targets);
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       ApEvent::NO_AP_EVENT);
 #endif
-      // Mark that we are done executing which will complete the future
-      // as soon as this operation is complete
-      complete_execution();
+      complete_operation(completion_precondition);
     }
 
     ///////////////////////////////////////////////////////////// 

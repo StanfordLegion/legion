@@ -226,31 +226,34 @@ namespace Legion {
     };
 
     /**
-     * \class AllReduceOpCollective
-     * This collective has equivalent functonality to 
-     * MPI All Reduce in that it will take a value from each
-     * shard and reduce it down to a final value using a
-     * Realm reduction operator.
+     * \class FutureAllReduceCollective
+     * This collective will build a butterfly network for reducing
+     * future instance values. Note that execution will not resume
+     * until the precondition event for each future instance triggers
+     * so this collective can be used to build the Realm event graph
+     * in advance of actual execution.
      */
-    class AllReduceOpCollective : public AllGatherCollective<false> {
+    class FutureAllReduceCollective : public AllGatherCollective<false> {
     public:
-      AllReduceOpCollective(CollectiveIndexLocation loc, ReplicateContext *ctx,
-                            const ReductionOp *redop);
-      AllReduceOpCollective(ReplicateContext *ctx, CollectiveID id,
-                            const ReductionOp *redop);
-      virtual ~AllReduceOpCollective(void);
+      FutureAllReduceCollective(CollectiveIndexLocation loc, 
+          ReplicateContext *ctx, const ReductionOp *redop, bool deterministic);
+      FutureAllReduceCollective(ReplicateContext *ctx, CollectiveID id,
+                                const ReductionOp *redop, bool deterministic);
+      virtual ~FutureAllReduceCollective(void);
     public:
       virtual void pack_collective_stage(Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      RtEvent async_reduce(const void *value);
-      void sync_result(void *result);
+      RtEvent async_reduce(FutureInstance *instance, ApEvent &ready_event);
     public:
       const ReductionOp *const redop;
+      const bool deterministic;
     protected:
+      FutureInstance *instance;
+      ApEvent ready_event;
       int current_stage;
-      void *const value;
-      std::map<int,std::vector<void*> > future_values;
+      std::map<int,std::map<ShardID,
+            std::pair<FutureInstance*,ApEvent> > > future_instances;
     };
 
     /**
@@ -668,29 +671,28 @@ namespace Legion {
     };
 
     /**
-     * \class FutureExchange
-     * A class for doing an all-to-all exchange of future values
+     * \class BufferExchange
+     * A class for doing an all-to-all exchange of byte buffers
      */
-    class FutureExchange : public AllGatherCollective<false> {
+    class BufferExchange : public AllGatherCollective<false> {
     public:
-      FutureExchange(ReplicateContext *ctx, size_t future_size,
+      BufferExchange(ReplicateContext *ctx,
                      CollectiveIndexLocation loc);
-      FutureExchange(const FutureExchange &rhs);
-      virtual ~FutureExchange(void);
+      BufferExchange(const BufferExchange &rhs);
+      virtual ~BufferExchange(void);
     public:
-      FutureExchange& operator=(const FutureExchange &rhs);
+      BufferExchange& operator=(const BufferExchange &rhs);
     public:
       virtual void pack_collective_stage(Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      // This takes ownership of the buffer
-      RtEvent exchange_futures(void *value);
-      void reduce_futures(ReplIndexTask *target);
-      void reduce_futures(const ReductionOp *redop, void *result_buffer);
-    public:
-      const size_t future_size;
+      const std::map<ShardID,std::pair<void*,size_t> >&
+        exchange_buffers(void *value, size_t size, bool keep_self = false);
+      RtEvent exchange_buffers_async(void *value, size_t size, 
+                                     bool keep_self = false);
+      const std::map<ShardID,std::pair<void*,size_t> >& sync_buffers(bool keep);
     protected:
-      std::map<ShardID,void*> results;
+      std::map<ShardID,std::pair<void*,size_t> > results;
     };
 
     /**
@@ -1149,7 +1151,8 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
     protected:
-      virtual RtEvent prepare_index_task_complete(void);
+      virtual RtEvent finish_index_task_reduction(std::set<ApEvent> &effects);
+      virtual RtEvent finish_index_task_complete(void);
     public:
       // Override this so we can exchange reduction results
       virtual void trigger_task_complete(void);
@@ -1174,7 +1177,8 @@ namespace Legion {
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      FutureExchange *reduction_collective;
+      BufferExchange *serdez_redop_collective;
+      FutureAllReduceCollective *all_reduce_collective;
       OutputSizeExchange *output_size_collective;
     protected:
       // Map of output sizes collected by this shard
@@ -1750,12 +1754,13 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-    public:
-      virtual void deferred_execute(void);
     protected:
-      void *result_buffer;
-      FutureExchange *exchange_collective;
-      AllReduceOpCollective *all_reduce_collective;
+      virtual void all_reduce_serdez(void);
+      virtual RtEvent pre_reduce_redop(void);
+      virtual RtEvent all_reduce_redop(void);
+    protected:
+      BufferExchange *serdez_redop_collective;
+      FutureAllReduceCollective *all_reduce_collective;
     };
 
     /**
