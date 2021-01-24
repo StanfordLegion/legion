@@ -26,59 +26,7 @@
 #include "legion/legion_allocation.h"
 
 namespace Legion {
-  namespace Internal {
-
-    /**
-     * \class ResourceTracker
-     * A helper class for tracking which privileges an
-     * operation owns. This is inherited by multi-tasks
-     * for aggregating the privilege results of their
-     * children as well as task contexts for tracking
-     * which privileges have been accrued or deleted
-     * as part of the execution of the task.
-     */
-    class ResourceTracker {
-    public:
-      ResourceTracker(void);
-      ResourceTracker(const ResourceTracker &rhs);
-      virtual ~ResourceTracker(void);
-    public:
-      ResourceTracker& operator=(const ResourceTracker &rhs);
-    public:
-      void return_resources(ResourceTracker *target, size_t return_index,
-                            std::set<RtEvent> &preconditions);
-      virtual void receive_resources(size_t return_index,
-              std::map<LogicalRegion,unsigned> &created_regions,
-              std::vector<LogicalRegion> &deleted_regions,
-              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
-              std::map<FieldSpace,unsigned> &created_field_spaces,
-              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
-              std::vector<FieldSpace> &deleted_field_spaces,
-              std::map<IndexSpace,unsigned> &created_index_spaces,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
-              std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
-              std::set<RtEvent> &preconditions) = 0;
-      void pack_resources_return(Serializer &rez, size_t return_index);
-      static RtEvent unpack_resources_return(Deserializer &derez,
-                                             ResourceTracker *target);
-    protected:
-      std::map<LogicalRegion,unsigned>                 created_regions;
-      std::map<LogicalRegion,bool>                     local_regions;
-      std::set<std::pair<FieldSpace,FieldID> >         created_fields;
-      std::map<std::pair<FieldSpace,FieldID>,bool>     local_fields;
-      std::map<FieldSpace,unsigned>                    created_field_spaces;
-      std::map<IndexSpace,unsigned>                    created_index_spaces;
-      std::map<IndexPartition,unsigned>                created_index_partitions;
-    protected:
-      std::vector<LogicalRegion>                       deleted_regions;
-      std::vector<std::pair<FieldSpace,FieldID> >      deleted_fields;
-      std::vector<FieldSpace>                          deleted_field_spaces;
-      std::map<FieldSpace,std::set<LogicalRegion> >    latent_field_spaces;
-      std::vector<std::pair<IndexSpace,bool> >         deleted_index_spaces;
-      std::vector<std::pair<IndexPartition,bool> >     deleted_index_partitions;
-    };
+  namespace Internal { 
 
     /**
      * \class ExternalTask
@@ -385,6 +333,8 @@ namespace Legion {
       std::map<PhysicalManager*,unsigned/*ref count*/> acquired_instances;
     protected:
       std::vector<unsigned>                     parent_req_indexes;
+      // The version infos for this task
+      LegionVector<VersionInfo>::aligned        version_infos;
     protected:
       bool complete_received;
       bool commit_received;
@@ -465,6 +415,17 @@ namespace Legion {
       public:
         MisspeculationTaskArgs(SingleTask *t)
           : LgTaskArgs<MisspeculationTaskArgs>(t->get_unique_op_id()),
+            task(t) { }
+      public:
+        SingleTask *const task;
+      };
+      struct DeferTriggerTaskCompleteArgs :
+        public LgTaskArgs<DeferTriggerTaskCompleteArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID;
+      public:
+        DeferTriggerTaskCompleteArgs(SingleTask *t)
+          : LgTaskArgs<DeferTriggerTaskCompleteArgs>(t->get_unique_op_id()),
             task(t) { }
       public:
         SingleTask *const task;
@@ -599,22 +560,24 @@ namespace Legion {
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
                                                             bool inline_task);
+      virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx);
+    public:
+      static void handle_deferred_task_complete(const void *args);
     protected:
       // Boolean for each region saying if it is virtual mapped
-      std::vector<bool>                     virtual_mapped;
+      std::vector<bool>                           virtual_mapped;
       // Regions which are NO_ACCESS or have no privilege fields
-      std::vector<bool>                     no_access_regions;
-      // The version infos for this operation
-      LegionVector<VersionInfo>::aligned    version_infos;
+      std::vector<bool>                           no_access_regions; 
     protected:
-      std::vector<Processor>                target_processors;
-      // Hold the result of the mapping
-      std::deque<InstanceSet>               physical_instances;
-    protected: // Mapper choices
-      std::set<unsigned>                    untracked_valid_regions;
-      VariantID                             selected_variant;
-      TaskPriority                          task_priority;
-      bool                                  perform_postmap;
+      std::vector<Processor>                      target_processors;
+      // Hold the result of the mapping 
+      std::deque<InstanceSet>                     physical_instances;
+      std::vector<std::vector<PhysicalManager*> > source_instances;
+    protected: // Mapper choices 
+      std::set<unsigned>                          untracked_valid_regions;
+      VariantID                                   selected_variant;
+      TaskPriority                                task_priority;
+      bool                                        perform_postmap;
     protected:
       // origin-mapped cases need to know if they've been mapped or not yet
       bool                                  first_mapping;
@@ -828,8 +791,6 @@ namespace Legion {
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions);
       virtual bool is_stealable(void) const;
-      virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual bool is_output_valid(unsigned idx) const;
@@ -858,7 +819,7 @@ namespace Legion {
 #endif
     protected:
       void pack_remote_versions(Serializer &rez);
-      void pack_remote_complete(Serializer &rez);
+      void pack_remote_complete(Serializer &rez, RtEvent precondition);
       void pack_remote_commit(Serializer &rez);
       void unpack_remote_complete(Deserializer &derez);
       void unpack_remote_commit(Deserializer &derez);
@@ -955,7 +916,6 @@ namespace Legion {
       void initialize_point(SliceTask *owner, const DomainPoint &point,
                             const FutureMap &point_arguments,
                             const std::vector<FutureMap> &point_futures);
-      void send_back_created_state(AddressSpaceID target);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
@@ -1042,9 +1002,6 @@ namespace Legion {
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
-      using SingleTask::get_version_info;
-      virtual VersionInfo& get_version_info(unsigned idx);
-    public:
       virtual void perform_physical_traversal(unsigned idx,
                                 RegionTreeContext ctx, InstanceSet &valid);
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
@@ -1062,6 +1019,7 @@ namespace Legion {
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
                                                             bool inline_task);
+      virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx);
     public:
       virtual InnerContext* create_implicit_context(void);
     public:
@@ -1072,10 +1030,12 @@ namespace Legion {
       void report_leaks_and_duplicates(std::set<RtEvent> &preconditions);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
-      void handle_equivalence_set_request(Deserializer &derez);
+      void handle_disjoint_complete_request(Deserializer &derez);
       void handle_intra_space_dependence(Deserializer &derez);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
+      void handle_created_region_contexts(Deserializer &derez,
+                                          std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event,
                                               ShardID remote_shard);
@@ -1084,10 +1044,13 @@ namespace Legion {
                                              AddressSpaceID source);
       void initialize_implicit_task(InnerContext *context, TaskID tid,
                                     MapperID mid, Processor proxy);
+      void complete_startup_initialization(void);
     public:
       const ShardID shard_id;
     protected:
       UniqueID remote_owner_uid;
+      RtBarrier shard_barrier;
+      bool all_shards_complete;
     };
 
     /**
@@ -1165,8 +1128,6 @@ namespace Legion {
                                std::set<RtEvent> &ready_events);
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions);
-      virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const VersionInfo& get_version_info(unsigned idx) const;
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
@@ -1239,7 +1200,6 @@ namespace Legion {
       unsigned committed_points;
       RtUserEvent future_map_ready;
     protected:
-      LegionMap<unsigned/*idx*/,VersionInfo>::aligned version_infos;
       std::vector<RegionTreePath> privilege_paths;
       std::set<SliceTask*> origin_mapped_slices;
     protected:
@@ -1315,6 +1275,8 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
+      virtual VersionInfo& get_version_info(unsigned idx);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
       virtual void launch_task(bool inline_task = false);

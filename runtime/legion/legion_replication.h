@@ -19,6 +19,7 @@
 #include "legion/legion_ops.h"
 #include "legion/legion_tasks.h"
 #include "legion/legion_trace.h"
+#include "legion/legion_context.h"
 
 namespace Legion {
   namespace Internal { 
@@ -124,6 +125,8 @@ namespace Legion {
       virtual void handle_collective_message(Deserializer &derez);
     public:
       RtEvent get_done_event(void) const;
+      inline bool is_origin(void) const
+        { return (origin == local_shard); }
     protected:
       void send_messages(void) const;
     public:
@@ -1204,10 +1207,59 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       void set_repl_close_info(RtBarrier mapped_barrier);
+      virtual void record_refinements(const FieldMask &refinement_mask,
+                                      const bool overwrite);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
     protected:
       RtBarrier mapped_barrier;
+      RtBarrier refinement_barrier;
+      ValueBroadcast<DistributedID> *did_collective;
+    };
+
+    /**
+     * \class ReplRefinementOp
+     * A refinement operatoin that is aware that it is being
+     * executed ina  control replication context.
+     */
+    class ReplRefinementOp : public RefinementOp {
+    public:
+      ReplRefinementOp(Runtime *runtime);
+      ReplRefinementOp(const ReplRefinementOp &rhs);
+      virtual ~ReplRefinementOp(void);
+    public:
+      ReplRefinementOp& operator=(const ReplRefinementOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      void set_repl_refinement_info(RtBarrier mapped_barrier, 
+                                    RtBarrier refinement_barrier);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void); 
+    protected:
+      void initialize_replicated_set(EquivalenceSet *set,
+          const FieldMask &mask, std::set<RtEvent> &applied_events) const;
+    protected:
+      RtBarrier mapped_barrier;
+      RtBarrier refinement_barrier;
+      std::vector<ValueBroadcast<DistributedID>*> collective_dids;
+      // Note that this data structure ensures that we do things
+      // for these partitions in a order that is consistent across
+      // shards because all shards will sort the keys the same way
+      std::map<LogicalPartition,PartitionNode*> replicated_partitions;
+      // Same thing for one-off regions
+      std::map<LogicalRegion,RegionNode*> replicated_regions;
+      // Version information objects for each of our local regions
+      // that we are own after sharding non-replicated partitions
+      LegionMap<RegionNode*,VersionInfo>::aligned sharded_region_version_infos;
+      // Regions for which we need to propagate refinements for
+      // non-replicated partition refinements
+      std::map<PartitionNode*,std::vector<RegionNode*> > sharded_regions;
+      // Fields for partitions that have refinement regions
+      FieldMaskSet<PartitionNode> sharded_partitions;
     };
 
     /**
@@ -1617,8 +1669,22 @@ namespace Legion {
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_commit(void);
+      virtual void receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regions,
+              std::vector<LogicalRegion> &deleted_regions,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::map<FieldSpace,unsigned> &created_field_spaces,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
+              std::vector<FieldSpace> &deleted_field_spaces,
+              std::map<IndexSpace,unsigned> &created_index_spaces,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions);
+    public:
       void map_replicate_tasks(void) const;
-      void distribute_replicate_tasks(void) const;
+      void distribute_replicate_tasks(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
       Domain get_shard_domain(void) const;
@@ -1632,6 +1698,7 @@ namespace Legion {
       MustEpochDependenceExchange *dependence_exchange;
       MustEpochCompletionExchange *completion_exchange;
       std::set<SingleTask*> shard_single_tasks;
+      RtBarrier resource_return_barrier;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -1705,15 +1772,15 @@ namespace Legion {
     public:
       ReplFenceOp& operator=(const ReplFenceOp &rhs);
     public:
-      Future initialize_repl_fence(ReplicateContext *ctx, FenceKind kind, 
-                                   bool need_future, bool track = true);
-    public:
       virtual void activate(void);
       virtual void deactivate(void);
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent complete_event);
+    protected:
+      void initialize_fence_barriers(ReplicateContext *repl_ctx = NULL);
     protected:
       RtBarrier mapping_fence_barrier;
       ApBarrier execution_fence_barrier;
@@ -1859,6 +1926,7 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
@@ -1866,6 +1934,7 @@ namespace Legion {
       virtual void elide_fences_post_sync(void);
     protected:
       PhysicalTemplate *current_template;
+      RtBarrier recording_fence;
       CollectiveID replayable_collective_id;
       CollectiveID replay_sync_collective_id;
       CollectiveID pre_elide_fences_collective_id;
@@ -1904,6 +1973,7 @@ namespace Legion {
     protected:
       PhysicalTemplate *current_template;
       ApEvent template_completion;
+      RtBarrier recording_fence;
       CollectiveID replayable_collective_id;
       CollectiveID replay_sync_collective_id;
       CollectiveID pre_elide_fences_collective_id;
@@ -1999,7 +2069,7 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
     protected:
-      PhysicalTemplate *current_template;
+      ShardedPhysicalTemplate *current_template;
     };
 
     /**
@@ -2024,6 +2094,39 @@ namespace Legion {
       void unpack_mapping(Deserializer &derez);
     protected:
       std::vector<AddressSpaceID> address_spaces;
+    };
+
+    /**
+     * \class CollectiveMapping
+     * A collective mapping is an ordering of unique address spaces
+     * and can be used to construct broadcast and reduction trees.
+     */
+    class CollectiveMapping : public Collectable {
+    public:
+      CollectiveMapping(const std::vector<AddressSpaceID> &spaces,size_t radix);
+      CollectiveMapping(const ShardMapping &shard_mapping, size_t radix);
+      CollectiveMapping(Deserializer &derez);
+    public:
+      inline AddressSpaceID operator[](unsigned idx) const
+        { return unique_sorted_spaces[idx]; }
+      inline size_t size(void) const { return unique_sorted_spaces.size(); }
+      bool operator==(const CollectiveMapping &rhs) const;
+      bool operator!=(const CollectiveMapping &rhs) const;
+    public:
+      AddressSpaceID get_parent(const AddressSpaceID origin, 
+                                const AddressSpaceID local) const;
+      void get_children(const AddressSpaceID origin, const AddressSpaceID local,
+                        std::vector<AddressSpaceID> &children) const;
+      bool contains(const AddressSpaceID space) const;
+    public:
+      void pack(Serializer &rez) const;
+    protected:
+      unsigned find_index(const AddressSpaceID space) const;
+      unsigned convert_to_offset(unsigned index, unsigned origin) const;
+      unsigned convert_to_index(unsigned offset, unsigned origin) const;
+    protected:
+      std::vector<AddressSpaceID> unique_sorted_spaces;
+      size_t radix;
     };
 
     /**
@@ -2056,15 +2159,22 @@ namespace Legion {
         ShardManager *manager;
       };
     public:
+      enum BroadcastMessageKind {
+        RESOURCE_UPDATE_KIND,
+        CREATED_REGION_UPDATE_KIND,
+      };
+    public:
       ShardManager(Runtime *rt, ReplicationID repl_id, 
                    bool control, bool top, size_t total_shards,
                    AddressSpaceID owner_space, SingleTask *original = NULL,
-                   RtBarrier startup_barrier = RtBarrier::NO_RT_BARRIER);
+                   RtBarrier shard_task_barrier = RtBarrier::NO_RT_BARRIER);
       ShardManager(const ShardManager &rhs);
       ~ShardManager(void);
     public:
       ShardManager& operator=(const ShardManager &rhs);
     public:
+      inline RtBarrier get_shard_task_barrier(void) const
+        { return shard_task_barrier; }
       inline ApBarrier get_pending_partition_barrier(void) const
         { return pending_partition_barrier; }
       inline RtBarrier get_creation_barrier(void) const
@@ -2081,6 +2191,8 @@ namespace Legion {
         { return external_resource_barrier; }
       inline RtBarrier get_mapping_fence_barrier(void) const
         { return mapping_fence_barrier; }
+      inline RtBarrier get_resource_return_barrier(void) const
+        { return resource_return_barrier; }
       inline RtBarrier get_trace_recording_barrier(void) const
         { return trace_recording_barrier; }
       inline RtBarrier get_summary_fence_barrier(void) const
@@ -2102,12 +2214,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
       inline RtBarrier get_collective_check_barrier(void) const
         { return collective_check_barrier; }
+      inline RtBarrier get_logical_check_barrier(void) const
+        { return logical_check_barrier; }
       inline RtBarrier get_close_check_barrier(void) const
         { return close_check_barrier; }
+      inline RtBarrier get_refinement_check_barrier(void) const
+        { return refinement_check_barrier; }
 #endif
     public:
       inline ShardMapping& get_mapping(void) const
         { return *address_spaces; }
+      inline CollectiveMapping& get_collective_mapping(void) const
+        { return *collective_mapping; }
       inline AddressSpaceID get_shard_space(ShardID sid) const
         { return (*address_spaces)[sid]; }    
       inline bool is_first_local_shard(ShardTask *task) const
@@ -2120,20 +2238,22 @@ namespace Legion {
       void create_callback_barrier(size_t arrival_count);
       ShardTask* create_shard(ShardID id, Processor target);
       void extract_event_preconditions(const std::deque<InstanceSet> &insts);
-      void launch(void);
+      void launch(const std::vector<bool> &virtual_mapped);
       void distribute_shards(AddressSpaceID target,
                              const std::vector<ShardTask*> &shards);
       void unpack_shards_and_launch(Deserializer &derez);
       void launch_shard(ShardTask *task,
                         RtEvent precondition = RtEvent::NO_RT_EVENT) const;
-      void complete_startup_initialization(void) const;
+      EquivalenceSet* get_initial_equivalence_set(unsigned idx) const;
+      EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
+                      const FieldMask &mask, DistributedID did, bool &first);
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
     public:
       void handle_post_mapped(bool local, RtEvent precondition);
       void handle_post_execution(const void *res, size_t res_size, 
                                  bool owned, bool local);
-      void trigger_task_complete(bool local, ApEvent effects_done);
+      RtEvent trigger_task_complete(bool local, ApEvent effects_done);
       void trigger_task_commit(bool local);
     public:
       void send_collective_message(ShardID target, Serializer &rez);
@@ -2142,15 +2262,21 @@ namespace Legion {
       void send_future_map_request(ShardID target, Serializer &rez);
       void handle_future_map_request(Deserializer &derez);
     public:
-      void send_equivalence_set_request(ShardID target, Serializer &rez);
-      void handle_equivalence_set_request(Deserializer &derez);
+      void send_disjoint_complete_request(ShardID target, Serializer &rez);
+      void handle_disjoint_complete_request(Deserializer &derez);
     public:
       void send_intra_space_dependence(ShardID target, Serializer &rez);
       void handle_intra_space_dependence(Deserializer &derez);
     public:
       void broadcast_resource_update(ShardTask *source, Serializer &rez,
                                      std::set<RtEvent> &applied_events);
-      void handle_resource_update(Deserializer &derez);
+    public:
+      void broadcast_created_region_contexts(ShardTask *source, Serializer &rez,
+                                             std::set<RtEvent> &applied_events);
+    protected:
+      void broadcast_message(ShardTask *source, Serializer &rez,
+                BroadcastMessageKind kind, std::set<RtEvent> &applied_events);
+      void handle_broadcast(Deserializer &derez);
     public:
       void send_trace_event_request(ShardedPhysicalTemplate *physical_template,
                           ShardID shard_source, AddressSpaceID template_source, 
@@ -2177,10 +2303,11 @@ namespace Legion {
       static void handle_top_view_request(Deserializer &derez, Runtime *rt,
                                           AddressSpaceID request_source);
       static void handle_top_view_response(Deserializer &derez, Runtime *rt);
-      static void handle_eq_request(Deserializer &derez, Runtime *rt);
+      static void handle_disjoint_complete_request(Deserializer &derez, 
+                                                   Runtime *rt);
       static void handle_intra_space_dependence(Deserializer &derez, 
                                                 Runtime *rt);
-      static void handle_resource_update(Deserializer &derez, Runtime *rt);
+      static void handle_broadcast_update(Deserializer &derez, Runtime *rt);
       static void handle_trace_event_request(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID request_source);
       static void handle_trace_event_response(Deserializer &derez);
@@ -2214,7 +2341,9 @@ namespace Legion {
       // Inheritted from Mapper::SelectShardingFunctorInput
       // std::vector<Processor>        shard_mapping;
       ShardMapping*                    address_spaces;
+      CollectiveMapping*               collective_mapping;
       std::vector<ShardTask*>          local_shards;
+      std::vector<EquivalenceSet*>     mapped_equivalence_sets;
     protected:
       // There are four kinds of signals that come back from 
       // the execution of the shards:
@@ -2234,7 +2363,7 @@ namespace Legion {
       bool        local_future_set;
       std::set<RtEvent> mapping_preconditions;
     protected:
-      RtBarrier startup_barrier;
+      RtBarrier shard_task_barrier;
       ApBarrier pending_partition_barrier;
       RtBarrier creation_barrier;
       RtBarrier deletion_ready_barrier;
@@ -2243,6 +2372,7 @@ namespace Legion {
       RtBarrier inline_mapping_barrier;
       RtBarrier external_resource_barrier;
       RtBarrier mapping_fence_barrier;
+      RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
       RtBarrier summary_fence_barrier;
       ApBarrier execution_fence_barrier;
@@ -2254,11 +2384,15 @@ namespace Legion {
       RtBarrier callback_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
       RtBarrier collective_check_barrier;
+      RtBarrier logical_check_barrier;
       RtBarrier close_check_barrier;
+      RtBarrier refinement_check_barrier;
 #endif
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
     protected:
+      std::map<DistributedID,std::pair<EquivalenceSet*,size_t> > 
+                                        created_equivalence_sets;
       // ApEvents describing the completion of each shard
       std::set<ApEvent> shard_effects;
     protected:

@@ -206,6 +206,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
     def search_for_spy_data(self, filename):
         with open(filename, 'rb') as log:
             for line in log:
+                line = line.decode('utf-8')
                 if legion_spy.config_pat.match(line) or \
                    legion_spy.detailed_config_pat.match(line):
                    self.state.has_spy_data = True

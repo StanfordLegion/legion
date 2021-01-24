@@ -531,60 +531,177 @@ namespace Legion {
     class TraceViewSet {
     public:
       struct FailedPrecondition {
-        InstanceView *view;
-        EquivalenceSet *eq;
+        LogicalView *view;
+        IndexSpaceExpression *expr;
         FieldMask mask;
 
         std::string to_string(void) const;
       };
     public:
-      TraceViewSet(RegionTreeForest *forest);
+      TraceViewSet(RegionTreeForest *forest, DistributedID owner_did,
+                   RegionNode *region);
+      TraceViewSet(RegionTreeForest *forest, TraceViewSet &source,
+                   DistributedID owner_did, RegionNode *region,
+                   std::set<RtEvent> &applied_events);
       virtual ~TraceViewSet(void);
     public:
-      void insert(InstanceView *view,
-                  EquivalenceSet *eq,
-                  const FieldMask &mask);
-      void invalidate(InstanceView *view,
-                      EquivalenceSet *eq,
-                      const FieldMask &mask);
+      void insert(LogicalView *view,
+                  IndexSpaceExpression *expr,
+                  const FieldMask &mask,
+                  std::set<RtEvent> *ready_events);
+      void invalidate(LogicalView *view,
+                      IndexSpaceExpression *expr,
+                      const FieldMask &mask,
+           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
+           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
+      void invalidate_all_but(LogicalView *except,
+                              IndexSpaceExpression *expr,
+                              const FieldMask &mask,
+           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
+           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
     public:
-      bool dominates(InstanceView *view, EquivalenceSet *eq,
+      bool dominates(LogicalView *view, IndexSpaceExpression *expr, 
                      FieldMask &non_dominated) const;
+      void dominates(LogicalView *view, 
+                     IndexSpaceExpression *expr, FieldMask mask,
+                     FieldMaskSet<IndexSpaceExpression> &non_dominated,
+                     FieldMaskSet<IndexSpaceExpression> *dominate = NULL) const;
       bool subsumed_by(const TraceViewSet &set,
                        FailedPrecondition *condition = NULL) const;
-      bool has_refinements(void) const;
+      bool independent_of(const TraceViewSet &set,
+                       FailedPrecondition *condition = NULL) const;
+      void transpose_uniquely(LegionMap<IndexSpaceExpression*,
+                            FieldMaskSet<LogicalView> >::aligned &target) const;
+      void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
+                         const bool expr_covers, const FieldMask &mask) const;
       bool empty(void) const;
+    public:
+      void merge(TraceViewSet &target, std::set<RtEvent> &applied_events) const;
+      void pack(Serializer &rez, AddressSpaceID target) const;
+      void unpack(Deserializer &derez, size_t num_views,
+                  AddressSpaceID source, std::set<RtEvent> &ready_events);
     public:
       void dump(void) const;
     protected:
-      typedef LegionMap<InstanceView*,
-                        FieldMaskSet<EquivalenceSet> >::aligned ViewSet;
+      typedef LegionMap<LogicalView*,
+                        FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
     protected:
-      RegionTreeForest * const forest;
+      RegionTreeForest *const forest;
+      RegionNode *const region;
+      const DistributedID owner_did;
     protected:
-      ViewSet conditions;
-      // Need to hold view references if we're going to be dumping
-      // this trace even past the end of execution
-      const bool view_references;
+      // At most one expression per field
+      ViewExprs conditions;
     };
 
     /**
      * \class TraceConditionSet
      */
-    class TraceConditionSet : public TraceViewSet {
+    class TraceConditionSet : public EqSetTracker, public Collectable,
+                              public LegionHeapify<TraceConditionSet> {
     public:
-      TraceConditionSet(RegionTreeForest *forest);
+      struct DeferTracePreconditionTestArgs :
+        public LgTaskArgs<DeferTracePreconditionTestArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_TRACE_PRECONDITION_TASK_ID;
+      public:
+        DeferTracePreconditionTestArgs(TraceConditionSet *s, Operation *o, 
+                                       RtUserEvent d, RtUserEvent a)
+          : LgTaskArgs<DeferTracePreconditionTestArgs>(o->get_unique_op_id()),
+            set(s), op(o), done_event(d), applied_event(a) { }
+      public:
+        TraceConditionSet *const set;
+        Operation *const op;
+        const RtUserEvent done_event;
+        const RtUserEvent applied_event;
+      };
+      struct DeferTracePostconditionTestArgs :
+        public LgTaskArgs<DeferTracePostconditionTestArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_TRACE_POSTCONDITION_TASK_ID;
+      public:
+        DeferTracePostconditionTestArgs(TraceConditionSet *s, Operation *o, 
+                                        RtUserEvent d)
+          : LgTaskArgs<DeferTracePostconditionTestArgs>(o->get_unique_op_id()),
+            set(s), op(o), done_event(d) { }
+      public:
+        TraceConditionSet *const set;
+        Operation *const op;
+        const RtUserEvent done_event;
+      };
+      struct DeferTraceFinalizeSetsArgs :
+        public LgTaskArgs<DeferTraceFinalizeSetsArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID;
+      public:
+        DeferTraceFinalizeSetsArgs(TraceConditionSet *s, UniqueID uid)
+          : LgTaskArgs<DeferTraceFinalizeSetsArgs>(uid), set(s) { }
+      public:
+        TraceConditionSet *const set;
+      };
+    public:
+      TraceConditionSet(RegionTreeForest *forest, IndexSpaceExpression *expr,
+                const FieldMask &mask, const std::set<RegionNode*> &regions); 
+      TraceConditionSet(const TraceConditionSet &rhs);
       virtual ~TraceConditionSet(void);
     public:
-      void make_ready(bool postcondition);
+      TraceConditionSet& operator=(const TraceConditionSet &rhs);
     public:
-      bool require(Operation *op, std::set<RtEvent> &applied_events);
+      virtual void add_tracker_reference(unsigned cnt = 1);
+      virtual bool remove_tracker_reference(unsigned cnt = 1);
+    public:
+      virtual void record_equivalence_set(EquivalenceSet *set,
+                                          const FieldMask &mask);
+      virtual void record_pending_equivalence_set(EquivalenceSet *set,
+                                          const FieldMask &mask);
+      virtual void remove_equivalence_set(EquivalenceSet *set,
+                                          const FieldMask &mask);
+    public:
+      void invalidate_equivalence_sets(void);
+      void capture(EquivalenceSet *set, std::set<RtEvent> &ready_events);
+      void receive_capture(TraceViewSet *pre, TraceViewSet *anti,
+                           TraceViewSet *post, std::set<RtEvent> &ready);
+      bool is_empty(void) const;
+      bool is_replayable(bool &not_subsumed, 
+                         TraceViewSet::FailedPrecondition *failed);
+      void dump_preconditions(void) const;
+      void dump_anticonditions(void) const;
+      void dump_postconditions(void) const;
+    public:
+      void test_require(Operation *op, std::set<RtEvent> &ready_events,
+                        std::set<RtEvent> &applied_events);
+      bool check_require(void);
       void ensure(Operation *op, std::set<RtEvent> &applied_events);
+    public:
+      static void handle_precondition_test(const void *args);
+      static void handle_postcondition_test(const void *args);
+      static void handle_finalize_sets(const void *args);
     private:
-      bool cached;
-      // The following containers are populated only when the 'cached' is true.
-      LegionVector<FieldMaskSet<InstanceView> >::aligned views;
-      LegionVector<VersionInfo>::aligned                 version_infos;
+      RtEvent recompute_equivalence_sets(Operation *op);
+      void finalize_computed_sets(void);
+    public:
+      RegionTreeForest *const forest;
+      IndexSpaceExpression *const condition_expr;
+      const FieldMask condition_mask;
+      const std::vector<RegionNode*> regions;
+    private:
+      mutable LocalLock set_lock;
+      FieldMaskSet<EquivalenceSet> current_sets;
+      FieldMaskSet<EquivalenceSet> pending_sets;
+      FieldMask invalid_mask;
+    private:
+      TraceViewSet *precondition_views;
+      TraceViewSet *anticondition_views;
+      TraceViewSet *postcondition_views; 
+      // Transpose of conditions for testing
+      typedef LegionMap<IndexSpaceExpression*,
+                        FieldMaskSet<LogicalView> >::aligned ExprViews;
+      ExprViews preconditions;
+      ExprViews anticonditions;
+      ExprViews postconditions;
+    private:
+      std::vector<InvalidInstAnalysis*> precondition_analyses;
+      std::vector<AntivalidInstAnalysis*> anticondition_analyses;
     };
 
     /**
@@ -643,7 +760,6 @@ namespace Legion {
                         FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
       typedef LegionMap<InstanceView*,
                         FieldMaskSet<ViewUser> >::aligned             ViewUsers;
-      typedef std::map<RegionTreeID,std::set<InstanceView*> >        ViewGroups;
     public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(const PhysicalTemplate &rhs);
@@ -658,8 +774,8 @@ namespace Legion {
       virtual ApEvent get_completion_for_deletion(void) const;
     public:
       void find_execution_fence_preconditions(std::set<ApEvent> &preconditions);
-      void finalize(bool has_blocking_call, ReplTraceOp *op = NULL);
-      void generate_conditions(void);
+      void finalize(InnerContext *context, UniqueID opid,
+                    bool has_blocking_call, ReplTraceOp *op = NULL);
     public:
       struct Replayable {
         explicit Replayable(bool r)
@@ -679,8 +795,8 @@ namespace Legion {
         std::string message;
       };
     protected:
-      virtual Replayable check_replayable(ReplTraceOp *op,
-                            bool has_blocking_call) const;
+      virtual Replayable check_replayable(ReplTraceOp *op, 
+          InnerContext *context, UniqueID opid, bool has_blocking_call);
     public:
       void optimize(ReplTraceOp *op);
     private:
@@ -781,9 +897,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<void*> &indirections,
                              ApEvent precondition, PredEvent pred_guard);
-      virtual void record_copy_views(ApEvent lhs, Memoizable *memo,
-                           unsigned src_idx, unsigned dst_idx,
-                           IndexSpaceExpression *expr,
+      virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied);
@@ -810,30 +924,22 @@ namespace Legion {
       virtual void record_op_view(Memoizable *memo,
                                   unsigned idx,
                                   InstanceView *view,
+                                  RegionNode *node,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
                                   bool update_validity,
                                   std::set<RtEvent> &applied);
-      virtual void record_post_fill_view(FillView *view, const FieldMask &mask);
-      virtual void record_fill_views(ApEvent lhs, Memoizable *memo,
-                           unsigned idx, IndexSpaceExpression *expr, 
+      virtual void record_fill_views(ApEvent lhs, IndexSpaceExpression *expr, 
                            const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events,
-                           bool reduction_initialization);
+                           const bool reduction_initialization);
     protected:
       void record_views(unsigned entry,
                         IndexSpaceExpression *expr,
                         const RegionUsage &usage,
                         const FieldMaskSet<InstanceView> &views,
-                    const LegionList<FieldSet<EquivalenceSet*> >::aligned &eqs,
                         std::set<RtEvent> &applied);
-      virtual void update_valid_views(InstanceView *view,
-                                      EquivalenceSet *eq,
-                                      const RegionUsage &usage,
-                                      const FieldMask &user_mask,
-                                      bool invalidates,
-                                      std::set<RtEvent> &applied_events);
       virtual void add_view_user(InstanceView *view,
                          const RegionUsage &usage,
                          unsigned user, IndexSpaceExpression *user_expr,
@@ -843,8 +949,6 @@ namespace Legion {
       void record_copy_views(unsigned copy_id,
                              IndexSpaceExpression *expr,
                              const FieldMaskSet<InstanceView> &views);
-      virtual void record_fill_views(const FieldMaskSet<FillView> &views,
-                                     std::set<RtEvent> &applied_events);
     public:
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
@@ -958,10 +1062,6 @@ namespace Legion {
       std::map<TraceLocalID,ViewExprs> op_views;
       std::map<unsigned,ViewExprs>     copy_views;
     protected:
-      // THESE ARE SHARDED FOR CONTROL REPLICATION!!!
-      TraceConditionSet   pre, post;
-      // THIS IS SHARDED FOR CONTROL REPLICATION!!!
-      ViewGroups          view_groups;
       // This data structure holds a set of last users for each view.
       // Each user (which is an index in the event table) is associated with
       // a field mask, an index expression representing the working set within
@@ -970,13 +1070,13 @@ namespace Legion {
       // writer. THIS IS SHARDED FOR CONTROL REPLICATION!!!
       ViewUsers           view_users;
       std::set<ViewUser*> all_users;
-    private:
-      TraceViewSet pre_reductions;
-      TraceViewSet post_reductions;
-      TraceViewSet consumed_reductions;
     protected:
-      FieldMaskSet<FillView> pre_fill_views;
-      FieldMaskSet<FillView> post_fill_views;
+      // Capture the set of regions that we saw operations for, we'll use this
+      // at the end of the trace capture to compute the equivalence sets for
+      // this trace and then extract the different condition sets for this trace
+      // THESE ARE SHARDED FOR CONTROL REPLICATION!!!
+      FieldMaskSet<RegionNode> trace_regions;
+      std::vector<TraceConditionSet*> conditions;
 #ifdef LEGION_SPY
     private:
       UniqueID prev_fence_uid;
@@ -1015,9 +1115,6 @@ namespace Legion {
     class ShardedPhysicalTemplate : public PhysicalTemplate {
     public:
       enum UpdateKind {
-        UPDATE_VALID_VIEWS,
-        UPDATE_PRE_FILL,
-        UPDATE_POST_FILL,
         UPDATE_VIEW_USER,
         UPDATE_LAST_USER,
         FIND_LAST_USERS_REQUEST,
@@ -1035,7 +1132,6 @@ namespace Legion {
         DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
                              UpdateKind kind, RtUserEvent done, 
                              Deserializer &derez, LogicalView *view,
-                             EquivalenceSet *set = NULL,
                              RtUserEvent deferral = 
                               RtUserEvent::NO_RT_USER_EVENT);
         DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
@@ -1059,7 +1155,6 @@ namespace Legion {
         const UpdateKind kind;
         const RtUserEvent done;
         LogicalView *const view;
-        EquivalenceSet *const eq;
         IndexSpaceExpression *const expr;
         const IndexSpaceExprID remote_expr_id;
         const IndexSpace handle;
@@ -1145,16 +1240,6 @@ namespace Legion {
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       static void handle_deferred_trace_update(const void *args, Runtime *rt);
     protected:
-      bool handle_update_valid_views(InstanceView *view, EquivalenceSet *eq,
-                           Deserializer &derez, std::set<RtEvent> &applied,
-                           RtUserEvent done, 
-                           const DeferTraceUpdateArgs *dargs = NULL);
-      bool handle_update_pre_fill(FillView *view, Deserializer &derez,
-                                  std::set<RtEvent> &applied, RtUserEvent done,
-                                  const DeferTraceUpdateArgs *dargs = NULL);
-      bool handle_update_post_fill(FillView *view, Deserializer &derez,
-                                   std::set<RtEvent> &applied, RtUserEvent done,
-                                   const DeferTraceUpdateArgs *dargs = NULL);
       bool handle_update_view_user(InstanceView *view, IndexSpaceExpression *ex,
                             Deserializer &derez, std::set<RtEvent> &applied,
                             RtUserEvent done, 
@@ -1168,26 +1253,16 @@ namespace Legion {
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void request_remote_shard_event(ApEvent event, RtUserEvent done_event);
       static AddressSpaceID find_event_space(ApEvent event);
-      virtual Replayable check_replayable(ReplTraceOp *op,
-                            bool has_blocking_call) const;
-      virtual void update_valid_views(InstanceView *view,
-                                      EquivalenceSet *eq,
-                                      const RegionUsage &usage,
-                                      const FieldMask &user_mask,
-                                      bool invalidates,
-                                      std::set<RtEvent> &applied);
+      virtual Replayable check_replayable(ReplTraceOp *op, 
+          InnerContext *context, UniqueID opid, bool has_blocking_call);
       virtual void add_view_user(InstanceView *view,
                          const RegionUsage &usage,
                          unsigned user, IndexSpaceExpression *user_expr,
                          const FieldMask &user_mask,
                          std::set<RtEvent> &applied,
                          int owner_shard = -1);
-      using PhysicalTemplate::record_fill_views;
-      virtual void record_fill_views(const FieldMaskSet<FillView> &views,
-                                     std::set<RtEvent> &applied_events);
     protected:
       ShardID find_view_owner(InstanceView *view);
-      ShardID find_equivalence_owner(EquivalenceSet *set);
       void find_owner_shards(AddressSpace owner, std::vector<ShardID> &shards);
       void find_last_users_sharded(InstanceView *view,
                                    IndexSpaceExpression *expr,

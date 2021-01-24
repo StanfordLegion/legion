@@ -20,6 +20,7 @@
 #include "legion/legion_tasks.h"
 #include "legion/region_tree.h"
 #include "legion/garbage_collection.h"
+#include "legion/legion_replication.h"
 
 namespace Legion {
   namespace Internal {
@@ -116,9 +117,10 @@ namespace Legion {
     DistributedCollectable::DistributedCollectable(Runtime *rt,
                                                    DistributedID id,
                                                    AddressSpaceID own_space,
-                                                   bool do_registration)
+                                                   bool do_registration,
+                                                   CollectiveMapping *mapping)
       : runtime(rt), did(id), owner_space(own_space), 
-        local_space(rt->address_space), 
+        local_space(rt->address_space), collective_mapping(mapping),
         current_state(INACTIVE_STATE), has_gc_references(false),
         has_valid_references(false), has_resource_references(false), 
         reentrant_update(false), gc_references(0), valid_references(0), 
@@ -138,12 +140,15 @@ namespace Legion {
         // the owner node removes it with an unregister message
         add_base_resource_ref(REMOTE_DID_REF);
       }
+      if (collective_mapping != NULL)
+        collective_mapping->add_reference();
     }
 
     //--------------------------------------------------------------------------
     DistributedCollectable::DistributedCollectable(
                                               const DistributedCollectable &rhs)
-      : runtime(NULL), did(0), owner_space(0), local_space(0)
+      : runtime(NULL), did(0), owner_space(0), local_space(0), 
+        collective_mapping(NULL)
     //--------------------------------------------------------------------------
     {
       // Should never be called
@@ -161,6 +166,9 @@ namespace Legion {
 #endif
       if (is_owner() && registered_with_runtime)
         unregister_with_runtime();
+      if ((collective_mapping != NULL) && 
+          collective_mapping->remove_reference())
+        delete collective_mapping;
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -1405,6 +1413,11 @@ namespace Legion {
                                      AddressSpaceID remote_inst, bool need_lock)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Should not be recording remote things in the collective mapping
+      assert((collective_mapping == NULL) || 
+              !collective_mapping->contains(remote_inst));
+#endif
       if (need_lock)
       {
         AutoLock gc(gc_lock);
@@ -1437,9 +1450,8 @@ namespace Legion {
       assert(registered_with_runtime);
 #endif
       runtime->unregister_distributed_collectable(did);
-      if (!remote_instances.empty())
-        runtime->recycle_distributed_id(did, 
-                     send_unregister_messages(REFERENCE_VIRTUAL_CHANNEL));
+      if (!remote_instances.empty() || (collective_mapping != NULL))
+        runtime->recycle_distributed_id(did, send_unregister_messages());
       else
         runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
     }
@@ -1457,29 +1469,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::send_unregister_messages(
-                                                    VirtualChannelKind vc) const
+    RtEvent DistributedCollectable::send_unregister_messages(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(!remote_instances.empty());
+      assert(!remote_instances.empty() || (collective_mapping != NULL));
 #endif
       std::set<RtEvent> done_events;
-      UnregisterFunctor functor(runtime, did, vc, done_events); 
-      // No need for the lock since we're being destroyed
-      remote_instances.map(functor);
+      if (collective_mapping != NULL)
+        send_unregister_mapping(done_events);
+      if (!remote_instances.empty())
+      {
+        UnregisterFunctor functor(runtime, did, 
+            REFERENCE_VIRTUAL_CHANNEL, done_events); 
+        // No need for the lock since we're being destroyed
+        remote_instances.map(functor);
+      }
       return Runtime::merge_events(done_events);
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::unregister_collectable(void)
+    void DistributedCollectable::send_unregister_mapping(
+                                           std::set<RtEvent> &done_events) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+#endif
+      std::vector<AddressSpaceID> children;
+      collective_mapping->get_children(owner_space, local_space, children);
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+        RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        rez.serialize(did);
+        rez.serialize(done_event); 
+        runtime->send_did_remote_unregister(*it, rez,REFERENCE_VIRTUAL_CHANNEL);
+        done_events.insert(done_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::unregister_collectable(
+                                                 std::set<RtEvent> &done_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!is_owner());
       assert(registered_with_runtime);
 #endif
+      if (collective_mapping != NULL)
+        send_unregister_mapping(done_events);
       runtime->unregister_distributed_collectable(did);
     }
 
@@ -1493,8 +1535,12 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-      dc->unregister_collectable();
-      Runtime::trigger_event(done_event);
+      std::set<RtEvent> done_events;
+      dc->unregister_collectable(done_events);
+      if (!done_events.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
+      else
+        Runtime::trigger_event(done_event);
       // Now remove the resource reference we were holding
       if (dc->remove_base_resource_ref(REMOTE_DID_REF))
         delete dc;

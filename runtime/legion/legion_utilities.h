@@ -2717,6 +2717,7 @@ namespace Legion {
             result->second -= mask;
             // Don't filter valid fields since its unsound
           }
+
         inline void clear(void)
           {
             result->second.clear();
@@ -2829,7 +2830,10 @@ namespace Legion {
     public:
       FieldMaskSet(void)
         : single(true) { entries.single_entry = NULL; }
-      inline FieldMaskSet(const FieldMaskSet &rhs);
+      inline FieldMaskSet(T *init, const FieldMask &m, bool no_null = true);
+      inline FieldMaskSet(const FieldMaskSet<T> &rhs);
+      // If copy is set to false then this is a move constructor
+      inline FieldMaskSet(FieldMaskSet<T> &rhs, bool copy);
       ~FieldMaskSet(void) { clear(); }
     public:
       inline FieldMaskSet& operator=(const FieldMaskSet &rhs);
@@ -2847,7 +2851,7 @@ namespace Legion {
     public:
       // Return true if we actually added the entry, false if it already existed
       inline bool insert(T *entry, const FieldMask &mask); 
-      inline void filter(const FieldMask &filter);
+      inline void filter(const FieldMask &filter, bool tighten = true);
       inline void erase(T *to_erase);
       inline void clear(void);
       inline size_t size(void) const;
@@ -2866,6 +2870,8 @@ namespace Legion {
       inline void compute_field_sets(FieldMask universe_mask,
           typename LegionList<FieldSet<T*> >::aligned &output_sets) const;
     protected:
+      template<typename T2>
+      friend class FieldMaskSet;
       // Fun with C, keep these two fields first and in this order
       // so that a FieldMaskSet of size 1 looks the same as an entry
       // in the STL Map in the multi-entries case, 
@@ -2881,6 +2887,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
+    inline FieldMaskSet<T>::FieldMaskSet(T *init, const FieldMask &mask, 
+                                         bool no_null)
+      : single(true)
+    //--------------------------------------------------------------------------
+    {
+      if (!no_null || (init != NULL))
+      {
+        entries.single_entry = init;
+        valid_fields = mask;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
     inline FieldMaskSet<T>::FieldMaskSet(const FieldMaskSet<T> &rhs)
       : valid_fields(rhs.valid_fields), single(rhs.single)
     //--------------------------------------------------------------------------
@@ -2891,6 +2911,33 @@ namespace Legion {
         entries.multi_entries = new typename LegionMap<T*,FieldMask>::aligned(
             rhs.entries.multi_entries->begin(),
             rhs.entries.multi_entries->end());
+    }
+    
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline FieldMaskSet<T>::FieldMaskSet(FieldMaskSet<T> &rhs, bool copy)
+      : valid_fields(rhs.valid_fields), single(rhs.single)
+    //--------------------------------------------------------------------------
+    {
+      if (copy)
+      {
+        if (single)
+          entries.single_entry = rhs.entries.single_entry;
+        else
+          entries.multi_entries = new typename LegionMap<T*,FieldMask>::aligned(
+              rhs.entries.multi_entries->begin(),
+              rhs.entries.multi_entries->end());
+      }
+      else
+      {
+        if (single)
+          entries.single_entry = rhs.entries.single_entry;
+        else
+          entries.multi_entries = rhs.entries.multi_entries;
+        rhs.entries.single_entry = NULL;
+        rhs.valid_fields.clear();
+        rhs.single = true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2955,6 +3002,16 @@ namespace Legion {
     inline void FieldMaskSet<T>::relax_valid_mask(const FieldMask &m)
     //--------------------------------------------------------------------------
     {
+      if (single && (entries.single_entry != NULL))
+      {
+        if (!(m - valid_fields))
+          return;
+        // have to avoid the aliasing case
+        T *entry = entries.single_entry;
+        entries.multi_entries = new typename LegionMap<T*,FieldMask>::aligned();
+        entries.multi_entries->insert(std::make_pair(entry, valid_fields));
+        single = false;
+      }
       valid_fields |= m;
     }
 
@@ -3008,7 +3065,7 @@ namespace Legion {
         if (entries.single_entry == NULL)
         {
           entries.single_entry = entry;
-          valid_fields = mask;
+          valid_fields |= mask;
         }
         else if (entries.single_entry == entry)
         {
@@ -3048,22 +3105,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline void FieldMaskSet<T>::filter(const FieldMask &filter)
+    inline void FieldMaskSet<T>::filter(const FieldMask &filter, bool tighten)
     //--------------------------------------------------------------------------
     {
       if (single)
       {
         if (entries.single_entry != NULL)
         {
-          valid_fields -= filter;
+          if (tighten)
+            valid_fields -= filter;
           if (!valid_fields)
             entries.single_entry = NULL;
         }
       }
       else
       {
-        valid_fields -= filter;
-        if (!valid_fields)
+        if (tighten)
+          valid_fields -= filter;
+        if (!valid_fields || (!tighten && (filter == valid_fields)))
         {
           // No fields left so just clean everything up
           delete entries.multi_entries;
@@ -3084,23 +3143,32 @@ namespace Legion {
           }
           if (!to_delete.empty())
           {
-            for (typename std::vector<T*>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-              entries.multi_entries->erase(*it);
-            if (entries.multi_entries->empty())
+            if (to_delete.size() < entries.multi_entries->size())
+            {
+              for (typename std::vector<T*>::const_iterator it = 
+                    to_delete.begin(); it != to_delete.end(); it++)
+                entries.multi_entries->erase(*it);
+              if (entries.multi_entries->empty())
+              {
+                delete entries.multi_entries;
+                entries.multi_entries = NULL;
+                single = true;
+              }
+              else if ((entries.multi_entries->size() == 1) &&
+                  (entries.multi_entries->begin()->second == valid_fields))
+              {
+                typename LegionMap<T*,FieldMask>::aligned::iterator last = 
+                  entries.multi_entries->begin();     
+                T *temp = last->first; 
+                delete entries.multi_entries;
+                entries.single_entry = temp;
+                single = true;
+              }
+            }
+            else
             {
               delete entries.multi_entries;
               entries.multi_entries = NULL;
-              single = true;
-            }
-            else if (entries.multi_entries->size() == 1)
-            {
-              typename LegionMap<T*,FieldMask>::aligned::iterator last = 
-                entries.multi_entries->begin();     
-              T *temp = last->first; 
-              valid_fields = last->second;
-              delete entries.multi_entries;
-              entries.single_entry = temp;
               single = true;
             }
           }
@@ -3464,6 +3532,145 @@ namespace Legion {
       // no elements so it can start right away!
       if (!!universe_mask)
         output_sets.push_front(FieldSet<T*>(universe_mask));
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T1, typename T2>
+    inline void unique_join_on_field_mask_sets(
+             const FieldMaskSet<T1> &left, const FieldMaskSet<T2> &right,
+             typename LegionMap<std::pair<T1*,T2*>,FieldMask>::aligned &results)
+    //--------------------------------------------------------------------------
+    {
+      if (left.empty() || right.empty())
+        return;
+      if (left.get_valid_mask() * right.get_valid_mask())
+        return;
+#ifdef DEBUG_LEGION
+      FieldMask unique_test;
+#endif
+      if (left.size() == 1)
+      {
+        typename FieldMaskSet<T1>::const_iterator first = left.begin();
+        for (typename FieldMaskSet<T2>::const_iterator it =
+              right.begin(); it != right.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          const FieldMask overlap = first->second & it->second;
+          if (!overlap)
+            continue;
+          const std::pair<T1*,T2*> key(first->first, it->first);
+          results[key] = overlap;
+        }
+        return;
+      }
+      if (right.size() == 1)
+      {
+        typename FieldMaskSet<T2>::const_iterator first = right.begin();
+        for (typename FieldMaskSet<T1>::const_iterator it =
+              left.begin(); it != left.end(); it++)
+        {
+          const FieldMask overlap = first->second & it->second;
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          if (!overlap)
+            continue;
+          const std::pair<T1*,T2*> key(it->first, first->first);
+          results[key] = overlap;
+        }
+        return;
+      }
+      // Build the lookup table for the one with fewer fields
+      // since it is probably more costly to allocate memory
+      if (left.get_valid_mask().pop_count() < 
+          right.get_valid_mask().pop_count())
+      {
+        // Build the hash table for left
+        std::map<unsigned,T1*> hash_table;
+        for (typename FieldMaskSet<T1>::const_iterator it =
+              left.begin(); it != left.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          int fidx = it->second.find_first_set();
+          while (fidx >= 0)
+          {
+            hash_table[fidx] = it->first;
+            fidx = it->second.find_next_set(fidx+1);
+          }
+        }
+#ifdef DEBUG_LEGION
+        unique_test.clear();
+#endif
+        for (typename FieldMaskSet<T2>::const_iterator it =
+              right.begin(); it != right.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          int fidx = it->second.find_first_set();
+          while (fidx >= 0)
+          {
+            typename std::map<unsigned,T1*>::const_iterator
+              finder = hash_table.find(fidx);
+            if (finder != hash_table.end())
+            {
+              const std::pair<T1*,T2*> key(finder->second,it->first);
+              results[key].set_bit(fidx);
+            }
+            fidx = it->second.find_next_set(fidx+1);
+          }
+        }
+      }
+      else
+      {
+        // Build the hash table for the right
+        std::map<unsigned,T2*> hash_table;
+        for (typename FieldMaskSet<T2>::const_iterator it =
+              right.begin(); it != right.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          int fidx = it->second.find_first_set();
+          while (fidx >= 0)
+          {
+            hash_table[fidx] = it->first;
+            fidx = it->second.find_next_set(fidx+1);
+          }
+        }
+#ifdef DEBUG_LEGION
+        unique_test.clear();
+#endif
+        for (typename FieldMaskSet<T1>::const_iterator it =
+              left.begin(); it != left.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * unique_test);
+          unique_test |= it->second;
+#endif
+          int fidx = it->second.find_first_set();
+          while (fidx >= 0)
+          {
+            typename std::map<unsigned,T2*>::const_iterator
+              finder = hash_table.find(fidx);
+            if (finder != hash_table.end())
+            {
+              const std::pair<T1*,T2*> key(it->first,finder->second);
+              results[key].set_bit(fidx);
+            }
+            fidx = it->second.find_next_set(fidx+1);
+          }
+        }
+      }
     }
 
   }; // namespace Internal

@@ -70,8 +70,6 @@ namespace Legion {
         { return get_task()->get_task_name(); }
       inline const std::vector<PhysicalRegion>& get_physical_regions(void) const
         { return physical_regions; }
-      inline bool has_created_requirements(void) const
-        { return !created_requirements.empty(); }
       inline SingleTask* get_owner_task(void) const { return owner_task; }
       inline bool is_priority_mutable(void) const { return mutable_priority; }
       inline int get_depth(void) const { return depth; }
@@ -81,7 +79,7 @@ namespace Legion {
       virtual ContextID get_context_id(void) const = 0;
       virtual UniqueID get_context_uid(void) const;
       virtual Task* get_task(void); 
-      virtual TaskContext* find_parent_context(void);
+      virtual InnerContext* find_parent_context(void);
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target,
                                        bool replicate = false) = 0;
@@ -341,12 +339,17 @@ namespace Legion {
                                const std::set<FieldID> &to_free,
                                const bool unordered) = 0; 
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
-                                            IndexSpace index_space,
-                                            FieldSpace field_space,
-                                            bool task_local);
+                                          IndexSpace index_space,
+                                          FieldSpace field_space,
+                                          const bool task_local,
+                                          const bool output_region = false) = 0;
       virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered) = 0;
+      virtual void advise_analysis_subtree(LogicalRegion parent,
+                                      const std::set<LogicalRegion> &regions,
+                                      const std::set<LogicalPartition> &parts,
+                                      const std::set<FieldID> &fields) = 0;
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle,
                                                          bool unordered);
       virtual void destroy_field_allocator(FieldSpaceNode *node);
@@ -479,24 +482,33 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node) = 0;
+      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
+                                              RegionTreeNode *node) = 0;
 #else
       virtual MergeCloseOp* get_merge_close_op(void) = 0;
+      virtual RefinementOp* get_refinement_op(void) = 0;
 #endif
     public:
-      virtual InnerContext* find_parent_logical_context(unsigned index) = 0;
-      virtual InnerContext* find_parent_physical_context(unsigned index,
-                                                  LogicalRegion parent) = 0;
+      virtual InnerContext* find_parent_physical_context(unsigned index) = 0;
       // Override by RemoteTask and TopLevelTask
-      virtual InnerContext* find_outermost_local_context(
-                          InnerContext *previous = NULL) = 0;
       virtual InnerContext* find_top_context(InnerContext *previous = NULL) = 0;
     public:
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
+          const LegionVector<VersionInfo>::aligned &version_infos,
+          const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events) = 0;
-      virtual void invalidate_region_tree_contexts(void) = 0;
-      virtual void send_back_created_state(AddressSpaceID target) = 0;
+          std::set<RtEvent> &applied_events,
+          std::set<RtEvent> &execution_events) = 0;
+      virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
+                                      std::set<RtEvent> &applied) = 0;
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::vector<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            InnerContext *source_context) = 0;
+      // This is called once all the effects from 
+      // invalidate_region_tree_contexts have been applied 
+      virtual void free_region_tree_context(void) = 0;
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source) = 0;
@@ -529,11 +541,13 @@ namespace Legion {
       const std::vector<OutputRegion> get_output_regions(void) const
         { return output_regions; }
     public:
-      void add_created_region(LogicalRegion handle, bool task_local);
+      void add_created_region(LogicalRegion handle, const bool task_local,
+                              const bool output_region = false);
       // for logging created region requirements
       void log_created_requirements(void);
     public:
-      void register_region_creation(LogicalRegion handle, bool task_local);
+      void register_region_creation(LogicalRegion handle, const bool task_local,
+                                    const bool output_region);
     public:
       void register_field_creation(FieldSpace space, FieldID fid, bool local);
       void register_all_field_creations(FieldSpace space, bool local,
@@ -549,7 +563,7 @@ namespace Legion {
       void destroy_user_lock(Reservation r);
       void destroy_user_barrier(ApBarrier b);
     public:
-      void report_leaks_and_duplicates(std::set<RtEvent> &preconditions);
+      virtual void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
     public:
       void analyze_destroy_fields(FieldSpace handle,
                                   const std::set<FieldID> &to_delete,
@@ -699,7 +713,7 @@ namespace Legion {
     protected:
       UniqueID current_fence_uid;
 #endif
-    };
+    }; 
 
     class InnerContext : public TaskContext {
     public:
@@ -806,6 +820,17 @@ namespace Legion {
         const IndexPartition pid;
         const PartitionKind kind;
         const char *const func;
+      };
+      struct DeferRemoveRemoteReferenceArgs : 
+        public LgTaskArgs<DeferRemoveRemoteReferenceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID;
+      public:
+        DeferRemoveRemoteReferenceArgs(UniqueID uid, 
+               std::vector<DistributedCollectable*> *r) 
+          : LgTaskArgs<DeferRemoveRemoteReferenceArgs>(uid), to_remove(r) { }
+      public:
+        std::vector<DistributedCollectable*> *const to_remove;
       };
       struct LocalFieldInfo {
       public:
@@ -924,10 +949,20 @@ namespace Legion {
                                          std::set<RtEvent> &preconditions);
       virtual void compute_task_tree_coordinates(
           std::vector<std::pair<size_t,DomainPoint> > &coordinates);
-      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
-                        RegionTreeID tree_id, IndexSpace handle,
-                        IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source, bool symbolic);
+      virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
+                      AddressSpaceID target_space, RegionNode *region, 
+                      const FieldMask &mask, const UniqueID opid, 
+                      const AddressSpaceID original_source);
+      void record_pending_disjoint_complete_set(PendingEquivalenceSet *set,
+                                                const FieldMask &mask);
+      virtual bool finalize_disjoint_complete_sets(RegionNode *region,
+          VersionManager *target, FieldMask mask, const UniqueID opid,
+          const AddressSpaceID source, RtUserEvent ready_event);
+      void invalidate_disjoint_complete_sets(RegionNode *region,
+                                             const FieldMask &mask);
+      virtual void deduplicate_invalidate_trackers(
+                    const FieldMaskSet<EquivalenceSet> &to_untrack,
+                    std::set<RtEvent> &applied_events);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       bool inline_child_task(TaskOp *child);
@@ -1131,8 +1166,17 @@ namespace Legion {
       virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space,
                                const std::set<FieldID> &to_free,
                                const bool unordered);
+      virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
+                                            IndexSpace index_space,
+                                            FieldSpace field_space,
+                                            const bool task_local,
+                                            const bool output_region = false);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
+      virtual void advise_analysis_subtree(LogicalRegion parent,
+                                      const std::set<LogicalRegion> &regions,
+                                      const std::set<LogicalPartition> &parts,
+                                      const std::set<FieldID> &fields);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const;
@@ -1262,28 +1306,39 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node);
+      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
+                                               RegionTreeNode *node);
 #else
       virtual MergeCloseOp* get_merge_close_op(void);
+      virtual RefinementOp* get_refinement_op(void);
 #endif
     public:
-      virtual InnerContext* find_parent_logical_context(unsigned index);
-      virtual InnerContext* find_parent_physical_context(unsigned index,
-                                                  LogicalRegion parent);
+      virtual InnerContext* find_parent_physical_context(unsigned index);
     public:
       // Override by RemoteTask and TopLevelTask
-      virtual InnerContext* find_outermost_local_context(
-                          InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       void configure_context(MapperManager *mapper, TaskPriority priority);
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
+          const LegionVector<VersionInfo>::aligned &version_infos,
+          const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events);
-      virtual void invalidate_region_tree_contexts(void);
-      void invalidate_created_requirement_contexts(void);
-      virtual void invalidate_remote_tree_contexts(Deserializer &derez);
-      virtual void send_back_created_state(AddressSpaceID target);
+          std::set<RtEvent> &applied_events,
+          std::set<RtEvent> &execution_events);
+      virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
+                                                   std::set<RtEvent> &applied);
+      void invalidate_created_requirement_contexts(const bool is_top_level_task,
+                            std::set<RtEvent> &applied, size_t num_shards = 0);
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::vector<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            InnerContext *source_context);
+      void invalidate_region_tree_context(LogicalRegion handle,
+                                      std::set<RtEvent> &applied_events,
+                                      std::vector<EquivalenceSet*> &to_release);
+      virtual void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
+      virtual void free_region_tree_context(void);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -1316,14 +1371,18 @@ namespace Legion {
     public:
       static void handle_compute_equivalence_sets_request(Deserializer &derez,
                                      Runtime *runtime, AddressSpaceID source);
+      static void remove_remote_references(
+                       const std::vector<DistributedCollectable*> &to_remove);
+      static void handle_remove_remote_references(const void *args);
     public:
-      void invalidate_remote_contexts(void);
       void clear_instance_top_views(void); 
     public:
       void free_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
     public:
+      void convert_source_views(const std::vector<PhysicalManager*> &sources,
+                                std::vector<InstanceView*> &source_views);
       void convert_target_views(const InstanceSet &targets, 
                                 std::vector<InstanceView*> &target_views);
       // I hate the container problem, same as previous except MaterializedView
@@ -1333,7 +1392,6 @@ namespace Legion {
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
                                bool silence_warnings, bool inlining_enabled);
-      EquivalenceSet* find_or_create_top_equivalence_set(RegionTreeID tree_id); 
     public:
       void clone_local_fields(
           std::map<FieldSpace,std::vector<LocalFieldInfo> > &child_local) const;
@@ -1457,10 +1515,9 @@ namespace Legion {
       std::map<PhysicalManager*,InstanceView*>  instance_top_views;
       std::map<PhysicalManager*,RtUserEvent>    pending_top_views;
     protected:
-      mutable LocalLock                         tree_set_lock;
-      std::map<RegionTreeID,EquivalenceSet*>    tree_equivalence_sets;
-      std::map<std::pair<RegionTreeID,
-        IndexSpaceExprID>,EquivalenceSet*>      empty_equivalence_sets;
+      mutable LocalLock                         pending_set_lock;
+      LegionMap<RegionNode*,
+        FieldMaskSet<PendingEquivalenceSet> >::aligned pending_equivalence_sets;
     protected:
       mutable LocalLock                       remote_lock;
       std::map<AddressSpaceID,RemoteContext*> remote_instances;
@@ -1477,6 +1534,10 @@ namespace Legion {
       mutable LocalLock     fill_view_lock;            
       std::list<FillView*>  fill_view_cache;
       static const size_t MAX_FILL_VIEW_CACHE_SIZE = 64;
+    protected:
+      // Equivalence sets that were invalidated by 
+      // invalidate_region_tree_contexts and need to be released
+      std::vector<EquivalenceSet*> invalidated_refinements;
     };
 
     /**
@@ -1498,16 +1559,20 @@ namespace Legion {
     public:
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate = false);
-      virtual TaskContext* find_parent_context(void);
+      virtual InnerContext* find_parent_context(void);
     public:
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
-      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
-                        RegionTreeID tree_id, IndexSpace handle, 
-                        IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source, bool symbolic);
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::vector<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            InnerContext *source_context);
+      virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
+                      AddressSpaceID target_space, RegionNode *region, 
+                      const FieldMask &mask, const UniqueID opid, 
+                      const AddressSpaceID original_source);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<RegionRequirement>       dummy_output_requirements;
@@ -1579,6 +1644,21 @@ namespace Legion {
         std::map<ShardID,RtEvent> ready_deps;
         std::map<ShardID,RtUserEvent> pending_deps;
       };
+    public:
+      struct DeferDisjointCompleteResponseArgs :
+        public LgTaskArgs<DeferDisjointCompleteResponseArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_DISJOINT_COMPLETE_TASK_ID;
+      public:
+        DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *target,
+             AddressSpaceID space, VersionInfo *version_info, RtUserEvent done);
+      public:
+        VersionManager *const target;
+        const AddressSpaceID target_space;
+        VersionInfo *const version_info;
+        const RtUserEvent done_event;
+      };
+    public:
       enum ReplicateAPICall {
         REPLICATE_PERFORM_REGISTRATION_CALLBACK,
         REPLICATE_CONSENSUS_MATCH,
@@ -1624,6 +1704,7 @@ namespace Legion {
         REPLICATE_FREE_FIELDS,
         REPLICATE_CREATE_LOGICAL_REGION,
         REPLICATE_DESTROY_LOGICAL_REGION,
+        REPLICATE_ADVISE_ANALYSIS_SUBTREE,
         REPLICATE_CREATE_FIELD_ALLOCATOR,
         REPLICATE_DESTROY_FIELD_ALLOCATOR,
         REPLICATE_EXECUTE_TASK,
@@ -1771,14 +1852,20 @@ namespace Legion {
       virtual bool perform_semantic_attach(bool &global);
       virtual void post_semantic_attach(void);
     public:
-      virtual InnerContext* find_parent_physical_context(unsigned index,
-                                                  LogicalRegion handle);
-      virtual void invalidate_region_tree_contexts(void);
-    public:
-      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
-                        RegionTreeID tree_id, IndexSpace handle,
-                        IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source, bool symbolic);
+      virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
+                                                   std::set<RtEvent> &applied);
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::vector<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            InnerContext *source_context);
+      virtual void free_region_tree_context(void);
+      void receive_replicate_created_region_contexts(RegionTreeContext ctx,
+                          const std::vector<RegionNode*> &created_state, 
+                          std::set<RtEvent> &applied_events, size_t num_shards,
+                          InnerContext *source_context);
+      void handle_created_region_contexts(Deserializer &derez,
+                                          std::set<RtEvent> &applied_events);
+    public: 
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 
                                             TypeTag type_tag);
@@ -1992,10 +2079,15 @@ namespace Legion {
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
                                             FieldSpace field_space,
-                                            bool task_local);
+                                            const bool task_local,
+                                            const bool output_region = false);
       virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
+      virtual void advise_analysis_subtree(LogicalRegion parent,
+                                      const std::set<LogicalRegion> &regions,
+                                      const std::set<LogicalPartition> &parts,
+                                      const std::set<FieldID> &fields);
     public:
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle,
                                                          bool unordered);
@@ -2065,8 +2157,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node);
+      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
+                                              RegionTreeNode *node);
 #else
       virtual MergeCloseOp* get_merge_close_op(void);
+      virtual RefinementOp* get_refinement_op(void);
 #endif
     public:
       virtual void pack_remote_context(Serializer &rez, 
@@ -2085,10 +2180,14 @@ namespace Legion {
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
-      void handle_equivalence_set_request(Deserializer &derez);
-      void handle_equivalence_set_response(RegionTreeID tree_id, 
-                                           EquivalenceSet *result);
-      static void handle_eq_response(Deserializer &derez, Runtime *rt);
+      void handle_disjoint_complete_request(Deserializer &derez);
+      static void handle_disjoint_complete_response(Deserializer &derez, 
+                                                    Runtime *runtime);
+      static void handle_defer_disjoint_complete_response(Runtime *runtime,
+                                                          const void *args);
+      static void finalize_disjoint_complete_response(Runtime *runtime,
+            UniqueID opid, VersionManager *target, AddressSpaceID target_space,
+            VersionInfo *version_info, RtUserEvent done_event);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
@@ -2110,7 +2209,8 @@ namespace Legion {
           ApBarrier partition_ready = ApBarrier::NO_AP_BARRIER);
     public:
       // Collective methods
-      CollectiveID get_next_collective_index(CollectiveIndexLocation loc);
+      CollectiveID get_next_collective_index(CollectiveIndexLocation loc,
+                                             bool logical = false);
       void register_collective(ShardCollective *collective);
       ShardCollective* find_or_buffer_collective(Deserializer &derez);
       void unregister_collective(ShardCollective *collective);
@@ -2128,9 +2228,21 @@ namespace Legion {
                                                          AddressSpaceID source);
       void unregister_trace_template(size_t template_index);
     public:
+      // Support for making equivalence sets (logical analysis stage only)
+      ShardID get_next_equivalence_set_origin(void);
+      bool replicate_partition_equivalence_sets(PartitionNode *node) const;
+      virtual bool finalize_disjoint_complete_sets(RegionNode *region,
+          VersionManager *target, FieldMask mask, const UniqueID opid,
+          const AddressSpaceID source, RtUserEvent ready_event);
+      virtual void deduplicate_invalidate_trackers(
+                    const FieldMaskSet<EquivalenceSet> &to_untrack,
+                    std::set<RtEvent> &applied_events);
+    public:
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
       ApBarrier get_next_execution_fence_barrier(void);
+      RtBarrier get_next_resource_return_barrier(void);
+      RtBarrier get_next_refinement_barrier(void);
       RtBarrier get_next_trace_recording_barrier(void);
       RtBarrier get_next_summary_fence_barrier(void);
       inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
@@ -2145,12 +2257,27 @@ namespace Legion {
           if (!bar.exists())
             create_new_replicate_barrier(bar, arrivals);
         }
+      inline void advance_logical_barrier(RtBarrier &bar, size_t arrivals)
+        {
+          Runtime::advance_barrier(bar);
+          if (!bar.exists())
+            create_new_logical_barrier(bar, arrivals);
+        }
+      inline void advance_logical_barrier(ApBarrier &bar, size_t arrivals)
+        {
+          Runtime::advance_barrier(bar);
+          if (!bar.exists())
+            create_new_logical_barrier(bar, arrivals);
+        }
     protected:
       // These can only be called inside the task for this context
       // since they assume that all the shards are aligned and doing
       // the same calls for the same operations in the same order
       void create_new_replicate_barrier(RtBarrier &bar, size_t arrivals);
       void create_new_replicate_barrier(ApBarrier &bar, size_t arrivals);
+      // This one can only be called inside the logical dependence analysis
+      void create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
+      void create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
     public:
       static void hash_future(Murmur3Hasher &hasher, 
                               const unsigned safe_level, const Future &future);
@@ -2185,6 +2312,12 @@ namespace Legion {
       // These barriers are used to identify when close operations are mapped
       std::vector<RtBarrier>  close_mapped_barriers;
       unsigned                next_close_mapped_bar_index;
+      // These barriers are used to identify when refinement ops are ready
+      std::vector<RtBarrier>  refinement_ready_barriers;
+      unsigned                next_refinement_ready_bar_index;
+      // These barriers are used to identify when refinement ops are mapped
+      std::vector<RtBarrier>  refinement_mapped_barriers;
+      unsigned                next_refinement_mapped_bar_index; 
       // These barriers are for signaling when indirect copies are done
       std::vector<ApBarrier>  indirection_barriers;
       unsigned                next_indirection_bar_index;
@@ -2204,6 +2337,7 @@ namespace Legion {
       ShardID field_allocator_shard;
       ShardID logical_region_allocator_shard;
       ShardID dynamic_id_allocator_shard;
+      ShardID equivalence_set_allocator_shard;
     protected:
       ApBarrier pending_partition_barrier;
       RtBarrier creation_barrier;
@@ -2213,6 +2347,7 @@ namespace Legion {
       RtBarrier inline_mapping_barrier;
       RtBarrier external_resource_barrier;
       RtBarrier mapping_fence_barrier;
+      RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
       RtBarrier summary_fence_barrier;
       ApBarrier execution_fence_barrier;
@@ -2224,7 +2359,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtBarrier collective_check_barrier;
+      RtBarrier logical_check_barrier;
       RtBarrier close_check_barrier;
+      RtBarrier refinement_check_barrier;
+      bool collective_guard_reentrant;
+      bool logical_guard_reentrant;
 #endif
     protected:
       // local barriers to this context for handling returned
@@ -2241,15 +2380,14 @@ namespace Legion {
     protected:
       mutable LocalLock replication_lock;
       CollectiveID next_available_collective_index;
+      // We also need to create collectives in the logical dependence
+      // analysis stage of the pipeline. We'll have those count on the
+      // odd numbers of the collective IDs whereas the ones from the 
+      // application task will be the even numbers.
+      CollectiveID next_logical_collective_index;
       std::map<CollectiveID,ShardCollective*> collectives;
       std::map<CollectiveID,std::vector<
                 std::pair<void*,size_t> > > pending_collective_updates;
-      // Use this for creating new summary barriers in the dependence
-      // analsyis stage of the pipeline. Our use of this variable is only
-      // safe as long as we know we have more generations of phase barriers
-      // than we can have outstanding replays, which is usually very true
-      volatile CollectiveID trace_recording_collective_id;
-      volatile CollectiveID summary_collective_id;
     protected:
       // Pending allocations of various resources
       std::deque<std::pair<ValueBroadcast<ISBroadcast>*,bool> > 
@@ -2291,8 +2429,7 @@ namespace Legion {
       std::map<std::pair<unsigned,unsigned>,RtUserEvent> pending_clone_barriers;
     protected:
       unsigned next_replicate_bar_index;
-      unsigned next_trace_bar_index;
-      unsigned next_summary_bar_index;
+      unsigned next_logical_bar_index;
     protected:
       static const unsigned MIN_UNORDERED_OPS_EPOCH = 32;
       static const unsigned MAX_UNORDERED_OPS_EPOCH = 32768;
@@ -2340,11 +2477,10 @@ namespace Legion {
       public:
         RemotePhysicalRequestArgs(UniqueID uid, RemoteContext *ctx,
                                   InnerContext *loc, unsigned idx, 
-                                  AddressSpaceID src, RtUserEvent trig,
-                                  LogicalRegion par)
+                                  AddressSpaceID src, RtUserEvent trig)
           : LgTaskArgs<RemotePhysicalRequestArgs>(implicit_provenance), 
             context_uid(uid), target(ctx), local(loc), index(idx), 
-            source(src), to_trigger(trig), parent(par) { }
+            source(src), to_trigger(trig) { }
       public:
         const UniqueID context_uid;
         RemoteContext *const target;
@@ -2352,7 +2488,6 @@ namespace Legion {
         const unsigned index;
         const AddressSpaceID source;
         const RtUserEvent to_trigger;
-        const LogicalRegion parent;
       };
       struct RemotePhysicalResponseArgs : 
         public LgTaskArgs<RemotePhysicalResponseArgs> {
@@ -2378,23 +2513,26 @@ namespace Legion {
       virtual Task* get_task(void);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
-      virtual TaskContext* find_parent_context(void);
+      virtual InnerContext* find_parent_context(void);
     public:
-      virtual InnerContext* find_outermost_local_context(
-                          InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
-      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
-                        RegionTreeID tree_id, IndexSpace handle,
-                        IndexSpaceExpression *expr, const FieldMask &mask,
-                        AddressSpaceID source, bool symbolic);
-      virtual InnerContext* find_parent_physical_context(unsigned index,
-                                                  LogicalRegion parent);
-      virtual void record_using_physical_context(LogicalRegion handle);
+      virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
+                      AddressSpaceID target_space, RegionNode *region, 
+                      const FieldMask &mask, const UniqueID opid, 
+                      const AddressSpaceID original_source);
+      virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
-      virtual void invalidate_region_tree_contexts(void);
-      virtual void invalidate_remote_tree_contexts(Deserializer &derez);
+      virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
+                                                   std::set<RtEvent> &applied);
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::vector<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            InnerContext *source_context);
+      static void handle_created_region_contexts(Runtime *runtime, 
+                                   Deserializer &derez, AddressSpaceID source);
+      virtual void free_region_tree_context(void);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
     public:
@@ -2413,7 +2551,7 @@ namespace Legion {
       static void defer_physical_response(const void *args);
     protected:
       UniqueID parent_context_uid;
-      TaskContext *parent_ctx;
+      InnerContext *parent_ctx;
       ShardManager *shard_manager; // if we're lucky and one is already here
     protected:
       bool top_level_context;
@@ -2425,7 +2563,6 @@ namespace Legion {
       // Cached physical contexts recorded from the owner
       std::map<unsigned/*index*/,InnerContext*> physical_contexts;
       std::map<unsigned,RtEvent> pending_physical_contexts;
-      std::set<LogicalRegion> local_physical_contexts;
     protected:
       // For remote replicate contexts
       size_t total_shards;
@@ -2662,8 +2799,17 @@ namespace Legion {
       virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space,
                                const std::set<FieldID> &to_free,
                                const bool unordered);
+      virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
+                                            IndexSpace index_space,
+                                            FieldSpace field_space,
+                                            const bool task_local,
+                                            const bool output_region = false);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
+      virtual void advise_analysis_subtree(LogicalRegion parent,
+                                      const std::set<LogicalRegion> &regions,
+                                      const std::set<LogicalPartition> &parts,
+                                      const std::set<FieldID> &fields);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const;
@@ -2786,23 +2932,30 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node);
+      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
+                                              RegionTreeNode *node);
 #else
       virtual MergeCloseOp* get_merge_close_op(void);
+      virtual RefinementOp* get_refinement_op(void);
 #endif
     public:
-      virtual InnerContext* find_parent_logical_context(unsigned index);
-      virtual InnerContext* find_parent_physical_context(unsigned index,
-                                                  LogicalRegion parent);
-      virtual InnerContext* find_outermost_local_context(
-                          InnerContext *previous = NULL);
+      virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
+          const LegionVector<VersionInfo>::aligned &version_infos,
+          const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events);
-      virtual void invalidate_region_tree_contexts(void);
-      virtual void send_back_created_state(AddressSpaceID target);
+          std::set<RtEvent> &applied_events, 
+          std::set<RtEvent> &execution_events);
+      virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
+                                                   std::set<RtEvent> &applied);
+      virtual void receive_created_region_contexts(RegionTreeContext ctx,
+                            const std::vector<RegionNode*> &created_state,
+                            std::set<RtEvent> &applied_events,size_t num_shards,
+                            InnerContext *source_context);
+      virtual void free_region_tree_context(void);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);

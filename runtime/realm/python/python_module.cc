@@ -58,12 +58,12 @@ namespace Realm {
     get_symbol(this->PyThreadState_New, "PyThreadState_New");
     get_symbol(this->PyThreadState_Clear, "PyThreadState_Clear");
     get_symbol(this->PyThreadState_Delete, "PyThreadState_Delete");
-    get_symbol(this->PyThreadState_Get, "PyThreadState_Get");
 #endif
     get_symbol(this->PyEval_RestoreThread, "PyEval_RestoreThread");
     get_symbol(this->PyEval_SaveThread, "PyEval_SaveThread");
 
     get_symbol(this->PyThreadState_Swap, "PyThreadState_Swap");
+    get_symbol(this->PyThreadState_Get, "PyThreadState_Get");
 
     get_symbol(this->PyErr_PrintEx, "PyErr_PrintEx");
 
@@ -741,12 +741,9 @@ namespace Realm {
   
     // create a python interpreter that stays entirely within this thread
     interpreter = new PythonInterpreter;
-#ifdef USE_PYGILSTATE_CALLS
-    PyGILState_STATE gilstate = (interpreter->api->PyGILState_Ensure)();
-    assert(gilstate = PyGILState_UNLOCKED);
-#else
+    // the call to PyEval_InitThreads in the PythonInterpreter constructor
+    //  acquired the GIL on our behalf already
     master_thread = (interpreter->api->PyThreadState_Get)();
-#endif
 
     // always need the python threading module
     interpreter->import_module("threading");
@@ -762,14 +759,12 @@ namespace Realm {
 	++it)
       interpreter->run_string(*it);
 
-    // default state is GIL _released_
-#ifdef USE_PYGILSTATE_CALLS
-    (interpreter->api->PyGILState_Release)(gilstate);
-#else
+    // default state is GIL _released_ - even if using PyGILState_* calls,
+    //  use PyEval_SaveThread here to release the lock without decrementing
+    //  the use count of our master thread
     PyThreadState *saved = (interpreter->api->PyEval_SaveThread)();
     log_py.debug() << "SaveThread -> " << saved;
     assert(saved == master_thread);
-#endif
   }
 
   void LocalPythonProcessor::destroy_interpreter(void)

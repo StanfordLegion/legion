@@ -462,6 +462,30 @@
 #define LEGION_INITIAL_LIBRARY_ID_OFFSET (1 << 30)
 #endif
 
+// Default number of consecutive accesses to the
+// same disjoint+complete partition before Legion
+// will switch physical analysis to using it
+// Pick prime numbers to avoid aliasing during sampling
+#ifndef LEGION_REFINEMENT_SAME_CHILD
+#define LEGION_REFINEMENT_SAME_CHILD      7
+#endif
+
+// Default number of consecutive accesses to any
+// disjoint+complete partition other than the current
+// one being used for analysis before Legion will
+// switch physical analysis to using a new partition
+// Pick prime numbers to avoid aliasing during sampling
+#ifndef LEGION_REFINEMENT_DIFF_CHILD
+#define LEGION_REFINEMENT_DIFF_CHILD      31
+#endif
+
+// Default percentage of the number of children in a
+// disjoint+complete partition that need to be accessed
+// before we consider the whole partition as accessed
+#ifndef LEGION_REFINEMENT_PARTITION_PERCENTAGE
+#define LEGION_REFINEMENT_PARTITION_PERCENTAGE     50
+#endif
+
 // Some helper macros
 
 // This statically computes an integer log base 2 for a number
@@ -1281,6 +1305,7 @@ typedef enum legion_error_t {
   ERROR_INVALID_OUTPUT_FIELD = 613,
   ERROR_OUTPUT_REGIONS_IN_PREDICATED_TASK = 614,
   ERROR_OUTPUT_REGIONS_IN_TRACE = 615,
+  ERROR_PARENT_TASK_ADVISEMENT = 616,
   
 
   LEGION_WARNING_FUTURE_NONLEAF = 1000,
@@ -1347,6 +1372,7 @@ typedef enum legion_error_t {
   LEGION_WARNING_SLOW_NON_FUNCTIONAL_PROJECTION = 1107,
   LEGION_WARNING_MISMATCHED_REPLICATED_FUTURES = 1108,
   LEGION_WARNING_INLINING_NOT_SUPPORTED = 1109,
+  LEGION_WARNING_IGNORING_ADVISED_ANALYSIS_SUBTREE = 1110,
   
   
   LEGION_FATAL_MUST_EPOCH_NOADDRESS = 2000,
@@ -1355,14 +1381,13 @@ typedef enum legion_error_t {
   LEGION_FATAL_SHIM_MAPPER_SUPPORT = 2006,
   LEGION_FATAL_UNKNOWN_FIELD_ID = 2007,
   LEGION_FATAL_RESTRICTED_SIMULTANEOUS = 2008,
-  LEGION_FATAL_CTRL_REPL_RETURN_PRIV = 2009,
-  LEGION_FATAL_UNIMPLEMENTED_FEATURE = 2010,  
-  LEGION_FATAL_INCONSISTENT_PHI_VIEW = 2011, 
-  LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET = 2012,
-  LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES = 2013,
-  LEGION_FATAL_UNSUPPORTED_CONSENSUS_SIZE = 2014,
-  LEGION_FATAL_CALLBACK_NOT_PORTABLE = 2015,
-  LEGION_FATAL_REDUCTION_ABA_PROBLEM = 2016,
+  LEGION_FATAL_UNIMPLEMENTED_FEATURE = 2009,  
+  LEGION_FATAL_INCONSISTENT_PHI_VIEW = 2010, 
+  LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET = 2011,
+  LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES = 2012,
+  LEGION_FATAL_UNSUPPORTED_CONSENSUS_SIZE = 2013,
+  LEGION_FATAL_CALLBACK_NOT_PORTABLE = 2014,
+  LEGION_FATAL_REDUCTION_ABA_PROBLEM = 2015,
   
 }  legion_error_t;
 

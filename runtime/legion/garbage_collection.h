@@ -65,7 +65,7 @@ namespace Legion {
       REMOTE_DID_REF = 7,
       PENDING_COLLECTIVE_REF = 8,
       MEMORY_MANAGER_REF = 9,
-      PENDING_UNBOUND_REF = 10,
+      PENDING_REFINEMENT_REF = 10,
       FIELD_ALLOCATOR_REF = 11,
       REMOTE_CREATE_REF = 12,
       INSTANCE_MAPPER_REF = 13,
@@ -74,7 +74,7 @@ namespace Legion {
       NEVER_GC_REF = 16,
       CONTEXT_REF = 17,
       RESTRICTED_REF = 18,
-      VERSION_STATE_TREE_REF = 19,
+      PENDING_UNBOUND_REF = 19,
       PHYSICAL_MANAGER_REF = 20,
       LOGICAL_VIEW_REF = 21,
       REGION_TREE_REF = 22,
@@ -84,8 +84,9 @@ namespace Legion {
       TRACE_REF = 26,
       AGGREGATORE_REF = 27,
       FIELD_STATE_REF = 28,
-      REPLICATION_REF = 29,
-      LAST_SOURCE_REF = 30,
+      DISJOINT_COMPLETE_REF = 29,
+      REPLICATION_REF = 30,
+      LAST_SOURCE_REF = 31,
     };
 
     enum ReferenceKind {
@@ -106,7 +107,7 @@ namespace Legion {
       "Remote Distributed ID Reference",            \
       "Pending Collective Reference",               \
       "Memory Manager Reference",                   \
-      "Pending Unbound Reference",                  \
+      "Pending Refinement Reference",               \
       "Field Allocator Reference",                  \
       "Remote Creation Reference",                  \
       "Instance Mapper Reference",                  \
@@ -115,7 +116,7 @@ namespace Legion {
       "Never GC Reference",                         \
       "Context Reference",                          \
       "Restricted Reference",                       \
-      "Version State Tree Reference",               \
+      "Pending Unbound Reference",                  \
       "Physical Manager Reference",                 \
       "Logical View Reference",                     \
       "Region Tree Reference",                      \
@@ -125,6 +126,7 @@ namespace Legion {
       "Index Space Expression Reference",           \
       "Aggregator Reference",                       \
       "Field State Reference",                      \
+      "Disjoint Complete Reference",                \
       "Replication Reference",                      \
     }
 
@@ -292,7 +294,8 @@ namespace Legion {
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
                              AddressSpaceID owner_space,
-                             bool register_with_runtime = true);
+                             bool register_with_runtime = true,
+                             CollectiveMapping *mapping = NULL);
       DistributedCollectable(const DistributedCollectable &rhs);
       virtual ~DistributedCollectable(void);
     public:
@@ -385,10 +388,11 @@ namespace Legion {
                                  bool notify_remote = true);
     protected:
       void unregister_with_runtime(void) const;
-      RtEvent send_unregister_messages(VirtualChannelKind vc) const;
+      RtEvent send_unregister_messages(void) const;
+      void send_unregister_mapping(std::set<RtEvent> &done_events) const;
     public:
       // This for remote nodes only
-      void unregister_collectable(void);
+      void unregister_collectable(std::set<RtEvent> &done_events);
       static void handle_unregister_collectable(Runtime *runtime,
                                                 Deserializer &derez);
     public:
@@ -442,6 +446,7 @@ namespace Legion {
       const DistributedID did;
       const AddressSpaceID owner_space;
       const AddressSpaceID local_space;
+      CollectiveMapping *const collective_mapping;
     private: // derived users can't get the gc lock
       mutable LocalLock gc_lock;
     private: // derived users can't see the state information

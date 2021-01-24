@@ -1299,7 +1299,7 @@ namespace Legion {
         assert(current_template != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(has_blocking_call);
+        current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
         if (!current_template->is_replayable())
         {
           physical_trace->record_failed_capture(current_template);
@@ -1495,7 +1495,7 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(has_blocking_call);
+        current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
         if (!current_template->is_replayable())
         {
@@ -1626,7 +1626,7 @@ namespace Legion {
       bool recurrent = true;
       bool fence_registered = false;
       bool is_recording = local_trace->is_recording();
-      if (physical_trace->get_current_template() == NULL || is_recording)
+      if ((physical_trace->get_current_template() == NULL) || is_recording)
       {
         recurrent = false;
         {
@@ -1641,8 +1641,8 @@ namespace Legion {
 #endif
 
         if (physical_trace->get_current_template() == NULL)
-          physical_trace->check_template_preconditions(this, 
-                                      map_applied_conditions);
+          physical_trace->check_template_preconditions(this,
+                                    map_applied_conditions);
 #ifdef DEBUG_LEGION
         assert(physical_trace->get_current_template() == NULL ||
                !physical_trace->get_current_template()->is_recording());
@@ -2140,121 +2140,432 @@ namespace Legion {
     {
       char *m = mask.to_string();
       std::stringstream ss;
-      ss << "view: " << view << ", Index expr: " << eq->set_expr->expr_id
+      ss << "view: " << view << ", Index expr: " << expr->expr_id
          << ", Field Mask: " << m;
       return ss.str();
     }
 
     //--------------------------------------------------------------------------
-    TraceViewSet::TraceViewSet(RegionTreeForest *f)
-      : forest(f), view_references(f->runtime->dump_physical_traces)
+    TraceViewSet::TraceViewSet(RegionTreeForest *f, DistributedID own_did, 
+                               RegionNode *r)
+      : forest(f), region(r), owner_did(own_did)
     //--------------------------------------------------------------------------
     {
+      region->add_base_resource_ref(TRACE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    TraceViewSet::TraceViewSet(RegionTreeForest *f, TraceViewSet &source,
+                               DistributedID own_did, RegionNode *r,
+                               std::set<RtEvent> &applied_events)
+      : forest(f), region(r), owner_did(own_did)
+    //--------------------------------------------------------------------------
+    {
+      region->add_base_resource_ref(TRACE_REF);
+      conditions.swap(source.conditions);
+      if (owner_did > 0)
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        for (ViewExprs::const_iterator vit = 
+              conditions.begin(); vit != conditions.end(); ++vit)
+        {
+          vit->first->add_nested_valid_ref(owner_did, &mutator);
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                vit->second.begin(); it != vit->second.end(); ++it)
+            it->first->add_expression_reference();
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
     TraceViewSet::~TraceViewSet(void)
     //--------------------------------------------------------------------------
     {
-      if (view_references)
+      if (owner_did > 0)
       {
-        for (ViewSet::const_iterator it = conditions.begin();
-              it != conditions.end(); it++)
-          if (it->first->remove_base_resource_ref(TRACE_REF))
-            delete it->first;
+        for (ViewExprs::const_iterator vit = 
+              conditions.begin(); vit != conditions.end(); vit++)
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                vit->second.begin(); it != vit->second.end(); it++)
+            if (it->first->remove_expression_reference())
+              delete it->first;
+          if (vit->first->remove_nested_valid_ref(owner_did))
+            delete vit->first;
+        }
       }
+      if (region->remove_base_resource_ref(TRACE_REF))
+        delete region;
       conditions.clear();
     }
 
     //--------------------------------------------------------------------------
     void TraceViewSet::insert(
-                  InstanceView *view, EquivalenceSet *eq, const FieldMask &mask)
+                              LogicalView *view, IndexSpaceExpression *expr, 
+                              const FieldMask &mask, std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
-      if (view_references && (conditions.find(view) == conditions.end()))
-        view->add_base_resource_ref(TRACE_REF);
-      conditions[view].insert(eq, mask);
+      ViewExprs::iterator finder = conditions.find(view);
+      IndexSpaceExpression *const total_expr = region->row_source; 
+      const size_t expr_volume = expr->get_volume();
+      if (expr != total_expr)
+      {
+#ifdef DEBUG_LEGION
+        // This is a necessary but not sufficient condition for dominance
+        // If we need to we can put in the full intersection test later
+        assert(expr_volume <= total_expr->get_volume());
+#endif
+        // Recognize total expressions when they get here
+        if (expr_volume == total_expr->get_volume())
+          expr = total_expr;
+      }
+      // We need to enforce the invariant that there is at most one 
+      // expression for field in this function
+      if (finder != conditions.end())
+      {
+        FieldMask set_overlap = mask & finder->second.get_valid_mask();
+        if (!!set_overlap)
+        {
+          if (set_overlap != mask)
+          {
+            // Handle the difference fields first before we mutate set_overlap
+            FieldMask diff = mask - set_overlap;
+            if (finder->second.insert(expr, mask) && (owner_did > 0))
+              expr->add_expression_reference();
+          }
+          FieldMaskSet<IndexSpaceExpression> to_add;
+          std::vector<IndexSpaceExpression*> to_delete;
+          for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            const FieldMask overlap = set_overlap & it->second;
+            if (!overlap)
+              continue;
+            if (it->first != total_expr)
+            {
+              if (it->first != expr)
+              {
+                // Not the same expression, so compute the union
+                IndexSpaceExpression *union_expr = 
+                  forest->union_index_spaces(it->first, expr);
+                const size_t union_volume = union_expr->get_volume();
+                if (it->first->get_volume() < union_volume)
+                {
+                  if (expr_volume < union_volume)
+                    to_add.insert(union_expr, overlap);
+                  else
+                    to_add.insert(expr, overlap);
+                  it.filter(overlap);
+                  if (!it->second)
+                    to_delete.push_back(it->first);
+                }
+                else
+                  it.merge(overlap);
+              }
+              else
+                it.merge(overlap);
+            }
+            set_overlap -= overlap;
+            if (!set_overlap)
+              break;
+          }
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                to_add.begin(); it != to_add.end(); it++)
+            if (finder->second.insert(it->first, it->second) && (owner_did > 0))
+              it->first->add_expression_reference();
+          for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            if (to_add.find(*it) != to_add.end())
+              continue;
+            finder->second.erase(*it);
+            if ((owner_did > 0) && (*it)->remove_expression_reference())
+              delete (*it);
+          }
+        }
+        else if (finder->second.insert(expr, mask) && (owner_did > 0))
+          expr->add_expression_reference();
+      }
+      else
+      {
+        if (owner_did > 0)
+        {
+#ifdef DEBUG_LEGION
+          assert(applied != NULL);
+#endif
+          WrapperReferenceMutator mutator(*applied);
+          view->add_nested_valid_ref(owner_did, &mutator);
+          expr->add_expression_reference();
+        }
+        conditions[view].insert(expr, mask);
+      }
     }
 
     //--------------------------------------------------------------------------
     void TraceViewSet::invalidate(
-                  InstanceView *view, EquivalenceSet *eq, const FieldMask &mask)
+           LogicalView *view, IndexSpaceExpression *expr, const FieldMask &mask,
+           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
+           std::map<LogicalView*,unsigned> *view_refs_to_remove)
     //--------------------------------------------------------------------------
     {
-      ViewSet::iterator finder = conditions.find(view);
-      if (finder == conditions.end())
+      ViewExprs::iterator finder = conditions.find(view);
+      if ((finder == conditions.end()) || 
+          (finder->second.get_valid_mask() * mask))
         return;
-
-      FieldMaskSet<EquivalenceSet> to_delete;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            finder->second.begin(); it != finder->second.end(); ++it)
+      
+      const size_t expr_volume = expr->get_volume();
+      IndexSpaceExpression *const total_expr = region->row_source; 
+#ifdef DEBUG_LEGION
+      // This is a necessary but not sufficient condition for dominance
+      // If we need to we can put in the full intersection test later
+      assert(expr_volume <= total_expr->get_volume());
+#endif
+      if ((expr == total_expr) || (expr_volume == total_expr->get_volume()))
       {
-        FieldMask overlap = mask & it->second;
-        if (!overlap)
-          continue;
-
-        IndexSpaceExpression *expr1 = eq->set_expr;
-        IndexSpaceExpression *expr2 = it->first->set_expr;
-        if (expr1 == expr2)
+        // Expr covers the whole instance so no need to do intersections
+        if (!(finder->second.get_valid_mask() - mask))
         {
-          to_delete.insert(it->first, overlap);
+          // Dominate all fields so just filter everything
+          if (owner_did > 0)
+          {
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  finder->second.begin(); it != finder->second.end(); it++)
+            {
+              if (expr_refs_to_remove != NULL)
+              {
+                std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                  expr_refs_to_remove->find(it->first);
+                if (finder == expr_refs_to_remove->end())
+                  (*expr_refs_to_remove)[it->first] = 1;
+                else
+                  finder->second += 1;
+              }
+              else if (it->first->remove_expression_reference())
+                delete it->first;
+            }
+            if (view_refs_to_remove != NULL)
+            {
+              std::map<LogicalView*,unsigned>::iterator finder = 
+                view_refs_to_remove->find(view);
+              if (finder == view_refs_to_remove->end())
+                (*view_refs_to_remove)[view] = 1;
+              else
+                finder->second += 1;
+            }
+            else if (view->remove_nested_valid_ref(owner_did))
+              delete view;
+          }
+          conditions.erase(finder);
         }
-        else if (expr1->get_volume() >= expr2->get_volume())
+        else
         {
-          IndexSpaceExpression *diff =
-            forest->subtract_index_spaces(expr2, expr1);
-          if (diff->is_empty())
-            to_delete.insert(it->first, overlap);
+          // Filter on fields
+          std::vector<IndexSpaceExpression*> to_delete;
+          for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            it.filter(mask);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            finder->second.erase(*it);
+            if (owner_did > 0)
+            {
+              if (expr_refs_to_remove != NULL)
+              {
+                std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                  expr_refs_to_remove->find(*it);
+                if (finder == expr_refs_to_remove->end())
+                  (*expr_refs_to_remove)[*it] = 1;
+                else
+                  finder->second += 1;
+              }
+              else if ((*it)->remove_expression_reference())
+                delete (*it);
+            }
+          }
+          if (finder->second.empty())
+          {
+            if (owner_did > 0)
+            {
+              if (view_refs_to_remove != NULL)
+              {
+                std::map<LogicalView*,unsigned>::iterator finder = 
+                  view_refs_to_remove->find(view);
+                if (finder == view_refs_to_remove->end())
+                  (*view_refs_to_remove)[view] = 1;
+                else
+                  finder->second += 1;
+              }
+              else if (view->remove_nested_valid_ref(owner_did))
+                delete view;
+            }
+            conditions.erase(finder);
+          }
+          else
+            finder->second.tighten_valid_mask();
         }
       }
-      for (FieldMaskSet<EquivalenceSet>::iterator it = to_delete.begin();
-           it != to_delete.end(); ++it)
+      else
       {
-        FieldMaskSet<EquivalenceSet>::iterator eit =
-          finder->second.find(it->first);
-#ifdef DEBUG_LEGION
-        assert(eit != finder->second.end());
-#endif
-        eit.filter(it->second);
-        if (!eit->second)
-          finder->second.erase(eit);
+        // We need intersection tests as part of filtering
+        FieldMaskSet<IndexSpaceExpression> to_add;
+        std::vector<IndexSpaceExpression*> to_delete;
+        for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          const FieldMask overlap = mask & it->second;
+          if (!overlap)
+            continue;
+          IndexSpaceExpression *intersection = expr;
+          if (it->first != total_expr)
+          {
+            intersection = forest->intersect_index_spaces(it->first, expr);
+            const size_t volume = intersection->get_volume();
+            if (volume == 0)
+              continue;
+            if (volume == expr_volume)
+              intersection = expr;
+            else if (volume == it->first->get_volume())
+              intersection = it->first;
+          }
+          if (intersection->get_volume() < it->first->get_volume())
+          {
+            // Only dominated part of it so compute the difference
+            IndexSpaceExpression *diff = 
+              forest->subtract_index_spaces(it->first, intersection);
+            to_add.insert(diff, overlap);
+          }
+          // No matter what we're removing these fields for this expr
+          it.filter(overlap);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              to_add.begin(); it != to_add.end(); it++)
+          if (finder->second.insert(it->first, it->second) && (owner_did > 0))
+            it->first->add_expression_reference();
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          if (to_add.find(*it) != to_add.end())
+            continue;
+          finder->second.erase(*it);
+          if (owner_did > 0)
+          {
+            if (expr_refs_to_remove != NULL)
+            {
+              std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                expr_refs_to_remove->find(*it);
+              if (finder == expr_refs_to_remove->end())
+                (*expr_refs_to_remove)[*it] = 1;
+              else
+                finder->second += 1;
+            }
+            else if ((*it)->remove_expression_reference())
+              delete (*it);
+          }
+        }
+        if (finder->second.empty())
+        {
+          if (owner_did > 0)
+          {
+            if (view_refs_to_remove != NULL)
+            {
+              std::map<LogicalView*,unsigned>::iterator finder = 
+                view_refs_to_remove->find(view);
+              if (finder == view_refs_to_remove->end())
+                (*view_refs_to_remove)[view] = 1;
+              else
+                finder->second += 1;
+            }
+            else if (view->remove_nested_valid_ref(owner_did))
+              delete view;
+          }
+          conditions.erase(finder);
+        }
+        else
+          finder->second.tighten_valid_mask();
       }
     }
 
     //--------------------------------------------------------------------------
-    bool TraceViewSet::dominates(
-         InstanceView *view, EquivalenceSet *eq, FieldMask &non_dominated) const
+    void TraceViewSet::invalidate_all_but(LogicalView *except,
+                              IndexSpaceExpression *expr, const FieldMask &mask,
+                  std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
+                  std::map<LogicalView*,unsigned> *view_refs_to_remove)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<LogicalView*> to_invalidate;
+      for (ViewExprs::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+      {
+        if (it->first == except)
+          continue;
+        if (it->second.get_valid_mask() * mask)
+          continue;
+        to_invalidate.push_back(it->first);
+      }
+      for (std::vector<LogicalView*>::const_iterator it = 
+            to_invalidate.begin(); it != to_invalidate.end(); it++)
+        invalidate(*it, expr, mask, expr_refs_to_remove, view_refs_to_remove);
+    }
+
+    //--------------------------------------------------------------------------
+    bool TraceViewSet::dominates(LogicalView *view, IndexSpaceExpression *expr, 
+                                 FieldMask &non_dominated) const
     //--------------------------------------------------------------------------
     {
       // If this is for an empty equivalence set then it doesn't matter
-      if (eq->set_expr->is_empty())
+      if (expr->is_empty())
         return true;
-      ViewSet::const_iterator finder = conditions.find(view);
+      ViewExprs::const_iterator finder = conditions.find(view);
       if (finder == conditions.end())
         return false;
 
-      LegionList<FieldSet<EquivalenceSet*> >::aligned field_sets;
-      finder->second.compute_field_sets(non_dominated, field_sets);
-      for (LegionList<FieldSet<EquivalenceSet*> >::aligned::const_iterator it =
-            field_sets.begin(); it != field_sets.end(); it++)
+      const size_t expr_volume = expr->get_volume();
+      IndexSpaceExpression *const total_expr = region->row_source;
+#ifdef DEBUG_LEGION
+      // This is a necessary but not sufficient condition for dominance
+      // If we need to we can put in the full intersection test later
+      assert(expr_volume <= total_expr->get_volume());
+#endif
+      if ((expr == total_expr) || (expr_volume == total_expr->get_volume()))
       {
-        if (it->elements.empty())
-          continue;
-        std::set<IndexSpaceExpression*> exprs;
-        for (std::set<EquivalenceSet*>::const_iterator eit = 
-              it->elements.begin(); eit != it->elements.end(); eit++)
-          exprs.insert((*eit)->set_expr);
-        IndexSpaceExpression *union_expr = forest->union_index_spaces(exprs);
-        IndexSpaceExpression *expr = eq->set_expr;
-        if (expr == union_expr)
-          non_dominated -= it->set_mask;
-        // Can only dominate if we have enough points
-        else if (expr->get_volume() <= union_expr->get_volume())
+        // Expression is for the whole view, so will only be dominated
+        // by the expression for the full view
+        FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
+          finder->second.find(total_expr);
+        if (expr_finder != finder->second.end())
+          non_dominated -= expr_finder->second;
+      }
+      else
+      {
+        // There is at most one expression per field so just iterate and compare
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
         {
-          IndexSpaceExpression *diff_expr =
-            forest->subtract_index_spaces(expr, union_expr);
-          if (diff_expr->is_empty())
-            non_dominated -= it->set_mask;
+          const FieldMask overlap = non_dominated & it->second;
+          if (!overlap)
+            continue;
+          if ((it->first != total_expr) && (it->first != expr))
+          {
+            IndexSpaceExpression *intersection = 
+              forest->intersect_index_spaces(it->first, expr);
+            const size_t volume = intersection->get_volume();
+            if (volume == 0)
+              continue;
+            // Can only dominate if we have enough points
+            if (volume < expr->get_volume())
+              continue;
+          }
+          // If we get here we were dominated
+          non_dominated -= overlap;
+          if (!non_dominated)
+            break;
         }
       }
       // If there are no fields left then we dominated
@@ -2262,22 +2573,112 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TraceViewSet::dominates(LogicalView *view, 
+                            IndexSpaceExpression *expr, FieldMask mask,
+                            FieldMaskSet<IndexSpaceExpression> &non_dominated,
+                            FieldMaskSet<IndexSpaceExpression> *dominated) const
+    //--------------------------------------------------------------------------
+    {
+      // If this is for an empty equivalence set then it doesn't matter
+      if (expr->is_empty())
+      {
+        if (dominated != NULL)
+          dominated->insert(expr, mask);
+        return;
+      }
+      ViewExprs::const_iterator finder = conditions.find(view);
+      if (finder == conditions.end() ||
+          (finder->second.get_valid_mask() * mask))
+      {
+        non_dominated.insert(expr, mask);
+        return;
+      }
+
+      const size_t expr_volume = expr->get_volume();
+      IndexSpaceExpression *const total_expr = region->row_source;
+#ifdef DEBUG_LEGION
+      // This is a necessary but not sufficient condition for dominance
+      // If we need to we can put in the full intersection test later
+      assert(expr_volume <= total_expr->get_volume());
+#endif
+      if ((expr == total_expr) || (expr_volume == total_expr->get_volume()))
+      {
+        // Expression is for the whole view, so will only be dominated
+        // for the full view
+        FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
+          finder->second.find(total_expr);
+        if (expr_finder != finder->second.end())
+        {
+          const FieldMask overlap = mask & expr_finder->second;
+          if (!!overlap)
+          {
+            if (dominated != NULL)
+              dominated->insert(expr, overlap); 
+            mask -= overlap;
+            if (!mask)
+              return;
+          }
+        }
+      }
+      else
+      {
+        // There is at most one expression per field so just iterate and compare
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          const FieldMask overlap = mask & it->second;
+          if (!overlap)
+            continue;
+          if ((it->first != total_expr) && (it->first != expr))
+          {
+            IndexSpaceExpression *intersection = 
+              forest->intersect_index_spaces(it->first, expr);
+            const size_t volume = intersection->get_volume();
+            if (volume == 0)
+              continue;
+            // Can only dominate if we have enough points
+            if (volume < expr->get_volume())
+            {
+              if (dominated != NULL)
+                dominated->insert(intersection, overlap);
+              IndexSpaceExpression *diff = 
+                forest->subtract_index_spaces(expr, intersection);
+              non_dominated.insert(diff, overlap);
+            }
+            else if (dominated != NULL)
+              dominated->insert(expr, overlap);
+          } // total expr dominates everything
+          else if (dominated != NULL)
+            dominated->insert(expr, overlap);
+          mask -= overlap;
+          if (!mask)
+            return;
+        }
+      }
+      // If we get here then these fields are definitely not dominated
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
+      non_dominated.insert(expr, mask);
+    }
+
+    //--------------------------------------------------------------------------
     bool TraceViewSet::subsumed_by(const TraceViewSet &set, 
                                    FailedPrecondition *condition) const
     //--------------------------------------------------------------------------
     {
-      for (ViewSet::const_iterator it = conditions.begin();
-           it != conditions.end(); ++it)
-        for (FieldMaskSet<EquivalenceSet>::const_iterator eit =
-             it->second.begin(); eit != it->second.end(); ++eit)
+      for (ViewExprs::const_iterator vit = 
+            conditions.begin(); vit != conditions.end(); ++vit)
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); ++it)
         {
-          FieldMask mask = eit->second;
-          if (!set.dominates(it->first, eit->first, mask))
+          FieldMask mask = it->second;
+          if (!set.dominates(vit->first, it->first, mask))
           {
             if (condition != NULL)
             {
-              condition->view = it->first;
-              condition->eq = eit->first;
+              condition->view = vit->first;
+              condition->expr = it->first;
               condition->mask = mask;
             }
             return false;
@@ -2288,17 +2689,274 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TraceViewSet::has_refinements(void) const
+    bool TraceViewSet::independent_of(const TraceViewSet &set,
+                                      FailedPrecondition *condition) const
     //--------------------------------------------------------------------------
     {
-      for (ViewSet::const_iterator it = conditions.begin();
-           it != conditions.end(); ++it)
-        for (FieldMaskSet<EquivalenceSet>::const_iterator eit =
-             it->second.begin(); eit != it->second.end(); ++eit)
-          if (eit->first->has_refinements(eit->second))
-            return true;
+      if (conditions.size() > set.conditions.size())
+        return set.independent_of(*this, condition);
+      for (ViewExprs::const_iterator vit = 
+            conditions.begin(); vit != conditions.end(); ++vit)
+      {
+        ViewExprs::const_iterator finder = set.conditions.find(vit->first);
+        if (finder == set.conditions.end())
+          continue;
+        if (vit->second.get_valid_mask() * finder->second.get_valid_mask())
+          continue;
+        LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
+                  FieldMask>::aligned overlaps;
+        unique_join_on_field_mask_sets(vit->second, finder->second, overlaps);
+        for (LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
+                       FieldMask>::aligned::const_iterator it = 
+              overlaps.begin(); it != overlaps.end(); it++)
+        {
+          IndexSpaceExpression *overlap = 
+            forest->intersect_index_spaces(it->first.first, it->first.second);
+          if (!overlap->is_empty())
+          {
+            if (condition != NULL)
+            {
+              condition->view = vit->first;
+              condition->expr = overlap;
+              condition->mask = it->second;
+            }
+            return false;
+          }
+        }
+      }
+      return true;
+    }
 
-      return false;
+    //--------------------------------------------------------------------------
+    void TraceViewSet::transpose_uniquely(LegionMap<IndexSpaceExpression*,
+                             FieldMaskSet<LogicalView> >::aligned &target) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target.empty());
+#endif
+      for (ViewExprs::const_iterator vit = 
+            conditions.begin(); vit != conditions.end(); ++vit)
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); it++)
+          target[it->first].insert(vit->first, it->second);
+      if (target.size() == 1)
+        return;
+      // Now for the hard part, we need to compare any expresions that overlap
+      // and have overlapping fields so we can uniquify them, this reduces the
+      // number of analyses in the precondition/anticondition cases, and is 
+      // necessary for correctness in the postcondition case where we cannot
+      // have multiple overwrites for the same fields and index expressions
+      FieldMaskSet<IndexSpaceExpression> expr_fields;
+      LegionMap<IndexSpaceExpression*,
+                FieldMaskSet<LogicalView> >::aligned intermediate;
+      intermediate.swap(target);
+      for (LegionMap<IndexSpaceExpression*,
+            FieldMaskSet<LogicalView> >::aligned::const_iterator it =
+            intermediate.begin(); it != intermediate.end(); it++)
+        expr_fields.insert(it->first, it->second.get_valid_mask());
+      LegionList<FieldSet<IndexSpaceExpression*> >::aligned field_exprs;
+      expr_fields.compute_field_sets(FieldMask(), field_exprs);
+      for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::const_iterator
+            eit = field_exprs.begin(); eit != field_exprs.end(); eit++)
+      {
+        if (eit->elements.size() == 1)
+        {
+          IndexSpaceExpression *expr = *(eit->elements.begin());
+          FieldMaskSet<LogicalView> &src_views = intermediate[expr];
+          FieldMaskSet<LogicalView> &dst_views = target[expr];
+          // No chance of overlapping so just move everything over
+          if (eit->set_mask != src_views.get_valid_mask())
+          {
+            // Move over the relevant expressions
+            for (FieldMaskSet<LogicalView>::const_iterator it = 
+                  src_views.begin(); it != src_views.end(); it++)
+            {
+              const FieldMask overlap = eit->set_mask & it->second;
+              if (!overlap)
+                continue;
+              dst_views.insert(it->first, overlap);
+            }
+          }
+          else if (!dst_views.empty())
+          {
+            for (FieldMaskSet<LogicalView>::const_iterator it = 
+                  src_views.begin(); it != src_views.end(); it++)
+              dst_views.insert(it->first, it->second);
+          }
+          else
+            dst_views.swap(src_views);
+          continue;
+        }
+        // Do pair-wise intersection tests for overlapping of the expressions
+        std::vector<IndexSpaceExpression*> disjoint_expressions;
+        std::vector<std::vector<IndexSpaceExpression*> > disjoint_components;
+        for (std::set<IndexSpaceExpression*>::const_iterator isit = 
+              eit->elements.begin(); isit != eit->elements.end(); isit++)
+        {
+          IndexSpaceExpression *current = *isit;
+          const size_t num_expressions = disjoint_expressions.size();
+          for (unsigned idx = 0; idx < num_expressions; idx++)
+          {
+            IndexSpaceExpression *expr = disjoint_expressions[idx];
+            // Compute the intersection
+            IndexSpaceExpression *intersection =
+              forest->intersect_index_spaces(expr, current);
+            const size_t volume = intersection->get_volume();
+            if (volume == 0)
+              continue;
+            if (volume == current->get_volume())
+            {
+              // this one dominates us, see if we need to split ourself off
+              if (volume < expr->get_volume())
+              {
+                disjoint_expressions.push_back(intersection);
+                disjoint_components.resize(disjoint_components.size() + 1);
+                std::vector<IndexSpaceExpression*> &components =
+                  disjoint_components.back();
+                components.insert(components.end(),
+                    disjoint_components[idx].begin(), 
+                    disjoint_components[idx].end());
+                components.push_back(*isit);
+                disjoint_expressions[idx] =
+                  forest->subtract_index_spaces(expr, intersection);
+              }
+              else // Congruent so we are done
+                disjoint_components[idx].push_back(*isit);
+              current = NULL;
+              break;
+            }
+            else if (volume == expr->get_volume())
+            {
+              // We dominate the expression so add ourselves and compute diff
+              disjoint_components[idx].push_back(*isit); 
+              current = forest->subtract_index_spaces(current, intersection);
+#ifdef DEBUG_LEGION
+              assert(!current->is_empty());
+#endif
+            }
+            else
+            {
+              // Split into the three parts and keep going
+              disjoint_expressions.push_back(intersection);
+              disjoint_components.resize(disjoint_components.size() + 1);
+              std::vector<IndexSpaceExpression*> &components = 
+                disjoint_components.back();
+              components.insert(components.end(),
+                  disjoint_components[idx].begin(), 
+                  disjoint_components[idx].end());
+              components.push_back(*isit);
+              disjoint_expressions[idx] =
+                forest->subtract_index_spaces(expr, intersection);
+              current = forest->subtract_index_spaces(current, intersection);
+#ifdef DEBUG_LEGION
+              assert(!current->is_empty());
+#endif
+            }
+          }
+          if (current != NULL)
+          {
+            disjoint_expressions.push_back(current);
+            disjoint_components.resize(disjoint_components.size() + 1);
+            disjoint_components.back().push_back(*isit);
+          }
+        }
+        // Now we have overlapping expressions and constituents for
+        // each of what used to be the old equivalence sets, so we
+        // can now build the actual output target
+        for (unsigned idx = 0; idx < disjoint_expressions.size(); idx++)
+        {
+          FieldMaskSet<LogicalView> &dst_views =
+            target[disjoint_expressions[idx]];
+          for (std::vector<IndexSpaceExpression*>::const_iterator sit =
+                disjoint_components[idx].begin(); sit !=
+                disjoint_components[idx].end(); sit++)
+          {
+#ifdef DEBUG_LEGION
+            assert(intermediate.find(*sit) != intermediate.end());
+#endif
+            const FieldMaskSet<LogicalView> &src_views = intermediate[*sit];
+            for (FieldMaskSet<LogicalView>::const_iterator it =
+                  src_views.begin(); it != src_views.end(); it++)
+            {
+              const FieldMask overlap = it->second & eit->set_mask;
+              if (!overlap)
+                continue;
+              dst_views.insert(it->first, overlap);
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceViewSet::find_overlaps(TraceViewSet &target, 
+                                     IndexSpaceExpression *expr, 
+                                     const bool expr_covers, 
+                                     const FieldMask &mask) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target.owner_did == 0);
+#endif
+      if (expr_covers)
+      {
+        for (ViewExprs::const_iterator vit = 
+              conditions.begin(); vit != conditions.end(); vit++)
+        {
+          if (!(vit->second.get_valid_mask() - mask))
+          {
+            // sending everything
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+              target.insert(vit->first, it->first, it->second, NULL);
+          }
+          else
+          {
+            // filtering on fields
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = mask & it->second;
+              if (!overlap)
+                continue;
+              target.insert(vit->first, it->first, overlap, NULL);
+            }
+          }
+        }
+      }
+      else
+      {
+        for (ViewExprs::const_iterator vit = 
+              conditions.begin(); vit != conditions.end(); vit++)
+        {
+          FieldMask view_overlap = vit->second.get_valid_mask() & mask;
+          if (!view_overlap)
+            continue;
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                vit->second.begin(); it != vit->second.end(); it++)
+          {
+            const FieldMask overlap = it->second & view_overlap;
+            if (!overlap)
+              continue;
+            IndexSpaceExpression *expr_overlap = 
+              forest->intersect_index_spaces(it->first, expr); 
+            const size_t volume = expr_overlap->get_volume();
+            if (volume > 0)
+            {
+              if (volume == expr->get_volume())
+                target.insert(vit->first, expr, overlap, NULL);
+              else if (volume == it->first->get_volume())
+                target.insert(vit->first, it->first, overlap, NULL);
+              else
+                target.insert(vit->first, expr_overlap, overlap, NULL);
+            }
+            view_overlap -= overlap;
+            if (!view_overlap)
+              break;
+          }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2309,28 +2967,92 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TraceViewSet::merge(TraceViewSet &target, 
+                             std::set<RtEvent> &applied_events) const
+    //--------------------------------------------------------------------------
+    {
+      for (ViewExprs::const_iterator vit = 
+            conditions.begin(); vit != conditions.end(); ++vit)
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); it++)
+          target.insert(vit->first, it->first, it->second, &applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceViewSet::pack(Serializer &rez, AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(conditions.size());
+      for (ViewExprs::const_iterator vit = 
+            conditions.begin(); vit != conditions.end(); ++vit)
+      {
+        rez.serialize(vit->first->did);
+        rez.serialize<size_t>(vit->second.size());
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); it++)
+        {
+          it->first->pack_expression(rez, target);
+          rez.serialize(it->second);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceViewSet::unpack(Deserializer &derez, size_t num_views,
+                         AddressSpaceID source, std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner_did == 0); // should only be unpacking without refs
+#endif
+      for (unsigned idx1 = 0; idx1 < num_views; idx1++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        LogicalView *view = 
+          forest->runtime->find_or_request_logical_view(did, ready);
+        size_t num_exprs;
+        derez.deserialize(num_exprs);
+        FieldMaskSet<IndexSpaceExpression> &exprs = conditions[view];
+        for (unsigned idx2 = 0; idx2 < num_exprs; idx2++)
+        {
+          IndexSpaceExpression *expr = 
+            IndexSpaceExpression::unpack_expression(derez, forest, source);
+          FieldMask mask;
+          derez.deserialize(mask);
+          exprs.insert(expr, mask);
+        }
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void TraceViewSet::dump(void) const
     //--------------------------------------------------------------------------
     {
-      for (ViewSet::const_iterator it = conditions.begin();
-           it != conditions.end(); ++it)
+      const LogicalRegion lr = region->handle;
+      for (ViewExprs::const_iterator vit = 
+            conditions.begin(); vit != conditions.end(); ++vit)
       {
-        InstanceView *view = it->first;
-        for (FieldMaskSet<EquivalenceSet>::const_iterator eit =
-             it->second.begin(); eit != it->second.end(); ++eit)
+        LogicalView *view = vit->first;
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); ++it)
         {
-          char *mask = eit->second.to_string();
-          LogicalRegion lr =
-            forest->get_tree(view->get_manager()->tree_id)->handle;
+          char *mask = it->second.to_string();
           const void *name = NULL; size_t name_size = 0;
           forest->runtime->retrieve_semantic_information(lr, 
               LEGION_NAME_SEMANTIC_TAG, name, name_size, true, true);
+          PhysicalManager *manager = view->get_manager();
           log_tracing.info() << "  "
-                    <<(view->is_reduction_view() ? "Reduction" : "Materialized")
+                    << (view->is_reduction_view() ? "Reduction" : 
+                       (view->is_fill_view() ? "Fill" : "Materialized"))
                     << " view: " << view << ", Inst: " << std::hex
-                    << view->get_manager()->get_instance(DomainPoint()).id 
+                    << ((manager != NULL) ? 
+                        manager->get_instance(DomainPoint()).id : 0)
                     << std::dec
-                    << ", Index expr: " << eit->first->set_expr->expr_id
+                    << ", Index expr: " << it->first->expr_id
                     << ", Name: " << (name_size > 0 ? (const char*)name : "")
                     << ", Field Mask: " << mask;
           free(mask);
@@ -2343,116 +3065,478 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceConditionSet::TraceConditionSet(RegionTreeForest *f)
-      : TraceViewSet(f), cached(false)
+    TraceConditionSet::TraceConditionSet(RegionTreeForest *f, 
+                              IndexSpaceExpression *expr, const FieldMask &mask, 
+                              const std::set<RegionNode*> &rgs)
+      : forest(f), condition_expr(expr), condition_mask(mask), 
+        regions(std::vector<RegionNode*>(rgs.begin(), rgs.end())),
+        precondition_views(NULL), anticondition_views(NULL), 
+        postcondition_views(NULL)
     //--------------------------------------------------------------------------
     {
+      condition_expr->add_expression_reference();
+      for (std::vector<RegionNode*>::const_iterator it =
+            regions.begin(); it != regions.end(); it++)
+        (*it)->add_base_resource_ref(TRACE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    TraceConditionSet::TraceConditionSet(const TraceConditionSet &rhs)
+      : forest(rhs.forest), condition_expr(rhs.condition_expr),
+        condition_mask(rhs.condition_mask), regions(rhs.regions)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
     TraceConditionSet::~TraceConditionSet(void)
     //--------------------------------------------------------------------------
     {
-      views.clear();
-      version_infos.clear();
+#ifdef DEBUG_LEGION
+      assert(current_sets.empty());
+#endif
+      for (LegionMap<IndexSpaceExpression*,
+                     FieldMaskSet<LogicalView> >::aligned::const_iterator eit =
+            preconditions.begin(); eit != preconditions.end(); eit++)
+      {
+        for (FieldMaskSet<LogicalView>::const_iterator it = 
+              eit->second.begin(); it != eit->second.end(); it++)
+          if (it->first->remove_base_valid_ref(TRACE_REF))
+            delete it->first;
+        if (eit->first->remove_expression_reference())
+          delete eit->first;
+      }
+      for (LegionMap<IndexSpaceExpression*,
+                     FieldMaskSet<LogicalView> >::aligned::const_iterator eit =
+            anticonditions.begin(); eit != anticonditions.end(); eit++)
+      {
+        for (FieldMaskSet<LogicalView>::const_iterator it = 
+              eit->second.begin(); it != eit->second.end(); it++)
+          if (it->first->remove_base_valid_ref(TRACE_REF))
+            delete it->first;
+        if (eit->first->remove_expression_reference())
+          delete eit->first;
+      }
+      for (LegionMap<IndexSpaceExpression*,
+                     FieldMaskSet<LogicalView> >::aligned::const_iterator eit =
+            postconditions.begin(); eit != postconditions.end(); eit++)
+      {
+        for (FieldMaskSet<LogicalView>::const_iterator it = 
+              eit->second.begin(); it != eit->second.end(); it++)
+          if (it->first->remove_base_valid_ref(TRACE_REF))
+            delete it->first;
+        if (eit->first->remove_expression_reference())
+          delete eit->first;
+      }
+      for (std::vector<RegionNode*>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++)
+        if ((*it)->remove_base_resource_ref(TRACE_REF))
+          delete (*it);
+      if (condition_expr->remove_expression_reference())
+        delete condition_expr;
+      if (precondition_views != NULL)
+        delete precondition_views;
+      if (anticondition_views != NULL)
+        delete anticondition_views;
+      if (postcondition_views != NULL)
+        delete postcondition_views;
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::make_ready(bool postcondition)
+    TraceConditionSet& TraceConditionSet::operator=(
+                                                   const TraceConditionSet &rhs)
     //--------------------------------------------------------------------------
     {
-      if (cached)
-        return;
-      cached = true;
+      // should never be called
+      assert(false);
+      return *this;
+    }
 
-      typedef std::pair<RegionTreeID,EquivalenceSet*> Key;
-      LegionMap<Key,FieldMaskSet<InstanceView> >::aligned views_by_regions;
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::add_tracker_reference(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      add_reference(cnt);
+    }
 
-      for (ViewSet::iterator it = conditions.begin(); it != conditions.end();
-           ++it)
+    //--------------------------------------------------------------------------
+    bool TraceConditionSet::remove_tracker_reference(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      return remove_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::record_equivalence_set(EquivalenceSet *set,
+                                                   const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      set->record_tracker(this, mask);
+      AutoLock s_lock(set_lock);
+      if (current_sets.insert(set, mask))
+        set->add_base_resource_ref(TRACE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::record_pending_equivalence_set(EquivalenceSet *set,
+                                                          const FieldMask &mask) 
+    //--------------------------------------------------------------------------
+    {
+      AutoLock s_lock(set_lock);
+      pending_sets.insert(set, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::remove_equivalence_set(EquivalenceSet *set,
+                                                   const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
       {
-        RegionTreeID tid = it->first->get_manager()->tree_id;
-        for (FieldMaskSet<EquivalenceSet>::iterator eit = it->second.begin();
-             eit != it->second.end(); ++eit)
-        {
-          EquivalenceSet *eq = eit->first;
-          Key key(tid, eq);
-          FieldMaskSet <InstanceView> &vset = views_by_regions[key];
-          vset.insert(it->first, eit->second);
-        }
+        AutoLock s_lock(set_lock);
+        invalid_mask |= mask;
+        FieldMaskSet<EquivalenceSet>::iterator finder = current_sets.find(set);
+        // Might have already been removed as part of deleting the set
+        if (finder == current_sets.end())
+          return;
+#ifdef DEBUG_LEGION
+        assert(!(mask - finder->second));
+#endif
+        finder.filter(mask);
+        if (!finder->second)
+          current_sets.erase(finder);
+        else
+          return;
       }
+      // Remove the reference if we removed the set from our current sets
+      if (set->remove_base_resource_ref(TRACE_REF))
+        delete set;
+    }
 
-      // Filter out views that overlap with some restricted views
-      if (postcondition)
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::invalidate_equivalence_sets(void)
+    //--------------------------------------------------------------------------
+    {
+      FieldMaskSet<EquivalenceSet> to_remove;
       {
-        for (LegionMap<Key,FieldMaskSet<InstanceView> >::aligned::iterator it =
-             views_by_regions.begin(); it != views_by_regions.end(); ++it)
-        {
-          EquivalenceSet *eq = it->first.second;
-          FieldMaskSet<InstanceView> &all_views = it->second;
-          if (!eq->has_restrictions(all_views.get_valid_mask())) continue;
-
-          FieldMaskSet<InstanceView> restricted_views;
-          FieldMask restricted_mask;
-          for (FieldMaskSet<InstanceView>::iterator vit = all_views.begin();
-               vit != all_views.end(); ++vit)
-          {
-            FieldMask restricted = eq->is_restricted(vit->first);
-            FieldMask overlap = restricted & vit->second;
-            if (!!overlap)
-            {
-              restricted_views.insert(vit->first, overlap);
-              restricted_mask |= overlap;
-            }
-          }
-
-          std::vector<InstanceView*> to_delete;
-          for (FieldMaskSet<InstanceView>::iterator vit = all_views.begin();
-               vit != all_views.end(); ++vit)
-          {
-            vit.filter(restricted_mask);
-            if (!vit->second)
-              to_delete.push_back(vit->first);
-          }
-
-          for (std::vector<InstanceView*>::iterator vit = to_delete.begin();
-               vit != to_delete.end(); ++vit)
-            all_views.erase(*vit);
-
-          for (FieldMaskSet<InstanceView>::iterator vit =
-               restricted_views.begin(); vit != restricted_views.end(); ++vit)
-            all_views.insert(vit->first, vit->second);
-        }
+        AutoLock s_lock(set_lock);
+        if (current_sets.empty())
+          return;
+        to_remove.swap(current_sets);
       }
-
-      unsigned idx = 0;
-      version_infos.resize(views_by_regions.size());
-      for (LegionMap<Key,FieldMaskSet<InstanceView> >::aligned::iterator it =
-           views_by_regions.begin(); it != views_by_regions.end(); ++it)
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            to_remove.begin(); it != to_remove.end(); it++)
       {
-        views.push_back(it->second);
-        version_infos[idx++].record_equivalence_set(NULL,
-            it->first.second, it->second.get_valid_mask());
+        it->first->remove_tracker(this, it->second);
+        if (it->first->remove_base_resource_ref(TRACE_REF))
+          delete it->first;
       }
     }
 
     //--------------------------------------------------------------------------
-    bool TraceConditionSet::require(Operation *op, 
-                                    std::set<RtEvent> &applied_events)
+    void TraceConditionSet::capture(EquivalenceSet *set, 
+                                    std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      set->record_tracker(this, condition_mask);
+      if (current_sets.insert(set, condition_mask))
+        set->add_base_resource_ref(TRACE_REF);
+      const RtEvent ready_event = 
+        set->capture_trace_conditions(this, set->local_space, condition_expr, 
+                              condition_mask, RtUserEvent::NO_RT_USER_EVENT); 
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_events.insert(ready_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::receive_capture(TraceViewSet *pre, 
+               TraceViewSet *anti, TraceViewSet *post, std::set<RtEvent> &ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(cached);
+      assert(precondition_views == NULL);
+      assert(anticondition_views == NULL);
+      assert(postcondition_views == NULL);
 #endif
-      for (unsigned idx = 0; idx < views.size(); ++idx)
+      precondition_views = pre;
+      anticondition_views = anti;
+      postcondition_views = post;
+      WrapperReferenceMutator mutator(ready);
+      if (precondition_views != NULL)
       {
-        FieldMaskSet<InstanceView> invalid_views;
-        forest->find_invalid_instances(op, idx, version_infos[idx], views[idx],
-                                       invalid_views, applied_events);
-        if (!invalid_views.empty())
-          return false;
+        precondition_views->transpose_uniquely(preconditions);
+        for (LegionMap<IndexSpaceExpression*,
+                       FieldMaskSet<LogicalView> >::aligned::const_iterator 
+              eit = preconditions.begin(); eit != preconditions.end(); eit++)
+        {
+          eit->first->add_expression_reference();
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+            it->first->add_base_valid_ref(TRACE_REF, &mutator);
+        }
       }
+      if (anticondition_views != NULL)
+      {
+        anticondition_views->transpose_uniquely(anticonditions);
+        for (LegionMap<IndexSpaceExpression*,
+                       FieldMaskSet<LogicalView> >::aligned::const_iterator 
+              eit = anticonditions.begin(); eit != anticonditions.end(); eit++)
+        {
+          eit->first->add_expression_reference();
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+            it->first->add_base_valid_ref(TRACE_REF, &mutator);
+        }
+      }
+      if (postcondition_views != NULL)
+      {
+        postcondition_views->transpose_uniquely(postconditions);
+        for (LegionMap<IndexSpaceExpression*,
+                       FieldMaskSet<LogicalView> >::aligned::const_iterator 
+              eit = postconditions.begin(); eit != postconditions.end(); eit++)
+        {
+          eit->first->add_expression_reference();
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+            it->first->add_base_valid_ref(TRACE_REF, &mutator);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool TraceConditionSet::is_empty(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (precondition_views != NULL)
+        return false;
+      if (anticondition_views != NULL)
+        return false;
+      if (postcondition_views != NULL)
+        return false;
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool TraceConditionSet::is_replayable(bool &not_subsumed,
+                                       TraceViewSet::FailedPrecondition *failed)
+    //--------------------------------------------------------------------------
+    {
+      bool replayable = true;
+      if ((precondition_views != NULL) && ((postcondition_views == NULL) ||
+            !precondition_views->subsumed_by(*postcondition_views, failed)))
+      {
+        replayable = false;
+        not_subsumed = true;
+      }
+      if (replayable && 
+          (postcondition_views != NULL) && (anticondition_views != NULL) &&
+          !postcondition_views->independent_of(*anticondition_views, failed))
+      {
+        replayable = false;
+        not_subsumed = false;
+      }
+      // Clean up our view objects since we no longer need them
+      if (precondition_views != NULL)
+      {
+        delete precondition_views;
+        precondition_views = NULL;
+      }
+      if (anticondition_views != NULL)
+      {
+        delete anticondition_views;
+        anticondition_views = NULL;
+      }
+      if (postcondition_views != NULL)
+      {
+        delete postcondition_views;
+        postcondition_views = NULL;
+      }
+      return replayable;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::dump_preconditions(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!regions.empty());
+#endif
+      TraceViewSet dump_view_set(forest, 0/*owner did*/,
+          forest->get_tree(regions.front()->handle.get_tree_id()));
+      for (ExprViews::const_iterator eit = 
+            preconditions.begin(); eit != preconditions.end(); eit++)
+        for (FieldMaskSet<LogicalView>::const_iterator it =
+              eit->second.begin(); it != eit->second.end(); it++)
+          dump_view_set.insert(it->first, eit->first, it->second, NULL);
+      dump_view_set.dump();
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::dump_anticonditions(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!regions.empty());
+#endif
+      TraceViewSet dump_view_set(forest, 0/*owner did*/,
+          forest->get_tree(regions.front()->handle.get_tree_id()));
+      for (ExprViews::const_iterator eit = 
+            anticonditions.begin(); eit != anticonditions.end(); eit++)
+        for (FieldMaskSet<LogicalView>::const_iterator it =
+              eit->second.begin(); it != eit->second.end(); it++)
+          dump_view_set.insert(it->first, eit->first, it->second, NULL);
+      dump_view_set.dump();
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::dump_postconditions(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!regions.empty());
+#endif
+      TraceViewSet dump_view_set(forest, 0/*owner did*/,
+          forest->get_tree(regions.front()->handle.get_tree_id()));
+      for (ExprViews::const_iterator eit = 
+            postconditions.begin(); eit != postconditions.end(); eit++)
+        for (FieldMaskSet<LogicalView>::const_iterator it =
+              eit->second.begin(); it != eit->second.end(); it++)
+          dump_view_set.insert(it->first, eit->first, it->second, NULL);
+      dump_view_set.dump();
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::test_require(Operation *op, 
+             std::set<RtEvent> &ready_events, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      // We should not need the lock here because the trace should be 
+      // blocking all other operations from running and changing the 
+      // equivalence sets while we are here
+      // First check to see if we need to recompute our equivalence sets
+      if (!!invalid_mask)
+      {
+        const RtEvent ready = recompute_equivalence_sets(op);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          const RtUserEvent tested = Runtime::create_rt_user_event();
+          const RtUserEvent applied = Runtime::create_rt_user_event();
+          DeferTracePreconditionTestArgs args(this, op, tested, applied);
+          forest->runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, ready);
+          ready_events.insert(tested);
+          applied_events.insert(applied);
+          return;
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(precondition_analyses.empty());
+      assert(anticondition_analyses.empty());
+#endif
+      // Make analyses for the precondition and anticondition tests
+      for (ExprViews::const_iterator eit = 
+            preconditions.begin(); eit != preconditions.end(); eit++)
+      {
+        InvalidInstAnalysis *analysis = new InvalidInstAnalysis(forest->runtime,  
+            op, precondition_analyses.size(), eit->first, eit->second);
+        analysis->add_reference();
+        precondition_analyses.push_back(analysis);
+        std::set<RtEvent> deferral_events;
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              current_sets.begin(); it != current_sets.end(); it++)
+        {
+          const FieldMask overlap = eit->second.get_valid_mask() & it->second;
+          if (!overlap)
+            continue;
+          analysis->traverse(it->first, overlap,deferral_events,applied_events);
+        }
+        const RtEvent traversal_done = deferral_events.empty() ?
+          RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+        if (traversal_done.exists() || analysis->has_remote_sets())
+        {
+          const RtEvent ready = 
+            analysis->perform_remote(traversal_done, applied_events);
+          if (ready.exists() && !ready.has_triggered())
+            ready_events.insert(ready);
+        }
+      }
+      for (ExprViews::const_iterator eit =
+            anticonditions.begin(); eit != anticonditions.end(); eit++)
+      {
+        AntivalidInstAnalysis *analysis = 
+          new AntivalidInstAnalysis(forest->runtime, op, 
+              anticondition_analyses.size(), eit->first, eit->second);
+        analysis->add_reference();
+        anticondition_analyses.push_back(analysis);
+        std::set<RtEvent> deferral_events;
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              current_sets.begin(); it != current_sets.end(); it++)
+        {
+          const FieldMask overlap = eit->second.get_valid_mask() & it->second;
+          if (!overlap)
+            continue;
+          analysis->traverse(it->first, overlap,deferral_events,applied_events);
+        }
+        const RtEvent traversal_done = deferral_events.empty() ?
+          RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+        if (traversal_done.exists() || analysis->has_remote_sets())
+        {
+          const RtEvent ready = 
+            analysis->perform_remote(traversal_done, applied_events);
+          if (ready.exists() && !ready.has_triggered())
+            ready_events.insert(ready);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void TraceConditionSet::handle_precondition_test(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferTracePreconditionTestArgs *dargs = 
+        (const DeferTracePreconditionTestArgs*)args;
+      std::set<RtEvent> ready_events, applied_events;
+      dargs->set->test_require(dargs->op, ready_events, applied_events);
+      if (!ready_events.empty())
+        Runtime::trigger_event(dargs->done_event, 
+            Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(dargs->done_event);
+      if (!applied_events.empty())
+        Runtime::trigger_event(dargs->applied_event,
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(dargs->applied_event);
+    }
+
+    //--------------------------------------------------------------------------
+    bool TraceConditionSet::check_require(void)
+    //--------------------------------------------------------------------------
+    {
+      bool satisfied = true;
+      for (std::vector<InvalidInstAnalysis*>::const_iterator it =
+            precondition_analyses.begin(); it != 
+            precondition_analyses.end(); it++)
+      {
+        if ((*it)->has_invalid())
+          satisfied = false;
+        if ((*it)->remove_reference())
+          delete (*it);
+      }
+      precondition_analyses.clear();
+      for (std::vector<AntivalidInstAnalysis*>::const_iterator it =
+            anticondition_analyses.begin(); it != 
+            anticondition_analyses.end(); it++)
+      {
+        if ((*it)->has_antivalid())
+          satisfied = false;
+        if ((*it)->remove_reference())
+          delete (*it);
+      }
+      anticondition_analyses.clear();
+      return satisfied;
     }
 
     //--------------------------------------------------------------------------
@@ -2460,13 +3544,129 @@ namespace Legion {
                                    std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(cached);
-#endif
+      // We should not need the lock here because the trace should be 
+      // blocking all other operations from running and changing the 
+      // equivalence sets while we are here
+      // First check to see if we need to recompute our equivalence sets
+      if (!!invalid_mask)
+      {
+        const RtEvent ready = recompute_equivalence_sets(op);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          const RtUserEvent applied= Runtime::create_rt_user_event();
+          DeferTracePostconditionTestArgs args(this, op, applied);
+          forest->runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, ready);
+          applied_events.insert(applied);
+          return;
+        }
+      }
+      // Perform an overwrite analysis for each of the postconditions
+      unsigned index = 0;
       const TraceInfo trace_info(op, false/*init*/);
-      for (unsigned idx = 0; idx < views.size(); ++idx)
-        forest->update_valid_instances(op, idx, version_infos[idx], views[idx],
-            PhysicalTraceInfo(trace_info, idx), applied_events);
+      const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
+      for (ExprViews::const_iterator eit = 
+            postconditions.begin(); eit != postconditions.end(); eit++, index++)
+      {
+        OverwriteAnalysis *analysis = new OverwriteAnalysis(forest->runtime,
+            op, index, usage, eit->first, eit->second, 
+            PhysicalTraceInfo(trace_info, index), ApEvent::NO_AP_EVENT);
+        analysis->add_reference();
+        std::set<RtEvent> deferral_events;
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              current_sets.begin(); it != current_sets.end(); it++)
+        {
+          const FieldMask overlap = eit->second.get_valid_mask() & it->second;
+          if (!overlap)
+            continue;
+          analysis->traverse(it->first, overlap,deferral_events,applied_events);
+        }
+        const RtEvent traversal_done = deferral_events.empty() ?
+          RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+        if (traversal_done.exists() || analysis->has_remote_sets())
+          analysis->perform_remote(traversal_done, applied_events);
+        if (analysis->remove_reference())
+          delete analysis;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void TraceConditionSet::handle_postcondition_test(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferTracePostconditionTestArgs *dargs = 
+        (const DeferTracePostconditionTestArgs*)args;
+      std::set<RtEvent> ready_events;
+      dargs->set->ensure(dargs->op, ready_events);
+      if (!ready_events.empty())
+        Runtime::trigger_event(dargs->done_event, 
+            Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(dargs->done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void TraceConditionSet::handle_finalize_sets(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferTraceFinalizeSetsArgs *dargs =
+        (const DeferTraceFinalizeSetsArgs*)args;
+      dargs->set->finalize_computed_sets(); 
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent TraceConditionSet::recompute_equivalence_sets(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!invalid_mask);
+#endif
+      std::set<RtEvent> ready_events;
+      UniqueID opid = op->get_unique_op_id();
+      InnerContext *context = op->get_context();
+      ContextID ctxid = context->get_context().get_id();
+      AddressSpaceID space = forest->runtime->address_space;
+      for (std::vector<RegionNode*>::const_iterator it =
+            regions.begin(); it != regions.end(); it++)
+      {
+        IndexSpaceExpression *overlap = 
+          forest->intersect_index_spaces(condition_expr, (*it)->row_source);
+        (*it)->compute_equivalence_sets(ctxid, context, this, space, overlap,
+            invalid_mask, opid, space, ready_events, false/*downward only*/);
+      }
+      invalid_mask.clear();
+      if (!ready_events.empty())
+      {
+        const RtEvent ready = Runtime::merge_events(ready_events);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          // Launch a meta-task to finalize this trace condition set
+          DeferTraceFinalizeSetsArgs args(this, op->get_unique_op_id());
+          return forest->runtime->issue_runtime_meta_task(args, 
+                          LG_LATENCY_DEFERRED_PRIORITY, ready);
+        }
+      }
+      finalize_computed_sets();
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::finalize_computed_sets(void)
+    //--------------------------------------------------------------------------
+    {
+      // Don't need the lock here, there's only one thing looking at these
+      // data structures at this point
+      if (pending_sets.empty())
+        return;
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            pending_sets.begin(); it != pending_sets.end(); it++)
+      {
+        it->first->record_tracker(this, it->second);
+        if (current_sets.insert(it->first, it->second))
+          it->first->add_base_resource_ref(TRACE_REF);
+      }
+      pending_sets.clear();
     }
 
     /////////////////////////////////////////////////////////////
@@ -2479,10 +3679,7 @@ namespace Legion {
         fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false), last_fence(NULL),
-        recording_done(Runtime::create_rt_user_event()),
-        pre(t->runtime->forest), post(t->runtime->forest),
-        pre_reductions(t->runtime->forest), post_reductions(t->runtime->forest),
-        consumed_reductions(t->runtime->forest)
+        recording_done(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
       events.push_back(fence_event);
@@ -2497,9 +3694,7 @@ namespace Legion {
     PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
       : trace(NULL), recording(true), replayable(false, "uninitialized"),
         fence_completion_id(0),
-        replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT),
-        pre(NULL), post(NULL), pre_reductions(NULL), post_reductions(NULL),
-        consumed_reductions(NULL)
+        replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2515,6 +3710,13 @@ namespace Legion {
         for (std::set<ViewUser*>::iterator it = all_users.begin();
              it != all_users.end(); ++it)
           delete (*it);
+        for (std::vector<TraceConditionSet*>::const_iterator it =
+              conditions.begin(); it != conditions.end(); it++)
+        {
+          (*it)->invalidate_equivalence_sets();
+          if ((*it)->remove_reference())
+            delete (*it);
+        }
         for (std::vector<Instruction*>::iterator it = instructions.begin();
              it != instructions.end(); ++it)
           delete *it;
@@ -2590,7 +3792,22 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      return pre.require(op, applied_events);
+      std::set<RtEvent> ready_events;
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->test_require(op, ready_events, applied_events);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      bool result = true;
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+        if (!(*it)->check_require())
+          result = false;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2598,7 +3815,9 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      post.ensure(op, applied_events);
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->ensure(op, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -2606,20 +3825,38 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      return pre.require(op, applied_events);
-    }
+      std::set<RtEvent> ready_events;
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->test_require(op, ready_events, applied_events);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      bool result = true;
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+        if (!(*it)->check_require())
+          result = false;
+      return result;
+    } 
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::apply_postcondition(ReplTraceSummaryOp *op,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      post.ensure(op, applied_events);
+      for (std::vector<TraceConditionSet*>::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->ensure(op, applied_events);
     }
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::Replayable PhysicalTemplate::check_replayable(
-                                  ReplTraceOp *op, bool has_blocking_call) const
+                                         ReplTraceOp *op, InnerContext *context,
+                                         UniqueID opid, bool has_blocking_call) 
     //--------------------------------------------------------------------------
     {
       if (has_blocking_call)
@@ -2628,39 +3865,120 @@ namespace Legion {
       if (has_virtual_mapping)
         return Replayable(false, "virtual mapping");
 
-      if (!pre_fill_views.empty())
-        return Replayable(false, "external fill views");
-
-      if (!pre_reductions.empty())
-        return Replayable(false, "external reduction views");
-
-      if (pre.has_refinements() || post.has_refinements())
-        return Replayable(false, "found refined equivalence sets");
-
+      // Next we need to compute the equivalence sets for all these regions
+      LegionVector<VersionInfo>::aligned version_infos(trace_regions.size());
+      unsigned index = 0;
+      std::set<RtEvent> ready_events;
+      const ContextID ctx = context->get_context().get_id();
+      for (FieldMaskSet<RegionNode>::const_iterator it =
+            trace_regions.begin(); it != trace_regions.end(); it++, index++)
+        it->first->perform_versioning_analysis(ctx, context, 
+            &version_infos[index], it->second, opid, 
+            trace->runtime->address_space, ready_events);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        ready_events.clear();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      // Compute the sets of regions and fields associated with each set
+      index = 0;
+      LegionMap<EquivalenceSet*,FieldMaskSet<RegionNode> >::aligned set_regions;
+      for (FieldMaskSet<RegionNode>::const_iterator rit =
+            trace_regions.begin(); rit != trace_regions.end(); rit++, index++)
+      {
+        const FieldMaskSet<EquivalenceSet> &region_sets = 
+            version_infos[index].get_equivalence_sets();
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              region_sets.begin(); it != region_sets.end(); it++)
+          set_regions[it->first].insert(rit->first, it->second);
+      }
+      trace_regions.clear();
+      // Make a trace condition set for each one of them
+      // Note for control replication, we're just letting multiple shards 
+      // race to their equivalence sets, whichever one gets there first for
+      // their fields will be the one to own the preconditions
+      RegionTreeForest *forest = trace->runtime->forest;
+      for (LegionMap<EquivalenceSet*,
+                     FieldMaskSet<RegionNode> >::aligned::const_iterator eit =
+            set_regions.begin(); eit != set_regions.end(); eit++)
+      {
+        // Sort the region nodes into field groups so we can get a field 
+        // expression for each one of these
+        LegionList<FieldSet<RegionNode*> >::aligned region_fields;
+        eit->second.compute_field_sets(FieldMask(), region_fields);
+        for (LegionList<FieldSet<RegionNode*> >::aligned::iterator it =
+              region_fields.begin(); it != region_fields.end(); it++)
+        {
+          // The expression for this condition is the intersection of
+          // the equivalence set region with all the other regions that
+          // are represented by it
+          std::set<IndexSpaceExpression*> exprs;
+          for (std::set<RegionNode*>::const_iterator rit = 
+                it->elements.begin(); rit != it->elements.end(); rit++)
+            exprs.insert((*rit)->row_source);
+          IndexSpaceExpression *union_expr = forest->union_index_spaces(exprs);
+          IndexSpaceNode *eq_node = eit->first->region_node->row_source;
+          IndexSpaceExpression *condition_expr = 
+            forest->intersect_index_spaces(union_expr, eq_node);
+          // Small congruence test
+          if (condition_expr->get_volume() == eq_node->get_volume())
+            condition_expr = eq_node;
+          TraceConditionSet *condition = 
+            new TraceConditionSet(forest, condition_expr, 
+                                  it->set_mask, it->elements);
+          condition->add_reference();
+          condition->capture(eit->first, ready_events);
+          conditions.push_back(condition);
+        }
+      }
+      // Wait for the conditions to be ready and then test them for subsumption
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        ready_events.clear();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       TraceViewSet::FailedPrecondition condition;
-      if (!post_reductions.subsumed_by(consumed_reductions, &condition))
+      // Need this lock in case we invalidate empty conditions
+      AutoLock tpl_lock(template_lock);
+      for (std::vector<TraceConditionSet*>::iterator it = 
+            conditions.begin(); it != conditions.end(); /*nothing*/)
       {
-        if (trace->runtime->dump_physical_traces)
+        if ((*it)->is_empty())
         {
-          return Replayable(
-              false, "escaping reduction view: " + condition.to_string());
+          (*it)->invalidate_equivalence_sets();
+          if ((*it)->remove_reference())
+            delete (*it);
+          it = conditions.erase(it);
+          continue;
         }
-        else
-          return Replayable(false, "escaping reduction views");
-      }
-
-      if (!pre.subsumed_by(post, &condition))
-      {
-        if (trace->runtime->dump_physical_traces)
+        bool not_subsumed = true;
+        if (!(*it)->is_replayable(not_subsumed, &condition))
         {
-          return Replayable(
-              false, "precondition not subsumed: " + condition.to_string());
+          if (trace->runtime->dump_physical_traces)
+          {
+            if (not_subsumed)
+              return Replayable(
+                  false, "precondition not subsumed: " + condition.to_string());
+            else
+              return Replayable(
+               false, "postcondition anti dependent: " + condition.to_string());
+          }
+          else
+          {
+            if (not_subsumed)
+              return Replayable(
+                  false, "precondition not subsumed by postcondition");
+            else
+              return Replayable(
+                  false, "postcondition anti dependent");
+          }
         }
-        else
-          return Replayable(
-              false, "precondition not subsumed by postcondition");
+        it++;
       }
-
       return Replayable(true);
     }
 
@@ -2719,12 +4037,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finalize(bool has_blocking_call, ReplTraceOp *op)
+    void PhysicalTemplate::finalize(InnerContext *context, UniqueID opid,
+                                    bool has_blocking_call, ReplTraceOp *op)
     //--------------------------------------------------------------------------
     {
       trigger_recording_done();
       recording = false;
-      replayable = check_replayable(op, has_blocking_call);
+      replayable = check_replayable(op, context, opid, has_blocking_call);
 
       if (!replayable)
       {
@@ -2737,7 +4056,6 @@ namespace Legion {
           release_remote_memos();
         return;
       }
-      generate_conditions();
       optimize(op);
       if (trace->runtime->dump_physical_traces) dump_template();
       size_t num_events = events.size();
@@ -2747,14 +4065,6 @@ namespace Legion {
       operations.pop_front();
       if (!remote_memos.empty())
         release_remote_memos();
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::generate_conditions(void)
-    //--------------------------------------------------------------------------
-    {
-      pre.make_ready(false /*postcondition*/);
-      post.make_ready(true /*postcondition*/);
     }
 
     //--------------------------------------------------------------------------
@@ -3978,23 +5288,19 @@ namespace Legion {
       dump_sharded_template();
 
       log_tracing.info() << "[Precondition]";
-      pre.dump();
-      for (FieldMaskSet<FillView>::const_iterator vit = pre_fill_views.begin();
-           vit != pre_fill_views.end(); ++vit)
-      {
-        char *mask = vit->second.to_string();
-        log_tracing.info() << "  Fill view: " << vit->first
-                           << ", Field Mask: " << mask;
-        free(mask);
-      }
-      pre_reductions.dump();
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->dump_preconditions();
+
+      log_tracing.info() << "[Anticondition]";
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->dump_anticonditions();
 
       log_tracing.info() << "[Postcondition]";
-      post.dump();
-      post_reductions.dump();
-
-      log_tracing.info() << "[Consumed Reductions]";
-      consumed_reductions.dump();
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            conditions.begin(); it != conditions.end(); it++)
+        (*it)->dump_postconditions();
     }
 
     //--------------------------------------------------------------------------
@@ -4362,6 +5668,7 @@ namespace Legion {
     void PhysicalTemplate::record_op_view(Memoizable *memo,
                                           unsigned idx,
                                           InstanceView *view,
+                                          RegionNode *node,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
                                           bool update_validity,
@@ -4371,124 +5678,55 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memo != NULL);
 #endif
-      // Do this part before we take the lock
-      LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
-      if (update_validity)
-      {
-        FieldMaskSet<EquivalenceSet> eq_sets;
-        memo->find_equivalence_sets(trace->runtime, idx, user_mask, eq_sets);
-        eq_sets.compute_field_sets(user_mask, eqs);
-      }
-
       AutoLock tpl_lock(template_lock);
       TraceLocalID op_key = find_trace_local_id(memo);
       unsigned entry = find_memo_entry(memo);
 
       FieldMaskSet<IndexSpaceExpression> &views = op_views[op_key][view];
-      for (LegionList<FieldSet<EquivalenceSet*> >::aligned::iterator it =
-           eqs.begin(); it != eqs.end(); ++it)
-      {
-        FieldMask mask = it->set_mask & user_mask;
-        for (std::set<EquivalenceSet*>::iterator eit = it->elements.begin();
-             eit != it->elements.end(); ++eit)
-        {
-          IndexSpaceExpression *expr = (*eit)->set_expr;
-          views.insert(expr, mask);
-          if (update_validity)
-          {
-            update_valid_views(view, *eit, usage, mask, true, applied);
-            add_view_user(view, usage, entry, expr, mask, applied);
-          }
-        }
-      }
+      IndexSpaceNode *expr = node->row_source;
+      views.insert(expr, user_mask);
+      if (update_validity)
+        add_view_user(view, usage, entry, expr, user_mask, applied);
+      trace_regions.insert(node, user_mask);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_post_fill_view(
-                                     FillView *view, const FieldMask &user_mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock tpl_lock(template_lock);
-      // If you change this then also change 
-      // ShardedPhysicalTemplate::handle_update_post_fill
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      post_fill_views.insert(view, user_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_fill_views(ApEvent lhs, Memoizable *memo,
-                                 unsigned idx, IndexSpaceExpression *expr,
+    void PhysicalTemplate::record_fill_views(ApEvent lhs,
+                                 IndexSpaceExpression *expr,
                                  const FieldMaskSet<FillView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
                                  std::set<RtEvent> &applied_events,
-                                 bool reduction_initialization)
+                                 const bool reduction_initialization)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memo != NULL);
-#endif
-      // Do this before we take the lock
-      LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
-      {
-        FieldMaskSet<EquivalenceSet> eq_sets;
-        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
-        memo->find_equivalence_sets(trace->runtime, idx, dst_mask, eq_sets);
-        eq_sets.compute_field_sets(dst_mask, eqs);
-      }
-
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs, tpl_lock);
-      // Don't record fill views for initializing reduction 
-      // istances since since we don't need to track them
-      if (!reduction_initialization)
-        record_fill_views(tracing_srcs, applied_events);
-      record_views(lhs_, expr, RegionUsage(LEGION_WRITE_ONLY, 
-            LEGION_EXCLUSIVE, 0), tracing_dsts, eqs, applied_events);
+      record_views(lhs_, expr,RegionUsage(LEGION_WRITE_ONLY,LEGION_EXCLUSIVE,0), 
+                   tracing_dsts, applied_events);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_copy_views(ApEvent lhs, Memoizable *memo,
-                                 unsigned src_idx, unsigned dst_idx,
+    void PhysicalTemplate::record_copy_views(ApEvent lhs,
                                  IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
                                  std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memo != NULL);
-#endif
-      LegionList<FieldSet<EquivalenceSet*> >::aligned src_eqs, dst_eqs;
-      // Get these before we take the lock
-      {
-        FieldMaskSet<EquivalenceSet> eq_sets;
-        const FieldMask &src_mask = tracing_srcs.get_valid_mask();
-        memo->find_equivalence_sets(trace->runtime, src_idx, src_mask, eq_sets);
-        eq_sets.compute_field_sets(src_mask, src_eqs);
-      }
-      {
-        FieldMaskSet<EquivalenceSet> eq_sets;
-        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
-        memo->find_equivalence_sets(trace->runtime, dst_idx, dst_mask, eq_sets);
-        eq_sets.compute_field_sets(dst_mask, dst_eqs);
-      }
-
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs, tpl_lock);
-      record_views(lhs_, expr, RegionUsage(LEGION_READ_ONLY, 
-            LEGION_EXCLUSIVE, 0), tracing_srcs, src_eqs, applied_events);
+      record_views(lhs_, expr, RegionUsage(LEGION_READ_ONLY,LEGION_EXCLUSIVE,0),
+                   tracing_srcs, applied_events);
       record_copy_views(lhs_, expr, tracing_srcs);
-      record_views(lhs_, expr, RegionUsage(LEGION_WRITE_ONLY, 
-            LEGION_EXCLUSIVE, 0), tracing_dsts, dst_eqs, applied_events);
+      record_views(lhs_, expr,RegionUsage(LEGION_WRITE_ONLY,LEGION_EXCLUSIVE,0),
+                   tracing_dsts, applied_events);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -4497,89 +5735,12 @@ namespace Legion {
                                         IndexSpaceExpression *expr,
                                         const RegionUsage &usage,
                                         const FieldMaskSet<InstanceView> &views,
-                     const LegionList<FieldSet<EquivalenceSet*> >::aligned &eqs,
                                         std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      RegionTreeForest *forest = trace->runtime->forest;
-      for (FieldMaskSet<InstanceView>::const_iterator vit = views.begin();
-            vit != views.end(); ++vit)
-      {
-        for (LegionList<FieldSet<EquivalenceSet*> >::aligned::const_iterator 
-              it = eqs.begin(); it != eqs.end(); ++it)
-        {
-          const FieldMask mask = it->set_mask & vit->second;
-          if (!mask)
-            continue;
-          for (std::set<EquivalenceSet*>::const_iterator eit = 
-                it->elements.begin(); eit != it->elements.end(); ++eit)
-          {
-            // Test for intersection here
-            IndexSpaceExpression *intersect =
-              forest->intersect_index_spaces((*eit)->set_expr, expr);
-            if (intersect->is_empty())
-              continue;
-            update_valid_views(vit->first, *eit, usage, mask, false, applied);
-            add_view_user(vit->first, usage, entry, intersect, mask, applied);
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::update_valid_views(InstanceView *view,
-                                              EquivalenceSet *eq,
-                                              const RegionUsage &usage,
-                                              const FieldMask &user_mask,
-                                              bool invalidates,
-                                              std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-      std::set<InstanceView*> &views= view_groups[view->get_manager()->tree_id];
-      views.insert(view);
-
-      if (view->is_reduction_view())
-      {
-        if (invalidates)
-        {
-#ifdef DEBUG_LEGION
-          assert(IS_REDUCE(usage));
-#endif
-          post_reductions.insert(view, eq, user_mask);
-          if (eq->set_expr->is_empty())
-            consumed_reductions.insert(view, eq, user_mask);
-        }
-        else
-        {
-          if (HAS_READ(usage))
-          {
-            FieldMask non_dominated = user_mask;
-            if (!post_reductions.dominates(view, eq, non_dominated))
-              pre_reductions.insert(view, eq, non_dominated);
-            else
-              consumed_reductions.insert(view, eq, user_mask);
-          }
-        }
-      }
-      else
-      {
-        if (HAS_READ(usage))
-        {
-          FieldMask non_dominated = user_mask;
-          bool is_dominated = post.dominates(view, eq, non_dominated);
-          if (!is_dominated)
-            pre.insert(view, eq, non_dominated);
-        }
-        if (invalidates && HAS_WRITE(usage))
-        {
-          for (std::set<InstanceView*>::iterator vit = views.begin();
-               vit != views.end(); ++vit)
-          {
-            post.invalidate(*vit, eq, user_mask);
-          }
-        }
-        post.insert(view, eq, user_mask);
-      }
+      for (FieldMaskSet<InstanceView>::const_iterator it = 
+            views.begin(); it != views.end(); ++it)
+        add_view_user(it->first, usage, entry, expr, it->second, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -4642,27 +5803,6 @@ namespace Legion {
       for (FieldMaskSet<InstanceView>::const_iterator it = views.begin();
            it != views.end(); ++it)
         cviews[it->first].insert(expr, it->second);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_fill_views(const FieldMaskSet<FillView>&views,
-                                             std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      for (FieldMaskSet<FillView>::const_iterator it = views.begin();
-           it != views.end(); ++it)
-      {
-        FieldMaskSet<FillView>::iterator finder =
-          post_fill_views.find(it->first);
-        if (finder == post_fill_views.end())
-          pre_fill_views.insert(it->first, it->second);
-        else
-        {
-          FieldMask non_dominated = it->second - finder->second;
-          if (!!non_dominated)
-            pre_fill_views.insert(it->first, non_dominated);
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -5394,7 +6534,7 @@ namespace Legion {
       }
       // Then do the base call
       PhysicalTemplate::record_set_op_sync_event(lhs, memo);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     ApBarrier ShardedPhysicalTemplate::find_trace_shard_event(ApEvent event,
@@ -5492,69 +6632,6 @@ namespace Legion {
       std::set<RtEvent> applied;
       switch (kind)
       {
-        case UPDATE_VALID_VIEWS:
-          {
-            derez.deserialize(done);
-            DistributedID view_did, eq_did;
-            derez.deserialize(view_did);
-            RtEvent view_ready;
-            InstanceView *view = static_cast<InstanceView*>(
-                runtime->find_or_request_logical_view(view_did, view_ready));
-            derez.deserialize(eq_did);
-            RtEvent eq_ready;
-            EquivalenceSet *eq = 
-              runtime->find_or_request_equivalence_set(eq_did, eq_ready);
-            if ((view_ready.exists() && !view_ready.has_triggered()) ||
-                (eq_ready.exists() && !eq_ready.has_triggered()))
-            {
-              const RtEvent pre = Runtime::merge_events(view_ready, eq_ready);
-              DeferTraceUpdateArgs args(this, kind, done, derez, view, eq);
-              runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-              return;
-            }
-            else if (handle_update_valid_views(view, eq, derez, applied, done)) 
-              return;
-            break;
-          }
-        case UPDATE_PRE_FILL:
-          {
-            derez.deserialize(done);
-            DistributedID view_did;
-            derez.deserialize(view_did);
-            RtEvent view_ready;
-            FillView *view = static_cast<FillView*>(
-                runtime->find_or_request_logical_view(view_did, view_ready));
-            if (view_ready.exists() && !view_ready.has_triggered())
-            {
-              DeferTraceUpdateArgs args(this, kind, done, derez, view);
-              runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, view_ready);
-              return;
-            }
-            else if (handle_update_pre_fill(view, derez, applied, done)) 
-              return;
-            break;
-          }
-        case UPDATE_POST_FILL:
-          {
-            derez.deserialize(done);
-            DistributedID view_did;
-            derez.deserialize(view_did);
-            RtEvent view_ready;
-            FillView *view = static_cast<FillView*>(
-                runtime->find_or_request_logical_view(view_did, view_ready));
-            if (view_ready.exists() && !view_ready.has_triggered())
-            {
-              DeferTraceUpdateArgs args(this, kind, done, derez, view);
-              runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, view_ready);
-              return;
-            }
-            else if (handle_update_post_fill(view, derez, applied, done)) 
-              return;
-            break;
-          }
         case UPDATE_VIEW_USER:
           {
             derez.deserialize(done);
@@ -5931,9 +7008,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
      ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
-     Deserializer &derez, LogicalView *v, EquivalenceSet *q, RtUserEvent u)
+     Deserializer &derez, LogicalView *v, RtUserEvent u)
       : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
-        kind(k), done(d), view(v), eq(q), expr(NULL), remote_expr_id(0),
+        kind(k), done(d), view(v), expr(NULL), remote_expr_id(0),
         buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size)),
         deferral_event(u)
     //--------------------------------------------------------------------------
@@ -5944,10 +7021,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
-     ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, LogicalView *v, 
+     ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, LogicalView *v,
      Deserializer &derez, IndexSpaceExpression *x, RtUserEvent u)
-      : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
-        kind(k), done(d), view(v), eq(NULL), expr(x), remote_expr_id(0),
+      : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t),
+        kind(k), done(d), view(v), expr(x), remote_expr_id(0),
         buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size)),
         deferral_event(u)
     //--------------------------------------------------------------------------
@@ -5961,7 +7038,7 @@ namespace Legion {
      ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
      LogicalView *v, Deserializer &derez, IndexSpace h)
       : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
-        kind(k), done(d), view(v), eq(NULL), expr(NULL), remote_expr_id(0),
+        kind(k), done(d), view(v), expr(NULL), remote_expr_id(0),
         handle(h), buffer_size(derez.get_remaining_bytes()), 
         buffer(malloc(buffer_size))
     //--------------------------------------------------------------------------
@@ -5975,7 +7052,7 @@ namespace Legion {
      ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
      LogicalView *v, Deserializer &derez, IndexSpaceExprID x)
       : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
-        kind(k), done(d), view(v), eq(NULL), expr(NULL), remote_expr_id(x),
+        kind(k), done(d), view(v), expr(NULL), remote_expr_id(x),
         buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size))
     //--------------------------------------------------------------------------
     {
@@ -5987,8 +7064,8 @@ namespace Legion {
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
         const DeferTraceUpdateArgs &rhs, RtUserEvent d)
       : LgTaskArgs<DeferTraceUpdateArgs>(rhs.provenance), target(rhs.target),
-        kind(rhs.kind), done(rhs.done), view(rhs.view), eq(rhs.eq), 
-        expr(rhs.expr), remote_expr_id(rhs.remote_expr_id), handle(rhs.handle),
+        kind(rhs.kind), done(rhs.done), view(rhs.view), expr(rhs.expr), 
+        remote_expr_id(rhs.remote_expr_id), handle(rhs.handle),
         buffer_size(rhs.buffer_size), buffer(rhs.buffer), deferral_event(d)
     //--------------------------------------------------------------------------
     {
@@ -6004,30 +7081,6 @@ namespace Legion {
       Deserializer derez(dargs->buffer, dargs->buffer_size);
       switch (dargs->kind)
       {
-        case UPDATE_VALID_VIEWS:
-          {
-            if (dargs->target->handle_update_valid_views(
-                  static_cast<InstanceView*>(dargs->view),
-                  dargs->eq, derez, applied, dargs->done, dargs))
-              return;
-            break;
-          }
-        case UPDATE_PRE_FILL:
-          {
-            if (dargs->target->handle_update_pre_fill(
-                  static_cast<FillView*>(dargs->view), derez, applied, 
-                  dargs->done, dargs))
-              return;
-            break;
-          }
-        case UPDATE_POST_FILL:
-          {
-            if (dargs->target->handle_update_post_fill(
-                  static_cast<FillView*>(dargs->view), derez, applied, 
-                  dargs->done, dargs))
-              return;
-            break;
-          }
         case UPDATE_VIEW_USER:
           {
             if (dargs->expr != NULL)
@@ -6092,151 +7145,6 @@ namespace Legion {
       if (dargs->deferral_event.exists())
         Runtime::trigger_event(dargs->deferral_event);
       free(dargs->buffer);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ShardedPhysicalTemplate::handle_update_valid_views(InstanceView *view,
-            EquivalenceSet *eq, Deserializer &derez, std::set<RtEvent> &applied,
-            RtUserEvent done, const DeferTraceUpdateArgs *dargs /*=NULL*/)
-    //--------------------------------------------------------------------------
-    {
-      AutoTryLock tpl_lock(template_lock);
-      if (!tpl_lock.has_lock())
-      {
-        RtUserEvent deferral;
-        if (dargs != NULL)
-          deferral = dargs->deferral_event;
-        RtEvent pre;
-        if (!deferral.exists())
-        {
-          deferral = Runtime::create_rt_user_event();
-          pre = chain_deferral_events(deferral);
-        }
-        else
-          pre = tpl_lock.try_next();
-        if (dargs == NULL)
-        {
-          DeferTraceUpdateArgs args(this, UPDATE_VALID_VIEWS, done,
-                                    derez, view, eq, deferral);
-          repl_ctx->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-        }
-        else
-        {
-          DeferTraceUpdateArgs args(*dargs, deferral);
-          repl_ctx->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-#ifdef DEBUG_LEGION
-          // Keep the deserializer happy since we didn't use it
-          derez.advance_pointer(derez.get_remaining_bytes());
-#endif
-        }
-        return true;
-      }
-      RegionUsage usage;
-      derez.deserialize(usage);
-      FieldMask user_mask;
-      derez.deserialize(user_mask);
-      bool invalidates;
-      derez.deserialize<bool>(invalidates);
-      PhysicalTemplate::update_valid_views(view, eq, usage, user_mask,
-                                           invalidates, applied);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ShardedPhysicalTemplate::handle_update_pre_fill(FillView *view,
-                            Deserializer &derez, std::set<RtEvent> &applied,
-                            RtUserEvent done, const DeferTraceUpdateArgs *dargs)
-    //--------------------------------------------------------------------------
-    {
-      AutoTryLock tpl_lock(template_lock);
-      if (!tpl_lock.has_lock())
-      {
-        RtUserEvent deferral;
-        if (dargs != NULL)
-          deferral = dargs->deferral_event;
-        RtEvent pre;
-        if (!deferral.exists())
-        {
-          deferral = Runtime::create_rt_user_event();
-          pre = chain_deferral_events(deferral);
-        }
-        else
-          pre = tpl_lock.try_next();
-        if (dargs == NULL)
-        {
-          DeferTraceUpdateArgs args(this, UPDATE_PRE_FILL, done,
-                                    derez, view, NULL, deferral);
-          repl_ctx->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-        }
-        else
-        {
-          DeferTraceUpdateArgs args(*dargs, deferral);
-          repl_ctx->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-#ifdef DEBUG_LEGION
-          // Keep the deserializer happy since we didn't use it
-          derez.advance_pointer(derez.get_remaining_bytes());
-#endif
-        }
-        return true;
-      }
-      FieldMask view_mask;
-      derez.deserialize(view_mask);
-      FieldMaskSet<FillView> views;
-      views.insert(view, view_mask);
-      PhysicalTemplate::record_fill_views(views, applied);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ShardedPhysicalTemplate::handle_update_post_fill(FillView *view,
-                            Deserializer &derez, std::set<RtEvent> &applied,
-                            RtUserEvent done, const DeferTraceUpdateArgs *dargs)
-    //--------------------------------------------------------------------------
-    {
-      AutoTryLock tpl_lock(template_lock);
-      if (!tpl_lock.has_lock())
-      {
-        RtUserEvent deferral;
-        if (dargs != NULL)
-          deferral = dargs->deferral_event;
-        RtEvent pre;
-        if (!deferral.exists())
-        {
-          deferral = Runtime::create_rt_user_event();
-          pre = chain_deferral_events(deferral);
-        }
-        else
-          pre = tpl_lock.try_next();
-        if (dargs == NULL)
-        {
-          DeferTraceUpdateArgs args(this, UPDATE_POST_FILL, done,
-                                    derez, view, NULL, deferral);
-          repl_ctx->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-        }
-        else
-        {
-          DeferTraceUpdateArgs args(*dargs, deferral);
-          repl_ctx->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, pre);
-#ifdef DEBUG_LEGION
-          // Keep the deserializer happy since we didn't use it
-          derez.advance_pointer(derez.get_remaining_bytes());
-#endif
-        }
-        return true;
-      }
-      FieldMask view_mask;
-      derez.deserialize(view_mask);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      post_fill_views.insert(view, view_mask);
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -6427,7 +7335,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::Replayable ShardedPhysicalTemplate::check_replayable(
-                                  ReplTraceOp *op, bool has_blocking_call) const
+                                         ReplTraceOp *op, InnerContext *context,
+                                         UniqueID opid, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6438,7 +7347,7 @@ namespace Legion {
       op->sync_for_replayable_check();
       // Do the base call first to determine if our local shard is replayable
       const Replayable result = 
-        PhysicalTemplate::check_replayable(op, has_blocking_call);
+       PhysicalTemplate::check_replayable(op, context, opid, has_blocking_call);
       if (result)
       {
         // One extra step to do here, since we sharded the view_users we
@@ -6753,39 +7662,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::update_valid_views(InstanceView *view,
-                                                     EquivalenceSet *eq,
-                                                     const RegionUsage &usage,
-                                                     const FieldMask &user_mask,
-                                                     bool invalidates,
-                                                     std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-      const ShardID target_shard = find_equivalence_owner(eq); 
-      // Check to see if we're on the right shard, if not send the message
-      if (target_shard != repl_ctx->owner_shard->shard_id)
-      {
-        RtUserEvent done = Runtime::create_rt_user_event();
-        Serializer rez;
-        rez.serialize(repl_ctx->shard_manager->repl_id);
-        rez.serialize(target_shard);
-        rez.serialize(template_index);
-        rez.serialize(UPDATE_VALID_VIEWS);
-        rez.serialize(done);
-        rez.serialize(view->did);
-        rez.serialize(eq->did);
-        rez.serialize(usage);
-        rez.serialize(user_mask);
-        rez.serialize<bool>(invalidates);
-        repl_ctx->shard_manager->send_trace_update(target_shard, rez);
-        applied.insert(done);
-      }
-      else // Now that we are on the right shard we can do the update call
-        PhysicalTemplate::update_valid_views(view, eq, usage, user_mask,
-                                             invalidates, applied);
-    }
-
-    //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::add_view_user(InstanceView *view,
                                                 const RegionUsage &usage,
                                                 unsigned user_index,
@@ -6828,46 +7704,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::record_fill_views(
-         const FieldMaskSet<FillView> &views, std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      FieldMaskSet<FillView> local_set;
-      for (FieldMaskSet<FillView>::const_iterator it =
-            views.begin(); it != views.end(); it++)
-      {
-        // Figure out which shard these fill views should be stored on 
-        // using the same algorithm that we use for other views above
-        const AddressSpaceID view_owner = it->first->owner_space;
-        std::vector<ShardID> owner_shards;
-        find_owner_shards(view_owner, owner_shards);
-#ifdef DEBUG_LEGION
-        assert(!owner_shards.empty());
-#endif
-        // For now just send all views to the first shard on each node
-        const ShardID target_shard = owner_shards.front();
-        if (target_shard != repl_ctx->owner_shard->shard_id)
-        {
-          RtUserEvent applied = Runtime::create_rt_user_event(); 
-          Serializer rez;
-          rez.serialize(repl_ctx->shard_manager->repl_id);
-          rez.serialize(target_shard);
-          rez.serialize(template_index);
-          rez.serialize(UPDATE_PRE_FILL);
-          rez.serialize(applied);
-          rez.serialize(it->first->did);
-          rez.serialize(it->second);
-          repl_ctx->shard_manager->send_trace_update(target_shard,rez);
-          applied_events.insert(applied);
-        }
-        else
-          local_set.insert(it->first, it->second);
-      }
-      if (!local_set.empty())
-        PhysicalTemplate::record_fill_views(local_set, applied_events);
-    }
-
-    //--------------------------------------------------------------------------
     ShardID ShardedPhysicalTemplate::find_view_owner(InstanceView *view)
     //--------------------------------------------------------------------------
     {
@@ -6894,29 +7730,6 @@ namespace Legion {
       {
         const RegionTreeID tid = manager->tree_id;
         return owner_shards[tid % owner_shards.size()];
-      }
-      else // If there's only one shard then there is only one choice
-        return owner_shards.front();
-    }
-
-    //--------------------------------------------------------------------------
-    ShardID ShardedPhysicalTemplate::find_equivalence_owner(EquivalenceSet *eq)
-    //--------------------------------------------------------------------------
-    {
-      // This algorithm is the same as for views, except we do it based
-      // on the equivalence set owner
-      const AddressSpaceID eq_owner = eq->owner_space;
-      std::vector<ShardID> owner_shards;
-      find_owner_shards(eq_owner, owner_shards);
-#ifdef DEBUG_LEGION
-      assert(!owner_shards.empty());
-#endif
-      // Figure out which shard we should be sending this view to based on
-      // its set expression
-      if (owner_shards.size() > 1)
-      {
-        const IndexSpaceExprID eid = eq->set_expr->expr_id;
-        return owner_shards[eid % owner_shards.size()];
       }
       else // If there's only one shard then there is only one choice
         return owner_shards.front();

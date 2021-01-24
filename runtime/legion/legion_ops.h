@@ -34,6 +34,72 @@ namespace Legion {
     typedef PredicateImpl PredicateOp;  
 
     /**
+     * \class ResourceTracker
+     * A helper class for tracking which privileges an
+     * operation owns. This is inherited by multi-tasks
+     * for aggregating the privilege results of their
+     * children as well as task contexts for tracking
+     * which privileges have been accrued or deleted
+     * as part of the execution of the task.
+     */
+    class ResourceTracker {
+    public:
+      ResourceTracker(void);
+      ResourceTracker(const ResourceTracker &rhs);
+      virtual ~ResourceTracker(void);
+    public:
+      ResourceTracker& operator=(const ResourceTracker &rhs);
+    public:
+      bool has_return_resources(void) const;
+      void return_resources(ResourceTracker *target, size_t return_index,
+                            std::set<RtEvent> &preconditions);
+      virtual void receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regions,
+              std::vector<LogicalRegion> &deleted_regions,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::map<FieldSpace,unsigned> &created_field_spaces,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
+              std::vector<FieldSpace> &deleted_field_spaces,
+              std::map<IndexSpace,unsigned> &created_index_spaces,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions) = 0;
+      void pack_resources_return(Serializer &rez, size_t return_index);
+      static RtEvent unpack_resources_return(Deserializer &derez,
+                                             ResourceTracker *target);
+    protected:
+      void merge_received_resources(
+              std::map<LogicalRegion,unsigned> &created_regions,
+              std::vector<LogicalRegion> &deleted_regions,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::map<FieldSpace,unsigned> &created_field_spaces,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
+              std::vector<FieldSpace> &deleted_field_spaces,
+              std::map<IndexSpace,unsigned> &created_index_spaces,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions);
+    protected:
+      std::map<LogicalRegion,unsigned>                 created_regions;
+      std::map<LogicalRegion,bool>                     local_regions;
+      std::set<std::pair<FieldSpace,FieldID> >         created_fields;
+      std::map<std::pair<FieldSpace,FieldID>,bool>     local_fields;
+      std::map<FieldSpace,unsigned>                    created_field_spaces;
+      std::map<IndexSpace,unsigned>                    created_index_spaces;
+      std::map<IndexPartition,unsigned>                created_index_partitions;
+    protected:
+      std::vector<LogicalRegion>                       deleted_regions;
+      std::vector<std::pair<FieldSpace,FieldID> >      deleted_fields;
+      std::vector<FieldSpace>                          deleted_field_spaces;
+      std::map<FieldSpace,std::set<LogicalRegion> >    latent_field_spaces;
+      std::vector<std::pair<IndexSpace,bool> >         deleted_index_spaces;
+      std::vector<std::pair<IndexPartition,bool> >     deleted_index_partitions;
+    };
+
+    /**
      * \class Operation
      * The operation class serves as the root of the tree
      * of all operations that can be performed in a Legion
@@ -52,6 +118,8 @@ namespace Legion {
         POST_CLOSE_OP_KIND,
         VIRTUAL_CLOSE_OP_KIND,
         RETURN_CLOSE_OP_KIND,
+        REFINEMENT_OP_KIND,
+        ADVISEMENT_OP_KIND,
         ACQUIRE_OP_KIND,
         RELEASE_OP_KIND,
         DYNAMIC_COLLECTIVE_OP_KIND,
@@ -87,6 +155,8 @@ namespace Legion {
         "Post Close",               \
         "Virtual Close",            \
         "Return Close",             \
+        "Refinement",               \
+        "Advisement",               \
         "Acquire",                  \
         "Release",                  \
         "Dynamic Collective",       \
@@ -293,10 +363,9 @@ namespace Legion {
       virtual bool is_memoizing(void) const { return false; }
       inline bool is_tracing(void) const { return tracing; }
       inline bool is_tracking_parent(void) const { return track_parent; } 
-      inline bool already_traced(void) const 
-        { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
       inline size_t get_ctx_index(void) const { return context_index; }
+      inline MustEpochOp* get_must_epoch_op(void) const { return must_epoch; } 
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -588,9 +657,7 @@ namespace Legion {
                                    GenerationID gen);
     public:
       // Help for finding the contexts for an operation
-      InnerContext* find_logical_context(unsigned index);
-      InnerContext* find_physical_context(unsigned index,
-                                          const RegionRequirement &req);
+      InnerContext* find_physical_context(unsigned index);
     public:
       // Support for operations that compute futures
       void compute_future_coordinates(
@@ -921,8 +988,6 @@ namespace Legion {
       virtual ApEvent compute_sync_precondition(const TraceInfo *in) const = 0;
       virtual void set_effects_postcondition(ApEvent postcondition) = 0;
       virtual void complete_replay(ApEvent complete_event) = 0;
-      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
-        const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const = 0;
     protected:
       virtual const VersionInfo& get_version_info(unsigned idx) const = 0;
     public:
@@ -954,8 +1019,6 @@ namespace Legion {
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
       virtual void set_effects_postcondition(ApEvent postcondition);
       virtual void complete_replay(ApEvent complete_event);
-      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
-          const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const;
     protected:
       virtual const VersionInfo& get_version_info(unsigned idx) const;
     public:
@@ -964,9 +1027,6 @@ namespace Legion {
       virtual Memoizable* clone(Operation *op);
       static Memoizable* unpack_remote_memoizable(Deserializer &derez,
                                       Operation *op, Runtime *runtime);
-      static void handle_eq_request(Deserializer &derez, Runtime *runtime,
-                                    AddressSpaceID source);
-      static void handle_eq_response(Deserializer &derez, Runtime *runtime);
     public:
       Operation *const op;
       Memoizable *const original; // not a valid pointer on remote nodes
@@ -1025,8 +1085,6 @@ namespace Legion {
       virtual Operation::OpKind get_memoizable_kind(void) const
         { return this->get_operation_kind(); }
       virtual ApEvent compute_init_precondition(const TraceInfo &info);
-      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx, 
-          const FieldMask &mask, FieldMaskSet<EquivalenceSet> &eqs) const;
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
     public:
@@ -1128,7 +1186,8 @@ namespace Legion {
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
-      bool invoke_mapper(InstanceSet &mapped_instances);
+      bool invoke_mapper(InstanceSet &mapped_instances,
+                         std::vector<PhysicalManager*> &source_instances);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -1353,6 +1412,7 @@ namespace Legion {
     protected: // for support with mapping
       MapperManager*              mapper;
     protected:
+      std::vector<PhysicalManager*>         across_sources;
       std::map<PhysicalManager*,unsigned> acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
       std::set<RtEvent> map_applied_conditions;
@@ -1696,10 +1756,12 @@ namespace Legion {
                                       const std::set<FieldID> &to_free,
                                       const bool unordered,
                                       FieldAllocatorImpl *allocator,
-                                      const bool non_owner_shard);
+                                      const bool non_owner_shard,
+                                      const bool skip_dep_analysis = false);
       void initialize_logical_region_deletion(InnerContext *ctx, 
-                                              LogicalRegion handle,
-                                              const bool unordered);
+                                      LogicalRegion handle, 
+                                      const bool unordered,
+                                      const bool skip_dep_analysis = false);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1708,6 +1770,7 @@ namespace Legion {
     protected:
       void activate_deletion(void);
       void deactivate_deletion(void);
+      void log_deletion_requirements(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -1735,6 +1798,7 @@ namespace Legion {
       std::vector<RegionRequirement> deletion_requirements;
       LegionVector<VersionInfo>::aligned version_infos;
       std::set<RtEvent> map_applied_conditions;
+      std::vector<EquivalenceSet*> to_release;
     }; 
 
     /**
@@ -1760,9 +1824,11 @@ namespace Legion {
       virtual bool is_internal_op(void) const { return true; }
       virtual const FieldMask& get_internal_mask(void) const = 0;
     public:
+      inline Operation* get_creator_op(void) const { return create_op; }
+      inline GenerationID get_creator_gen(void) const { return create_gen; }
       inline int get_internal_index(void) const { return creator_req_idx; }
       void record_trace_dependence(Operation *target, GenerationID target_gen,
-                                   int target_idx, int source_idx, 
+                                   int target_idx, int source_idx,
                                    DependenceType dtype,
                                    const FieldMask &dependent_mask);
       virtual unsigned find_parent_index(unsigned idx);
@@ -1859,6 +1925,11 @@ namespace Legion {
       void initialize(InnerContext *ctx, const RegionRequirement &req,
                       const LogicalTraceInfo &trace_info, int close_idx,
                       const FieldMask &close_mask, Operation *create_op);
+      // Make this virtual so we can override for ReplMergeCloseOp
+      virtual void record_refinements(const FieldMask &refinement_mask, 
+                                      const bool overwrite);
+      void activate_merge(void);
+      void deactivate_merge(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1867,13 +1938,17 @@ namespace Legion {
       virtual const FieldMask& get_internal_mask(void) const;
     public:
       virtual unsigned find_parent_index(unsigned idx);
-#ifdef LEGION_SPY
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
-#endif
     protected:
       unsigned parent_req_index; 
     protected:
       FieldMask close_mask;
+      VersionInfo version_info;
+      std::vector<EquivalenceSet*> to_release;
+      FieldMask refinement_mask;
+      bool refinement_overwrite;
     };
 
     /**
@@ -1958,7 +2033,8 @@ namespace Legion {
       VirtualCloseOp& operator=(const VirtualCloseOp &rhs);
     public:
       void initialize(InnerContext *ctx, unsigned index,
-                      const RegionRequirement &req);
+                      const RegionRequirement &req,
+                      const VersionInfo *targets);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1966,14 +2042,131 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
 #ifdef LEGION_SPY
       virtual void trigger_complete(void);
 #endif
     protected:
+      VersionInfo source_version_info;
+      const VersionInfo *target_version_info;
       std::set<RtEvent> map_applied_conditions;
       unsigned parent_idx;
+    };
+
+    /**
+     * \class RefinementOp
+     * A refinement operation is an internal operation that 
+     * is used to update the equivalence sets being used to
+     * represent logical regions.
+     */
+    class RefinementOp : public InternalOp, public LegionHeapify<RefinementOp> {
+    public:
+      static const AllocationType alloc_type = REFINEMENT_OP_ALLOC;
+    public:
+      RefinementOp(Runtime *runtime);
+      RefinementOp(const RefinementOp &rhs);
+      virtual ~RefinementOp(void);
+    public:
+      RefinementOp& operator=(const RefinementOp &rhs);
+    public:
+      void initialize(Operation *creator, unsigned idx, 
+                      const LogicalTraceInfo &trace_info,
+                      RegionNode *to_refine, const FieldMask &mask);
+      void record_refinement(RegionTreeNode *node, const FieldMask &mask,
+                             RefProjectionSummary *summary = NULL);
+      void record_refinements(FieldMaskSet<RegionTreeNode> &nodes);
+      void record_uninitialized(const FieldMask &mask);
+#ifdef DEBUG_LEGION
+      void verify_refinement_mask(const FieldMask &refinement_mask);
+#endif
+    protected:
+      void initialize_region(RegionNode *node, const FieldMask &mask,
+         std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
+                            FieldMaskSet<PartitionNode> &refinement_partitions,
+                            std::set<RtEvent> &map_applied_conditions);
+      void initialize_partition(PartitionNode *node, const FieldMask &mask,
+         std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
+                            FieldMaskSet<PartitionNode> &refinement_partitions,
+                            std::set<RtEvent> &map_applied_conditions);
+      void initialize_pending(PendingEquivalenceSet *set, const FieldMask &mask,
+                              std::set<RtEvent> &applied_events);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual const FieldMask& get_internal_mask(void) const;
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+      virtual void trigger_complete(void);
+    protected:
+      void activate_refinement(void);
+      void deactivate_refinement(void);
+    protected:
+      // Upper bound node where this refinement is occuring
+      RegionNode *to_refine;
+      // The current equivalence sets for the node to be refined
+      VersionInfo version_info;
+      // Region tree nodes from which to make refinements
+      FieldMaskSet<RegionTreeNode> make_from;
+      // Projection summaries for non-trivial projections from nodes
+      LegionMap<RegionTreeNode*,
+                FieldMaskSet<RefProjectionSummary> >::aligned projections;
+      // Equivalence sets that need to be released at completion
+      std::vector<EquivalenceSet*> to_release;
+      // Fields which do not have initialized equivalence sets
+      FieldMask uninitialized_fields;
+    };
+
+    /**
+     * \class AdvisementOp
+     * An advisement operation is an operation that goes through
+     * the execution pipeline for the sole purpose of generating
+     * refinement operations to alter the equivalence sets of a
+     * region tree.
+     */
+    class AdvisementOp : public Operation {
+    public:
+      AdvisementOp(Runtime *runtime);
+      AdvisementOp(const AdvisementOp &rhs);
+      virtual ~AdvisementOp(void);
+    public:
+      AdvisementOp& operator=(const AdvisementOp &rhs);
+    public:
+      void initialize(InnerContext *ctx, LogicalRegion parent,
+                      const std::set<LogicalRegion> &regions,
+                      const std::set<LogicalPartition> &partitions,
+                      const std::set<FieldID> &fields, 
+                      ShardingFunction *function = NULL);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual size_t get_region_count(void) const;
+    public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
+#ifdef LEGION_SPY
+      virtual void trigger_complete(void);
+#endif
+      virtual unsigned find_parent_index(unsigned idx);
+    protected:
+      LogicalRegion parent;
+      std::vector<LogicalRegion> regions;
+      std::vector<LogicalPartition> partitions;
+      std::vector<FieldID> fields;
+      std::vector<unsigned> parent_indexes;
+      std::vector<RegionRequirement> requirements;
+      std::vector<RegionTreePath> privilege_paths;
+      std::set<RtEvent> map_applied_conditions;
+      ShardingFunction *sharding_function;
     };
 
     /**
@@ -2166,7 +2359,7 @@ namespace Legion {
     protected:
       void check_release_privilege(void);
       void compute_parent_index(void);
-      void invoke_mapper(void);
+      void invoke_mapper(std::vector<PhysicalManager*> &source_instances);
       void log_release_requirement(void);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);
@@ -2403,8 +2596,8 @@ namespace Legion {
      * these operations and ensures that they can all
      * be run in parallel or it reports an error.
      */
-    class MustEpochOp : public Operation, public MustEpoch,
-                        public LegionHeapify<MustEpochOp> {
+    class MustEpochOp : public Operation, public MustEpoch, 
+      public ResourceTracker, public LegionHeapify<MustEpochOp> {
     public:
       static const AllocationType alloc_type = MUST_EPOCH_OP_ALLOC;
     public:
@@ -2519,6 +2712,10 @@ namespace Legion {
                              Operation *target_op, GenerationID target_gen,
                              unsigned source_idx, unsigned target_idx,
                              DependenceType dtype);
+      bool record_intra_must_epoch_dependence(
+                             unsigned src_index, unsigned src_idx,
+                             unsigned dst_index, unsigned dst_idx,
+                             DependenceType dtype);
       void must_epoch_map_task_callback(SingleTask *task, 
                                         Mapper::MapTaskInput &input,
                                         Mapper::MapTaskOutput &output);
@@ -2528,6 +2725,21 @@ namespace Legion {
     public:
       // Make this a virtual method to override it for control replication
       virtual MapperManager* invoke_mapper(void);
+    public:
+      // From ResourceTracker
+      virtual void receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regions,
+              std::vector<LogicalRegion> &deleted_regions,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::map<FieldSpace,unsigned> &created_field_spaces,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
+              std::vector<FieldSpace> &deleted_field_spaces,
+              std::map<IndexSpace,unsigned> &created_index_spaces,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions);
     public:
       void add_mapping_dependence(RtEvent precondition);
       void register_single_task(SingleTask *single, unsigned index);
@@ -2566,7 +2778,7 @@ namespace Legion {
     public:
       static void handle_map_task(const void *args);
     protected:
-      void distribute_tasks(void) const;
+      void distribute_tasks(void);
       RtUserEvent compute_launch_space(const MustEpochLauncher &launcher);
     public:
       static void handle_distribute_task(const void *args);
@@ -2587,6 +2799,7 @@ namespace Legion {
       Mapper::MapMustEpochOutput   output;
     protected:
       FutureMap result_map;
+      unsigned remaining_resource_returns;
       unsigned remaining_subop_completes;
       unsigned remaining_subop_commits;
     protected:
@@ -2602,6 +2815,8 @@ namespace Legion {
       std::map<std::pair<unsigned/*task index*/,unsigned/*req index*/>,
                unsigned/*dependence index*/> dependence_map;
       std::vector<DependenceRecord*> dependences;
+      std::map<std::pair<Operation*,GenerationID>,std::vector<std::pair<
+        unsigned/*op idx*/,unsigned/*req idx*/> > > internal_dependences;
       std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     protected:
@@ -3194,7 +3409,8 @@ namespace Legion {
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
-      bool invoke_mapper(InstanceSet &mapped_instances);
+      bool invoke_mapper(InstanceSet &mapped_instances,
+                         std::vector<PhysicalManager*> &source_instances);
       void activate_dependent_op(void);
       void deactivate_dependent_op(void);
       void finalize_partition_profiling(void);

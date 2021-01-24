@@ -762,6 +762,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
+      RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
         RegionRequirement &req = logical_regions[idx];
@@ -770,6 +771,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, req, 
                                                      projection_info,
                                                      privilege_paths[idx],
+                                                     refinement_tracker,
                                                      map_applied_conditions);
       }
     }
@@ -1151,15 +1153,19 @@ namespace Legion {
     void ReplMergeCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_close();
+      activate_merge();
       mapped_barrier = RtBarrier::NO_RT_BARRIER;
+      refinement_barrier = RtBarrier::NO_RT_BARRIER;
+      did_collective = NULL;
     }
 
     //--------------------------------------------------------------------------
     void ReplMergeCloseOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_close();
+      deactivate_merge();
+      if (did_collective != NULL)
+        delete did_collective;
       runtime->free_repl_merge_close_op(this);
     }
 
@@ -1174,18 +1180,95 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplMergeCloseOp::record_refinements(const FieldMask &refinement_mask,
+                                              const bool overwrite)
+    //--------------------------------------------------------------------------
+    {
+      // Call the base version of this
+      MergeCloseOp::record_refinements(refinement_mask, overwrite);
+      // Get a barrier for a refinement invalidation
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      refinement_barrier = repl_ctx->get_next_refinement_barrier();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplMergeCloseOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
-      assert(mapping_tracker != NULL);
 #endif
-      // All we have to do is add our map precondition to the tracker
-      // so we know we are mapping in order with respect to other
-      // repl close operations that use the same close index
-      mapping_tracker->add_mapping_dependence(
-          mapped_barrier.get_previous_phase());
+      if (!!refinement_mask)
+      {
+#ifdef DEBUG_LEGION
+        assert(did_collective == NULL);
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        const ShardID origin = repl_ctx->get_next_equivalence_set_origin();
+        const CollectiveID collective_id = 
+         repl_ctx->get_next_collective_index(COLLECTIVE_LOC_20,true/*logical*/);
+        did_collective =
+          new ValueBroadcast<DistributedID>(collective_id, repl_ctx, origin);
+        if (did_collective->is_origin())
+        {
+          const DistributedID did = runtime->get_available_distributed_id();
+          did_collective->broadcast(did);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMergeCloseOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> ready_events;
+      if (!!refinement_mask && !refinement_overwrite)
+      {
+        const ContextID ctx = parent_ctx->get_context().get_id();
+        RegionNode *region_node = runtime->forest->get_node(requirement.region);
+        region_node->perform_versioning_analysis(ctx, parent_ctx, &version_info,
+           refinement_mask, unique_op_id, runtime->address_space, ready_events);
+#ifdef DEBUG_LEGION
+        assert(refinement_barrier.exists());
+#endif
+        if (!ready_events.empty())
+        {
+          // Make sure that everyone is done computing their previous
+          // equivalence sets before we allow anyone to do any invalidations
+          Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/,
+              Runtime::merge_events(ready_events));
+          ready_events.clear();
+        }
+        else
+          Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
+        ready_events.insert(refinement_barrier);
+      }
+      else if (refinement_barrier.exists())
+      {
+        Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
+        ready_events.insert(refinement_barrier);
+      }
+      if ((did_collective != NULL) && !did_collective->is_origin())
+      {
+        const RtEvent ready = 
+          did_collective->perform_collective_wait(false/*block*/);
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
+      }
+      if (!ready_events.empty())
+        enqueue_ready_operation(Runtime::merge_events(ready_events));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -1195,11 +1278,613 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
 #endif
-      // Arrive on our barrier with the precondition
-      Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+      if (!!refinement_mask)
+      {
+#ifdef DEBUG_LEGION
+        assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+        assert(did_collective != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        std::set<RtEvent> map_applied_conditions;
+        const ContextID ctx = parent_ctx->get_context().get_id();
+        RegionNode *region_node = runtime->forest->get_node(requirement.region); 
+#ifdef DEBUG_LEGION
+        assert(refinement_barrier.exists());
+#endif
+        // Make a new equivalence set and record it at this node
+        bool first = false;
+        const DistributedID did = did_collective->get_value(false/*block*/);
+        EquivalenceSet *set = 
+          repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
+                                    region_node, refinement_mask, did, first);
+        // Merge the state from the old equivalence sets if not overwriting
+        if (first && !refinement_overwrite)
+        {
+          const FieldMaskSet<EquivalenceSet> &previous_sets = 
+            version_info.get_equivalence_sets();
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                previous_sets.begin(); it != previous_sets.end(); it++)
+            set->clone_from(runtime->address_space, it->first, it->second,
+                        false/*forward to owner*/, map_applied_conditions, 
+                        false/*invalidate overlap*/);
+        }
+        // Invalidate the old refinement
+        region_node->invalidate_refinement(ctx, refinement_mask,
+            false/*self*/, map_applied_conditions, to_release, repl_ctx);
+        // Register this refinement in the tree 
+        region_node->record_refinement(ctx, set, refinement_mask, 
+                                       map_applied_conditions);
+        // Remove the CONTEXT_REF on the set now that it is registered
+        if (set->remove_base_valid_ref(CONTEXT_REF))
+          assert(false); // should never actually hit this
+        if (!map_applied_conditions.empty())
+          Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
+              Runtime::merge_events(map_applied_conditions));
+        else
+          Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+      }
+      else // Arrive on our barrier
+        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
       // Then complete the mapping once the barrier has triggered
       complete_mapping(mapped_barrier);
       complete_execution();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Repl Refinement Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplRefinementOp::ReplRefinementOp(Runtime *rt)
+      : RefinementOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplRefinementOp::ReplRefinementOp(const ReplRefinementOp&rhs)
+      : RefinementOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplRefinementOp::~ReplRefinementOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplRefinementOp& ReplRefinementOp::operator=(const ReplRefinementOp&rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_refinement();
+      mapped_barrier = RtBarrier::NO_RT_BARRIER;
+      refinement_barrier = RtBarrier::NO_RT_BARRIER;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_refinement();
+      if (!collective_dids.empty())
+      {
+        for (std::vector<ValueBroadcast<DistributedID>*>::const_iterator it =
+              collective_dids.begin(); it != collective_dids.end(); it++)
+          delete (*it);
+        collective_dids.clear();
+      }
+      replicated_regions.clear();
+      replicated_partitions.clear();
+      sharded_region_version_infos.clear();
+      sharded_regions.clear();
+      sharded_partitions.clear();
+      runtime->free_repl_refinement_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::set_repl_refinement_info(RtBarrier mapped_bar,
+                                                    RtBarrier refinement_bar)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!mapped_barrier.exists());
+      assert(!refinement_barrier.exists());
+#endif
+      mapped_barrier = mapped_bar;
+      refinement_barrier = refinement_bar;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapped_barrier.exists());
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Iterate through each of the partitions and see if we are going to
+      // shard them or not when making equivalence sets, we always duplicate
+      // the creation of equivalence sets for intermediate regions
+      // Anything that is projected and therefore sharded is not duplicated
+      size_t total_replicate_subregions = 0;
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+            make_from.begin(); it != make_from.end(); it++)
+      {
+        // Check to see first if we are not projecting for any fields
+        if (!projections.empty() && 
+            (projections.find(it->first) != projections.end()) &&
+            (it->second == projections[it->first].get_valid_mask()))
+          continue;
+        if (!it->first->is_region())
+        {
+          PartitionNode *part_node = it->first->as_partition_node();
+          if (repl_ctx->replicate_partition_equivalence_sets(part_node))
+          {
+            replicated_partitions[part_node->handle] = part_node;
+            total_replicate_subregions += part_node->get_num_children();
+          }
+        }
+        else
+        {
+          RegionNode *region = it->first->as_region_node();
+          replicated_regions[region->handle] = region;
+          total_replicate_subregions++;
+        }
+      }
+      if (total_replicate_subregions > 0)
+      {
+        // Create collective dids for all subregions of the replicate partitions
+        collective_dids.resize(total_replicate_subregions);
+        for (unsigned idx = 0; idx < total_replicate_subregions; idx++)
+        {
+          const ShardID origin = repl_ctx->get_next_equivalence_set_origin();
+          const CollectiveID collective_id = 
+            repl_ctx->get_next_collective_index(COLLECTIVE_LOC_21,
+                                                true/*logical*/);
+          collective_dids[idx] =
+            new ValueBroadcast<DistributedID>(collective_id, repl_ctx, origin);
+          if (collective_dids[idx]->is_origin())
+          {
+            const DistributedID did = runtime->get_available_distributed_id();
+            collective_dids[idx]->broadcast(did);
+          }
+        }
+      }
+      // Do the base call at this point
+      RefinementOp::trigger_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> ready_events;      
+      const ContextID ctx = parent_ctx->get_context().get_id();
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      FieldMask replicated_mask;
+      const AddressSpaceID local_space = runtime->address_space;
+      // Fill in the sharded_regions and sharded_partitions
+      // data structures, we'll use those to compute the equivalence sets
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+            make_from.begin(); it != make_from.end(); it++)
+      {
+        FieldMask version_mask = it->second;
+        // Check to see if any fields are projected, if so then we only
+        // need to compute equivalence sets for the projected regions
+        LegionMap<RegionTreeNode*,
+          FieldMaskSet<RefProjectionSummary> >::aligned::const_iterator 
+            finder = projections.find(it->first);
+        if (finder != projections.end())
+        {
+          for (FieldMaskSet<RefProjectionSummary>::const_iterator sit =
+                finder->second.begin(); sit != finder->second.end(); sit++)
+          {
+            std::vector<RegionNode*> regions;
+            sit->first->project_refinement(it->first, 
+                repl_ctx->owner_shard->shard_id, regions);
+            for (std::vector<RegionNode*>::const_iterator rit =
+                  regions.begin(); rit != regions.end(); rit++)
+            {
+              PartitionNode *parent = (*rit)->parent;
+              std::vector<RegionNode*> &children = sharded_regions[parent];
+              if (children.size() < parent->get_num_children())
+              {
+                bool found = false;
+                for (unsigned idx = 0; idx < children.size(); idx++)
+                {
+                  if ((*rit) != children[idx])
+                    continue;
+                  found = true;
+                  break;
+                }
+                if (!found)
+                  children.push_back(*rit);
+              }
+              sharded_partitions.insert(parent, sit->second);
+            }
+          }
+          version_mask -= finder->second.get_valid_mask();
+          if (!version_mask)
+            continue;
+        }
+        if (!it->first->is_region() &&
+            (replicated_partitions.find(it->first->as_partition_node()->handle) 
+             == replicated_partitions.end()))
+        {
+          // Only compute equivalence sets for the subregions that
+          // are sharded to this particular shard
+          PartitionNode *part_node = it->first->as_partition_node();
+          IndexPartNode *index_part = part_node->row_source;
+          std::vector<RegionNode*> &children = sharded_regions[part_node];
+          sharded_partitions.insert(part_node, version_mask);
+          // This is probably too conservative a check, but it is sound
+          if (children.size() < index_part->get_num_children())
+          {
+            const size_t max_check = children.size();
+            if (index_part->total_children == index_part->max_linearized_color)
+            {
+              for (LegionColor color = repl_ctx->owner_shard->shard_id; 
+                    color < index_part->total_children; 
+                    color += repl_ctx->total_shards)
+              {
+                RegionNode *child = part_node->get_child(color);
+                bool found = false;
+                for (unsigned idx = 0; idx < max_check; idx++)
+                {
+                  if (children[idx] != child)
+                      continue;
+                  found = true;
+                  break;
+                }
+                if (!found)
+                  children.push_back(child);
+              }
+            }
+            else
+            {
+              ColorSpaceIterator *itr = 
+                index_part->color_space->create_color_space_iterator();
+              // Skip ahead for our shard
+              for (unsigned idx = 0; 
+                    idx < repl_ctx->owner_shard->shard_id; idx++)
+              {
+                itr->yield_color();
+                if (!itr->is_valid())
+                  break;
+              }
+              while (itr->is_valid())
+              {
+                RegionNode *child = part_node->get_child(itr->yield_color());
+                bool found = false;
+                for (unsigned idx = 0; idx < max_check; idx++)
+                {
+                  if (children[idx] != child)
+                    continue;
+                  found = true;
+                  break;
+                }
+                if (!found)
+                  children.push_back(child);
+                // Skip ahead to the next color
+                for (unsigned idx = 0; idx < (repl_ctx->total_shards-1); idx++)
+                {
+                  itr->yield_color();
+                  if (!itr->is_valid())
+                    break;
+                }
+              }
+              delete itr;
+            }
+          }
+        }
+        else // we can compute versions from the root to_refine
+          replicated_mask |= version_mask;
+      }
+      // At this point we know which regions we need equivalence sets for
+      // Start with the root ones which we'll put in the normal version_info
+      if (!!replicated_mask)
+      {
+        if (!!uninitialized_fields)
+          replicated_mask -= uninitialized_fields;
+        if (!!replicated_mask)
+          to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
+                      replicated_mask, unique_op_id, local_space, ready_events);
+      }
+      // Now compute the shard specific ones
+      for (FieldMaskSet<PartitionNode>::const_iterator pit =
+            sharded_partitions.begin(); pit != sharded_partitions.end(); pit++)
+      {
+        const std::vector<RegionNode*> &children = sharded_regions[pit->first];
+        if (!!uninitialized_fields)
+        {
+          const FieldMask request_mask = pit->second - uninitialized_fields;
+          for (std::vector<RegionNode*>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+          {
+            VersionInfo &region_info = sharded_region_version_infos[*it];
+            if (!!request_mask)
+              (*it)->perform_versioning_analysis(ctx, parent_ctx, &region_info,
+                  request_mask, unique_op_id, local_space, ready_events);
+          }
+        }
+        else
+        {
+          for (std::vector<RegionNode*>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+          {
+            VersionInfo &region_info = sharded_region_version_infos[*it];
+            (*it)->perform_versioning_analysis(ctx, parent_ctx, &region_info,
+                pit->second, unique_op_id, local_space, ready_events);
+          }
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(refinement_barrier.exists());
+#endif
+      // Make sure that everyone is done computing their equivalence sets
+      // from the previous set before we allow anyone to do any invalidations
+      if (!ready_events.empty())
+      {
+        Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/,
+            Runtime::merge_events(ready_events));
+        ready_events.clear();
+      }
+      else
+        Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
+      ready_events.insert(refinement_barrier);
+      if (!collective_dids.empty())
+      {
+        for (std::vector<ValueBroadcast<DistributedID>*>::const_iterator it =
+              collective_dids.begin(); it != collective_dids.end(); it++)
+        {
+          if ((*it)->is_origin())
+            continue;
+          RtEvent ready_event = (*it)->perform_collective_wait(false/*block*/);
+          if (ready_event.exists() && !ready_event.has_triggered())
+            ready_events.insert(ready_event);
+        }
+      }
+      if (!ready_events.empty())
+        enqueue_ready_operation(Runtime::merge_events(ready_events));
+      else
+        enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapped_barrier.exists());
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+      assert(replicated_partitions.size() <= make_from.size());
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      std::set<RtEvent> map_applied_conditions;
+      // First we go through and make the pending refinements for any regions
+      // which are sharded to us so that we can add valid references before we
+      // invalidate the old refinements
+      if (!sharded_region_version_infos.empty())
+      {
+        for (FieldMaskSet<PartitionNode>::const_iterator pit =
+             sharded_partitions.begin(); pit != sharded_partitions.end(); pit++)
+        {
+          const std::vector<RegionNode*> &children = 
+            sharded_regions[pit->first];
+          for (std::vector<RegionNode*>::const_iterator rit =
+                children.begin(); rit != children.end(); rit++)
+          {
+            LegionMap<RegionNode*,VersionInfo>::aligned::iterator finder =
+              sharded_region_version_infos.find(*rit);
+#ifdef DEBUG_LEGION
+            assert(finder != sharded_region_version_infos.end());
+#endif
+            PendingEquivalenceSet *pending = new PendingEquivalenceSet(*rit);
+            pending->record_all(finder->second, map_applied_conditions);
+            // Context takes ownership at this point
+            parent_ctx->record_pending_disjoint_complete_set(pending, 
+                                                             pit->second);
+          }
+        }
+      }
+      // Now go through and invalidate the current refinements for
+      // the regions that we are updating
+      const ContextID ctx = parent_ctx->get_context().get_id();
+      if (!!uninitialized_fields)
+      {
+        const FieldMask invalidate_mask = 
+          get_internal_mask() - uninitialized_fields;
+        if (!!invalidate_mask)
+          to_refine->invalidate_refinement(ctx, invalidate_mask, false/*self*/,
+                                  map_applied_conditions, to_release, repl_ctx);
+      }
+      else
+        to_refine->invalidate_refinement(ctx, get_internal_mask(),
+            false/*self*/, map_applied_conditions, to_release, repl_ctx);
+      // First propagate the refinements for the sharded regions and partitions
+      for (FieldMaskSet<PartitionNode>::const_iterator it =
+            sharded_partitions.begin(); it != sharded_partitions.end(); it++)
+      {
+        const std::vector<RegionNode*> &children = sharded_regions[it->first];
+        if (children.empty())
+        {
+          // Still propagate the refinement so we can do lookups
+          // correctly for control replication
+          it->first->propagate_refinement(ctx, NULL/*no child*/, it->second,
+                                          map_applied_conditions);
+          continue;
+        }
+        // We're not actually going to make the equivalence sets here
+        // Instead we're going to just fill in the right data structure
+        // on the partition so that any traversals of the children
+        // will ping the context to figure out who the owner is. The
+        // actual owner of the initial equivalence set will be done
+        // with a first touch policy so that the first writer will
+        // the one to make the equivalence sets
+        it->first->propagate_refinement(ctx, children, it->second, 
+                                        map_applied_conditions);
+      }
+      // Now we do the replicated partitions and regions
+      if (!replicated_partitions.empty() || !replicated_regions.empty())
+      {
+        unsigned did_index = 0;
+        // Now make the replicated partitions
+        for (std::map<LogicalPartition,PartitionNode*>::const_iterator it =
+              replicated_partitions.begin(); it != 
+              replicated_partitions.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(did_index < collective_dids.size());
+#endif
+          IndexPartNode *index_part = it->second->row_source;
+          FieldMask mask = make_from[it->second];
+          // Prune out any projection fields for this node
+          LegionMap<RegionTreeNode*,
+            FieldMaskSet<RefProjectionSummary> >::aligned::const_iterator
+              finder = projections.find(it->second);
+          if (finder != projections.end())
+            mask -= finder->second.get_valid_mask();
+#ifdef DEBUG_LEGION
+          assert(!!mask);
+#endif
+          // Iterate over each child and make an equivalence set  
+          if (index_part->total_children == index_part->max_linearized_color)
+          {
+            for (LegionColor color = 0; 
+                  color < index_part->total_children; color++)
+            {
+              RegionNode *child = it->second->get_child(color);
+              bool first = false;
+              const DistributedID did = 
+                collective_dids[did_index++]->get_value(false/*block*/);
+              EquivalenceSet *set = 
+                repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
+                                                      child, mask, did, first);
+              if (first)
+                initialize_replicated_set(set, mask, map_applied_conditions);
+              child->record_refinement(ctx, set, mask, map_applied_conditions);
+              // Remove the CONTEXT_REF on the set now that it is registered
+              if (set->remove_base_valid_ref(CONTEXT_REF))
+                assert(false); // should never actually hit this
+            }
+          }
+          else
+          {
+            ColorSpaceIterator *itr = 
+              index_part->color_space->create_color_space_iterator();
+            while (itr->is_valid())
+            {
+              const LegionColor color = itr->yield_color();
+              RegionNode *child = it->second->get_child(color);
+              bool first = false;
+              const DistributedID did = 
+                collective_dids[did_index++]->get_value(false/*block*/);
+              EquivalenceSet *set = 
+                repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
+                                                      child, mask, did, first);
+              if (first)
+                initialize_replicated_set(set, mask, map_applied_conditions);
+              child->record_refinement(ctx, set, mask, map_applied_conditions);
+              // Remove the CONTEXT_REF on the set now that it is registered
+              if (set->remove_base_valid_ref(CONTEXT_REF))
+                assert(false); // should never actually hit this
+            }
+            delete itr;
+          }
+        }
+        for (std::map<LogicalRegion,RegionNode*>::const_iterator it =
+              replicated_regions.begin(); it != replicated_regions.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(did_index < collective_dids.size());
+#endif
+          bool first = false;
+          const DistributedID did = 
+            collective_dids[did_index++]->get_value(false/*block*/);
+          FieldMask mask = make_from[it->second];
+          // Prune out any projection fields for this node
+          LegionMap<RegionTreeNode*,
+            FieldMaskSet<RefProjectionSummary> >::aligned::const_iterator
+              finder = projections.find(it->second);
+          if (finder != projections.end())
+            mask -= finder->second.get_valid_mask();
+#ifdef DEBUG_LEGION
+          assert(!!mask);
+#endif
+          EquivalenceSet *set = 
+            repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
+                                        it->second, mask, did, first);
+          if (first)
+            initialize_replicated_set(set, mask, map_applied_conditions);
+          it->second->record_refinement(ctx, set, mask, 
+                                        map_applied_conditions);
+          // Remove the CONTEXT_REF on the set now that it is registered
+          if (set->remove_base_valid_ref(CONTEXT_REF))
+            assert(false); // should never actually hit this
+        }
+#ifdef DEBUG_LEGION
+        assert(did_index == collective_dids.size());
+#endif
+      }
+      if (!map_applied_conditions.empty())
+        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
+            Runtime::merge_events(map_applied_conditions));
+      else
+        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+      complete_mapping(mapped_barrier);
+      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::initialize_replicated_set(EquivalenceSet *set,
+                 const FieldMask &mask, std::set<RtEvent> &applied_events) const
+    //--------------------------------------------------------------------------
+    {
+      const FieldMaskSet<EquivalenceSet> &previous_sets = 
+        version_info.get_equivalence_sets();
+      // Import state into this equivalence set
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            previous_sets.begin(); it != previous_sets.end(); it++)
+      {
+        // See if the fields overlap first
+        const FieldMask overlap = it->second & mask;
+        if (!overlap)
+          continue;
+        IndexSpaceExpression *overlap_expr = 
+          runtime->forest->intersect_index_spaces(set->set_expr,
+                            it->first->region_node->row_source);
+        if (overlap_expr->is_empty())
+          continue;
+        set->clone_from(runtime->address_space, it->first, mask,
+                      false/*forward to owner*/, applied_events);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -1529,12 +2214,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
+      RefinementTracker tracker(this, map_applied_conditions);
       ProjectionInfo projection_info(runtime, requirement, launch_space, 
                                      sharding_function, sharding_space);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions);
     }
 
@@ -1984,6 +2670,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
+      RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         ProjectionInfo projection_info (runtime, src_requirements[idx], 
@@ -1992,6 +2679,7 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      projection_info,
                                                      src_privilege_paths[idx],
+                                                     refinement_tracker,
                                                      map_applied_conditions);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -2008,6 +2696,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      projection_info,
                                                      dst_privilege_paths[idx],
+                                                     refinement_tracker,
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -2024,6 +2713,7 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  gather_info,
                                                  gather_privilege_paths[idx],
+                                                 refinement_tracker,
                                                  map_applied_conditions);
         }
       }
@@ -2038,6 +2728,7 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
                                                  scatter_privilege_paths[idx],
+                                                 refinement_tracker,
                                                  map_applied_conditions);
         }
       }
@@ -2456,33 +3147,18 @@ namespace Legion {
       // otherwise we know we can evenly distribute the work
       if (kind == LOGICAL_REGION_DELETION)
       {
-        // Just need to clean out the version managers which will free
-        // all the equivalence sets and allow the reference counting to
-        // clean everything up
-        if (is_first_local_shard)
+        std::set<RtEvent> preconditions;
+        // Figure out the versioning context for this requirements
+        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
-          bool has_outermost = false;
-          RegionTreeContext outermost_ctx;
-          const RegionTreeContext tree_context = parent_ctx->get_context();
-          for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-          {
-            const RegionRequirement &req = deletion_requirements[idx];
-            if (returnable_privileges[idx])
-            {
-              if (!has_outermost)
-              {
-                TaskContext *outermost = 
-                  parent_ctx->find_outermost_local_context();
-                outermost_ctx = outermost->get_context();
-                has_outermost = true;
-              }
-              runtime->forest->invalidate_versions(outermost_ctx, req.region);
-            }
-            else
-              runtime->forest->invalidate_versions(tree_context, req.region);
-          }
+          const RegionRequirement &req = deletion_requirements[idx];
+          repl_ctx->invalidate_region_tree_context(req.region, 
+                                    preconditions, to_release);
         }
-        complete_mapping();
+        if (!preconditions.empty())
+          complete_mapping(Runtime::merge_events(preconditions));
+        else
+          complete_mapping();
       }
       else if (kind == FIELD_DELETION)
       {
@@ -2497,7 +3173,8 @@ namespace Legion {
           // to be able to free up the resources.
           const TraceInfo trace_info(this);
           for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-            runtime->forest->invalidate_fields(this, idx, version_infos[idx],
+            runtime->forest->invalidate_fields(this, idx, 
+                deletion_requirements[idx], version_infos[idx],
                 PhysicalTraceInfo(trace_info, idx), map_applied_conditions, 
                 is_total_sharding/*collective*/);
         }
@@ -2689,6 +3366,14 @@ namespace Legion {
                regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
             runtime->forest->destroy_logical_region(*it, applied);
         }
+      }
+      if (!to_release.empty())
+      {
+        for (std::vector<EquivalenceSet*>::const_iterator it =
+              to_release.begin(); it != to_release.end(); it++)
+          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+            delete (*it);
+        to_release.clear();
       }
 #ifdef LEGION_SPY
       // Still have to do this for legion spy
@@ -3239,8 +3924,43 @@ namespace Legion {
     void ReplDependentPartitionOp::select_partition_projection(void)
     //--------------------------------------------------------------------------
     {
-      // TODO: put in a check here that all the shards pick the same partition
-      DependentPartitionOp::select_partition_projection();
+      if (!runtime->unsafe_mapper)
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+        assert(sharding_function == NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        // Check here that all the shards pick the same partition
+        requirement.partition = LogicalPartition::NO_PART;   
+        DependentPartitionOp::select_partition_projection();
+        ValueBroadcast<LogicalPartition> part_check(
+         repl_ctx->get_next_collective_index(COLLECTIVE_LOC_22,true/*logical*/),
+         repl_ctx, 0/*origin shard*/);
+        if (repl_ctx->owner_shard->shard_id > 0)
+        {
+          const LogicalPartition chosen_part = part_check.get_value();
+          if (chosen_part != requirement.partition)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invocation of "
+                      "'select_partition_projection' on mapper %s for "
+                      "depedent partitioning operation launched in %s "
+                      "(UID %lld). Mapper selected a logical partition "
+                      "on shard %d that is different than the logical "
+                      "partition selected by shard 0. All shards must "
+                      "select the same logical partition.",
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id(), 
+                      repl_ctx->owner_shard->shard_id)
+        }
+        else
+          part_check.broadcast(requirement.partition);
+      }
+      else
+        DependentPartitionOp::select_partition_projection();
     }
 
     //--------------------------------------------------------------------------
@@ -3261,13 +3981,14 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         log_requirement();
       ProjectionInfo projection_info;
+      RefinementTracker tracker(this, map_applied_conditions);
       if (is_index_space)
         projection_info = ProjectionInfo(runtime, requirement, 
                                          launch_space, sharding_function);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path,
+                                                   privilege_path, tracker,
                                                    map_applied_conditions);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
@@ -3676,6 +4397,7 @@ namespace Legion {
       mapping_exchange = NULL;
       dependence_exchange = NULL;
       completion_exchange = NULL;
+      resource_return_barrier = RtBarrier::NO_RT_BARRIER;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -4023,6 +4745,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplMustEpochOp::receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regs,
+              std::vector<LogicalRegion> &deleted_regs,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::map<FieldSpace,unsigned> &created_fs,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
+              std::vector<FieldSpace> &deleted_fs,
+              std::map<IndexSpace,unsigned> &created_is,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // Wait until we've received all the resources before handing them
+      // back to the enclosing parent context
+      {
+        AutoLock o_lock(op_lock);
+        merge_received_resources(created_regs, deleted_regs, created_fids, 
+            deleted_fids, created_fs, latent_fs, deleted_fs, created_is,
+            deleted_is, created_partitions, deleted_partitions);
+#ifdef DEBUG_LEGION
+        assert(remaining_resource_returns > 0);
+#endif
+        if (--remaining_resource_returns > 0)
+          return;
+      }
+      // Make sure the other shards have received all their returns too
+      Runtime::phase_barrier_arrive(resource_return_barrier, 1/*count*/);
+      if (!has_return_resources())
+        return;
+      if (!resource_return_barrier.has_triggered())
+        resource_return_barrier.wait();
+      // If we get here then we can finally do the return to the parent context
+      // because we've received resources from all of our constituent operations
+      return_resources(parent_ctx, context_index, preconditions);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplMustEpochOp::map_replicate_tasks(void) const
     //--------------------------------------------------------------------------
     {
@@ -4093,7 +4855,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMustEpochOp::distribute_replicate_tasks(void) const
+    void ReplMustEpochOp::distribute_replicate_tasks(void)
     //--------------------------------------------------------------------------
     {
       // We only want to distribute the points that are owned by our shard
@@ -4101,12 +4863,14 @@ namespace Legion {
       MustEpochDistributorArgs dist_args(owner);
       MustEpochLauncherArgs launch_args(owner);
       std::set<RtEvent> wait_events;
+      // Count how many resource returns we expect to see as part of this
       for (std::vector<IndividualTask*>::const_iterator it = 
             indiv_tasks.begin(); it != indiv_tasks.end(); it++)
       {
         // Skip any points that we do not own on this shard
         if (shard_single_tasks.find(*it) == shard_single_tasks.end())
           continue;
+        remaining_resource_returns++;
         if (!runtime->is_local((*it)->target_proc))
         {
           dist_args.task = *it;
@@ -4165,6 +4929,7 @@ namespace Legion {
                               parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id())
         }
+        remaining_resource_returns++;
         (*it)->update_target_processor();
         if (!runtime->is_local((*it)->target_proc))
         {
@@ -4185,6 +4950,9 @@ namespace Legion {
             wait_events.insert(wait);
         }
       }
+      // Trigger this if we're not expecting to see any returns
+      if (remaining_resource_returns == 0)
+        Runtime::phase_barrier_arrive(resource_return_barrier, 1/*count*/);
       if (!wait_events.empty())
       {
         RtEvent dist_event = Runtime::merge_events(wait_events);
@@ -4211,6 +4979,7 @@ namespace Legion {
         new MustEpochDependenceExchange(ctx, COLLECTIVE_LOC_70);
       completion_exchange = 
         new MustEpochCompletionExchange(ctx, COLLECTIVE_LOC_73);
+      resource_return_barrier = ctx->get_next_resource_return_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -4567,15 +5336,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplFenceOp::initialize_repl_fence(ReplicateContext *ctx, 
-                                      FenceKind k, bool need_future, bool track)
+    void ReplFenceOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      Future f = initialize(ctx, k, need_future, track);
-      mapping_fence_barrier = ctx->get_next_mapping_fence_barrier();
+      initialize_fence_barriers();
+      FenceOp::trigger_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFenceOp::initialize_fence_barriers(ReplicateContext *repl_ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!mapping_fence_barrier.exists());
+      assert(!execution_fence_barrier.exists());
+      if (repl_ctx == NULL)
+        repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      if (repl_ctx == NULL)
+        repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // If we get here that means we weren't replayed so make our fences
+      mapping_fence_barrier = repl_ctx->get_next_mapping_fence_barrier();
       if (fence_kind == EXECUTION_FENCE)
-        execution_fence_barrier = ctx->get_next_execution_fence_barrier();
-      return f;
+        execution_fence_barrier = repl_ctx->get_next_execution_fence_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -4639,8 +5424,17 @@ namespace Legion {
     void ReplFenceOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      // free up these barriers since we didn't use them
-      Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+#ifdef DEBUG_LEGION
+      assert(!mapping_fence_barrier.exists());
+      assert(!execution_fence_barrier.exists());
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Get ourselves an execution fence barrier
+      // No need for a mapping fence since we're just replaying
+      execution_fence_barrier = repl_ctx->get_next_execution_fence_barrier();
       FenceOp::trigger_replay();
     }
 
@@ -4780,20 +5574,22 @@ namespace Legion {
         }
       }
       InstanceSet mapped_instances;
+      std::vector<PhysicalManager*> source_instances;
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
       bool record_valid = true;
       if (!remap_region)
       {
-        record_valid = invoke_mapper(mapped_instances);
+        record_valid = invoke_mapper(mapped_instances, source_instances);
         region.impl->set_references(mapped_instances);
       }
       else
         region.impl->get_references(mapped_instances);
       // First kick off the exchange to get that in flight
       std::vector<InstanceView*> mapped_views;
+      std::vector<InstanceView*> source_views;
       {
-        InnerContext *context = find_physical_context(0/*index*/, requirement);
+        InnerContext *context = find_physical_context(0/*index*/);
         context->convert_target_views(mapped_instances, mapped_views);
         if (exchange != NULL)
           exchange->initiate_exchange(mapped_instances, mapped_views);
@@ -4813,13 +5609,13 @@ namespace Legion {
         // Everyone else just needs to do their registration
         if (!is_owner_shard)
         {
-          InnerContext *context = find_physical_context(0/*index*/,requirement);
+          InnerContext *context = find_physical_context(0/*index*/);
           context->convert_target_views(mapped_instances, mapped_views); 
           RegionNode *node = runtime->forest->get_node(requirement.region);
-          UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
-                                      0/*index*/, version_info,
-                                      requirement, node, mapped_instances,
-                                      mapped_views,trace_info,init_precondition,
+          UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this,
+                                      0/*index*/, requirement, node,
+                                      mapped_instances, mapped_views,
+                                      source_views,trace_info,init_precondition,
                                       termination_event,
                                       false/*check initialized*/, record_valid,
                                       false/*skip output*/);
@@ -4832,8 +5628,8 @@ namespace Legion {
           effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
                 requirement, version_info, this, 0/*index*/, init_precondition,
-                termination_event, mapped_instances, trace_info, 
-                map_applied_conditions
+                termination_event, mapped_instances, source_instances,
+                trace_info, map_applied_conditions
 #ifdef DEBUG_LEGION
                 , get_logging_name(), unique_op_id
 #endif
@@ -4852,9 +5648,9 @@ namespace Legion {
         // All the users just need to do their registration
         RegionNode *node = runtime->forest->get_node(requirement.region);
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
-                                      0/*index*/, version_info,
-                                      requirement, node, mapped_instances,
-                                      mapped_views,trace_info,init_precondition,
+                                      0/*index*/, requirement, node, 
+                                      mapped_instances, mapped_views,
+                                      source_views,trace_info,init_precondition,
                                       termination_event,
                                       false/*check initialized*/, record_valid,
                                       false/*skip output*/);
@@ -4899,7 +5695,8 @@ namespace Legion {
         const RtEvent registration_precondition = 
           runtime->forest->physical_perform_updates(requirement, version_info,
               this, 0/*index*/, init_precondition, termination_event, 
-              mapped_instances, trace_info, map_applied_conditions, analysis,
+              mapped_instances, source_instances, trace_info, 
+              map_applied_conditions, analysis,
 #ifdef DEBUG_LEGION
               get_logging_name(), unique_op_id,
 #endif
@@ -5288,7 +6085,7 @@ namespace Legion {
         }
         InstanceSet attach_instances(1);
         attach_instances[0] = external_instance;
-        InnerContext *context = find_physical_context(0/*index*/, requirement);
+        InnerContext *context = find_physical_context(0/*index*/);
         std::vector<InstanceView*> attach_views;
         context->convert_target_views(attach_instances, attach_views);
         exchange->initiate_exchange(attach_instances, attach_views);
@@ -5303,8 +6100,9 @@ namespace Legion {
         if (mapping)
           termination_event = Runtime::create_ap_user_event(NULL);
         const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
+        std::vector<InstanceView*> dummy_source_views;
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 0/*index*/,
-          version_info, requirement, node, attach_instances, attach_views,
+          requirement, node, attach_instances, attach_views, dummy_source_views,
           trace_info, ApEvent::NO_AP_EVENT, mapping ? termination_event : 
             completion_event, false/*check initialized*/, 
           true/*record valid*/, true/*skip output*/);
@@ -5399,7 +6197,7 @@ namespace Legion {
           // to the memory in case we update the reference state
           did_broadcast->broadcast(external_instance.get_manager()->did);
           const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
-          InnerContext *context = find_physical_context(0/*index*/,requirement);
+          InnerContext *context = find_physical_context(0/*index*/);
           std::vector<InstanceView*> attach_views;
           context->convert_target_views(attach_instances, attach_views);
 #ifdef DEBUG_LEGION
@@ -5574,7 +6372,7 @@ namespace Legion {
         // instances for each shard
         // Only the owner does it in the case where there isn't a
         // sharded view because there is only one instance for all shards
-        InnerContext *context = find_physical_context(0/*index*/, requirement);
+        InnerContext *context = find_physical_context(0/*index*/);
         std::vector<InstanceView*> inst_views;
         context->convert_target_views(references, inst_views);
         detach_event = runtime->forest->detach_external(requirement,
@@ -5781,7 +6579,7 @@ namespace Legion {
                                           bool has_block, bool remove_trace_ref)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -5807,8 +6605,9 @@ namespace Legion {
     void ReplTraceCaptureOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      ReplTraceOp::activate();
       current_template = NULL;
+      recording_fence = RtBarrier::NO_RT_BARRIER;
       replayable_collective_id = 0;
       has_blocking_call = false;
       remove_trace_reference = false;
@@ -5818,7 +6617,7 @@ namespace Legion {
     void ReplTraceCaptureOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_fence();
       runtime->free_repl_capture_op(this);
     }
 
@@ -5846,9 +6645,6 @@ namespace Legion {
 #endif
       // Indicate that we are done capturing this trace
       local_trace->end_trace_capture();
-      // Register this fence with all previous users in the parent's context
-      ReplFenceOp::trigger_dependence_analysis();
-      parent_ctx->record_previous_trace(local_trace);
       if (local_trace->is_recording())
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
@@ -5859,7 +6655,35 @@ namespace Legion {
         physical_trace->record_previous_template_completion(
             get_completion_event());
         physical_trace->clear_cached_template();
+        // Get an additional mapping fence to ensure that all our prior
+        // operations are done mapping before anybody tries to finalize
+        // the capture which could induce races
+#ifdef DEBUG_LEGION
+        assert(!recording_fence.exists());
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        recording_fence = repl_ctx->get_next_mapping_fence_barrier();
       }
+      // Register this fence with all previous users in the parent's context
+      ReplFenceOp::trigger_dependence_analysis();
+      parent_ctx->record_previous_trace(local_trace);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCaptureOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (recording_fence.exists())
+      {
+        Runtime::phase_barrier_arrive(recording_fence, 1/*count*/);
+        enqueue_ready_operation(recording_fence);
+      }
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -5876,7 +6700,8 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(has_blocking_call, this);
+        current_template->finalize(parent_ctx, unique_op_id, 
+                                   has_blocking_call, this);
         if (!current_template->is_replayable())
         {
           physical_trace->record_failed_capture(current_template);
@@ -5996,7 +6821,7 @@ namespace Legion {
                                                   bool has_block)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -6023,9 +6848,10 @@ namespace Legion {
     void ReplTraceCompleteOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      ReplTraceOp::activate();
       current_template = NULL;
       template_completion = ApEvent::NO_AP_EVENT;
+      recording_fence = RtBarrier::NO_RT_BARRIER;
       replayable_collective_id = 0;
       replayed = false;
       has_blocking_call = false;
@@ -6035,7 +6861,7 @@ namespace Legion {
     void ReplTraceCompleteOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_fence();
       runtime->free_repl_trace_op(this);
     }
 
@@ -6092,6 +6918,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
 #endif
+#ifdef LEGION_SPY
+        local_trace->perform_logging(
+            current_template->get_fence_uid(), unique_op_id);
+#endif
+        // Get our fence barriers
+        initialize_fence_barriers();
         parent_ctx->update_current_fence(this, true, true);
         physical_trace->record_previous_template_completion(completion_event);
         local_trace->initialize_tracing_state();
@@ -6107,7 +6939,19 @@ namespace Legion {
         current_template = physical_trace->get_current_template();
         physical_trace->record_previous_template_completion(completion_event);
         physical_trace->clear_cached_template();
-      }
+        // Get an additional mapping fence to ensure that all our prior
+        // operations are done mapping before anybody tries to finalize
+        // the capture which could induce races
+#ifdef DEBUG_LEGION
+        assert(!recording_fence.exists());
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        recording_fence = repl_ctx->get_next_mapping_fence_barrier();
+      } 
 
       // If this is a static trace, then we remove our reference when we're done
       if (local_trace->is_static_trace())
@@ -6123,7 +6967,13 @@ namespace Legion {
     void ReplTraceCompleteOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      if (replayed)
+      if (recording_fence.exists())
+      {
+        Runtime::phase_barrier_arrive(recording_fence, 1/*count*/);
+        enqueue_ready_operation(recording_fence);
+        return;
+      }
+      else if (replayed)
       {
         // Having all our mapping dependences satisfied means that the previous 
         // replay of this template is done so we can start ours now
@@ -6152,7 +7002,8 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(has_blocking_call, this);
+        current_template->finalize(parent_ctx, unique_op_id, 
+                                   has_blocking_call, this);
         if (!current_template->is_replayable())
         {
           physical_trace->record_failed_capture(current_template);
@@ -6176,6 +7027,7 @@ namespace Legion {
       { 
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
+        assert(map_applied_conditions.empty());
 #endif
         std::set<ApEvent> template_postconditions;
         current_template->finish_replay(template_postconditions);
@@ -6289,7 +7141,7 @@ namespace Legion {
                                               LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -6303,14 +7155,14 @@ namespace Legion {
     void ReplTraceReplayOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      ReplTraceOp::activate();
     }
 
     //--------------------------------------------------------------------------
     void ReplTraceReplayOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_fence();
       runtime->free_repl_replay_op(this);
     }
 
@@ -6336,9 +7188,10 @@ namespace Legion {
       assert(trace == NULL);
       assert(local_trace != NULL);
 #endif
+      initialize_fence_barriers();
       PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
-      assert(physical_trace != NULL);
+      assert(physical_trace != NULL); 
 #endif
       bool recurrent = true;
       bool fence_registered = false;
@@ -6372,9 +7225,7 @@ namespace Legion {
             const unsigned number_to_find = 1 << round;
             if ((viable_templates.empty() || (viable_templates.back() >= 0)) &&
                 physical_trace->find_viable_templates(this, 
-                                                      map_applied_conditions,
-                                                      number_to_find, 
-                                                      viable_templates))
+                  map_applied_conditions, number_to_find, viable_templates))
             {
               // If we checked all the templates figure out what kind of 
               // guard to add:
@@ -6524,7 +7375,7 @@ namespace Legion {
                                             LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, MAPPING_FENCE, false/*need future*/);
+      initialize(ctx, MAPPING_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -6537,14 +7388,14 @@ namespace Legion {
     void ReplTraceBeginOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      ReplTraceOp::activate();
     }
 
     //--------------------------------------------------------------------------
     void ReplTraceBeginOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_fence();
       runtime->free_repl_begin_op(this);
     }
 
@@ -6604,11 +7455,10 @@ namespace Legion {
                                                 Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      // Do NOT call initialize_repl_fence here, we're in the dependence
+      // Do NOT call 'initialize' here, we're in the dependence
       // analysis stage of the pipeline and we need to get our mapping
       // fence from a different location to avoid racing with the application
       initialize(ctx, MAPPING_FENCE, false/*need future*/, false/*track*/);
-      mapping_fence_barrier = ctx->get_next_summary_fence_barrier();
       context_index = invalidator->get_ctx_index();
       current_template = tpl;
       // The summary could have been marked as being traced,
@@ -6621,7 +7471,7 @@ namespace Legion {
     void ReplTraceSummaryOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      ReplTraceOp::activate();
       current_template = NULL;
     }
 
@@ -6651,6 +7501,7 @@ namespace Legion {
     void ReplTraceSummaryOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      initialize_fence_barriers();
       perform_fence_analysis(true/*register fence also*/);
     }
 
@@ -6679,7 +7530,7 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Shard Manager 
+    // Shard Mapping
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
@@ -6762,6 +7613,182 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Collective Mapping
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping::CollectiveMapping(
+                            const std::vector<AddressSpaceID> &spaces, size_t r)
+      : radix(r)
+    //--------------------------------------------------------------------------
+    {
+      std::set<AddressSpaceID> unique_spaces(spaces.begin(), spaces.end());
+      unique_sorted_spaces.insert(unique_sorted_spaces.end(),
+                                  unique_spaces.begin(), unique_spaces.end());
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping::CollectiveMapping(const ShardMapping &mapping, size_t r)
+      : radix(r)
+    //--------------------------------------------------------------------------
+    {
+      std::set<AddressSpaceID> unique_spaces;
+      for (unsigned idx = 0; idx < mapping.size(); idx++)
+        unique_spaces.insert(mapping[idx]);
+      unique_sorted_spaces.insert(unique_sorted_spaces.end(),
+                                  unique_spaces.begin(), unique_spaces.end());
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping::CollectiveMapping(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      unique_sorted_spaces.resize(num_spaces);
+      for (unsigned idx = 0; idx < num_spaces; idx++)
+        derez.deserialize(unique_sorted_spaces[idx]);
+      if (num_spaces > 0)
+        derez.deserialize(radix);
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveMapping::operator==(const CollectiveMapping &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (radix != rhs.radix)
+        return false;
+      if (size() != rhs.size())
+        return false;
+      for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
+        if (unique_sorted_spaces[idx] != rhs[idx])
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveMapping::operator!=(const CollectiveMapping &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return !((*this) == rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID CollectiveMapping::get_parent(const AddressSpaceID origin, 
+                                               const AddressSpaceID local) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local);
+      const unsigned origin_index = find_index(origin);
+#ifdef DEBUG_LEGION
+      assert(local_index < unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      const unsigned offset = convert_to_offset(local_index, origin_index);
+      const unsigned index = convert_to_index((offset-1) / radix, origin_index);
+      return unique_sorted_spaces[index];
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveMapping::get_children(const AddressSpaceID origin,
+        const AddressSpaceID local, std::vector<AddressSpaceID> &children) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local);
+      const unsigned origin_index = find_index(origin);
+#ifdef DEBUG_LEGION
+      assert(local_index < unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      const unsigned offset = radix * 
+        convert_to_offset(local_index, origin_index);
+      for (unsigned idx = 1; idx <= radix; idx++)
+      {
+        const unsigned child_offset = offset + idx;
+        if (child_offset < unique_sorted_spaces.size())
+        {
+          const unsigned index = convert_to_index(child_offset, origin_index);
+          children.push_back(unique_sorted_spaces[index]); 
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveMapping::contains(const AddressSpaceID space) const
+    //--------------------------------------------------------------------------
+    {
+      return (find_index(space) < unique_sorted_spaces.size()); 
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveMapping::pack(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(unique_sorted_spaces.size());
+      for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
+        rez.serialize(unique_sorted_spaces[idx]);
+      if (!unique_sorted_spaces.empty())
+        rez.serialize(radix);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CollectiveMapping::find_index(const AddressSpaceID space) const
+    //--------------------------------------------------------------------------
+    {
+      // Binary search, will be fast
+      unsigned first = 0;
+      unsigned last = unique_sorted_spaces.size() - 1;
+      unsigned mid = 0;
+      while (first <= last)
+      {
+        mid = (first + last) / 2;
+        const AddressSpaceID midval = unique_sorted_spaces[mid];
+        if (space == midval)
+          return mid;
+        else if (space < midval)
+          last = mid - 1;
+        else if (midval < space)
+          first = mid + 1;
+        else
+          break;
+      }
+      return unique_sorted_spaces.size();
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CollectiveMapping::convert_to_offset(unsigned index, 
+                                                  unsigned origin_index) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      if (index < origin_index)
+      {
+        // Modulus arithmetic here
+        return ((index + unique_sorted_spaces.size()) - origin_index);
+      }
+      else
+        return (index - origin_index);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CollectiveMapping::convert_to_index(unsigned offset,
+                                                 unsigned origin_index) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(offset < unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      unsigned result = origin_index + offset;
+      if (result >= unique_sorted_spaces.size())
+        result -= unique_sorted_spaces.size();
+      return result;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Shard Manager 
     /////////////////////////////////////////////////////////////
 
@@ -6771,14 +7798,14 @@ namespace Legion {
                                SingleTask *original/*= NULL*/, RtBarrier bar)
       : runtime(rt), repl_id(id), owner_space(owner), total_shards(total),
         original_task(original),control_replicated(control),
-        top_level_task(top), address_spaces(NULL), 
+        top_level_task(top), address_spaces(NULL), collective_mapping(NULL), 
         local_mapping_complete(0), remote_mapping_complete(0),
         local_execution_complete(0), remote_execution_complete(0),
         trigger_local_complete(0), trigger_remote_complete(0),
         trigger_local_commit(0), trigger_remote_commit(0), 
         remote_constituents(0), semantic_attach_counter(0), 
         local_future_result(NULL), local_future_size(0), 
-        local_future_set(false), startup_barrier(bar) 
+        local_future_set(false), shard_task_barrier(bar) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6791,9 +7818,9 @@ namespace Legion {
       if (control_replicated && (owner_space == runtime->address_space))
       {
 #ifdef DEBUG_LEGION
-        assert(!startup_barrier.exists());
+        assert(!shard_task_barrier.exists());
 #endif
-        startup_barrier = 
+        shard_task_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         pending_partition_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
@@ -6817,6 +7844,8 @@ namespace Legion {
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // Fence barriers need arrivals from everyone
         mapping_fence_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        resource_return_barrier =
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         trace_recording_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
@@ -6844,7 +7873,17 @@ namespace Legion {
                 CollectiveCheckReduction::REDOP,
                 &CollectiveCheckReduction::IDENTITY, 
                 sizeof(CollectiveCheckReduction::IDENTITY)));
+        logical_check_barrier =
+          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+                CollectiveCheckReduction::REDOP,
+                &CollectiveCheckReduction::IDENTITY, 
+                sizeof(CollectiveCheckReduction::IDENTITY)));
         close_check_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+                CloseCheckReduction::REDOP,
+                &CloseCheckReduction::IDENTITY,
+                sizeof(CloseCheckReduction::IDENTITY)));
+        refinement_check_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards,
                 CloseCheckReduction::REDOP,
                 &CloseCheckReduction::IDENTITY,
@@ -6853,7 +7892,7 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       else if (control_replicated)
-        assert(startup_barrier.exists());
+        assert(shard_task_barrier.exists());
 #endif
     }
 
@@ -6883,7 +7922,7 @@ namespace Legion {
       {
         if (control_replicated)
         {
-          startup_barrier.destroy_barrier();
+          shard_task_barrier.destroy_barrier();
           pending_partition_barrier.destroy_barrier();
           creation_barrier.destroy_barrier();
           deletion_ready_barrier.destroy_barrier();
@@ -6892,6 +7931,7 @@ namespace Legion {
           inline_mapping_barrier.destroy_barrier();
           external_resource_barrier.destroy_barrier();
           mapping_fence_barrier.destroy_barrier();
+          resource_return_barrier.destroy_barrier();
           trace_recording_barrier.destroy_barrier();
           summary_fence_barrier.destroy_barrier();
           execution_fence_barrier.destroy_barrier();
@@ -6904,7 +7944,9 @@ namespace Legion {
           callback_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
           collective_check_barrier.destroy_barrier();
+          logical_check_barrier.destroy_barrier();
           close_check_barrier.destroy_barrier();
+          refinement_check_barrier.destroy_barrier();
 #endif
         }
         // Send messages to all the remote spaces to remove the manager
@@ -6927,8 +7969,14 @@ namespace Legion {
       }
       if ((address_spaces != NULL) && address_spaces->remove_reference())
         delete address_spaces;
+      if ((collective_mapping != NULL) && 
+          collective_mapping->remove_reference())
+        delete collective_mapping;
       if (local_future_result != NULL)
         free(local_future_result);
+#ifdef DEBUG_LEGION
+      assert(created_equivalence_sets.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6957,9 +8005,19 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(address_spaces == NULL);
+      assert(collective_mapping == NULL);
 #endif
       address_spaces = new ShardMapping(spaces);
       address_spaces->add_reference();
+      // We just need the collective radix, but use the existing routine
+      int collective_radix = runtime->legion_collective_radix;
+      int collective_log_radix, collective_stages;
+      int participating_spaces, collective_last_radix;
+      configure_collective_settings(spaces.size(), runtime->address_space,
+          collective_radix, collective_log_radix, collective_stages,
+          participating_spaces, collective_last_radix);
+      collective_mapping = new CollectiveMapping(spaces, collective_radix);
+      collective_mapping->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -6997,12 +8055,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::launch(void)
+    void ShardManager::launch(const std::vector<bool> &virtual_mapped)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!local_shards.empty());
       assert(address_spaces == NULL);
+      assert(collective_mapping == NULL);
+      assert(original_task->regions.size() == virtual_mapped.size());
 #endif
       address_spaces = new ShardMapping();
       address_spaces->add_reference();
@@ -7021,10 +8081,36 @@ namespace Legion {
         (*address_spaces)[(*it)->shard_id] = target;
       }
       local_shards.clear();
+      {
+        // We just need the collective radix, but use the existing routine
+        int collective_radix = runtime->legion_collective_radix;
+        int collective_log_radix, collective_stages;
+        int participating_spaces, collective_last_radix;
+        configure_collective_settings(address_spaces->size(), 
+            runtime->address_space, collective_radix, collective_log_radix,
+            collective_stages, participating_spaces, collective_last_radix);
+        collective_mapping = 
+          new CollectiveMapping(*address_spaces, collective_radix);
+        collective_mapping->add_reference();
+      }
       // Compute the unique shard spaces and make callback barrier
       // which has as many arrivers as unique shard spaces
       callback_barrier = 
         RtBarrier(Realm::Barrier::create_barrier(shard_groups.size()));
+      // Make initial equivalence sets for each of the mapped regions
+      mapped_equivalence_sets.resize(virtual_mapped.size(), NULL);
+      for (unsigned idx = 0; idx < virtual_mapped.size(); idx++)
+      {
+        // Make an equivalence set to contain the initial data
+        const RegionRequirement &req = original_task->regions[idx];
+        RegionNode *node = runtime->forest->get_node(req.region);
+        const FieldMask mask = 
+          node->column_source->get_field_mask(req.privilege_fields);
+        mapped_equivalence_sets[idx] =
+          new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
+              runtime->address_space, runtime->address_space, node,
+              true/*reg now*/, collective_mapping, &mask);
+      }
       // Now either send the shards to the remote nodes or record them locally
       for (std::map<AddressSpaceID,std::vector<ShardTask*> >::const_iterator 
             it = shard_groups.begin(); it != shard_groups.end(); it++)
@@ -7039,6 +8125,10 @@ namespace Legion {
         else
           local_shards = it->second;
       }
+      // This adds a CONTEXT_REF for each local shard
+      for (unsigned idx = 0; idx < virtual_mapped.size(); idx++)
+        mapped_equivalence_sets[idx]->initialize_collective_references(
+                                                    local_shards.size());
       if (!local_shards.empty())
       {
         for (std::vector<ShardTask*>::const_iterator it = 
@@ -7062,7 +8152,7 @@ namespace Legion {
         rez.serialize(total_shards);
         rez.serialize(control_replicated);
         rez.serialize(top_level_task);
-        rez.serialize(startup_barrier);
+        rez.serialize(shard_task_barrier);
         address_spaces->pack_mapping(rez);
         if (control_replicated)
         {
@@ -7075,6 +8165,7 @@ namespace Legion {
           assert(inline_mapping_barrier.exists());
           assert(external_resource_barrier.exists());
           assert(mapping_fence_barrier.exists());
+          assert(resource_return_barrier.exists());
           assert(trace_recording_barrier.exists());
           assert(summary_fence_barrier.exists());
           assert(execution_fence_barrier.exists());
@@ -7093,6 +8184,7 @@ namespace Legion {
           rez.serialize(inline_mapping_barrier);
           rez.serialize(external_resource_barrier);
           rez.serialize(mapping_fence_barrier);
+          rez.serialize(resource_return_barrier);
           rez.serialize(trace_recording_barrier);
           rez.serialize(summary_fence_barrier);
           rez.serialize(execution_fence_barrier);
@@ -7105,14 +8197,34 @@ namespace Legion {
 #ifdef DEBUG_LEGION_COLLECTIVES
           assert(collective_check_barrier.exists());
           rez.serialize(collective_check_barrier);
+          assert(logical_check_barrier.exists());
+          rez.serialize(logical_check_barrier);
           assert(close_check_barrier.exists());
           rez.serialize(close_check_barrier);
+          assert(refinement_check_barrier.exists());
+          rez.serialize(refinement_check_barrier);
 #endif
           for (std::vector<Processor>::const_iterator it = 
                 shard_mapping.begin(); it != shard_mapping.end(); it++)
             rez.serialize(*it);
         }
         rez.serialize<size_t>(shards.size());
+        rez.serialize<size_t>(mapped_equivalence_sets.size());
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              mapped_equivalence_sets.begin(); it != 
+              mapped_equivalence_sets.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((*it) != NULL);
+#endif
+          rez.serialize((*it)->did);
+          rez.serialize((*it)->region_node->handle);
+          // In general this is not safe, but we know these equivalence
+          // sets have not been put into ciculation yet so the
+          // replicated_states data structure is not changing and
+          // therefore we don't need to hold the lock when getting this
+          rez.serialize((*it)->get_replicated_fields());
+        }
         for (std::vector<ShardTask*>::const_iterator it = 
               shards.begin(); it != shards.end(); it++)
         {
@@ -7134,10 +8246,23 @@ namespace Legion {
       assert(owner_space != runtime->address_space);
       assert(local_shards.empty());
       assert(address_spaces == NULL);
+      assert(collective_mapping == NULL);
 #endif
       address_spaces = new ShardMapping();
       address_spaces->add_reference();
       address_spaces->unpack_mapping(derez);
+      {
+        // We just need the collective radix, but use the existing routine
+        int collective_radix = runtime->legion_collective_radix;
+        int collective_log_radix, collective_stages;
+        int participating_spaces, collective_last_radix;
+        configure_collective_settings(address_spaces->size(), 
+            runtime->address_space, collective_radix, collective_log_radix, 
+            collective_stages, participating_spaces, collective_last_radix);
+        collective_mapping = 
+          new CollectiveMapping(*address_spaces, collective_radix);
+        collective_mapping->add_reference();
+      }
       if (control_replicated)
       {
         derez.deserialize(pending_partition_barrier);
@@ -7148,6 +8273,7 @@ namespace Legion {
         derez.deserialize(inline_mapping_barrier);
         derez.deserialize(external_resource_barrier);
         derez.deserialize(mapping_fence_barrier);
+        derez.deserialize(resource_return_barrier);
         derez.deserialize(trace_recording_barrier);
         derez.deserialize(summary_fence_barrier);
         derez.deserialize(execution_fence_barrier);
@@ -7159,7 +8285,9 @@ namespace Legion {
         derez.deserialize(callback_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
         derez.deserialize(collective_check_barrier);
+        derez.deserialize(logical_check_barrier);
         derez.deserialize(close_check_barrier);
+        derez.deserialize(refinement_check_barrier);
 #endif
         shard_mapping.resize(total_shards);
         for (unsigned idx = 0; idx < total_shards; idx++)
@@ -7167,6 +8295,25 @@ namespace Legion {
       }
       size_t num_shards;
       derez.deserialize(num_shards);
+      size_t num_equivalence_sets;
+      derez.deserialize(num_equivalence_sets);
+      mapped_equivalence_sets.resize(num_equivalence_sets);
+      for (unsigned idx = 0; idx < num_equivalence_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        FieldMask mask;
+        derez.deserialize(mask);
+        RegionNode *region_node = runtime->forest->get_node(handle);
+        mapped_equivalence_sets[idx] = new EquivalenceSet(runtime, did,
+            owner_space, owner_space, region_node, true/*register now*/,
+            collective_mapping, &mask);
+        // This adds a CONTEXT_REF for each local shard
+        mapped_equivalence_sets[idx]->initialize_collective_references(
+                                                            num_shards);
+      }
       local_shards.resize(num_shards);
       for (unsigned idx = 0; idx < num_shards; idx++)
       {
@@ -7195,13 +8342,64 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::complete_startup_initialization(void) const
+    EquivalenceSet* ShardManager::get_initial_equivalence_set(unsigned idx)const
     //--------------------------------------------------------------------------
     {
-      // Do our arrival
-      Runtime::phase_barrier_arrive(startup_barrier, 1/*count*/);
-      // Then wait for everyone else to be ready
-      startup_barrier.wait();
+#ifdef DEBUG_LEGION
+      assert(idx < mapped_equivalence_sets.size());
+      assert(mapped_equivalence_sets[idx] != NULL);
+#endif
+      return mapped_equivalence_sets[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* ShardManager::deduplicate_equivalence_set_creation(
+                                 RegionNode *region_node, const FieldMask &mask,
+                                 DistributedID did, bool &first)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+#endif
+      const AddressSpaceID owner_space = runtime->determine_owner(did);
+      EquivalenceSet *result = NULL;
+      if (local_shards.size() > 1)
+      {
+        AutoLock m_lock(manager_lock);
+        // See if we already have this here or not
+        std::map<DistributedID,std::pair<EquivalenceSet*,size_t> >::iterator
+          finder = created_equivalence_sets.find(did);
+        if (finder != created_equivalence_sets.end())
+        {
+          result = finder->second.first;
+#ifdef DEBUG_LEGION
+          assert(finder->second.second > 0);
+#endif
+          if (--finder->second.second == 0)
+            created_equivalence_sets.erase(finder);
+          first = false;
+          return result;
+        }
+        // Didn't find it so make it
+        result = new EquivalenceSet(runtime, did, owner_space, owner_space,
+              region_node, true/*register now*/, collective_mapping, &mask);
+        // This adds as many context refs as there are shards
+        result->initialize_collective_references(local_shards.size());
+        // Record it for the shards that come later
+        std::pair<EquivalenceSet*,size_t> &pending = 
+          created_equivalence_sets[did];
+        pending.first = result;
+        pending.second = local_shards.size() - 1;
+      }
+      else // Only one shard here on this node so just make it
+      {
+        result = new EquivalenceSet(runtime, did, owner_space, owner_space,
+              region_node, true/*register now*/, collective_mapping, &mask);
+        // This adds as many context refs as there are shards
+        result->initialize_collective_references(1/*local shard count*/);
+      }
+      first = true;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -7337,7 +8535,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::trigger_task_complete(bool local, ApEvent shard_complete)
+    RtEvent ShardManager::trigger_task_complete(bool local, ApEvent effects) 
     //--------------------------------------------------------------------------
     {
       bool notify = false;
@@ -7357,8 +8555,8 @@ namespace Legion {
           assert(trigger_remote_complete <= remote_constituents);
 #endif
         }
-        if (shard_complete.exists())
-          shard_effects.insert(shard_complete);
+        if (effects.exists())
+          shard_effects.insert(effects);
         notify = (trigger_local_complete == local_shards.size()) &&
                  (trigger_remote_complete == remote_constituents);
       }
@@ -7368,10 +8566,13 @@ namespace Legion {
           Runtime::merge_events(NULL, shard_effects);
         if (original_task == NULL)
         {
+          const RtUserEvent done_event = Runtime::create_rt_user_event();
           Serializer rez;
           rez.serialize(repl_id);
           rez.serialize(all_shard_effects);
+          rez.serialize(done_event);
           runtime->send_replicate_trigger_complete(owner_space, rez);
+          return done_event;
         }
         else
         {
@@ -7382,19 +8583,21 @@ namespace Legion {
           // the tree or report leaks and duplicates of resources.
           // All the shards have the same set so we only have to do this
           // for one of the shards.
-          std::set<RtEvent> applied;
+          std::set<RtEvent> applied_events;
           if (original_task->is_top_level_task())
-            local_shards[0]->report_leaks_and_duplicates(applied);
+            local_shards[0]->report_leaks_and_duplicates(applied_events);
           else
             local_shards[0]->return_resources(
-                original_task->get_context(), applied);
-          if (!applied.empty())
-            original_task->complete_execution(Runtime::merge_events(applied));
-          else
-            original_task->complete_execution();
+                original_task->get_context(), applied_events); 
+          RtEvent applied_event;
+          if (!applied_events.empty())
+            applied_event = Runtime::merge_events(applied_events);
+          original_task->complete_execution(applied_event);
           original_task->trigger_children_complete(all_shard_effects);
+          return applied_event;
         }
       }
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -7517,8 +8720,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::send_equivalence_set_request(ShardID target, 
-                                                    Serializer &rez)
+    void ShardManager::send_disjoint_complete_request(ShardID target, 
+                                                      Serializer &rez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7531,16 +8734,16 @@ namespace Legion {
         Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
         // Have to unpack the preample we already know
         ReplicationID local_repl;
-        derez.deserialize(local_repl);     
-        handle_equivalence_set_request(derez);
+        derez.deserialize(local_repl);
+        handle_disjoint_complete_request(derez);
       }
       else
-        runtime->send_control_replicate_equivalence_set_request(target_space, 
-                                                                rez);
+        runtime->send_control_replicate_disjoint_complete_request(target_space,
+                                                                  rez);
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::handle_equivalence_set_request(Deserializer &derez)
+    void ShardManager::handle_disjoint_complete_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Figure out which shard we are going to
@@ -7551,7 +8754,7 @@ namespace Legion {
       {
         if ((*it)->shard_id == target)
         {
-          (*it)->handle_equivalence_set_request(derez);
+          (*it)->handle_disjoint_complete_request(derez);
           return;
         }
       }
@@ -7607,6 +8810,22 @@ namespace Legion {
                              Serializer &rez, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+      broadcast_message(source, rez, RESOURCE_UPDATE_KIND, applied_events); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::broadcast_created_region_contexts(ShardTask *source, 
+                             Serializer &rez, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      broadcast_message(source, rez, CREATED_REGION_UPDATE_KIND,applied_events); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::broadcast_message(ShardTask *source, Serializer &rez,
+                   BroadcastMessageKind kind, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
       std::vector<AddressSpaceID> shard_spaces;
       {
         AutoLock m_lock(manager_lock);
@@ -7650,10 +8869,11 @@ namespace Legion {
           rez2.serialize(repl_id);
           rez2.serialize<unsigned>(start_idx);
           rez2.serialize<unsigned>(locals[idx]);
+          rez2.serialize(kind);
           rez2.serialize<size_t>(rez.get_used_bytes());
           rez2.serialize(rez.get_buffer(), rez.get_used_bytes());
           rez2.serialize(next_done);
-          runtime->send_control_replicate_resource_update(targets[idx], rez2);
+          runtime->send_control_replicate_broadcast_update(targets[idx], rez2);
           applied_events.insert(next_done);
         }
       }
@@ -7665,17 +8885,33 @@ namespace Legion {
         if ((*it) == source)
           continue;
         Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
-        (*it)->handle_resource_update(derez, applied_events);
+        switch (kind)
+        {
+          case RESOURCE_UPDATE_KIND:
+            {
+              (*it)->handle_resource_update(derez, applied_events);
+              break;
+            }
+          case CREATED_REGION_UPDATE_KIND:
+            {
+              (*it)->handle_created_region_contexts(derez, applied_events);
+              break;
+            }
+          default:
+            assert(false);
+        }
       }
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::handle_resource_update(Deserializer &derez)
+    void ShardManager::handle_broadcast(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       unsigned start_idx, local_idx;
       derez.deserialize(start_idx);
       derez.deserialize(local_idx);
+      BroadcastMessageKind kind;
+      derez.deserialize(kind);
       size_t message_size;
       derez.deserialize(message_size);
       const void *message = derez.get_current_pointer();
@@ -7716,10 +8952,11 @@ namespace Legion {
           rez.serialize(repl_id);
           rez.serialize<unsigned>(start_idx);
           rez.serialize<unsigned>(locals[idx]);
+          rez.serialize(kind);
           rez.serialize<size_t>(message_size);
           rez.serialize(message, message_size);
           rez.serialize(next_done);
-          runtime->send_control_replicate_resource_update(targets[idx], rez);
+          runtime->send_control_replicate_broadcast_update(targets[idx], rez);
           remote_handled.insert(next_done);
         } 
       }
@@ -7728,7 +8965,21 @@ namespace Legion {
             local_shards.begin(); it != local_shards.end(); it++)
       {
         Deserializer derez2(message, message_size);
-        (*it)->handle_resource_update(derez2, remote_handled);
+        switch (kind)
+        {
+          case RESOURCE_UPDATE_KIND:
+            {
+              (*it)->handle_resource_update(derez2, remote_handled);
+              break;
+            }
+          case CREATED_REGION_UPDATE_KIND:
+            {
+              (*it)->handle_created_region_contexts(derez2, remote_handled);
+              break;
+            }
+          default:
+            assert(false);
+        }
       }
       if (!remote_handled.empty())
         Runtime::trigger_event(done_event, 
@@ -7944,11 +9195,11 @@ namespace Legion {
       derez.deserialize(control_repl);
       bool top_level_task;
       derez.deserialize(top_level_task);
-      RtBarrier startup_barrier;
-      derez.deserialize(startup_barrier);
+      RtBarrier shard_task_barrier;
+      derez.deserialize(shard_task_barrier);
       ShardManager *manager = 
         new ShardManager(runtime, repl_id, control_repl, top_level_task,
-                total_shards, source, NULL/*original*/, startup_barrier);
+                total_shards, source, NULL/*original*/, shard_task_barrier);
       manager->unpack_shards_and_launch(derez);
     }
 
@@ -7994,7 +9245,6 @@ namespace Legion {
                                      false/*owned*/, false/*local*/);
     }
 
-    //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_trigger_complete(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
@@ -8003,8 +9253,11 @@ namespace Legion {
       derez.deserialize(repl_id);
       ApEvent all_shards_done;
       derez.deserialize(all_shards_done);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->trigger_task_complete(false/*local*/, all_shards_done);
+      Runtime::trigger_event(done_event,
+          manager->trigger_task_complete(false/*local*/, all_shards_done));
     }
 
     //--------------------------------------------------------------------------
@@ -8102,14 +9355,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_eq_request(Deserializer &derez,
-                                                    Runtime *runtime)
+    /*static*/ void ShardManager::handle_disjoint_complete_request(
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       ReplicationID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_equivalence_set_request(derez);
+      manager->handle_disjoint_complete_request(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -8124,14 +9377,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_resource_update(Deserializer &derez,
-                                                         Runtime *runtime)
+    /*static*/ void ShardManager::handle_broadcast_update(Deserializer &derez,
+                                                          Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       ReplicationID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_resource_update(derez);
+      manager->handle_broadcast(derez);
     }
 
     //--------------------------------------------------------------------------

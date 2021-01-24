@@ -90,6 +90,8 @@ ALL_REDUCE_OP_KIND = 22
 PREDICATE_OP_KIND = 23
 MUST_EPOCH_OP_KIND = 24
 CREATION_OP_KIND = 25
+REFINEMENT_OP_KIND = 26
+ADVISEMENT_OP_KIND = 27
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -124,6 +126,8 @@ OpNames = [
 "Predicate Op",
 "Must Epoch Op",
 "Creation Op",
+"Refinement Op",
+"Advisement Op",
 ]
 
 INDEX_SPACE_EXPR = 0
@@ -3199,7 +3203,7 @@ class LogicalRegion(object):
         path.append(self)
 
     def perform_logical_analysis(self, depth, path, op, req, field, open_local, 
-                                 unopened, advance, closed, prev, aliased, checks):
+                         unopened, advance, closed, prev, aliased, init, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
@@ -3207,19 +3211,24 @@ class LogicalRegion(object):
         next_child = path[depth+1] if not arrived else None
         result,next_open,next_unopened,next_advance,next_closed = \
             self.logical_state[field].perform_logical_analysis(op, req, next_child, 
-                            open_local, unopened, advance, closed, prev, aliased, checks)
+                open_local, unopened, advance, closed, prev, aliased, init, checks)
         if not result:
             return False
         if not arrived:
             return path[depth+1].perform_logical_analysis(depth+1, path, op, req, 
                         field, next_open, next_unopened, next_advance, next_closed, 
-                        prev, aliased, checks)
+                        prev, aliased, init, checks)
         return True
 
     def register_logical_user(self, op, req, field):
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
         self.logical_state[field].register_logical_user(op, req)
+
+    def register_refinement_user(self, op, field):
+        if field not in self.logical_state:
+            self.logical_state[field] = LogicalState(self, field)
+        self.logical_state[field].register_refinement_user(op)
 
     def perform_logical_deletion(self, depth, path, op, req, field, closed, prev, checks):
         assert self is path[depth]
@@ -3621,7 +3630,7 @@ class LogicalPartition(object):
         path.append(self)
 
     def perform_logical_analysis(self, depth, path, op, req, field, open_local, 
-                                  unopened, advance, closed, prev, aliased, checks):
+                          unopened, advance, closed, prev, aliased, init, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
@@ -3629,19 +3638,24 @@ class LogicalPartition(object):
         next_child = path[depth+1] if not arrived else None
         result,next_open,next_unopened,next_advance,next_closed = \
           self.logical_state[field].perform_logical_analysis(op, req, next_child, 
-                          open_local, unopened, advance, closed, prev, aliased, checks)
+              open_local, unopened, advance, closed, prev, aliased, init, checks)
         if not result:
             return False
         if not arrived:
             return path[depth+1].perform_logical_analysis(depth+1, path, op, req, 
                                     field, next_open, next_unopened, next_advance, 
-                                    next_closed, prev, aliased, checks)
+                                    next_closed, prev, aliased, init, checks)
         return True
 
     def register_logical_user(self, op, req, field):
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
         self.logical_state[field].register_logical_user(op, req)
+
+    def register_refinement_user(self, op, field):
+        if field not in self.logical_state:
+            self.logical_state[field] = LogicalState(self, field)
+        self.logical_state[field].register_refinement_user(op)
 
     def perform_logical_deletion(self, depth, path, op, req, field, closed, prev, checks):
         assert self is path[depth]
@@ -3844,7 +3858,7 @@ class LogicalState(object):
         self.projection_epoch = list()
 
     def perform_logical_analysis(self, op, req, next_child, open_local, unopened, advance, 
-                                 closed, previous_deps, aliased_children, perform_checks):
+                     closed, previous_deps, aliased_children, init_fields, perform_checks):
         # At most one of these should be true, they can both be false
         assert not open_local or not unopened
         arrived = next_child is None
@@ -3882,6 +3896,28 @@ class LogicalState(object):
                                            arrived, previous_deps):
             return (False,None,None,None,closed)
         if arrived: 
+            # Check to see if we have a refinement operation to handle
+            tree_field = (self.node.tree_id,self.field.fid)
+            refinement = op.has_refinement_operation(req, self.node, self.field)
+            if refinement is not None:
+                # Check to see that the refinement has dependences on
+                # everything that we also depended on
+                if not self.analyze_refinement(refinement, previous_deps, 
+                                               op, req, perform_checks):
+                    return False
+                init_fields.add(tree_field)
+                # Register the refinement user
+                refinement.reqs[0].logical_node.register_refinement_user(refinement,self.field)
+            elif tree_field not in init_fields:
+                # Verify that we have an initial close operation that
+                # would initialize the version information for this field
+                close = op.get_close_operation(req, req.parent, self.field, False)
+                if not self.analyze_initial_close(close, op, req, perform_checks):
+                    return False
+                init_fields.add(tree_field)
+                # Register the refinement user
+                if close is not None:
+                    close.reqs[0].logical_node.register_refinement_user(close, self.field)
             # Add ourselves as the current user
             self.register_logical_user(op, req)
             # Record if we have outstanding reductions
@@ -3894,6 +3930,10 @@ class LogicalState(object):
 
     def register_logical_user(self, op, req):
         self.current_epoch_users.append((op,req))
+
+    def register_refinement_user(self, op):
+        assert op.is_internal()
+        self.previous_epoch_users.append((op,op.reqs[0]))
 
     def perform_logical_deletion(self, op, req, next_child, already_closed, 
                                  previous_deps, perform_checks, force_close):
@@ -4454,6 +4494,85 @@ class LogicalState(object):
         self.projection_mode = OPEN_NONE
         self.projection_epoch = list()
         
+    def analyze_refinement(self, refinement, previous_deps, op, req, perform_checks):
+        refinement_req = refinement.reqs[0]
+        # Check for dependences on all previous users
+        for prev_op,prev_req in previous_deps:
+            # Check for replays
+            if prev_op is op:
+                # If it is a previous registration of ourself, skip it
+                # This will only happen during replays
+                if prev_req.index == req.index:
+                    continue
+                assert False
+            dep_type = compute_dependence_type(prev_req, refinement_req)
+            if perform_checks:
+                if not refinement.has_mapping_dependence(refinement_req, prev_op,
+                                                    prev_req, dep_type, self.field):
+                    print(("ERROR: refinement operation %s generated by "+
+                           "field %s of region requirement %s of %s failed to "+
+                           "find a mapping dependence on previous operation %s") %
+                           (refinement, self.field, req.index, op, prev_op))
+                    if self.node.state.assert_on_error:
+                        assert False
+                    return False
+            else:
+                # Not performing checks so just record the mapping dependence
+                dep = MappingDependence(prev_op, refinement, prev_req.index,
+                                        refinement_req.index, dep_type)
+                prev_op.add_outgoing(dep)
+                refinement.add_incoming(dep)
+        # Now check the op against the refinement
+        dep_type = compute_dependence_type(refinement_req, req)
+        if perform_checks:
+            if not op.has_mapping_dependence(req, refinement, refinement_req,
+                                             dep_type, self.field):
+                print(("ERROR: region requirement %s of operation %s is missing "+
+                       "a mapping dependence on generated refinement %s for field %s") %
+                       (req.index, op, refinement, self.field))
+                if self.node.state.assert_on_error:
+                    assert False
+                return False
+        else:
+            dep = MappingDependence(refinement, op, refinement_req.index,
+                                    req.index, dep_type)
+            refinement.add_outgoing(dep)
+            op.add_incoming(dep)
+        return True
+
+    def analyze_initial_close(self, close, op, req, perform_checks):
+        if close is None:
+            # Check for the case where this is an output region
+            if op.mappings[req.index][self.field.fid].is_virtual():
+                return True
+            if perform_checks:
+                print(("ERROR: %s (UID %s) failed to generate an initial close "+
+                       "operation for field %s of region requirement %s") %
+                       (op, str(op.uid), self.field, req.index))
+            else:
+                print(("ERROR: %s (UID %s) failed to generate an initial close "+
+                       "operation that we normally would have expected for field "+
+                       "%s of region requirement %s. Re-run with detailed Legion "+
+                       "Spy logs to confirm.") % (op, str(op.uid), self.field, req.index))
+            if self.node.state.assert_on_error:
+                assert False
+            return False
+        close_req = close.reqs[0]
+        dep_type = compute_dependence_type(close_req, req)
+        if perform_checks:
+            if not op.has_mapping_dependence(req, close, close_req, dep_type, self.field):
+                print(("ERROR: region requirement %s of operation %s is missing a "+
+                       "mapping dependence on initial close op %s for field %s") %
+                       (req.index, op, close, self.field))
+                if self.node.state.assert_on_error:
+                    assert False
+                return False
+        else:
+            dep = MappingDependence(close, op, close_req.index, req.index, dep_type)
+            close.add_outgoing(dep)
+            op.add_incoming(dep)
+        return True
+
     def perform_epoch_analysis(self, op, req, perform_checks, 
                                can_dominate, recording_set,
                                replay_op = None):
@@ -5554,7 +5673,7 @@ class Operation(object):
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'copy_kind', 'collective_src', 'collective_dst', 'collective_copies', 
                  'eq_incoming', 'eq_outgoing', 'eq_privileges',
-                 'start_event', 'finish_event', 'inter_close_ops', 'inlined',
+                 'start_event', 'finish_event', 'internal_ops', 'inlined',
                  'summary_op', 'task', 'task_id', 'predicate', 'predicate_result',
                  'futures', 'owner_shard', 'index_owner', 'points', 'launch_rect', 
                  'creator', 'realm_copies', 'realm_fills', 'realm_depparts', 
@@ -5584,7 +5703,7 @@ class Operation(object):
         self.eq_privileges = None
         self.start_event = state.get_no_event() 
         self.finish_event = state.get_no_event()
-        self.inter_close_ops = None
+        self.internal_ops = None
         self.summary_op = None
         self.realm_copies = None
         self.realm_depparts = None
@@ -5635,7 +5754,7 @@ class Operation(object):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
 
     def is_internal(self):
-        return self.is_close()
+        return self.is_close() or self.kind == REFINEMENT_OP_KIND
 
     def set_name(self, name):
         self.name = name
@@ -5657,9 +5776,9 @@ class Operation(object):
     def set_context(self, context, add=True):
         self.context = context
         # Recurse for any inter close operations
-        if self.inter_close_ops:
-            for close in self.inter_close_ops:
-                close.set_context(context, False)
+        if self.internal_ops:
+            for internal in self.internal_ops:
+                internal.set_context(context, False)
         # Also recurse for any points we have
         if self.points is not None:
             for point in itervalues(self.points):
@@ -5701,13 +5820,13 @@ class Operation(object):
     def set_creator(self, creator, idx):
         # Better be an internal op kind
         assert self.kind == INTER_CLOSE_OP_KIND or \
-            self.kind == POST_CLOSE_OP_KIND
+            self.kind == POST_CLOSE_OP_KIND or self.kind == REFINEMENT_OP_KIND
         self.creator = creator
         self.internal_idx = idx
         # If our parent context created us we don't need to be recorded 
         if creator is not self.context.op:
             assert self.kind != POST_CLOSE_OP_KIND
-            creator.add_close_operation(self)
+            creator.add_internal_operation(self)
         else:
             assert self.kind == POST_CLOSE_OP_KIND
 
@@ -5734,10 +5853,10 @@ class Operation(object):
         assert self.launch_rect
         return self.launch_rect
 
-    def add_close_operation(self, close):
-        if self.inter_close_ops is None:
-            self.inter_close_ops = list()
-        self.inter_close_ops.append(close)
+    def add_internal_operation(self, internal):
+        if self.internal_ops is None:
+            self.internal_ops = list()
+        self.internal_ops.append(internal)
 
     def set_summary_operation(self, summary):
         self.summary_op = summary
@@ -5750,9 +5869,11 @@ class Operation(object):
         return self
 
     def get_close_operation(self, req, node, field, read_only):
-        if self.inter_close_ops is None:
+        if self.internal_ops is None:
             return None
-        for close in self.inter_close_ops:
+        for close in self.internal_ops:
+            if not close.is_close():
+                continue
             #if close.internal_idx != req.index:
                 #continue
             assert len(close.reqs) == 1
@@ -5764,6 +5885,28 @@ class Operation(object):
             if not read_only and close.kind != INTER_CLOSE_OP_KIND:
                 continue
             return close
+        return None
+
+    def has_refinement_operation(self, req, node, field):
+        if self.internal_ops is None:
+            return None
+        for refinement in self.internal_ops:
+            if refinement.kind != REFINEMENT_OP_KIND:
+                continue
+            assert len(refinement.reqs) == 1
+            refinement_req = refinement.reqs[0]
+            if refinement_req.logical_node.tree_id != node.tree_id:
+                continue
+            if field not in refinement_req.fields:
+                continue
+            # Lastly check to see if the refinement node is an ancestor
+            if refinement_req.logical_node is node:
+                return refinement
+            ancestor = node.parent
+            while ancestor is not None:
+                if ancestor is refinement_req.logical_node:
+                    return refinement
+                ancestor = ancestor.parent
         return None
 
     def set_pending_partition_info(self, node, kind):
@@ -6000,10 +6143,10 @@ class Operation(object):
                 self.finish_event.update_incoming_op(other, self)
         else:
             assert not other.finish_event.exists() 
-        if not self.inter_close_ops:
-            self.inter_close_ops = other.inter_close_ops
+        if not self.internal_ops:
+            self.internal_ops = other.internal_ops
         else:
-            assert not other.inter_close_ops
+            assert not other.internal_ops
         if not self.realm_copies:
             self.realm_copies = other.realm_copies
             if self.realm_copies:
@@ -6434,15 +6577,15 @@ class Operation(object):
         self.points = new_points
         return False
 
-    def analyze_logical_requirement(self, index, perform_checks):
+    def analyze_logical_requirement(self, index, init_fields, perform_checks):
         assert index in self.reqs
         req = self.reqs[index]
         # Special out for no access
-        if req.priv is NO_ACCESS:
+        if req.priv == NO_ACCESS:
             return True
         # Destination requirements for copies are a little weird because
         # they actually need to behave like READ_WRITE privileges
-        if self.kind == COPY_OP_KIND and len(self.reqs)/2 <= index:
+        if self.kind == COPY_OP_KIND and len(self.reqs) // 2 <= index:
             if req.priv == REDUCE:
                 copy_reduce = True
                 req.priv = READ_WRITE
@@ -6493,7 +6636,7 @@ class Operation(object):
             previous_deps = list()
             if not req.parent.perform_logical_analysis(0, path, self, req, field,
                                         False, True, False, False, previous_deps,
-                                        aliased_children, perform_checks):
+                                        aliased_children, init_fields, perform_checks):
                 return False
         # Restore the privileges if necessary
         if copy_reduce:
@@ -6509,7 +6652,7 @@ class Operation(object):
         assert index in logical_op.reqs
         # Destination requirements for copies are a little weird because
         # they actually need to behave like READ_WRITE privileges
-        if self.kind == COPY_OP_KIND and len(self.reqs)/2 <= index:
+        if self.kind == COPY_OP_KIND and len(self.reqs) // 2 <= index:
             if req.priv == REDUCE:
                 copy_reduce = True
                 req.priv = READ_WRITE
@@ -6579,8 +6722,8 @@ class Operation(object):
                 return False
         return True
 
-    def perform_logical_analysis(self, perform_checks):
-        if self.replayed:
+    def perform_logical_analysis(self, init_fields, perform_checks):
+        if self.replayed and perform_checks:
             return True
         # We need a context to do this
         assert self.context is not None
@@ -6619,7 +6762,7 @@ class Operation(object):
                     return False
             return True
         for idx in xrange(0,len(self.reqs)):
-            if not self.analyze_logical_requirement(idx, perform_checks):
+            if not self.analyze_logical_requirement(idx, init_fields, perform_checks):
                 return False
         return True
 
@@ -7616,10 +7759,10 @@ class Operation(object):
         return self.check_for_spurious_realm_ops(perform_checks)
 
     def print_op_mapping_decisions(self, depth):
-        if self.inter_close_ops:
+        if self.internal_ops:
             assert not self.is_close()
-            for close in self.inter_close_ops:
-                close.print_op_mapping_decisions(depth)
+            for internal in self.internal_ops:
+                internal.print_op_mapping_decisions(depth)
         # If we are an index task just do our points and return
         if self.kind == INDEX_TASK_KIND:
             assert self.points is not None
@@ -7682,6 +7825,8 @@ class Operation(object):
             ALL_REDUCE_OP_KIND : "cyan",
             PREDICATE_OP_KIND : "olivedrab1",
             MUST_EPOCH_OP_KIND : "tomato",
+            REFINEMENT_OP_KIND : "royalblue",
+            ADVISEMENT_OP_KIND : "magenta",
             }[self.kind]
 
     @property
@@ -7707,15 +7852,15 @@ class Operation(object):
 
     def print_dataflow_node(self, printer):
         # Print any close operations that we have, then print ourself 
-        if self.inter_close_ops:
-            for close in self.inter_close_ops:
-                close.print_dataflow_node(printer)
+        if self.internal_ops:
+            for internal in self.internal_ops:
+                internal.print_dataflow_node(printer)
         self.print_base_node(printer, True) 
 
     def print_incoming_dataflow_edges(self, printer, previous):
-        if self.inter_close_ops:
-            for close in self.inter_close_ops:
-                close.print_incoming_dataflow_edges(printer, previous)
+        if self.internal_ops:
+            for internal in self.internal_ops:
+                internal.print_incoming_dataflow_edges(printer, previous)
         if self.incoming:
             for dep in self.incoming:
                 dep.print_dataflow_edge(printer, previous)
@@ -7766,9 +7911,9 @@ class Operation(object):
             if self.owner_shard != self.context.shard:
                 return
         # Do any of our close operations too
-        if self.inter_close_ops:
-            for close in self.inter_close_ops:
-                close.print_event_graph(printer, elevate, all_nodes, False)
+        if self.internal_ops:
+            for internal in self.internal_ops:
+                internal.print_event_graph(printer, elevate, all_nodes, False)
         # Handle index space operations specially, everything
         # else is the same
         if self.kind is INDEX_TASK_KIND or self.points:
@@ -7909,7 +8054,7 @@ class Operation(object):
         assert self.kind == COPY_OP_KIND
         replay_file.write(struct.pack('Q',self.uid))
         assert len(self.reqs) % 2 == 0
-        half = len(self.reqs) / 2
+        half = len(self.reqs) // 2
         replay_file.write(struct.pack('I',half))
         
     def pack_close_replay_info(self, replay_file):
@@ -8255,19 +8400,28 @@ class Task(object):
         print('Performing logical dependence analysis for %s...' % str(self))
         if self.op.state.verbose:
             print('  Analyzing %d operations...' % len(self.operations))
+        # Record which fields are already initialized
+        init_fields = set()
+        if self.op.reqs:
+            for req in itervalues(self.op.reqs):
+                if req.priv == NO_ACCESS:
+                    continue
+                tid = req.logical_node.tree_id
+                for field in req.fields:
+                    init_fields.add((tid,field.fid))
         # Iterate over all the operations in order and
         # have them perform their analysis
         success = True
         for op in self.operations:
             if op.inlined:
                 continue
-            if not op.fully_logged:
+            if not op.fully_logged and perform_checks:
                 print(('Warning: skipping logical analysis of %s because it '+
                         'was not fully logged...') % str(op))
                 if op.state.assert_on_warning:
                     assert False
                 continue
-            if not op.perform_logical_analysis(perform_checks):
+            if not op.perform_logical_analysis(init_fields, perform_checks):
                 success = False
                 break
         # Reset the logical state when we are done
@@ -8390,7 +8544,7 @@ class Task(object):
             for op in self.operations:
                 if op.inlined:
                     continue
-                if not op.fully_logged:
+                if not op.fully_logged and perform_checks:
                     print(('Warning: skipping physical verification of %s '+
                             'because it was not fully logged...') % str(op))
                     if op.state.assert_on_warning:
@@ -8421,7 +8575,7 @@ class Task(object):
             return 0
         if len(self.operations) == 1:
             op = self.operations[0]
-            if not op.inter_close_ops or not op.fully_logged:
+            if not op.internal_ops or not op.fully_logged:
                 return 0
         name = str(self)
         filename = 'dataflow_'+name.replace(' ', '_')+'_'+str(self.op.uid)
@@ -8444,10 +8598,10 @@ class Task(object):
             for op in self.operations:
                 if not op.fully_logged:
                     continue
-                # Add any close operations first
-                if op.inter_close_ops:
-                    for close in op.inter_close_ops:
-                        all_ops.append(close)
+                # Add any internal operations first
+                if op.internal_ops:
+                    for internal in op.internal_ops:
+                        all_ops.append(internal)
                 # Then add the operation itself
                 all_ops.append(op)
                 # If this is an index space operation prune any
@@ -10677,6 +10831,8 @@ mapping_pat              = re.compile(
     prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 close_pat                = re.compile(
     prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
+refinement_pat           = re.compile(
+    prefix+"Refinement Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 internal_creator_pat     = re.compile(
     prefix+"Internal Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
 fence_pat                = re.compile(
@@ -11326,6 +11482,14 @@ def parse_legion_spy_line(line, state):
         # close operation, otherwise add it to the context like normal
         # because it as an actual operation
         op.set_context(context, not inter)
+        return True
+    m = refinement_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(REFINEMENT_OP_KIND)
+        op.set_name("Refinement Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context, False)
         return True
     m = internal_creator_pat.match(line)
     if m is not None:
@@ -12565,18 +12729,18 @@ class State(object):
                 found = True
                 break
             if found:
-                if op.inter_close_ops:
-                    for inter in op.inter_close_ops:
-                        if not inter.reqs:
+                if op.internal_ops:
+                    for internal in op.internal_ops:
+                        if not internal.reqs:
                             continue
-                        assert len(inter.reqs) == 1
-                        req = inter.reqs[0]
+                        assert len(internal.reqs) == 1
+                        req = internal.reqs[0]
                         if req.logical_node.tree_id != tree_id:
                             continue
                         if field not in req.fields:
                             continue
-                        nodes.append(inter)
-                        inter.print_base_node(printer, True)
+                        nodes.append(internal)
+                        internal.print_base_node(printer, True)
                 nodes.append(op)
                 op.print_base_node(printer, True)
         # Now we need to compute the edges for this graph
