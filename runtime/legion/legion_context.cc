@@ -180,10 +180,10 @@ namespace Legion {
       {
         Memory memory = runtime->find_local_memory(executing_processor, kind);
         if (owned)
-          instance = new FutureInstance(value, size, memory, 
-              ApEvent::NO_AP_EVENT, false/*eager*/, true/*external allocation*/,
-              true/*own allocation*/, PhysicalInstance::NO_INST,
-              func, executing_processor);
+          instance = new FutureInstance(value, size, memory,
+              ApEvent::NO_AP_EVENT, runtime, false/*eager*/,
+              true/*external allocation*/, true/*own allocation*/,
+              PhysicalInstance::NO_INST, func, executing_processor);
         else
           instance = copy_to_future_inst(value, size, memory, done);
       }
@@ -2146,10 +2146,11 @@ namespace Legion {
         assert(callback_functor == NULL);
         assert(freefunc == NULL);
 #endif
-        instance = new FutureInstance(res, res_size, 
-            deferred_result_instance.get_location(), 
-            ApEvent(Processor::get_current_finish_event()), true/*eager*/,
-            false/*external*/, true/*own alloc*/, deferred_result_instance);
+        instance = new FutureInstance(res, res_size,
+            deferred_result_instance.get_location(),
+            ApEvent(Processor::get_current_finish_event()), runtime,
+            true/*eager*/, false/*external*/, true/*own alloc*/,
+            deferred_result_instance);
       }
       else if (res_size > 0)
       {
@@ -2161,10 +2162,10 @@ namespace Legion {
         const Memory memory =
           runtime->find_local_memory(executing_processor, result_kind);
         if (owned)
-          instance = new FutureInstance(res, res_size, memory, 
-              ApEvent::NO_AP_EVENT, false/*eager*/, true/*external allocation*/,
-              true/*own allocation*/, PhysicalInstance::NO_INST, 
-              freefunc, executing_processor);
+          instance = new FutureInstance(res, res_size, memory,
+              ApEvent::NO_AP_EVENT, runtime, false/*eager*/,
+              true/*external allocation*/, true/*own allocation*/,
+              PhysicalInstance::NO_INST, freefunc, executing_processor);
         else
           instance = copy_to_future_inst(res, res_size, memory, copy_future);
       }
@@ -2260,10 +2261,11 @@ namespace Legion {
               Realm::ExternalMemoryResource(
                reinterpret_cast<uintptr_t>(value), size, true/*read only*/),
               Realm::ProfilingRequestSet()));
-        FutureInstance source(value, size, memory, ApEvent::NO_AP_EVENT,
+        FutureInstance source(value, size, memory, ApEvent::NO_AP_EVENT,runtime,
            false/*eager*/,false/*external*/,false/*own alloc*/,source_instance);
         // issue the copy between them
-        Runtime::trigger_event(NULL, ready, instance->initialize(&source));
+        Runtime::trigger_event(NULL, ready, 
+            instance->copy_from(&source, owner_task));
         done = Runtime::protect_event(ready);
         // deferred delete the external instance source
         source_instance.destroy(done);
@@ -2277,7 +2279,7 @@ namespace Legion {
         if (memory.kind() != Memory::SYSTEM_MEM)
           memory = runtime->runtime_system_memory;
         return new FutureInstance(buffer, size, memory, ApEvent::NO_AP_EVENT,
-            false/*eager*/, true/*external*/, true/*own allocation*/,
+            runtime, false/*eager*/, true/*external*/, true/*own allocation*/,
             PhysicalInstance::NO_INST, NULL, executing_processor);
       }
     }
@@ -2298,7 +2300,8 @@ namespace Legion {
           manager->create_future_instance(owner_task, ready,
                                           source->size, true/*eager*/);
         // issue the copy between them
-        Runtime::trigger_event(NULL, ready, instance->initialize(source));
+        Runtime::trigger_event(NULL, ready, 
+            instance->copy_from(source, owner_task));
         return instance;
       }
       else
@@ -2309,7 +2312,7 @@ namespace Legion {
         if (memory.kind() != Memory::SYSTEM_MEM)
           memory = runtime->runtime_system_memory;
         return new FutureInstance(buffer, source->size, memory, 
-                                  ApEvent::NO_AP_EVENT, false/*eager*/,
+                                  ApEvent::NO_AP_EVENT, runtime, false/*eager*/,
                                   true/*external*/, true/*own allocation*/,
                                   PhysicalInstance::NO_INST, NULL,
                                   executing_processor);

@@ -950,6 +950,8 @@ namespace Legion {
         { assert(false); return NULL; }
       virtual bool is_shard_task(void) const { return true; }
       virtual bool is_top_level_task(void) const; 
+      // Set this to true so we always eagerly evaluate future functors
+      // at the end of a task to get an actual future instance to pass back
       virtual bool is_reducing_future(void) const { return true; }
     public:
       // From MemoizableOp
@@ -1139,7 +1141,7 @@ namespace Legion {
     protected:
       // Callback for control replication to perform reduction for sizes
       // and provide an event for when the result is ready
-      virtual RtEvent finish_index_task_reduction(std::set<ApEvent> &effects);
+      virtual void finish_index_task_reduction(void);
       virtual RtEvent finish_index_task_complete(void);
     public:
       void return_slice_mapped(unsigned points, RtEvent applied_condition,

@@ -1151,11 +1151,8 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
     protected:
-      virtual RtEvent finish_index_task_reduction(std::set<ApEvent> &effects);
+      virtual void finish_index_task_reduction(void);
       virtual RtEvent finish_index_task_complete(void);
-    public:
-      // Override this so we can exchange reduction results
-      virtual void trigger_task_complete(void);
     public:
       // Have to override this too for doing output in the
       // case that we misspeculate
@@ -2256,8 +2253,7 @@ namespace Legion {
       bool is_total_sharding(void);
     public:
       void handle_post_mapped(bool local, RtEvent precondition);
-      void handle_post_execution(const void *res, size_t res_size, 
-                                 bool owned, bool local);
+      void handle_post_execution(FutureInstance *instance, bool local);
       RtEvent trigger_task_complete(bool local, ApEvent effects_done);
       void trigger_task_commit(bool local);
     public:
@@ -2364,8 +2360,7 @@ namespace Legion {
       unsigned    trigger_local_commit,   trigger_remote_commit;
       unsigned    remote_constituents;
       unsigned    semantic_attach_counter;
-      void*       local_future_result; size_t local_future_size;
-      bool        local_future_set;
+      FutureInstance *local_future_result;
       std::set<RtEvent> mapping_preconditions;
     protected:
       RtBarrier shard_task_barrier;

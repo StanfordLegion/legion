@@ -344,50 +344,72 @@ namespace Legion {
 
     /**
      * \class FutureInstance
-     * A future instance wraps a Realm instance that is storing the
-     * data for the future. Current future instances are immutable
-     * after they are initially written, but are designed so that
-     * we might easily be able to relax that later so we can support
-     * mutable future values.
+     * A future instance represents the data for a single copy of
+     * the future in a memory somewhere. It has a duality to it that
+     * is likely confusing at first. It can either be an external 
+     * allocation which may or may not have an external realm instance
+     * associated with it. Or it could be a normal realm instance for
+     * which we have extracted the pointer and size for it. Furthermore
+     * when moving these from one node to another, sometimes we pass
+     * them by-value if they can be cheaply copied, other times we
+     * will move the just the references to the instances and allocations.
+     * You'll have to look into the implementation to discover which
+     * is happening, but when you get an unpacked copy on the remote
+     * side it is a valid future instance that can you use regardless.
+     * Current future instances are immutable after they are initially 
+     * written, but are designed so that we might easily be able to relax
+     * that later so we can support mutable future values.
      */
     class FutureInstance {
     public:
       FutureInstance(const void *data, size_t size, Memory memory, 
-                     ApEvent ready_event, bool eager, bool external, 
-                     bool own_allocation = true,
+                     ApEvent ready_event, Runtime *runtime, bool eager, 
+                     bool external, bool own_allocation = true,
                      PhysicalInstance inst = PhysicalInstance::NO_INST,
                      void (*freefunc)(void*,size_t) = NULL,
-                     Processor free_proc = Processor::NO_PROC);
+                     Processor free_proc = Processor::NO_PROC,
+                     RtEvent use_event = RtEvent::NO_RT_EVENT);
       FutureInstance(const FutureInstance &rhs);
       ~FutureInstance(void);
     public:
       FutureInstance& operator=(const FutureInstance &rhs);
     public:
-      ApEvent initialize(const ReductionOp *redop);
-      ApEvent initialize(const FutureInstance *source); 
-      ApEvent copy_from(const FutureInstance *source, ApEvent precondition);
-      ApEvent reduce_from(const FutureInstance *source,
+      ApEvent initialize(const ReductionOp *redop, Operation *op);
+      ApEvent copy_from(FutureInstance *source, Operation *op,
+                        ApEvent precondition = ApEvent::NO_AP_EVENT);
+      ApEvent reduce_from(FutureInstance *source, Operation *op,
+                          const ReductionOpID redop_id,
                           const ReductionOp *redop, bool exclusive,
                           ApEvent precondition = ApEvent::NO_AP_EVENT);
     public:
-      void pack_instance(Serializer &rez, ApEvent ready = ApEvent::NO_AP_EVENT);
+      bool is_ready(void) const;
+      ApEvent get_ready(void);
+      PhysicalInstance get_instance(void);
+    public:
+      void pack_instance(Serializer &rez, bool pack_ownership,
+                         ApEvent ready = ApEvent::NO_AP_EVENT);
       static FutureInstance* unpack_instance(Deserializer &derez, Runtime *rt);
     public:
+      static bool check_meta_visible(Runtime *runtime, Memory memory,
+                                     bool has_freefunc);
       static FutureInstance* create_local(const void *value, size_t size, 
                                           bool own, Runtime *runtime);
     public:
+      Runtime *const runtime;
       const void *const data;
       const size_t size;
       const Memory memory;
+      const ApEvent ready_event;
       void (*const freefunc)(void*,size_t);
-      const Processor free_proc;
+      const Processor freeproc;
       const bool eager_allocation;
       const bool external_allocation;
       const bool is_meta_visible;
     protected:
       bool own_allocation;
       PhysicalInstance instance;
-      ApEvent ready_event;
+      RtEvent use_event;
+      bool own_instance;
     };
 
     /**
@@ -1283,6 +1305,7 @@ namespace Legion {
                                     GCPriority priority, bool remote);
       FutureInstance* create_future_instance(Operation *op, ApEvent ready_event,
                                              size_t size, bool eager);
+      void free_future_instance(PhysicalInstance inst, size_t size, bool eager);
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
@@ -2252,6 +2275,18 @@ namespace Legion {
       public:
         TopLevelContext *const ctx;
       };
+      struct FreeExternalArgs : public LgTaskArgs<FreeExternalArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FREE_EXTERNAL_TASK_ID;
+      public:
+        FreeExternalArgs(void *d, size_t s, void (*f)(void*,size_t))
+          : LgTaskArgs<FreeExternalArgs>(implicit_provenance),
+            data(d), size(s), func(f) { }
+      public:
+        void *const data;
+        const size_t size;
+        void (*const func)(void*,size_t);
+      };
       struct MapperTaskArgs : public LgTaskArgs<MapperTaskArgs> {
       public:
         static const LgTaskID TASK_ID = LG_MAPPER_TASK_ID;
@@ -2761,6 +2796,8 @@ namespace Legion {
       // Memory manager functions
       MemoryManager* find_memory_manager(Memory mem);
       AddressSpaceID find_address_space(Memory handle) const;
+      void free_external_allocation(Processor proc, void *data, size_t size,
+                                    void (*freefunc)(void*,size_t));
 #ifdef LEGION_MALLOC_INSTANCES
       uintptr_t allocate_deferred_instance(Memory memory,size_t size,bool free);
       void free_deferred_instance(Memory memory, uintptr_t ptr);
@@ -3096,6 +3133,7 @@ namespace Legion {
                                                  Serializer &rez);
       void send_remote_trace_update(AddressSpaceID target, Serializer &rez);
       void send_remote_trace_response(AddressSpaceID target, Serializer &rez);
+      void send_free_external_allocation(AddressSpaceID target,Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -3398,6 +3436,7 @@ namespace Legion {
       void handle_remote_tracing_update(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_remote_tracing_response(Deserializer &derez);
+      void handle_free_external_allocation(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);

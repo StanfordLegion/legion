@@ -3891,6 +3891,7 @@ namespace Legion {
       virtual RtEvent all_reduce_redop(void);
     protected:
       FutureMap future_map;
+      ReductionOpID redop_id;
       const ReductionOp *redop; 
       const SerdezRedopFns *serdez_redop_fns;
       Future result;

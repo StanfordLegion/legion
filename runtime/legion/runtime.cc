@@ -1688,7 +1688,418 @@ namespace Legion {
       if (cargs->impl->remove_base_gc_ref(PENDING_COLLECTIVE_REF))
         delete cargs->impl;
     }
+
+    /////////////////////////////////////////////////////////////
+    // Future Instance
+    /////////////////////////////////////////////////////////////
       
+    //--------------------------------------------------------------------------
+    FutureInstance::FutureInstance(const void *d, size_t s, Memory m, ApEvent r,
+        Runtime *rt, bool eager, bool external, bool own, PhysicalInstance inst,
+        void (*func)(void*,size_t), Processor p, RtEvent use)
+      : runtime(rt), data(d), size(s), memory(m), ready_event(r),freefunc(func),
+        freeproc(p), eager_allocation(eager), external_allocation(external),
+        is_meta_visible(check_meta_visible(rt, m, (func != NULL))),
+        own_allocation(own), instance(inst), use_event(use), own_instance(false)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+      assert(data != NULL);
+      assert(memory.exists());
+      assert((freefunc == NULL) || freeproc.exists());
+      assert((freefunc == NULL) || external_allocation);
+      assert(!freeproc.exists() || (freeproc.kind() != Processor::UTIL_PROC));
+      assert(instance.exists() || external_allocation);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance::FutureInstance(const FutureInstance &rhs)
+      : runtime(rhs.runtime), data(rhs.data), size(rhs.size), 
+        memory(rhs.memory), freefunc(rhs.freefunc), freeproc(rhs.freeproc),
+        eager_allocation(rhs.eager_allocation),
+        external_allocation(rhs.external_allocation),
+        is_meta_visible(rhs.is_meta_visible)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance::~FutureInstance(void)
+    //--------------------------------------------------------------------------
+    {
+      // Only need to free resources if we own the allocation
+      if (own_allocation)
+      {
+        if (external_allocation)
+        {
+          // Destroy the external instance if it exists
+          if (instance.exists())
+            instance.destroy(ready_event);
+          void *tofree = const_cast<void*>(data);
+          // Check to see if we have a freefunc or not
+          if (freefunc != NULL)
+            runtime->free_external_allocation(freeproc, tofree, size, freefunc);
+          else if (memory.address_space() != runtime->address_space)
+          {
+            // Send this to the target node with a NO_PROC which will
+            // be the sign it can delete it immediately
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(Processor::NO_PROC);
+              rez.serialize(tofree);
+              rez.serialize(size);
+              rez.serialize(freefunc);
+            }
+            runtime->send_free_external_allocation(memory.address_space(), rez);
+          }
+          else // this has to be a local allocation so we can free it
+            free(tofree);
+        }
+        else
+        {
+          // Free the future instance through the memory manager
+          MemoryManager *manager = runtime->find_memory_manager(memory);
+          manager->free_future_instance(instance, size, eager_allocation);
+        }
+      }
+      else if (own_instance)
+      {
+#ifdef DEBUG_LEGION
+        assert(instance.exists());
+#endif
+        instance.destroy(ready_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance& FutureInstance::operator=(const FutureInstance &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FutureInstance::initialize(const ReductionOp *redop, Operation *op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size == redop->sizeof_rhs);
+#endif
+      // Check to see if this is visible or not
+      if (!is_meta_visible)
+      {
+        void *buffer = malloc(size); 
+        redop->init(buffer, 1/*count*/);
+        CopySrcDstField src, dst;
+        src.set_fill(buffer, size);
+        dst.set_field(get_instance(), 0/*field id*/, size);
+        std::vector<CopySrcDstField> srcs(1, src);
+        std::vector<CopySrcDstField> dsts(1, dst);
+        Realm::ProfilingRequestSet requests;
+        if (runtime->profiler != NULL)
+          runtime->profiler->add_fill_request(requests, op);
+        const Point<1,coord_t> zero(0);
+        const Rect<1,coord_t> rect(zero, zero);
+        ApEvent result(rect.copy(srcs, dsts, requests, use_event));
+        free(buffer);
+        return result;
+      }
+      else
+      {
+        redop->init(const_cast<void*>(data), 1/*count*/);
+        return ApEvent::NO_AP_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FutureInstance::copy_from(FutureInstance *source, Operation *op,
+                                      ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size == source->size);
+#endif
+      if (!is_meta_visible || !source->is_meta_visible || 
+          precondition.exists() || !source->is_ready())
+      {
+        // We need to offload this to realm
+        CopySrcDstField src, dst;
+        src.set_field(source->get_instance(), 0/*field id*/, size);
+        dst.set_field(get_instance(), 0/*field id*/, size);
+        std::vector<CopySrcDstField> srcs(1, src);
+        std::vector<CopySrcDstField> dsts(1, dst);
+        Realm::ProfilingRequestSet requests;
+        if (runtime->profiler != NULL)
+          runtime->profiler->add_copy_request(requests, op);
+        const Point<1,coord_t> zero(0);
+        const Rect<1,coord_t> rect(zero, zero);
+        if (use_event.exists() && !use_event.has_triggered())
+
+          return ApEvent(rect.copy(srcs, dsts, requests,
+                  Runtime::merge_events(NULL, source->get_ready(),
+                    precondition, ApEvent(use_event))));
+        else if (precondition.exists())
+          return ApEvent(rect.copy(srcs, dsts, requests,
+              Runtime::merge_events(NULL, source->get_ready(), precondition)));
+        else
+          return ApEvent(rect.copy(srcs, dsts, requests, source->get_ready()));
+      }
+      else
+      {
+        // We can do this as a straight memcpy, no need to offload to realm
+        memcpy(const_cast<void*>(data), source->data, size);
+        return ApEvent::NO_AP_EVENT;
+      }
+    } 
+
+    //--------------------------------------------------------------------------
+    ApEvent FutureInstance::reduce_from(FutureInstance *source, Operation *op,
+                       const ReductionOpID redop_id, const ReductionOp *redop, 
+                       bool exclusive, ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size == source->size);
+#endif
+      if (!is_meta_visible || !source->is_meta_visible || 
+          precondition.exists() || !source->is_ready())
+      {
+        // We need to offload this to realm
+        CopySrcDstField src, dst;
+        src.set_field(source->get_instance(), 0/*field id*/, size);
+        dst.set_field(get_instance(), 0/*field id*/, size);
+        dst.set_redop(redop_id, true/*fold*/);
+        std::vector<CopySrcDstField> srcs(1, src);
+        std::vector<CopySrcDstField> dsts(1, dst);
+        Realm::ProfilingRequestSet requests;
+        if (runtime->profiler != NULL)
+          runtime->profiler->add_copy_request(requests, op);
+        const Point<1,coord_t> zero(0);
+        const Rect<1,coord_t> rect(zero, zero);
+        if (use_event.exists() && !use_event.has_triggered())
+          return ApEvent(rect.copy(srcs, dsts, requests,
+                  Runtime::merge_events(NULL, source->get_ready(),
+                    precondition, ApEvent(use_event))));
+        else if (precondition.exists())
+          return ApEvent(rect.copy(srcs, dsts, requests,
+              Runtime::merge_events(NULL, source->get_ready(), precondition)));
+        else
+          return ApEvent(rect.copy(srcs, dsts, requests, source->get_ready()));
+      }
+      else
+      {
+        // We can do this as a straight fold, no need to offload to realm
+        redop->fold(const_cast<void*>(data),source->data,1/*count*/,exclusive);
+        return ApEvent::NO_AP_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool FutureInstance::is_ready(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.exists())
+        return true;
+      return ready_event.has_triggered_faultignorant(); 
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FutureInstance::get_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (use_event.exists() && !use_event.has_triggered())
+      {
+        if (ready_event.exists())
+          return Runtime::merge_events(NULL, ready_event, ApEvent(use_event));
+        return ApEvent(use_event);
+      }
+      return ready_event;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance FutureInstance::get_instance(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!instance.exists())
+      {
+#ifdef DEBUG_LEGION
+        assert(external_allocation);
+#endif
+        const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
+        const std::vector<size_t> sizes(1, size);
+        const int dim_order[1] = { 0 };
+        const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
+        const Point<1,coord_t> zero(0);
+        const Realm::IndexSpace<1,coord_t> rect_space(
+                      Realm::Rect<1,coord_t>(zero, zero));
+        Realm::InstanceLayoutGeneric *ilg =
+          Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
+              rect_space, constraints, dim_order);
+        use_event = RtEvent(PhysicalInstance::create_external_instance(
+              instance, memory, ilg, Realm::ExternalMemoryResource(
+                reinterpret_cast<uintptr_t>(data), size, false/*read only*/),
+              Realm::ProfilingRequestSet()));
+        own_instance = true;
+      }
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureInstance::pack_instance(Serializer &rez, bool pack_ownership,
+                                       ApEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(size);
+      // Check to see if we can just pass this future instance by value
+      if (is_meta_visible && (size <= LEGION_MAX_RETURN_SIZE) &&
+          (!ready_event.exists() || ready_event.has_triggered_faultignorant()))
+      {
+        // We can just pass this future by value because we can
+        // see it here, it's tiny, and it's ready to be read
+        rez.serialize<bool>(true); // by value
+        rez.serialize(data, size);
+        // No need to do anything else, don't even move the ownership because
+        // we have everything we need to make the future on the destination node
+      }
+      else
+      {
+        rez.serialize<bool>(false); // by value
+        rez.serialize(data);
+        rez.serialize(memory);
+        rez.serialize(instance);
+        if (ready.exists())
+          rez.serialize(ready);
+        else
+          rez.serialize(ready_event);
+        if (pack_ownership)
+        {
+#ifdef DEBUG_LEGION
+          assert(own_allocation);
+#endif
+          rez.serialize<bool>(true); // own the allocation on the destination
+          own_allocation = false;
+        }
+        else
+          rez.serialize<bool>(false); // do not own allocation on destination
+        if (external_allocation)
+        {
+          rez.serialize<bool>(true); // external allocation
+          rez.serialize(freefunc);
+          rez.serialize(freeproc);
+        }
+        else
+        {
+          rez.serialize<bool>(false); // external allocation
+          rez.serialize<bool>(eager_allocation);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ FutureInstance* FutureInstance::unpack_instance(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      size_t size;
+      derez.deserialize(size);
+      bool pass_by_value;
+      derez.deserialize<bool>(pass_by_value);
+      if (pass_by_value)
+      {
+        void *data = malloc(size);
+        derez.deserialize(data, size);
+        return new FutureInstance(data, size, runtime->runtime_system_memory,
+            ApEvent::NO_AP_EVENT, runtime, false/*eager*/, true/*external*/);
+      }
+      void *data;
+      derez.deserialize(data);
+      Memory memory;
+      derez.deserialize(memory);
+      PhysicalInstance instance;
+      derez.deserialize(instance);
+      RtEvent use_event;
+      if (instance.exists())
+        use_event = RtEvent(instance.fetch_metadata(
+              Processor::get_executing_processor()));
+      ApEvent ready;
+      derez.deserialize(ready);
+      bool own_allocation, external_allocation;
+      derez.deserialize<bool>(own_allocation);
+      derez.deserialize<bool>(external_allocation);
+      if (external_allocation)
+      {
+        void (*func)(void*,size_t);
+        derez.deserialize(func);
+        Processor proc;
+        derez.deserialize(proc);
+        return new FutureInstance(data, size, memory, ready, runtime,
+                    false/*eager*/, true/*external*/, own_allocation,
+                    instance, func, proc, use_event);
+      }
+      else
+      {
+        bool eager_alloc;
+        derez.deserialize<bool>(eager_alloc);
+        return new FutureInstance(data, size, memory, ready, runtime,
+                    eager_alloc, false/*external*/, own_allocation,
+                    instance, NULL/*freefunc*/, Processor::NO_PROC, use_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ bool FutureInstance::check_meta_visible(Runtime *runtime,
+                                               Memory memory, bool has_freefunc)
+    //--------------------------------------------------------------------------
+    {
+      // Common case, if it is the local system memory, we can see it
+      if (runtime->runtime_system_memory == memory)
+        return true;
+      // If it's not in the local process, we definitely can't see it
+      if (memory.address_space() != runtime->address_space)
+        return false;
+      // If doesn't have a freefunc, then we know it can be freed
+      // by the system 'free' function, so we can definitely see it
+      if (!has_freefunc)
+        return true;
+      // switch on the memory kind and see if there are any we support
+      switch (memory.kind())
+      {
+        case Memory::GLOBAL_MEM:
+        case Memory::SYSTEM_MEM:
+        case Memory::REGDMA_MEM:
+        case Memory::SOCKET_MEM:
+        case Memory::Z_COPY_MEM:
+          return true;
+        default:
+          break;
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ FutureInstance* FutureInstance::create_local(const void *value,
+                                        size_t size, bool own, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      // Copy the data into a buffer we own if we don't already
+      if (!own)
+      {
+        void *buffer = malloc(size);
+        memcpy(buffer, value, size);
+        value = buffer;
+        own = true;
+      }
+      return new FutureInstance(value, size, runtime->runtime_system_memory,
+            ApEvent::NO_AP_EVENT, runtime, false/*eager*/, true/*external*/);
+    }
+
     /////////////////////////////////////////////////////////////
     // Future Map Impl 
     /////////////////////////////////////////////////////////////
@@ -10775,6 +11186,11 @@ namespace Legion {
               runtime->handle_remote_tracing_response(derez);
               break;
             }
+          case SEND_FREE_EXTERNAL_ALLOCATION:
+            {
+              runtime->handle_free_external_allocation(derez);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
 #ifdef DEBUG_LEGION
@@ -11116,6 +11532,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RemoteTraceRecorder::handle_remote_response(derez);
+    }
+  
+    //--------------------------------------------------------------------------
+    void Runtime::handle_free_external_allocation(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Processor proc;
+      derez.deserialize(proc);
+      void *data;
+      derez.deserialize(data);
+      size_t size;
+      derez.deserialize(size);
+      void (*func)(void*,size_t);
+      derez.deserialize(func);
+      // handle the special case where the processor does not exist
+      // which means we can just free this here now
+      if (proc.exists())
+        free_external_allocation(proc, data, size, func);
+      else
+        free(data);
     }
 
     //--------------------------------------------------------------------------
@@ -18603,6 +19040,34 @@ namespace Legion {
       return result;
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::free_external_allocation(Processor proc, void *data, 
+                                        size_t size, void (*func)(void*,size_t))
+    //--------------------------------------------------------------------------
+    {
+      // Check see if this is local, if not, send a message
+      const AddressSpaceID target_space = proc.address_space();
+      if (target_space != address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(proc);
+          rez.serialize(data);
+          rez.serialize(size);
+          rez.serialize(func);
+        }
+        send_free_external_allocation(target_space, rez);
+      }
+      else
+      {
+        // Dispatch this on the target processor
+        FreeExternalArgs args(data, size, func);
+        issue_application_processor_task(args, 
+            LG_THROUGHPUT_WORK_PRIORITY, proc); 
+      }
+    }
+
 #ifdef LEGION_MALLOC_INSTANCES
     //--------------------------------------------------------------------------
     uintptr_t Runtime::allocate_deferred_instance(Memory memory, size_t size,
@@ -20894,6 +21359,15 @@ namespace Legion {
       // the default virtual channel in whatever order
       find_messenger(target)->send_message(rez, SEND_REMOTE_TRACE_RESPONSE,
                   DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_free_external_allocation(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_FREE_EXTERNAL_ALLOCATION,
+                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -29095,7 +29569,7 @@ namespace Legion {
           {
             OutputRegionImpl::handle_finalize_output(args);
             break;
-          }
+          } 
 #ifdef LEGION_MALLOC_INSTANCES
         // LG_MALLOC_INSTANCE_TASK_ID should always run app processor
         case LG_FREE_INSTANCE_TASK_ID:
@@ -29241,6 +29715,12 @@ namespace Legion {
         case LG_REPLAY_SLICE_ID:
           {
             PhysicalTemplate::handle_replay_slice(args);
+            break;
+          }
+        case LG_FREE_EXTERNAL_TASK_ID:
+          {
+            const FreeExternalArgs *fargs = (const FreeExternalArgs*)args;
+            (*(fargs->func))(fargs->data, fargs->size);
             break;
           }
 #ifdef LEGION_MALLOC_INSTANCES

@@ -401,6 +401,7 @@ namespace Legion {
       LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
+      LG_FREE_EXTERNAL_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_YIELD_TASK_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
@@ -523,6 +524,7 @@ namespace Legion {
         "Defer Trace Finalize Condition Set Updates",             \
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
+        "Free External Allocation",                               \
         "Defer Consensus Match",                                  \
         "Yield",                                                  \
         "Retry Shutdown",                                         \
@@ -907,6 +909,7 @@ namespace Legion {
       SEND_REMOTE_OP_PROFILING_COUNT_UPDATE,
       SEND_REMOTE_TRACE_UPDATE,
       SEND_REMOTE_TRACE_RESPONSE,
+      SEND_FREE_EXTERNAL_ALLOCATION,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1119,6 +1122,7 @@ namespace Legion {
         "Remote Op Profiling Count Update",                           \
         "Send Remote Trace Update",                                   \
         "Send Remote Trace Response",                                 \
+        "Send Free External Allocation",                              \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };

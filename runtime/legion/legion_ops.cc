@@ -19882,12 +19882,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future AllReduceOp::initialize(InnerContext *ctx, const FutureMap &fm, 
-                                   ReductionOpID redop_id,bool is_deterministic,
+                                   ReductionOpID redid, bool is_deterministic,
                                    MapperID map_id, MappingTagID t)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
       future_map = fm;
+      redop_id = redid;
       redop = runtime->get_reduction(redop_id);
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop_id);
       result = Future(new FutureImpl(runtime, true/*register*/,
@@ -19940,6 +19941,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation(); 
+      redop_id = 0;
       future_result_size = 0;
       serdez_redop_buffer = NULL;
     }
@@ -20066,13 +20068,13 @@ namespace Legion {
               Realm::ProfilingRequestSet()));
         FutureInstance source(serdez_redop_buffer, future_result_size, 
             runtime->runtime_system_memory, ApEvent::NO_AP_EVENT, 
-            false/*eager*/, false/*external*/,
+            runtime, false/*eager*/, false/*external*/,
             false/*own alloc*/, source_instance);
         std::set<ApEvent> done_events;
         for (std::vector<FutureInstance*>::const_iterator it =
               targets.begin(); it != targets.end(); it++)
         {
-          ApEvent done = (*it)->initialize(&source);
+          ApEvent done = (*it)->copy_from(&source, this);
           if (done.exists())
             done_events.insert(done);
         }
@@ -20128,7 +20130,7 @@ namespace Legion {
       }
       std::vector<ApEvent> preconditions(targets.size());
       for (unsigned idx = 0; idx < targets.size(); idx++)
-        preconditions[idx] = targets[idx]->initialize(redop);
+        preconditions[idx] = targets[idx]->initialize(redop, this);
       std::set<ApEvent> postconditions;
       if (deterministic)
       {
@@ -20136,8 +20138,8 @@ namespace Legion {
               sources.begin(); it != sources.end(); it++)
         {
           for (unsigned idx = 0; idx < targets.size(); idx++)
-            preconditions[idx] = targets[idx]->reduce_from(*it, redop,
-                                true/*exclusive*/, preconditions[idx]);
+            preconditions[idx] = targets[idx]->reduce_from(*it, this, redop_id,
+                                  redop, true/*exclusive*/, preconditions[idx]);
         }
         for (std::vector<ApEvent>::const_iterator it =
               preconditions.begin(); it != preconditions.end(); it++)
@@ -20151,8 +20153,8 @@ namespace Legion {
         {
           for (unsigned idx = 0; idx < targets.size(); idx++)
           {
-            const ApEvent done = targets[idx]->reduce_from(*it, redop,
-                              false/*exclusive*/, preconditions[idx]);
+            const ApEvent done = targets[idx]->reduce_from(*it, this, redop_id,
+                                redop, false/*exclusive*/, preconditions[idx]);
             if (done.exists())
               postconditions.insert(done);
           }
