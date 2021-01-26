@@ -65,28 +65,34 @@ local function get_task_params(task)
 
       local param_type = param:gettype()
 
-      local terra_type, c_type, cxx_type
-      if base.types.is_region(param_type) then
-        terra_type, c_type, cxx_type = c.legion_logical_region_t, "legion_logical_region_t", "Legion::LogicalRegion"
-      elseif base.types.is_ispace(param_type) then
-        terra_type, c_type, cxx_type = c.legion_index_space_t, "legion_index_space_t", "Legion::IndexSpace"
-      elseif param_type == int32 then
-        terra_type, c_type, cxx_type = int32, "int32_t",  "int32_t"
-      elseif param_type == int64 then
-        terra_type, c_type, cxx_type = int64, "int64_t", "int64_t"
-      elseif param_type == uint32 then
-        terra_type, c_type, cxx_type = uint32, "uint32_t", "uint32_t"
-      elseif param_type == uint64 then
-        terra_type, c_type, cxx_type = uint64, "uint64_t", "uint64_t"
-      elseif param_type == float then
-        terra_type, c_type, cxx_type = float, "float", "float"
-      elseif param_type == double then
-        terra_type, c_type, cxx_type = double, "double", "double"
-      elseif param_type == bool then
-        terra_type, c_type, cxx_type = bool, "bool", "bool"
-      else
-        assert(false, "unknown type " .. tostring(param_type))
+      local function lower_type(t)
+        if base.types.is_region(t) then
+          return c.legion_logical_region_t, "legion_logical_region_t", "Legion::LogicalRegion"
+        elseif base.types.is_ispace(t) then
+          return c.legion_index_space_t, "legion_index_space_t", "Legion::IndexSpace"
+        elseif t == int32 then
+          return int32, "int32_t",  "int32_t"
+        elseif t == int64 then
+          return int64, "int64_t", "int64_t"
+        elseif t == uint32 then
+          return uint32, "uint32_t", "uint32_t"
+        elseif t == uint64 then
+          return uint64, "uint64_t", "uint64_t"
+        elseif t == float then
+          return float, "float", "float"
+        elseif t == double then
+          return double, "double", "double"
+        elseif t == bool then
+          return bool, "bool", "bool"
+        elseif t:isarray() then
+          local elt_t, elt_c, elt_cxx = lower_type(t.type)
+          return elt_t[t.N], elt_c .. "[" .. t.N .. "]", elt_cxx .. "[" .. t.N .. "]"
+        else
+          assert(false, "unknown type " .. tostring(t))
+        end
       end
+
+      local terra_type, c_type, cxx_type = lower_type(param_type)
 
       assert(terra_type and c_type and cxx_type)
       result:insert({terra_type, c_type, cxx_type, param:getname()})
