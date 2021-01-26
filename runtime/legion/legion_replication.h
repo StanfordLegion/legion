@@ -1474,6 +1474,7 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
+      virtual void request_future_buffers(std::set<RtEvent> &ready_events);
       virtual void trigger_complete(void);
     };
 
@@ -1752,6 +1753,7 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     protected:
+      virtual void populate_sources(void);
       virtual void all_reduce_serdez(void);
       virtual RtEvent pre_reduce_redop(void);
       virtual RtEvent all_reduce_redop(void);

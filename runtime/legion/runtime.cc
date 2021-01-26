@@ -363,7 +363,8 @@ namespace Legion {
       if ((finder == arguments.end()) || (finder->second.impl == NULL))
         return TaskArgument();
       size_t arg_size = 0;
-      const void *ptr = finder->second.impl->get_internal_buffer(arg_size);
+      const void *ptr = finder->second.impl->get_buffer(
+              runtime->runtime_system_memory, &arg_size);
       return TaskArgument(ptr, arg_size);
     }
 
@@ -643,8 +644,8 @@ namespace Legion {
 #ifdef LEGION_SPY
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
 #endif
-        future_complete(complete), result(NULL), result_size(0), 
-        result_set_space(local_space), callback_functor(NULL),
+        future_complete(complete), result_set_space(local_space),
+        canonical_instance(NULL), callback_functor(NULL),
         own_callback_functor(false), empty(true), sampled(false)
     //--------------------------------------------------------------------------
     {
@@ -675,8 +676,8 @@ namespace Legion {
 #ifdef LEGION_SPY
         producer_uid(uid),
 #endif
-        future_complete(complete), result(NULL), result_size(0), 
-        result_set_space(local_space), callback_functor(NULL),
+        future_complete(complete), result_set_space(local_space),
+        canonical_instance(NULL), callback_functor(NULL),
         own_callback_functor(false), empty(true), sampled(false)
     //--------------------------------------------------------------------------
     {
@@ -707,6 +708,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!subscription_event.exists());
+      assert(((canonical_instance == NULL) && instances.empty()) ||
+              (instances[canonical_instance->memory] == canonical_instance));
 #endif
       // Remove the extra reference on a remote set future if there is one
       if (empty && (result_set_space != local_space))
@@ -719,12 +722,9 @@ namespace Legion {
         }
         runtime->send_future_broadcast(result_set_space, rez);
       }
-      if (result != NULL)
-      {
-        free(result);
-        result = NULL;
-        result_size = 0;
-      }
+      for (std::map<Memory,FutureInstance*>::const_iterator it =
+            instances.begin(); it != instances.end(); it++)
+        delete it->second;
       if (producer_op != NULL)
         producer_op->remove_mapping_reference(op_gen);
       if (callback_functor != NULL)
@@ -779,97 +779,161 @@ namespace Legion {
       mark_sampled();
     }
     
-#if 0
     //--------------------------------------------------------------------------
-    void* FutureImpl::get_untyped_result(bool silence_warnings,
-                                      const char *warning_string, bool internal, 
-                                      bool check_size, size_t future_size)
+    const void* FutureImpl::get_buffer(Processor proc, Memory::Kind memkind,
+                              size_t *extent_in_bytes, bool check_extent,
+                              bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
-      if (!internal)
+      // Figure out which memory we are looking for
+      const Memory memory = runtime->find_local_memory(proc, memkind);
+      return get_buffer(memory, extent_in_bytes, check_extent,
+                        silence_warnings, warning_string);
+    }
+
+    //--------------------------------------------------------------------------
+    const void* FutureImpl::get_buffer(Memory memory, size_t *extent_in_bytes,
+           bool check_extent, bool silence_warnings, const char *warning_string)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->runtime_warnings && !silence_warnings && 
+          (implicit_context != NULL))
       {
-        if (runtime->runtime_warnings && !silence_warnings && 
-            (implicit_context != NULL))
-        {
-          if (!implicit_context->is_leaf_context())
-            REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
-               "Waiting on a future in non-leaf task %s "
-               "(UID %lld) is a violation of Legion's deferred execution model "
-               "best practices. You may notice a severe performance "
-               "degradation. Warning string: %s",
-               implicit_context->get_task_name(), 
-               implicit_context->get_unique_id(),
-               (warning_string == NULL) ? "" : warning_string)
-        }
-        if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
-          implicit_context->record_blocking_call();
+        if (!implicit_context->is_leaf_context())
+          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
+             "Waiting on a future in non-leaf task %s "
+             "(UID %lld) is a violation of Legion's deferred execution model "
+             "best practices. You may notice a severe performance "
+             "degradation. Warning string: %s",
+             implicit_context->get_task_name(), 
+             implicit_context->get_unique_id(),
+             (warning_string == NULL) ? "" : warning_string)
       }
-      if (internal)
-      {
-        const RtEvent ready_event = subscribe_internal();
-        if (!ready_event.has_triggered())
-        {
-          TaskContext *context = implicit_context;
-          if (context != NULL)
-          {
-            context->begin_task_wait(false/*from runtime*/);
-            ready_event.wait();
-            context->end_task_wait();
-          }
-          else
-            ready_event.wait();
-        }
-      }
-      else
-      {
-        const ApEvent ready_event = subscribe();
-        bool poisoned = false;
-        if (!ready_event.has_triggered_faultaware(poisoned))
-        {
-          TaskContext *context = implicit_context;
-          if (context != NULL)
-          {
-            context->begin_task_wait(false/*from runtime*/);
-            ready_event.wait_faultaware(poisoned);
-            context->end_task_wait();
-          }
-          else
-            ready_event.wait_faultaware(poisoned);
-        }
-        if (poisoned)
-          implicit_context->raise_poison_exception();
-      }
-      if (check_size)
-      {
-        if (empty)
-          REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
-                              "Accessing empty future! (UID %lld)",
-                              (producer_op == NULL) ? 0 :
-                                producer_op->get_unique_op_id())
-        else if (future_size != result_size)
-          REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
-              "Future size mismatch! Expected type of %zd bytes but "
-              "requested type is %zd bytes. (UID %lld)", 
-              result_size, future_size, (producer_op == NULL) ? 0 : 
-              producer_op->get_unique_op_id())
-      }
+      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
+        implicit_context->record_blocking_call();
       mark_sampled();
-      return result;
+      const RtEvent ready_event = subscribe();
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      FutureInstance *instance = find_or_create_instance(memory, true/*eager*/);
+      if (extent_in_bytes != NULL)
+      {
+        if (check_extent)
+        {
+          if (empty)
+            REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+                                "Accessing empty future! (UID %lld)",
+                                (producer_op == NULL) ? 0 :
+                                  producer_op->get_unique_op_id())
+          else if (instance->size != *extent_in_bytes)
+            REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
+                "Future size mismatch! Expected type of %zd bytes but "
+                "requested type is %zd bytes. (UID %lld)", 
+                instance->size, *extent_in_bytes, (producer_op == NULL) ? 0 :
+                producer_op->get_unique_op_id())
+        }
+        else
+          (*extent_in_bytes) = instance->size;
+      }
+      if (instance == NULL)
+        return NULL;
+      bool poisoned = false;
+      if (!instance->ready_event.has_triggered_faultaware(poisoned))
+      {
+        TaskContext *context = implicit_context;
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          instance->ready_event.wait_faultaware(poisoned);
+          context->end_task_wait();
+        }
+        else
+          instance->ready_event.wait_faultaware(poisoned);
+      }
+      if (poisoned && (implicit_context != NULL))
+        implicit_context->raise_poison_exception();
+      return instance->data;
+    }
+
+#if 0
+    //--------------------------------------------------------------------------
+    RtEvent FutureImpl::request_internal_buffer(bool eager)
+    //--------------------------------------------------------------------------
+    {
+      // Do the subscription call to get that in flight first
+      const RtEvent subscribed = subscribe();
+      // Check to see if we have an internal buffer to use 
+      {
+
+      }
+
+      return subscribed;
     }
 #endif
 
     //--------------------------------------------------------------------------
-    size_t FutureImpl::get_untyped_size(bool internal)
+    const void* FutureImpl::find_internal_buffer(Operation *op, size_t &size)
     //--------------------------------------------------------------------------
     {
-      // Call this first to make sure the future is ready
-      size_t result_size = 0;
-      if (internal)
-        get_internal_buffer(result_size);
+      FutureInstance *instance = NULL;
+      {
+        AutoLock f_lock(future_lock,1,false/*exclusive*/);
+        if (canonical_instance == NULL)
+        {
+          size = 0;
+          return NULL;
+        }
+        if (!canonical_instance->is_meta_visible)
+        {
+          for (std::map<Memory,FutureInstance*>::const_iterator it =
+                instances.begin(); it != instances.end(); it++)
+          {
+            if (!it->second->is_meta_visible)
+              continue;
+            instance = it->second;
+            break;
+          }
+        }
+        else
+          instance = canonical_instance;
+      }
+#ifdef DEBUG_LEGION
+      assert(instance != NULL);
+#endif
+      size = instance->size;
+      // Make sure the instance is safe to use
+      if (instance->ready_event.exists())
+      {
+        bool poisoned = false;
+        if (!instance->ready_event.has_triggered_faultaware(poisoned))
+          instance->ready_event.wait_faultaware(poisoned);
+        if (poisoned)
+          op->get_context()->raise_poison_exception();
+      }
+      return instance->data;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t FutureImpl::get_untyped_size(void)
+    //--------------------------------------------------------------------------
+    {
+      const RtEvent ready_event = subscribe();
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      if (canonical_instance != NULL)
+        return canonical_instance->size;
       else
-        get_buffer(implicit_context->get_executing_processor(), 
-            Memory::SYSTEM_MEM, &result_size, false, true/*silence warnings*/);
-      return result_size;
+        return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance* FutureImpl::get_canonical_instance(void)
+    //--------------------------------------------------------------------------
+    {
+      const RtEvent ready = subscribe();
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      return canonical_instance;
     }
 
     //--------------------------------------------------------------------------
@@ -898,31 +962,16 @@ namespace Legion {
       }
       if (block)
       {
-        const ApEvent ready_event = subscribe();
-        bool poisoned = false;
-        if (!ready_event.has_triggered_faultaware(poisoned))
-        {
-          TaskContext *context =
-            (producer_op == NULL) ? NULL : producer_op->get_context();
-          if (context != NULL)
-          {
-            context->begin_task_wait(false/*from runtime*/);
-            ready_event.wait_faultaware(poisoned);
-            context->end_task_wait();
-          }
-          else
-            ready_event.wait_faultaware(poisoned);
-        }
-        if (poisoned)
-          implicit_context->raise_poison_exception();
+        const RtEvent ready_event = subscribe();
         mark_sampled();
+        if (ready_event.exists() && !ready_event.has_triggered())
+          ready_event.wait();
       }
       return empty;
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void FutureImpl::set_result(const void *args, size_t arglen, bool own)
+    void FutureImpl::set_result(FutureInstance *instance)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
@@ -933,20 +982,43 @@ namespace Legion {
             "please check that all of the point tasks that it creates have "
             "unique index points. If your program has no must epoch launches "
             "then this is likely a runtime bug.")
-      if (own)
+#ifdef DEBUG_LEGION
+      assert(canonical_instance == NULL);
+      assert(instances.empty());
+#endif
+      canonical_instance = instance;
+      instances[instance->memory] = instance;
+      finish_set_future();
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::set_results(const std::vector<FutureInstance*> &insts)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(future_lock);
+      if (!empty || (callback_functor != NULL))
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_FUTURE_SET,
+            "Duplicate future set! This can be either a runtime bug or a "
+            "user error. If you have a must epoch launch in this program "
+            "please check that all of the point tasks that it creates have "
+            "unique index points. If your program has no must epoch launches "
+            "then this is likely a runtime bug.")
+#ifdef DEBUG_LEGION
+      assert(canonical_instance == NULL);
+      assert(instances.empty());
+      assert(!insts.empty());
+#endif
+      canonical_instance = insts.front();
+      for (std::vector<FutureInstance*>::const_iterator it =
+            insts.begin(); it != insts.end(); it++)
       {
-        result = const_cast<void*>(args);
-        result_size = arglen;
-      }
-      else
-      {
-        result_size = arglen;
-        result = malloc(result_size);
-        memcpy(result,args,result_size);
+#ifdef DEBUG_LEGION
+        assert(instances.find((*it)->memory) == instances.end());
+#endif
+        instances[(*it)->memory] = *it;
       }
       finish_set_future();
     }
-#endif
 
     //--------------------------------------------------------------------------
     void FutureImpl::set_result(FutureFunctor *functor, bool own,Processor proc)
@@ -969,21 +1041,14 @@ namespace Legion {
       finish_set_future();
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void FutureImpl::set_local(const void *value, size_t size, bool owned)
+    void FutureImpl::set_local(const void *value, size_t size, bool own)
     //--------------------------------------------------------------------------
     {
-      Memory memory = runtime->
-      if (!owned)
-      {
-
-      }
-      else
-        set_result(new FutureInstance(
-
+      FutureInstance *instance = 
+        FutureInstance::create_local(value, size, own, runtime);
+      set_result(instance);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void FutureImpl::finish_set_future(void)
@@ -1005,45 +1070,31 @@ namespace Legion {
         runtime->send_future_notification(owner_space, rez); 
       }
       else if (!subscribers.empty())
-        broadcast_result(subscribers, future_complete, false/*need lock*/);
-      if (subscription_internal.exists())
-      {
-        Runtime::trigger_event(subscription_internal);
-        if (!subscription_event.exists() && 
-            remove_base_resource_ref(RUNTIME_REF))
-          assert(false); // should always hold reference from caller
-      }
+        broadcast_result(subscribers, false/*need lock*/);
       if (subscription_event.exists())
       {
-        // Be very careful here, it might look like you can trigger the
-        // subscription event immediately on the owner node but you can't
-        // because we still rely on futures to propagate privileges when
-        // return region tree types
-        if (future_complete != subscription_event)
-          Runtime::trigger_event(NULL, subscription_event, future_complete);
-        else
-          Runtime::trigger_event(NULL, subscription_event);
-        subscription_event = ApUserEvent::NO_AP_USER_EVENT;
+        Runtime::trigger_event(subscription_event);
+        subscription_event = RtUserEvent::NO_RT_USER_EVENT;
         if (remove_base_resource_ref(RUNTIME_REF))
-          assert(false); // should always hold a reference from caller
+          assert(false); // should always hold reference from caller
       }
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FutureImpl::invoke_callback(void)
+    RtEvent FutureImpl::invoke_callback(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(callback_functor != NULL);
 #endif
-      if (!callback_ready.exists())
+      if (!subscription_event.exists())
       {
-        callback_ready = Runtime::create_ap_user_event(NULL);
+        subscription_event = Runtime::create_rt_user_event();
         FutureCallbackArgs args(this);    
         runtime->issue_application_processor_task(args, 
             LG_LATENCY_WORK_PRIORITY, callback_proc);
       }
-      return callback_ready;
+      return subscription_event;
     }
 
     //--------------------------------------------------------------------------
@@ -1052,9 +1103,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(callback_functor != NULL);
-      assert(callback_ready.exists());
+      assert(subscription_event.exists());
 #endif
-      result_size = callback_functor->callback_get_future_size();
+      size_t result_size = callback_functor->callback_get_future_size();
+      void *result = NULL;
       if (result_size > 0)
       {
         result = malloc(result_size);
@@ -1063,13 +1115,20 @@ namespace Legion {
       callback_functor->callback_release_future();
       if (own_callback_functor)
         delete callback_functor;
+      FutureInstance *instance =
+        FutureInstance::create_local(result, result_size, true/*own*/, runtime);
       // Retake the lock and remove the guards
       AutoLock f_lock(future_lock);
       callback_functor = NULL;
-      Runtime::trigger_event(NULL, callback_ready, future_complete);
+#ifdef DEBUG_LEGION
+      assert(canonical_instance == NULL);
+#endif
+      canonical_instance = instance;
+      instances[instance->memory] = instance;
+      Runtime::trigger_event(subscription_event);
       // Check for any subscribers that we need to tell about the result
       if (!subscribers.empty())
-        broadcast_result(subscribers, future_complete, false/*need lock*/);
+        broadcast_result(subscribers, false/*need lock*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1088,7 +1147,7 @@ namespace Legion {
       fargs->impl->perform_callback();
       if (fargs->impl->remove_base_gc_ref(DEFERRED_TASK_REF))
         delete fargs->impl;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void FutureImpl::unpack_future(Deserializer &derez)
@@ -1098,24 +1157,24 @@ namespace Legion {
       AutoLock f_lock(future_lock);
 #ifdef DEBUG_LEGION
       assert(empty);
-      assert(subscription_event.exists() || subscription_internal.exists());
+      assert(subscription_event.exists());
 #endif
-      derez.deserialize(result_size);
-      if (result_size > 0)
+      canonical_instance = FutureInstance::unpack_instance(derez, runtime);
+      if (canonical_instance != NULL)
       {
-        result = malloc(result_size);
-        derez.deserialize(result,result_size);
+        size_t num_instances;
+        derez.deserialize(num_instances);
+        for (unsigned idx = 0; idx < num_instances; idx++)
+        {
+          FutureInstance *inst = FutureInstance::unpack_instance(derez,runtime);
+          if (instances.find(inst->memory) == instances.end())
+            instances[inst->memory] = inst;
+          else
+            delete inst;
+        }
       }
       empty = false;
-      ApEvent complete;
-      derez.deserialize(complete);
-      if (subscription_event.exists())
-      {
-        Runtime::trigger_event(NULL, subscription_event, complete);
-        subscription_event = ApUserEvent::NO_AP_USER_EVENT;
-      }
-      if (subscription_internal.exists())
-        Runtime::trigger_event(subscription_internal);
+      Runtime::trigger_event(subscription_event);
       if (is_owner())
       {
 #ifdef DEBUG_LEGION
@@ -1144,8 +1203,9 @@ namespace Legion {
       return was_sampled;
     }
 
+#if 0
     //--------------------------------------------------------------------------
-    bool FutureImpl::get_boolean_value(bool &valid)
+    bool FutureImpl::get_boolean_value(bool &valid, ApEvent *ready)
     //--------------------------------------------------------------------------
     {
       if (!empty)
@@ -1155,6 +1215,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(callback_functor == NULL);
 #endif
+        size_t size = 0;
+        const void *result = find_internal_buffer(size);
+#ifdef DEBUG_LEGION
+        assert(sizeof(bool) == size);
+#endif
         return *((const bool*)result); 
       }
       else
@@ -1163,55 +1228,10 @@ namespace Legion {
         return false; 
       }
     }
-
-    //--------------------------------------------------------------------------
-    ApEvent FutureImpl::subscribe(bool need_local_data)
-    //--------------------------------------------------------------------------
-    {
-      if (!empty && (callback_functor == NULL))
-        return future_complete;
-      AutoLock f_lock(future_lock);
-      // See if we lost the race
-      if (empty)
-      {
-        if (!subscription_event.exists())
-        {
-          subscription_event = Runtime::create_ap_user_event(NULL);
-          if (!is_owner())
-          {
-#ifdef DEBUG_LEGION
-            assert(!future_complete.exists());
 #endif
-            future_complete = subscription_event;
-          }
-          if (!subscription_internal.exists())
-          {
-            // Add a reference to prevent us from being collected
-            // until we get the result of the subscription
-            add_base_resource_ref(RUNTIME_REF);
-            if (!is_owner())
-            {
-              // Send a request to the owner node to subscribe
-              Serializer rez;
-              rez.serialize(did);
-              runtime->send_future_subscription(owner_space, rez);
-            }
-            else
-              record_subscription(local_space, false/*need lock*/);
-          }
-        }
-        return subscription_event;
-      }
-      else
-      {
-        if ((callback_functor != NULL) && need_local_data)
-          return invoke_callback();
-        return future_complete;
-      }
-    }
 
     //--------------------------------------------------------------------------
-    RtEvent FutureImpl::subscribe_internal(bool need_local_data)
+    RtEvent FutureImpl::subscribe(void)
     //--------------------------------------------------------------------------
     {
       if (!empty && (callback_functor == NULL))
@@ -1220,35 +1240,28 @@ namespace Legion {
       // See if we lost the race
       if (empty)
       {
-        if (!subscription_internal.exists())
+        if (!subscription_event.exists())
         {
-          subscription_internal = Runtime::create_rt_user_event();
-          if (!subscription_event.exists())
+          subscription_event = Runtime::create_rt_user_event();
+          // Add a reference to prevent us from being collected
+          // until we get the result of the subscription
+          add_base_resource_ref(RUNTIME_REF);
+          if (!is_owner())
           {
-            // Add a reference to prevent us from being collected
-            // until we get the result of the subscription
-            add_base_resource_ref(RUNTIME_REF);
-            if (!is_owner())
-            {
-              // Send a request to the owner node to subscribe
-              Serializer rez;
-              rez.serialize(did);
-              runtime->send_future_subscription(owner_space, rez);
-            }
-            else if (need_local_data)
-              record_subscription(local_space, false/*need lock*/);
+            // Send a request to the owner node to subscribe
+            Serializer rez;
+            rez.serialize(did);
+            runtime->send_future_subscription(owner_space, rez);
           }
+          else
+            record_subscription(local_space, false/*need lock*/);
         }
-        return subscription_internal;
+        return subscription_event;
       }
       else
       {
-        if ((callback_functor != NULL) && need_local_data)
-        {
-          const ApEvent ready = invoke_callback();
-          if (ready.exists() && !ready.has_triggered())
-            return Runtime::protect_event(ready);
-        }
+        if (callback_functor != NULL)
+          return invoke_callback();
         return RtEvent::NO_RT_EVENT;
       }
     }
@@ -1398,7 +1411,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FutureImpl::broadcast_result(std::set<AddressSpaceID> &targets,
-                                      ApEvent complete, const bool need_lock)
+                                      const bool need_lock)
     //--------------------------------------------------------------------------
     {
       if (targets.empty())
@@ -1406,7 +1419,7 @@ namespace Legion {
       if (need_lock)
       {
         AutoLock f_lock(future_lock,1,false/*exclusive*/);
-        broadcast_result(targets, complete, false/*need lock*/);
+        broadcast_result(targets, false/*need lock*/);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -1430,19 +1443,17 @@ namespace Legion {
         }
         return;
       }
+      Serializer rez;
+      bool packed = false;
       for (std::set<AddressSpaceID>::const_iterator it = 
             targets.begin(); it != targets.end(); it++)
       {
         if ((*it) == local_space)
           continue;
-        Serializer rez;
+        if (!packed)
         {
-          rez.serialize(did);
-          RezCheck z(rez);
-          rez.serialize(result_size);
-          if (result_size > 0)
-            rez.serialize(result,result_size);
-          rez.serialize(complete);
+          pack_future_result(rez);
+          packed = true;
         }
         runtime->send_future_result(*it, rez);
       }
@@ -1476,7 +1487,6 @@ namespace Legion {
             rez.serialize(did);
             rez.serialize<size_t>(1); // size
             rez.serialize(subscriber);
-            rez.serialize(future_complete);
           }
           runtime->send_future_broadcast(result_set_space, rez);
         }
@@ -1502,16 +1512,31 @@ namespace Legion {
         }
         // We've got the result so we can't send it back right away
         Serializer rez;
-        {
-          rez.serialize(did);
-          RezCheck z(rez);
-          rez.serialize(result_size);
-          if (result_size > 0)
-            rez.serialize(result,result_size);
-          rez.serialize(future_complete);
-        }
+        pack_future_result(rez);
         runtime->send_future_result(subscriber, rez);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::pack_future_result(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(did);
+      RezCheck z(rez);
+      if (canonical_instance != NULL)
+      {
+        if (!canonical_instance->pack_instance(rez,false/*move ownership*/))
+        {
+          rez.serialize<size_t>(instances.size());
+          for (std::map<Memory,FutureInstance*>::const_iterator it =
+                instances.begin(); it != instances.end(); it++)
+            it->second->pack_instance(rez, false/*move ownership*/);
+        }
+        else
+          rez.serialize<size_t>(0);
+      }
+      else
+        rez.serialize<size_t>(0);
     }
 
     //--------------------------------------------------------------------------
@@ -1536,7 +1561,6 @@ namespace Legion {
           for (std::set<AddressSpaceID>::const_iterator it = 
                subscribers.begin(); it != subscribers.end(); it++)
             rez.serialize(*it);
-          rez.serialize(future_complete);
         }
         runtime->send_future_broadcast(remote_space, rez);
         subscribers.clear();
@@ -1649,9 +1673,7 @@ namespace Legion {
         derez.deserialize(subscriber);
         subscribers.insert(subscriber);
       }
-      ApEvent complete_event;
-      derez.deserialize(complete_event);
-      future->broadcast_result(subscribers, complete_event, true/*need lock*/);
+      future->broadcast_result(subscribers, true/*need lock*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1659,8 +1681,8 @@ namespace Legion {
                                               unsigned count)
     //--------------------------------------------------------------------------
     {
-      const ApEvent ready = subscribe();
-      if (!ready.has_triggered_faultignorant())
+      const RtEvent ready = subscribe();
+      if (ready.exists() && !ready.has_triggered())
       {
         // If we're not done then defer the operation until we are triggerd
         // First add a garbage collection reference so we don't get
@@ -1668,12 +1690,16 @@ namespace Legion {
         add_base_gc_ref(PENDING_COLLECTIVE_REF);
         ContributeCollectiveArgs args(this, dc, count);
         // Spawn the task dependent on the future being ready
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                                         Runtime::protect_event(ready));
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, ready);
       }
       else // If we've already triggered, then we can do the arrival now
+      {
+        size_t result_size = 0;
+        const void *result = get_buffer(runtime->runtime_system_memory,
+            &result_size, false/*check size*/, true/*silence warnings*/);
         Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT,
                                       result, result_size);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1952,7 +1978,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureInstance::pack_instance(Serializer &rez, bool pack_ownership,
+    bool FutureInstance::pack_instance(Serializer &rez, bool pack_ownership,
                                        ApEvent ready)
     //--------------------------------------------------------------------------
     {
@@ -1967,6 +1993,8 @@ namespace Legion {
         rez.serialize(data, size);
         // No need to do anything else, don't even move the ownership because
         // we have everything we need to make the future on the destination node
+        // We packed by value so return true
+        return true;
       }
       else
       {
@@ -1999,6 +2027,7 @@ namespace Legion {
           rez.serialize<bool>(false); // external allocation
           rez.serialize<bool>(eager_allocation);
         }
+        return false;
       }
     }
 
@@ -2487,7 +2516,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FutureMapImpl::get_shard_local_futures(
-                                      std::map<DomainPoint,FutureImpl*> &others)
+                                           std::map<DomainPoint,Future> &others)
     //--------------------------------------------------------------------------
     {
       // Wait for all the futures to be ready
@@ -2495,7 +2524,7 @@ namespace Legion {
         ready_event.wait();
       for (std::map<DomainPoint,Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
-        others[it->first] = it->second.impl;
+        others[it->first] = it->second;
     }
 
     //--------------------------------------------------------------------------
@@ -2835,21 +2864,21 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     void ReplFutureMapImpl::get_shard_local_futures(
-                                      std::map<DomainPoint,FutureImpl*> &others)
+                                           std::map<DomainPoint,Future> &others)
     //--------------------------------------------------------------------------
     {
       FutureMapImpl::get_shard_local_futures(others);
       const ShardID local_shard = repl_ctx->owner_shard->shard_id;
       if (!sharding_function_ready.has_triggered())
         sharding_function_ready.wait();
-      for (std::map<DomainPoint,FutureImpl*>::iterator it = 
+      for (std::map<DomainPoint,Future>::iterator it = 
             others.begin(); it != others.end(); /*nothing*/)
       {
         const ShardID shard = 
           sharding_function->find_owner(it->first, shard_domain);
         if (shard != local_shard)
         {
-          std::map<DomainPoint,FutureImpl*>::iterator to_delete = it++;
+          std::map<DomainPoint,Future>::iterator to_delete = it++;
           others.erase(to_delete);
         }
         else
@@ -29138,14 +29167,6 @@ namespace Legion {
         case LG_MUST_LAUNCH_ID:
           {
             MustEpochOp::handle_launch_task(args);
-            break;
-          }
-        case LG_RESOLVE_FUTURE_PRED_ID:
-          {
-            FuturePredOp::ResolveFuturePredArgs *resolve_args = 
-              (FuturePredOp::ResolveFuturePredArgs*)args;
-            resolve_args->future_pred_op->resolve_future_predicate();
-            resolve_args->future_pred_op->remove_predicate_reference();
             break;
           }
         case LG_CONTRIBUTE_COLLECTIVE_ID:

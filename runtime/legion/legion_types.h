@@ -316,7 +316,6 @@ namespace Legion {
       LG_MUST_MAP_ID,
       LG_MUST_DIST_ID,
       LG_MUST_LAUNCH_ID,
-      LG_RESOLVE_FUTURE_PRED_ID,
       LG_CONTRIBUTE_COLLECTIVE_ID,
       LG_FUTURE_CALLBACK_TASK_ID,
       LG_TOP_FINISH_TASK_ID,
@@ -439,7 +438,6 @@ namespace Legion {
         "Must Task Physical Dependence Analysis",                 \
         "Must Task Distribution",                                 \
         "Must Task Launch",                                       \
-        "Resolve Future Predicate",                               \
         "Contribute Collective",                                  \
         "Future Callback",                                        \
         "Top Finish",                                             \
@@ -1969,6 +1967,8 @@ namespace Legion {
     friend class Internal::ReplDetachOp;                    \
     friend class Internal::RegionTreeForest;                \
     friend class Internal::IndexSpaceNode;                  \
+    template<int, typename>                                 \
+    friend class Internal::IndexSpaceNodeT;                 \
     friend class Internal::IndexPartNode;                   \
     friend class Internal::FieldSpaceNode;                  \
     friend class Internal::RegionTreeNode;                  \

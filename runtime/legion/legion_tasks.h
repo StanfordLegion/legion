@@ -545,6 +545,7 @@ namespace Legion {
       // Hold the result of the mapping 
       std::deque<InstanceSet>                     physical_instances;
       std::vector<std::vector<PhysicalManager*> > source_instances;
+      std::vector<Memory>                         future_memories;
     protected: // Mapper choices 
       std::set<unsigned>                          untracked_valid_regions;
       VariantID                                   selected_variant;
@@ -888,7 +889,7 @@ namespace Legion {
       virtual void set_projection_result(unsigned idx, LogicalRegion result);
     public:
       void initialize_point(SliceTask *owner, const DomainPoint &point,
-                            const FutureMap &point_arguments,
+                            const FutureMap &point_arguments, bool eager,
                             const std::vector<FutureMap> &point_futures);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -1278,8 +1279,9 @@ namespace Legion {
             FutureFunctor *functor, Processor future_proc, bool own_functor); 
     public:
       virtual void register_must_epoch(void);
-      PointTask* clone_as_point_task(const DomainPoint &point);
-      size_t enumerate_points(void);
+      PointTask* clone_as_point_task(const DomainPoint &point,
+                                     bool inline_task);
+      size_t enumerate_points(bool inline_task);
       FutureInstance* get_predicate_false_result(Processor point_proc);
     public:
       void check_target_processors(void) const;

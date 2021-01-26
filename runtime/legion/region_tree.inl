@@ -4437,9 +4437,9 @@ namespace Legion {
         // Fast case for when we know that the bounds of future map
         // is the same as the color space of the new partition
         // Get the shard-local futures for this future map            
-        std::map<DomainPoint,FutureImpl*> shard_local_futures;
+        std::map<DomainPoint,Future> shard_local_futures;
         future_map->get_shard_local_futures(shard_local_futures);
-        for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
+        for (std::map<DomainPoint,Future>::const_iterator it = 
              shard_local_futures.begin(); it != shard_local_futures.end(); it++)
         {
           const Point<COLOR_DIM,COLOR_T> point = it->first;
@@ -4449,7 +4449,7 @@ namespace Legion {
                                             partition->get_child(child_color));
           size_t future_size = 0;
           const Domain *domain = static_cast<const Domain*>(
-              it->second->get_internal_buffer(future_size));
+              it->second.impl->find_internal_buffer(op, future_size));
           if (future_size != sizeof(Domain))
             REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
                 "An invalid future size was found in a partition by domain "
@@ -4518,7 +4518,7 @@ namespace Legion {
             {
               size_t future_size = 0;
               const Domain *domain = static_cast<const Domain*>(
-                  future->get_internal_buffer(future_size));
+                  future->find_internal_buffer(op, future_size));
               if (future_size != sizeof(Domain))
                 REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
                     "An invalid future size was found in a partition by domain "
@@ -4588,7 +4588,7 @@ namespace Legion {
                 "color in the color space. All colors must be present.")
           FutureImpl *future = future_map->unpack_future(finder->second);
           size_t future_size = 0;
-          const void *data = future->get_internal_buffer(future_size);
+          const void *data = future->find_internal_buffer(op, future_size);
           if (future_size == sizeof(int))
           {
             if (weights.empty())

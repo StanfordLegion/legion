@@ -2291,17 +2291,16 @@ namespace Legion {
     {
       if (impl != NULL)
       {
-        const Internal::ApEvent ready = subscribe ? 
-          impl->subscribe() : impl->get_ready_event();
+        if (subscribe)
+          impl->subscribe();
+        const Internal::ApEvent ready = impl->get_ready_event();
         // Always subscribe to the Realm event to know when it triggers
         ready.subscribe();
         bool poisoned = false;
         if (ready.has_triggered_faultaware(poisoned))
-        {
-          if (poisoned)
-            Internal::implicit_context->raise_poison_exception();
           return true;
-        }
+        if (poisoned && (Internal::implicit_context != NULL))
+          Internal::implicit_context->raise_poison_exception();
         return false;
       }
       return true; // Empty futures are always ready
@@ -2316,7 +2315,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for future value from empty future")
       Processor proc = Internal::implicit_context->get_executing_processor();
-      return impl->get_buffer(proc, memory, extent_in_bytes, check_size, 
+      return impl->get_buffer(proc, memory, extent_in_bytes, check_size,
                               silence_warnings, warning_string);
     }
 

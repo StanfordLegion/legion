@@ -235,13 +235,23 @@ namespace Legion {
                              bool check_extent = false,
                              bool silence_warnings = false, 
                              const char *warning_string = NULL);
-      const void *get_internal_buffer(size_t &expected_size);
+      const void* get_buffer(Memory memory,
+                             size_t *extent_in_bytes = NULL, 
+                             bool check_extent = false,
+                             bool silence_warnings = false, 
+                             const char *warning_string = NULL);
+      ApEvent request_application_buffer(Memory target);
+      RtEvent request_internal_buffer(bool eager);
+      const void *find_internal_buffer(Operation *op, size_t &expected_size);
       FutureInstance* get_canonical_instance(void);
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
                     bool internal = false);
-      size_t get_untyped_size(bool internal = false);
+      size_t get_untyped_size(void);
       ApEvent get_ready_event(void) const { return future_complete; }
+      // A special function for predicates to peek
+      // at the boolean value of a future if it is set
+      bool get_boolean_value(bool eager);
     public:
       // This will simply save the value of the future
       void set_result(FutureInstance *instance);
@@ -256,15 +266,8 @@ namespace Legion {
       // Reset the future in case we need to restart the
       // computation for resiliency reasons
       bool reset_future(void);
-      // A special function for predicates to peek
-      // at the boolean value of a future if it is set
-      bool get_boolean_value(bool &valid);
-      // Request that the value be made ready on this node
-      ApEvent subscribe(bool need_local_data = true);
-      // Request the value be made ready on this node for
-      // internal use which means we can see the value before
-      // the future actually completes
-      RtEvent subscribe_internal(bool need_local_data = true);
+      // Request that we get meta data for the future on this node
+      RtEvent subscribe(void);
       // Set the task tree coordinates for this future
       void set_future_coordinates(
           std::vector<std::pair<size_t,DomainPoint> > &coordinates);
@@ -287,15 +290,17 @@ namespace Legion {
       void register_dependence(Operation *consumer_op);
       void register_remote(AddressSpaceID sid, ReferenceMutator *mutator);
     protected:
+      FutureInstance* find_or_create_instance(Memory memory, bool eager);
       void finish_set_future(void); // must be holding lock
       void mark_sampled(void);
       void broadcast_result(std::set<AddressSpaceID> &targets,
-                            ApEvent complete, const bool need_lock);
+                            const bool need_lock);
       void record_subscription(AddressSpaceID subscriber, bool need_lock);
       void notify_remote_set(AddressSpaceID remote_space);
     protected:
-      ApEvent invoke_callback(void); // must be holding lock
+      RtEvent invoke_callback(void); // must be holding lock
       void perform_callback(void);
+      void pack_future_result(Serializer &rez) const; // must be holding lock
     public:
       void record_future_registered(ReferenceMutator *mutator);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
@@ -317,23 +322,21 @@ namespace Legion {
 #ifdef LEGION_SPY
       const UniqueID producer_uid;
 #endif
+      const ApEvent future_complete;
     private:
       FRIEND_ALL_RUNTIME_CLASSES
       mutable LocalLock future_lock;
-      ApEvent future_complete;
-      ApUserEvent subscription_event;
-      RtUserEvent subscription_internal;
+      RtUserEvent subscription_event;
       // On the owner node, keep track of the registered waiters
       std::set<AddressSpaceID> subscribers;
       // These are the coordinates in the task tree for the operation
       // that produced this future. Currently it is only valid if we
       // are running with -lg:safe_ctrlrepl but we could relax that
       std::vector<std::pair<size_t,DomainPoint> > coordinates;
-      void *result; 
-      size_t result_size;
       AddressSpaceID result_set_space; // space on which the result was set
+      std::map<Memory,FutureInstance*> instances;
+      FutureInstance *canonical_instance;
     private:
-      ApUserEvent callback_ready;
       Processor callback_proc;
       FutureFunctor *callback_functor;
       bool own_callback_functor;
@@ -386,7 +389,7 @@ namespace Legion {
       ApEvent get_ready(void);
       PhysicalInstance get_instance(void);
     public:
-      void pack_instance(Serializer &rez, bool pack_ownership,
+      bool pack_instance(Serializer &rez, bool pack_ownership,
                          ApEvent ready = ApEvent::NO_AP_EVENT);
       static FutureInstance* unpack_instance(Deserializer &derez, Runtime *rt);
     public:
@@ -476,7 +479,7 @@ namespace Legion {
       // Will return NULL if it does not exist
       virtual FutureImpl* find_shard_local_future(const DomainPoint &point);
       virtual void get_shard_local_futures(
-                                std::map<DomainPoint,FutureImpl*> &futures);
+                                     std::map<DomainPoint,Future> &futures);
     public:
       void register_dependence(Operation *consumer_op);
     public:
@@ -568,7 +571,7 @@ namespace Legion {
       // Will return NULL if it does not exist
       virtual FutureImpl* find_shard_local_future(const DomainPoint &point);
       virtual void get_shard_local_futures(
-                                std::map<DomainPoint,FutureImpl*> &futures);
+                                     std::map<DomainPoint,Future> &futures);
     public:
       void set_sharding_function(ShardingFunction *function);
       void handle_future_map_request(Deserializer &derez);
@@ -1071,6 +1074,7 @@ namespace Legion {
         { return (visible_memories.find(memory) != visible_memories.end()); }
       inline void find_visible_memories(std::set<Memory> &visible) const
         { visible = visible_memories; }
+      inline Memory find_best_visible_memory(Memory::Kind kind);
     protected:
       void perform_mapping_operations(void);
       void issue_advertisements(MapperID mid);

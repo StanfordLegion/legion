@@ -2155,6 +2155,7 @@ namespace Legion {
       target_processors.clear();
       physical_instances.clear();
       source_instances.clear();
+      future_memories.clear();
       virtual_mapped.clear();
       no_access_regions.clear();
       intra_space_mapping_dependences.clear();
@@ -2269,6 +2270,9 @@ namespace Legion {
         rez.serialize<size_t>(physical_instances.size());
         for (unsigned idx = 0; idx < physical_instances.size(); idx++)
           physical_instances[idx].pack_references(rez);
+        rez.serialize<size_t>(future_memories.size());
+        for (unsigned idx = 0; idx < future_memories.size(); idx++)
+          rez.serialize(future_memories[idx]);
         rez.serialize<size_t>(task_profiling_requests.size());
         for (unsigned idx = 0; idx < task_profiling_requests.size(); idx++)
           rez.serialize(task_profiling_requests[idx]);
@@ -2360,6 +2364,11 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_phy; idx++)
           physical_instances[idx].unpack_references(runtime,
                                                     derez, ready_events);
+        size_t num_future_memories;
+        derez.deserialize(num_future_memories);
+        future_memories.resize(num_future_memories);
+        for (unsigned idx = 0; idx < num_future_memories; idx++)
+          derez.deserialize(future_memories[idx]);
         size_t num_task_requests;
         derez.deserialize(num_task_requests);
         if (num_task_requests > 0)
@@ -2706,6 +2715,9 @@ namespace Legion {
         // Only one valid choice in this case, ignore everything else
         target_processors.push_back(this->target_proc);
       }
+      // If we had any future mapping outputs, we can grab them
+      if (!output.future_targets.empty())
+        future_memories.swap(output.future_targets);
       // Sort out any profiling requests that we need to perform
       if (!output.task_prof_requests.empty())
       {
@@ -4251,17 +4263,27 @@ namespace Legion {
       // doing the inner task optimization
       if (!do_inner_task_optimization)
       {
-        std::set<ApEvent> ready_events;
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           if (!virtual_mapped[idx] && !no_access_regions[idx])
-            physical_instances[idx].update_wait_on_events(ready_events);
+            physical_instances[idx].update_wait_on_events(wait_on_events);
         }
-        wait_on_events.insert(Runtime::merge_events(NULL, ready_events));
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           FutureImpl *impl = futures[idx].impl; 
-          wait_on_events.insert(impl->subscribe(false/*need local data*/));
+          ApEvent ready;
+          if (idx < future_memories.size())
+          {
+            if (future_memories[idx].exists())
+              ready = impl->request_application_buffer(future_memories[idx]);
+            else // skip requesting any futures mapped to NO_MEMORY
+              continue;
+          }
+          else
+            ready =
+              impl->request_application_buffer(runtime->runtime_system_memory);
+          if (ready.exists())
+            wait_on_events.insert(ready);
         }
       }
       // Now add get all the other preconditions for the launch
@@ -6019,23 +6041,13 @@ namespace Legion {
       }
       else
       {
-        // We can only do an early complete here if there are
-        // no other completion preconditions, otherwise actual
-        // application execution needs to wait for all the other
-        // resources to be returned.
-        if (!completion_preconditions.empty())
-        {
+        if (!request_early_complete(task_effects_complete))
           completion_preconditions.insert(
               Runtime::protect_event(task_effects_complete));
+        if (!completion_preconditions.empty())
           complete_operation(Runtime::merge_events(completion_preconditions));
-        }
         else
-        {
-          if (!request_early_complete(task_effects_complete))
-            complete_operation(Runtime::protect_event(task_effects_complete));
-          else
-            complete_operation();
-        }
+          complete_operation();
       }
       if (need_commit)
         trigger_children_committed();
@@ -6979,7 +6991,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PointTask::initialize_point(SliceTask *owner, const DomainPoint &point,
-                                    const FutureMap &point_arguments,
+                                    const FutureMap &point_arguments,bool eager,
                                     const std::vector<FutureMap> &point_futures)
     //--------------------------------------------------------------------------
     {
@@ -6992,7 +7004,10 @@ namespace Legion {
         Future f = point_arguments.impl->get_future(point, true/*internal*/);
         if (f.impl != NULL)
         {
-          const void *buffer = f.impl->get_internal_buffer(local_arglen);
+          const RtEvent ready = f.impl->request_internal_buffer(eager);
+          if (ready.exists() && !ready.has_triggered())
+            ready.wait();
+          const void *buffer = f.impl->find_internal_buffer(this, local_arglen);
           // Have to make a local copy since the point takes ownership
           if (local_arglen > 0)
           {
@@ -9062,21 +9077,25 @@ namespace Legion {
       // Should be empty at this point
       assert(complete_effects.empty());
 #endif
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      completion_event);
+#endif
       if (must_epoch != NULL)
       {
         RtEvent precondition;
         if (!complete_preconditions.empty())
           precondition = Runtime::merge_events(complete_preconditions);
         must_epoch->notify_subop_complete(this, precondition);
-      } 
-#ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      completion_event);
-#endif
-      if (!complete_preconditions.empty())
-        complete_operation(Runtime::merge_events(complete_preconditions));
-      else
         complete_operation();
+      } 
+      else
+      {
+        if (!complete_preconditions.empty())
+          complete_operation(Runtime::merge_events(complete_preconditions));
+        else
+          complete_operation();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9190,7 +9209,7 @@ namespace Legion {
       SliceTask *slice = clone_as_slice_task(launch_space->handle,
                 current_proc, false/*recurse*/, false/*stealable*/);
       complete_effects.insert(slice->get_completion_event());
-      slice->enumerate_points();
+      slice->enumerate_points(true/*inlining*/);
       slice->perform_inlining(variant, parent_regions);
       // Record that we had our speculation resolved too
       resolve_speculation();
@@ -9789,7 +9808,7 @@ namespace Legion {
                                                        current_proc,
                                                        false, false);
       // Count how many total points we need for this index space task
-      total_points = new_slice->enumerate_points();
+      total_points = new_slice->enumerate_points(false/*inline*/);
       // We need to make one slice per point here in case we need to move
       // points to remote nodes. The way we do slicing right now prevents
       // us from knowing which point tasks are going remote until later in
@@ -10321,7 +10340,7 @@ namespace Legion {
       // Check to see if we already enumerated all the points, if
       // not then do so now
       if (points.empty())
-        enumerate_points();
+        enumerate_points(false/*inlining*/);
       // Once we start mapping then we are no longer stealable
       stealable = false;
       std::set<RtEvent> mapped_events;
@@ -10365,7 +10384,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, SLICE_MAP_AND_LAUNCH_CALL);
       // First enumerate all of our points if we haven't already done so
       if (points.empty())
-        enumerate_points();
+        enumerate_points(false/*inlining*/);
       // Mark that this task is no longer stealable.  Once we start
       // executing things onto a specific processor slices cannot move.
       stealable = false;
@@ -10796,7 +10815,7 @@ namespace Legion {
       assert(must_epoch != NULL);
 #endif
       if (points.empty())
-        enumerate_points();
+        enumerate_points(false/*inling*/);
       must_epoch->register_slice_task(this);
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
@@ -10806,7 +10825,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PointTask* SliceTask::clone_as_point_task(const DomainPoint &point)
+    PointTask* SliceTask::clone_as_point_task(const DomainPoint &point,
+                                              bool inline_task)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_POINT_CALL);
@@ -10830,7 +10850,8 @@ namespace Legion {
         result->remote_trace_info = new TraceInfo(*remote_trace_info, result);
       }
       // Now figure out our local point information
-      result->initialize_point(this, point, point_arguments, point_futures);
+      result->initialize_point(this, point, point_arguments,
+                               inline_task, point_futures);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_point(get_unique_id(), 
                                    result->get_unique_id(),
@@ -10839,7 +10860,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t SliceTask::enumerate_points(void)
+    size_t SliceTask::enumerate_points(bool inline_task)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_ENUMERATE_POINTS_CALL);
@@ -10854,7 +10875,7 @@ namespace Legion {
       // Enumerate all the points in our slice and make point tasks
       for (Domain::DomainPointIterator itr(internal_domain); 
             itr; itr++, point_idx++)
-        points[point_idx] = clone_as_point_task(itr.p);
+        points[point_idx] = clone_as_point_task(itr.p, inline_task);
       // Compute any projection region requirements
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {

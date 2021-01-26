@@ -2463,17 +2463,6 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FUTURE_PRED_OP_ALLOC;
     public:
-      struct ResolveFuturePredArgs : public LgTaskArgs<ResolveFuturePredArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_RESOLVE_FUTURE_PRED_ID;
-      public:
-        ResolveFuturePredArgs(FuturePredOp *op)
-          : LgTaskArgs<ResolveFuturePredArgs>(op->get_unique_op_id()),
-            future_pred_op(op) { }
-      public:
-        FuturePredOp *const future_pred_op;
-      };
-    public:
       FuturePredOp(Runtime *rt);
       FuturePredOp(const FuturePredOp &rhs);
       virtual ~FuturePredOp(void);
@@ -2481,7 +2470,6 @@ namespace Legion {
       FuturePredOp& operator=(const FuturePredOp &rhs);
     public:
       void initialize(InnerContext *ctx, Future f);
-      void resolve_future_predicate(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2490,6 +2478,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
     protected:
       Future future;
     };
@@ -3170,6 +3159,8 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+    protected:
+      virtual void request_future_buffers(std::set<RtEvent> &ready_events);
     protected:
       PendingPartitionThunk *thunk;
       FutureMap future_map;
@@ -3887,6 +3878,7 @@ namespace Legion {
       virtual void trigger_complete(void);
     protected:
       // These are virtual methods to override for control replication
+      virtual void populate_sources(void);
       virtual void all_reduce_serdez(void);
       virtual RtEvent all_reduce_redop(void);
     protected:
@@ -3895,6 +3887,7 @@ namespace Legion {
       const ReductionOp *redop; 
       const SerdezRedopFns *serdez_redop_fns;
       Future result;
+      std::map<DomainPoint,Future> sources;
       std::vector<FutureInstance*> targets;
       size_t future_result_size;
       void *serdez_redop_buffer;

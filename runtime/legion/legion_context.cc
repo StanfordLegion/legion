@@ -11146,8 +11146,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::hash_future(Murmur3Hasher &hasher,
-                                const unsigned safe_level, const Future &future)
+    void ReplicateContext::hash_future(Murmur3Hasher &hasher,
+                          const unsigned safe_level, const Future &future) const
     //--------------------------------------------------------------------------
     {
       if (future.impl == NULL)
@@ -11167,7 +11167,8 @@ namespace Legion {
       else if (safe_level > 1)
       {
         size_t size = 0;
-        const void *result = future.impl->get_internal_buffer(size);
+        const void *result = future.impl->get_buffer(executing_processor,
+            Memory::SYSTEM_MEM, &size, false/*check*/, true/*silence warn*/);
         hasher.hash(result, size);
       }
     }
@@ -11295,8 +11296,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::hash_task_launcher(Murmur3Hasher &hasher,
-                        const unsigned safe_level, const TaskLauncher &launcher)
+    void ReplicateContext::hash_task_launcher(Murmur3Hasher &hasher,
+                  const unsigned safe_level, const TaskLauncher &launcher) const
     //--------------------------------------------------------------------------
     {
       hasher.hash(launcher.task_id);
@@ -21145,11 +21146,7 @@ namespace Legion {
       if (f.impl == NULL)
         return Predicate::FALSE_PRED;
       // Always eagerly evaluate predicates in leaf contexts
-      bool valid = false;
-      const bool value = f.impl->get_boolean_value(valid);
-#ifdef DEBUG_LEGION
-      assert(valid); // all futures should be ready
-#endif
+      const bool value = f.impl->get_boolean_value(true/*eager*/);
       if (value)
         return Predicate::TRUE_PRED;
       else

@@ -2285,8 +2285,8 @@ namespace Legion {
       void create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
       void create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
     public:
-      static void hash_future(Murmur3Hasher &hasher, 
-                              const unsigned safe_level, const Future &future);
+      void hash_future(Murmur3Hasher &hasher, 
+                       const unsigned safe_level, const Future &future) const;
       static void hash_future_map(Murmur3Hasher &hasher, const FutureMap &map);
       static void hash_index_space_requirements(Murmur3Hasher &hasher,
           const std::vector<IndexSpaceRequirement> &index_requirements);
@@ -2301,8 +2301,8 @@ namespace Legion {
       static void hash_predicate(Murmur3Hasher &hasher, const Predicate &pred);
       static void hash_static_dependences(Murmur3Hasher &hasher,
           const std::vector<StaticDependence> *dependences);
-      static void hash_task_launcher(Murmur3Hasher &hasher, 
-          const unsigned safe_level, const TaskLauncher &launcher);
+      void hash_task_launcher(Murmur3Hasher &hasher, 
+          const unsigned safe_level, const TaskLauncher &launcher) const;
       void hash_index_launcher(Murmur3Hasher &hasher,
           const unsigned safe_level, const IndexTaskLauncher &launcher);
       void verify_replicable(Murmur3Hasher &hasher, const char *func_name);

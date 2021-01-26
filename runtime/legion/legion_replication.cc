@@ -3589,6 +3589,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplPendingPartitionOp::request_future_buffers(
+                                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(future_map.impl != NULL);
+#endif
+      std::map<DomainPoint,Future> sources;
+      future_map.impl->get_shard_local_futures(sources);
+      for (std::map<DomainPoint,Future>::const_iterator it =
+            sources.begin(); it != sources.end(); it++)
+      {
+        const RtEvent ready =
+          it->second.impl->request_internal_buffer(false/*eager*/);
+        if (ready.exists())
+          ready_events.insert(ready);
+      } 
+    }
+
+    //--------------------------------------------------------------------------
     void ReplPendingPartitionOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
@@ -5252,20 +5272,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplAllReduceOp::populate_sources(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sources.empty());
+#endif
+      future_map.impl->get_shard_local_futures(sources);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplAllReduceOp::all_reduce_serdez(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(serdez_redop_fns != NULL);
 #endif
-      std::map<DomainPoint,FutureImpl*> futures;
-      future_map.impl->get_shard_local_futures(futures);
-      for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
-            futures.begin(); it != futures.end(); it++)
+      for (std::map<DomainPoint,Future>::const_iterator it = 
+            sources.begin(); it != sources.end(); it++)
       {
-        FutureImpl *impl = it->second;
+        FutureImpl *impl = it->second.impl;
         size_t src_size = 0;
-        const void *source = impl->get_internal_buffer(src_size);
+        const void *source = impl->find_internal_buffer(this, src_size);
         (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
                                        future_result_size, source);
         if (runtime->legion_spy_enabled)
@@ -5317,12 +5345,10 @@ namespace Legion {
     RtEvent ReplAllReduceOp::all_reduce_redop(void)
     //--------------------------------------------------------------------------
     {
-      std::map<DomainPoint,Future> futures;
-      future_map.impl->get_all_futures(futures);
-      std::vector<FutureInstance*> sources;
-      sources.reserve(futures.size());
+      std::vector<FutureInstance*> instances;
+      instances.reserve(sources.size());
       for (std::map<DomainPoint,Future>::const_iterator it = 
-            futures.begin(); it != futures.end(); it++)
+            sources.begin(); it != sources.end(); it++)
       {
         FutureImpl *impl = it->second.impl;
         FutureInstance *instance = impl->get_canonical_instance();
@@ -5333,7 +5359,7 @@ namespace Legion {
               "Future has size %zd bytes but reduction operator expects "
               "RHS inputs of %zd bytes.", parent_ctx->get_task_name(),
               parent_ctx->get_unique_id(), instance->size, redop->sizeof_rhs)
-        sources.push_back(instance);
+        instances.push_back(instance);
         if (runtime->legion_spy_enabled)
         {
           const ApEvent ready_event = impl->get_ready_event();
@@ -5352,7 +5378,7 @@ namespace Legion {
       if (deterministic)
       {
         for (std::vector<FutureInstance*>::const_iterator it =
-              sources.begin(); it != sources.end(); it++)
+              instances.begin(); it != instances.end(); it++)
           local_precondition = local_target->reduce_from(*it, this, redop_id,
                                 redop, true/*exclusive*/, local_precondition);
       }
@@ -5360,7 +5386,7 @@ namespace Legion {
       {
         std::set<ApEvent> postconditions;
         for (std::vector<FutureInstance*>::const_iterator it =
-              sources.begin(); it != sources.end(); it++)
+              instances.begin(); it != instances.end(); it++)
         {
           const ApEvent postcondition = local_target->reduce_from(*it, this,
                     redop_id, redop, false/*exclusive*/, local_precondition);
@@ -11710,7 +11736,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (source == ctx->owner_shard->shard_id)
-        ready = impl->subscribe_internal();
+        ready = impl->subscribe();
     }
 
     //--------------------------------------------------------------------------
