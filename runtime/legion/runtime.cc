@@ -815,7 +815,11 @@ namespace Legion {
       const RtEvent ready_event = subscribe();
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      FutureInstance *instance = find_or_create_instance(memory, true/*eager*/);
+      FutureInstance *instance = find_or_create_instance(memory,
+          (implicit_context != NULL) ? implicit_context->owner_task : NULL,
+          true/*eager*/);
+      if (instance == NULL)
+        return NULL;
       if (extent_in_bytes != NULL)
       {
         if (check_extent)
@@ -835,8 +839,6 @@ namespace Legion {
         else
           (*extent_in_bytes) = instance->size;
       }
-      if (instance == NULL)
-        return NULL;
       bool poisoned = false;
       if (!instance->ready_event.has_triggered_faultaware(poisoned))
       {
@@ -855,24 +857,51 @@ namespace Legion {
       return instance->data;
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    RtEvent FutureImpl::request_internal_buffer(bool eager)
+    RtEvent FutureImpl::request_internal_buffer(Operation *op, bool eager)
     //--------------------------------------------------------------------------
     {
-      // Do the subscription call to get that in flight first
-      const RtEvent subscribed = subscribe();
-      // Check to see if we have an internal buffer to use 
+      // Check to see if we have an internal buffer to use already
+      // If not record that we need one and do the subscription
+      RtEvent ready_event;
       {
-
+        AutoLock f_lock(future_lock);
+        if (!empty)
+        {
+          if ((canonical_instance == NULL) ||
+              canonical_instance->is_meta_visible)
+            return RtEvent::NO_RT_EVENT;
+          for (std::map<Memory,FutureInstance*>::const_iterator it =
+                instances.begin(); it != instances.end(); it++)
+            if (it->second->is_meta_visible)
+              return RtEvent::NO_RT_EVENT;
+          // We don't have one yet, but we can make one since we've got
+          // the canonical instance at this point
+          find_or_create_instance(runtime->runtime_system_memory,
+                                  op, eager, false/*need lock*/);
+          return RtEvent::NO_RT_EVENT;
+        }
+        // If we get here, it means we can't even make the instance yet
+        // because we don't have the needed meta-data like the size and
+        // a canonical instance to user.
+        // Keep it sticky to eager so that if any requests are eager
+        // then we must do an eager allocation
+        std::map<Memory,std::pair<Operation*,bool> >::iterator finder =
+          pending_instances.find(runtime->runtime_system_memory);
+        if (finder == pending_instances.end())
+          pending_instances[runtime->runtime_system_memory] = 
+            std::make_pair(op, eager);
+        else if (!finder->second.second && eager)
+          finder->second = std::make_pair(op, eager);
+        ready_event = subscription_event;
       }
-
-      return subscribed;
+      if (!ready_event.exists())
+        return subscribe();
+      return ready_event;
     }
-#endif
 
     //--------------------------------------------------------------------------
-    const void* FutureImpl::find_internal_buffer(Operation *op, size_t &size)
+    const void* FutureImpl::find_internal_buffer(TaskContext *ctx, size_t &size)
     //--------------------------------------------------------------------------
     {
       FutureInstance *instance = NULL;
@@ -908,7 +937,7 @@ namespace Legion {
         if (!instance->ready_event.has_triggered_faultaware(poisoned))
           instance->ready_event.wait_faultaware(poisoned);
         if (poisoned)
-          op->get_context()->raise_poison_exception();
+          ctx->raise_poison_exception();
       }
       return instance->data;
     }
@@ -988,6 +1017,8 @@ namespace Legion {
 #endif
       canonical_instance = instance;
       instances[instance->memory] = instance;
+      if (!pending_instances.empty())
+        create_pending_instances();
       finish_set_future();
     }
 
@@ -1017,6 +1048,8 @@ namespace Legion {
 #endif
         instances[(*it)->memory] = *it;
       }
+      if (!pending_instances.empty())
+        create_pending_instances();
       finish_set_future();
     }
 
@@ -1081,6 +1114,84 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FutureImpl::create_pending_instances(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!pending_instances.empty());
+#endif
+      for (std::map<Memory,std::pair<Operation*,bool> >::const_iterator it =
+            pending_instances.begin(); it != pending_instances.end(); it++)
+        find_or_create_instance(it->first, it->second.first, 
+                                it->second.second, false/*need lock*/);
+      pending_instances.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance* FutureImpl::find_or_create_instance(Memory memory,
+                                      Operation *op, bool eager, bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // This better be a local memory by the time that we get here
+      assert(memory.address_space() == runtime->address_space);
+#endif
+      if (need_lock)
+      {
+        AutoLock f_lock(future_lock);
+        return find_or_create_instance(memory, op, eager, false/*need lock*/);
+      }
+#ifdef DEBUG_LEGION
+      assert(!empty);
+#endif
+      // Handle the case where we don't have a payload
+      if (canonical_instance == NULL)
+        return NULL;
+      // See if we've already got one
+      std::map<Memory,FutureInstance*>::const_iterator finder =
+        instances.find(memory);
+      if (finder != instances.end())
+        return finder->second;
+      // Don't have it so we need to make it
+      MemoryManager *manager = runtime->find_memory_manager(memory); 
+      const ApUserEvent ready_event = Runtime::create_ap_user_event(NULL);
+      FutureInstance *instance = manager->create_future_instance(op,
+                      ready_event, canonical_instance->size, eager);
+      // Initialize the instance from one of the existing instances
+      FutureInstance *local_instance = NULL;
+      for (std::map<Memory,FutureInstance*>::const_iterator it =
+            instances.begin(); it != instances.end(); it++)
+      {
+        // See if we find a meta-visible one to copy from, if we
+        // do then we can just do this right away
+        if (it->second->is_meta_visible)
+        {
+          if (it->second->is_ready())
+          {
+            const ApEvent ready = instance->copy_from(it->second, op);
+            Runtime::trigger_event(NULL, ready_event, ready);
+            return instance;
+          }
+          else
+            local_instance = it->second;
+        }
+        else if ((local_instance == NULL) &&
+            (it->first.address_space() == runtime->address_space))
+          local_instance = it->second;
+      }
+      if (local_instance != NULL)
+      {
+        const ApEvent ready = instance->copy_from(local_instance, op);
+        Runtime::trigger_event(NULL, ready_event, ready);
+        return instance;
+      }
+      // If we get here, just issue the copy from the canonical instance
+      const ApEvent ready = instance->copy_from(canonical_instance, op); 
+      Runtime::trigger_event(NULL, ready_event, ready);
+      return instance; 
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent FutureImpl::invoke_callback(void)
     //--------------------------------------------------------------------------
     {
@@ -1125,6 +1236,8 @@ namespace Legion {
 #endif
       canonical_instance = instance;
       instances[instance->memory] = instance;
+      if (!pending_instances.empty())
+        create_pending_instances();
       Runtime::trigger_event(subscription_event);
       // Check for any subscribers that we need to tell about the result
       if (!subscribers.empty())
@@ -1173,6 +1286,8 @@ namespace Legion {
             delete inst;
         }
       }
+      if (!pending_instances.empty())
+        create_pending_instances();
       empty = false;
       Runtime::trigger_event(subscription_event);
       if (is_owner())
@@ -1203,32 +1318,21 @@ namespace Legion {
       return was_sampled;
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    bool FutureImpl::get_boolean_value(bool &valid, ApEvent *ready)
+    bool FutureImpl::get_boolean_value(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
-      if (!empty)
-      {
-        valid = !subscription_internal.exists() || 
-                  subscription_internal.has_triggered();
 #ifdef DEBUG_LEGION
-        assert(callback_functor == NULL);
+      assert(!empty);
+      assert(callback_functor == NULL);
 #endif
-        size_t size = 0;
-        const void *result = find_internal_buffer(size);
+      size_t size = 0;
+      const void *result = find_internal_buffer(ctx, size);
 #ifdef DEBUG_LEGION
-        assert(sizeof(bool) == size);
+      assert(sizeof(bool) == size);
 #endif
-        return *((const bool*)result); 
-      }
-      else
-      {
-        valid = false;
-        return false; 
-      }
+      return *((const bool*)result); 
     }
-#endif
 
     //--------------------------------------------------------------------------
     RtEvent FutureImpl::subscribe(void)
@@ -9191,6 +9295,9 @@ namespace Legion {
                PhysicalInstance &instance, Realm::InstanceLayoutGeneric *layout)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
       RtEvent wait_on(RtEvent::NO_EVENT);
       instance = PhysicalInstance::NO_INST;
       if (eager_allocator == NULL) 

@@ -2236,7 +2236,7 @@ namespace Legion {
     {
       // See if we need to make an eager instance for this or not
       if ((size > LEGION_MAX_RETURN_SIZE) ||
-          !runtime->is_meta_visible_memory(memory))
+          !FutureInstance::check_meta_visible(runtime, memory))
       {
         // create an eager instance in the chosen memory
         MemoryManager *manager = runtime->find_memory_manager(memory);
@@ -2291,7 +2291,7 @@ namespace Legion {
     {
       // See if we need to make an eager instance for this or not
       if ((source->size > LEGION_MAX_RETURN_SIZE) || !source->is_meta_visible ||
-          !runtime->is_meta_visible_memory(memory))
+          !FutureInstance::check_meta_visible(runtime, memory))
       {
         // create an eager instance in the chosen memory
         MemoryManager *manager = runtime->find_memory_manager(memory);
@@ -21145,8 +21145,12 @@ namespace Legion {
     {
       if (f.impl == NULL)
         return Predicate::FALSE_PRED;
+      const RtEvent ready = 
+        f.impl->request_internal_buffer(owner_task, true/*eager*/);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
       // Always eagerly evaluate predicates in leaf contexts
-      const bool value = f.impl->get_boolean_value(true/*eager*/);
+      const bool value = f.impl->get_boolean_value(this);
       if (value)
         return Predicate::TRUE_PRED;
       else

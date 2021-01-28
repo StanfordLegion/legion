@@ -2717,7 +2717,54 @@ namespace Legion {
       }
       // If we had any future mapping outputs, we can grab them
       if (!output.future_targets.empty())
+      {
         future_memories.swap(output.future_targets);
+        if (futures.size() < future_memories.size())
+          future_memories.resize(futures.size());
+        // Check to make sure that they are all on the same address
+        // space as the target processor(s)
+        const AddressSpaceID target_space = this->target_proc.address_space();
+        for (unsigned idx = 0; idx < future_memories.size(); idx++)
+        {
+          if (!future_memories[idx].exists())
+            continue;
+          if (future_memories[idx].address_space() != target_space)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Invalid mapper output from invocation of '%s' on mapper %s "
+                "when mapping task %s (UID %lld). Mapper attempted to map "
+                "future %d to memory " IDFMT " in address space "
+                "%d which is not the same as address space %d of the target "
+                "processor " IDFMT ". Mapped futures must be in the same "
+                "address space as the target processor for task mappings.",
+                "map_task", mapper->get_mapper_name(), get_task_name(),
+                get_unique_id(), idx, future_memories[idx].id, 
+                future_memories[idx].address_space(), target_space,
+                this->target_proc.id)
+          // Request the future memories be created
+          const RtEvent future_mapped =
+                futures[idx].impl->request_application_instance(
+                                      future_memories[idx], this);
+          if (future_mapped.exists())
+            map_applied_conditions.insert(future_mapped); 
+        }
+        // Handle any unmapped futures too
+        Memory target_memory = Memory::NO_MEMORY;
+        for (unsigned idx = future_memories.size(); idx < futures.size(); idx++)
+        {
+          if (!target_memory.exists())
+          {
+            if (target_proc.address_space() != runtime->address_space)
+              target_memory = runtime->find_local_memory(this->target_proc,
+                                                        Memory::SYSTEM_MEM);
+            else
+              target_memory = runtime->runtime_system_memory;
+          }
+          const RtEvent future_mapped =
+            futures[idx].impl->request_application_instance(target_memory,this);
+          if (future_mapped.exists())
+            map_applied_conditions.insert(future_mapped);
+        }
+      }
       // Sort out any profiling requests that we need to perform
       if (!output.task_prof_requests.empty())
       {
@@ -4275,13 +4322,14 @@ namespace Legion {
           if (idx < future_memories.size())
           {
             if (future_memories[idx].exists())
-              ready = impl->request_application_buffer(future_memories[idx]);
+              ready = impl->find_application_instance_ready(
+                                  future_memories[idx], this);
             else // skip requesting any futures mapped to NO_MEMORY
               continue;
           }
           else
-            ready =
-              impl->request_application_buffer(runtime->runtime_system_memory);
+            ready = impl->find_application_instance_ready(
+                      runtime->runtime_system_memory, this);
           if (ready.exists())
             wait_on_events.insert(ready);
         }
@@ -7004,10 +7052,11 @@ namespace Legion {
         Future f = point_arguments.impl->get_future(point, true/*internal*/);
         if (f.impl != NULL)
         {
-          const RtEvent ready = f.impl->request_internal_buffer(eager);
+          const RtEvent ready = f.impl->request_internal_buffer(this, eager);
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
-          const void *buffer = f.impl->find_internal_buffer(this, local_arglen);
+          const void *buffer =
+            f.impl->find_internal_buffer(parent_ctx, local_arglen);
           // Have to make a local copy since the point takes ownership
           if (local_arglen > 0)
           {

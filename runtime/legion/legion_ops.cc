@@ -2552,7 +2552,8 @@ namespace Legion {
           can_result_future_complete = true;
       }
       if (set_future)
-        result_future.impl->set_local(&predicate_value,sizeof(predicate_value));
+        result_future.impl->set_local(&predicate_value,
+            sizeof(predicate_value));
       complete_operation();
     }
 
@@ -2569,7 +2570,6 @@ namespace Legion {
           collect_predicate = Runtime::create_rt_user_event();
           precondition = collect_predicate;
         }
-        
       } 
       commit_operation(true/*deactivate*/, precondition);
     }
@@ -8520,9 +8520,17 @@ namespace Legion {
             // Have to request internal buffers before completing mapping
             // in case we have to make an instance as part of it
             const RtEvent ready = 
-              futures[0].impl->request_internal_buffer(false/*eager*/);
-            complete_mapping(mapping_precondition);
-            complete_execution(ready); 
+              futures[0].impl->request_internal_buffer(this, false/*eager*/);
+            if (ready.exists())
+            {
+              if (mapping_precondition.exists())
+                complete_mapping(
+                    Runtime::merge_events(ready, mapping_precondition));
+              else
+                complete_mapping(ready);
+            }
+            else
+              complete_mapping(mapping_precondition);
             break;
           }
         case FIELD_ALLOCATION:
@@ -8531,25 +8539,32 @@ namespace Legion {
             // Have to request internal buffers before completing mapping
             // in case we have to make an instance as part of it
             for (unsigned idx = 0; idx < futures.size(); idx++)
-              ready_events.insert(
-                  futures[idx].impl->request_internal_buffer(false/*eager*/));
-            complete_mapping(mapping_precondition);
+            {
+              const RtEvent ready =
+                futures[idx].impl->request_internal_buffer(this,false/*eager*/);
+              if (ready.exists())
+                ready_events.insert(ready);
+            }
             if (!ready_events.empty())
-              complete_execution(Runtime::merge_events(ready_events));
+            {
+              if (mapping_precondition.exists())
+                ready_events.insert(mapping_precondition);
+              complete_mapping(Runtime::merge_events(ready_events));
+            }
             else
-              complete_execution();
+              complete_mapping(mapping_precondition);
             break;
           }
         case FENCE_CREATION:
         case FUTURE_MAP_CREATION:
           {
             complete_mapping(mapping_precondition);
-            complete_execution();
             break;
           }
         default:
           assert(false);
       }
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -8566,7 +8581,7 @@ namespace Legion {
             FutureImpl *impl = futures[0].impl;
             size_t future_size = 0;
             const Domain *domain = static_cast<const Domain*>(
-                impl->find_internal_buffer(this, future_size));
+                impl->find_internal_buffer(parent_ctx, future_size));
             if (future_size != sizeof(Domain))
               REPORT_LEGION_ERROR(ERROR_CREATION_FUTURE_TYPE_MISMATCH,
                   "Future for index space creation in task %s (UID %lld) does "
@@ -8586,7 +8601,7 @@ namespace Legion {
               FutureImpl *impl = futures[idx].impl;
               size_t future_size = 0;
               const size_t *field_size = static_cast<const size_t*>(
-                      impl->find_internal_buffer(this, future_size));
+                      impl->find_internal_buffer(parent_ctx, future_size));
               if (future_size != sizeof(size_t))
                 REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
                     "Size of future passed into dynamic field allocation for "
@@ -13236,7 +13251,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enqueue_ready_operation(
-          future.impl->request_internal_buffer(false/*eager*/)); 
+          future.impl->request_internal_buffer(this, false/*eager*/)); 
     }
 
     //--------------------------------------------------------------------------
@@ -13246,7 +13261,7 @@ namespace Legion {
       // Mark that we completed mapping this operation
       complete_mapping();
       // See if we have a value
-      bool value = future.impl->get_boolean_value(false/*eager*/);
+      bool value = future.impl->get_boolean_value(parent_ctx);
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
@@ -15363,7 +15378,7 @@ namespace Legion {
             sources.begin(); it != sources.end(); it++)
       {
         const RtEvent ready =
-          it->second.impl->request_internal_buffer(false/*eager*/);
+          it->second.impl->request_internal_buffer(this, false/*eager*/);
         if (ready.exists())
           ready_events.insert(ready);
       }
@@ -15379,12 +15394,11 @@ namespace Legion {
       // Can only marked that that this is mapped after we've requested
       // buffers for any futures in the future map we need which may
       // require performing allocations
-      complete_mapping();
-      // If necessary defer execution until the internal buffers are ready
       if (!ready_events.empty())
-        complete_execution(Runtime::merge_events(ready_events));
+        complete_mapping(Runtime::merge_events(ready_events));
       else
-        complete_execution();
+        complete_mapping();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -17700,7 +17714,7 @@ namespace Legion {
       {
         // If we have a future value see if its event has triggered
         RtEvent future_ready_event = 
-          future.impl->request_internal_buffer(false/*eager*/);
+          future.impl->request_internal_buffer(this, false/*eager*/);
         if (!future_ready_event.has_triggered())
         {
           // Launch a task to handle the deferred complete
@@ -17724,7 +17738,8 @@ namespace Legion {
       // Make a copy of the future value since the region tree
       // will want to take ownership of the buffer
       size_t result_size = 0;
-      const void *buffer = future.impl->find_internal_buffer(this, result_size);
+      const void *buffer = 
+        future.impl->find_internal_buffer(parent_ctx, result_size);
       void *result = malloc(result_size);
       memcpy(result, buffer, result_size);
       // This is NULL for now until we implement tracing for fills
@@ -20018,7 +20033,7 @@ namespace Legion {
       {
         FutureImpl *impl = it->second.impl;
         size_t src_size = 0;
-        const void *source = impl->find_internal_buffer(this, src_size);
+        const void *source = impl->find_internal_buffer(parent_ctx, src_size);
         (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
                                        future_result_size, source);
         if (runtime->legion_spy_enabled)
@@ -20047,7 +20062,7 @@ namespace Legion {
               sources.begin(); it != sources.end(); it++)
         {
           const RtEvent ready = 
-            it->second.impl->request_internal_buffer(true/*eager*/);
+            it->second.impl->request_internal_buffer(this, true/*eager*/);
           if (ready.exists())
             ready_events.insert(ready);
         }

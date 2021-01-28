@@ -4448,8 +4448,8 @@ namespace Legion {
           IndexSpaceNodeT<DIM,T> *child = static_cast<IndexSpaceNodeT<DIM,T>*>(
                                             partition->get_child(child_color));
           size_t future_size = 0;
-          const Domain *domain = static_cast<const Domain*>(
-              it->second.impl->find_internal_buffer(op, future_size));
+          const Domain *domain = static_cast<const Domain*>(it->second.impl->
+                        find_internal_buffer(op->get_context(), future_size));
           if (future_size != sizeof(Domain))
             REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
                 "An invalid future size was found in a partition by domain "
@@ -4518,7 +4518,7 @@ namespace Legion {
             {
               size_t future_size = 0;
               const Domain *domain = static_cast<const Domain*>(
-                  future->find_internal_buffer(op, future_size));
+                  future->find_internal_buffer(op->get_context(), future_size));
               if (future_size != sizeof(Domain))
                 REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
                     "An invalid future size was found in a partition by domain "
@@ -4588,7 +4588,8 @@ namespace Legion {
                 "color in the color space. All colors must be present.")
           FutureImpl *future = future_map->unpack_future(finder->second);
           size_t future_size = 0;
-          const void *data = future->find_internal_buffer(op, future_size);
+          const void *data =
+            future->find_internal_buffer(op->get_context(), future_size);
           if (future_size == sizeof(int))
           {
             if (weights.empty())

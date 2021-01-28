@@ -240,9 +240,10 @@ namespace Legion {
                              bool check_extent = false,
                              bool silence_warnings = false, 
                              const char *warning_string = NULL);
-      ApEvent request_application_buffer(Memory target);
-      RtEvent request_internal_buffer(bool eager);
-      const void *find_internal_buffer(Operation *op, size_t &expected_size);
+      RtEvent request_application_instance(Memory target, SingleTask *task);
+      ApEvent find_application_instance_ready(Memory target, SingleTask *task);
+      RtEvent request_internal_buffer(Operation *op, bool eager);
+      const void *find_internal_buffer(TaskContext *ctx, size_t &expected_size);
       FutureInstance* get_canonical_instance(void);
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
@@ -251,7 +252,8 @@ namespace Legion {
       ApEvent get_ready_event(void) const { return future_complete; }
       // A special function for predicates to peek
       // at the boolean value of a future if it is set
-      bool get_boolean_value(bool eager);
+      // Must have called request internal buffer first and event must trigger
+      bool get_boolean_value(TaskContext *ctx);
     public:
       // This will simply save the value of the future
       void set_result(FutureInstance *instance);
@@ -290,8 +292,10 @@ namespace Legion {
       void register_dependence(Operation *consumer_op);
       void register_remote(AddressSpaceID sid, ReferenceMutator *mutator);
     protected:
-      FutureInstance* find_or_create_instance(Memory memory, bool eager);
       void finish_set_future(void); // must be holding lock
+      void create_pending_instances(void); // must be holding lock
+      FutureInstance* find_or_create_instance(Memory memory, Operation *op,
+                                              bool eager,bool need_lock = true);
       void mark_sampled(void);
       void broadcast_result(std::set<AddressSpaceID> &targets,
                             const bool need_lock);
@@ -336,6 +340,8 @@ namespace Legion {
       AddressSpaceID result_set_space; // space on which the result was set
       std::map<Memory,FutureInstance*> instances;
       FutureInstance *canonical_instance;
+      // Instances that need to be made once canonical instance is set
+      std::map<Memory,std::pair<Operation*,bool/*eager*/> > pending_instances;
     private:
       Processor callback_proc;
       FutureFunctor *callback_functor;
@@ -394,7 +400,7 @@ namespace Legion {
       static FutureInstance* unpack_instance(Deserializer &derez, Runtime *rt);
     public:
       static bool check_meta_visible(Runtime *runtime, Memory memory,
-                                     bool has_freefunc);
+                                     bool has_freefunc = false);
       static FutureInstance* create_local(const void *value, size_t size, 
                                           bool own, Runtime *runtime);
     public:
@@ -3751,7 +3757,6 @@ namespace Legion {
     public:
       bool is_local(Processor proc) const;
       bool is_visible_memory(Processor proc, Memory mem);
-      bool is_meta_visible_memory(Memory memory);
       void find_visible_memories(Processor proc, std::set<Memory> &visible);
       Memory find_local_memory(Processor proc, Memory::Kind mem_kind);
     public:

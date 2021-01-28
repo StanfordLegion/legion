@@ -3602,7 +3602,7 @@ namespace Legion {
             sources.begin(); it != sources.end(); it++)
       {
         const RtEvent ready =
-          it->second.impl->request_internal_buffer(false/*eager*/);
+          it->second.impl->request_internal_buffer(this, false/*eager*/);
         if (ready.exists())
           ready_events.insert(ready);
       } 
@@ -5293,7 +5293,7 @@ namespace Legion {
       {
         FutureImpl *impl = it->second.impl;
         size_t src_size = 0;
-        const void *source = impl->find_internal_buffer(this, src_size);
+        const void *source = impl->find_internal_buffer(parent_ctx, src_size);
         (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
                                        future_result_size, source);
         if (runtime->legion_spy_enabled)
