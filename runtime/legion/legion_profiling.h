@@ -349,8 +349,8 @@ namespace Legion {
         ProfilingInfo(ProfilingResponseHandler *h) 
           : ProfilingResponseBase(h) 
 #ifdef LEGION_PROF_PROVENANCE
-            , provenance(external_implicit_task ? LgEvent::NO_LG_EVENT :
-                LgEvent(Processor::get_current_finish_event()))
+          , provenance(!Processor::get_executing_processor.exists() ?
+          LgEvent::NO_LG_EVENT : LgEvent(Processor::get_current_finish_event()))
 #endif
         { }
       public:

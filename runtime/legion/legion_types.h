@@ -1494,9 +1494,6 @@ namespace Legion {
       GLOBAL_REGISTRATION_CALLBACK = 2,
     };
     extern __thread unsigned inside_registration_callback;
-    // Use this global variable to track if we're an
-    // implicit top-level task that needs to do external waits
-    extern __thread bool external_implicit_task;
 
     /**
      * \class LgTaskArgs
@@ -2374,7 +2371,7 @@ namespace Legion {
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
         // Now we can do the wait
-        if (external_implicit_task)
+        if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait();
         else
           Realm::Event::wait();
@@ -2390,7 +2387,7 @@ namespace Legion {
       }
       else // Just do the normal wait
       {
-        if (external_implicit_task)
+        if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait();
         else
           Realm::Event::wait();
@@ -2424,7 +2421,7 @@ namespace Legion {
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
         // Now we can do the wait
-        if (external_implicit_task)
+        if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait_faultaware(poisoned);
         else
           Realm::Event::wait_faultaware(poisoned);
@@ -2440,7 +2437,7 @@ namespace Legion {
       }
       else // Just do the normal wait
       {
-        if (external_implicit_task)
+        if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait_faultaware(poisoned);
         else
           Realm::Event::wait_faultaware(poisoned);
