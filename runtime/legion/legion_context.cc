@@ -2202,8 +2202,9 @@ namespace Legion {
       Runtime *runtime_ptr = runtime;
       // Tell the parent context that we are ready for post-end
       InnerContext *parent_ctx = owner_task->get_context();
-      RtEvent effects_done(!external_implicit_task && !inline_task ? 
-          Processor::get_current_finish_event() : Realm::Event::NO_EVENT); 
+      const bool internal_task = Processor::get_executing_processor().exists();
+      RtEvent effects_done(internal_task && !inline_task ?
+          Processor::get_current_finish_event() : Realm::Event::NO_EVENT);
       if (last_registration.exists() && !last_registration.has_triggered())
       {
         if (copy_future.exists() && !copy_future.has_triggered())

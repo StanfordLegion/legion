@@ -5556,8 +5556,7 @@ namespace Legion {
               execution_fence_precondition = 
                   Runtime::merge_events(&trace_info, execution_preconditions);
             if (is_recording())
-              trace_info.record_complete_replay(this, 
-                        execution_fence_precondition);
+              tpl->record_complete_replay(this, execution_fence_precondition);
             Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/, 
                                           execution_fence_precondition);
             // We can always trigger the completion event when these are done

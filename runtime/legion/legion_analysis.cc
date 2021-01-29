@@ -10739,11 +10739,18 @@ namespace Legion {
       if (current_samples.size() == SAMPLES_PER_MIGRATION_TEST)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_LARGE_EQUIVALENCE_SET_NODE_USAGE,
-            "Internal runtime performance warning: equivalence set %lld has "
-            "%zd different users which is the same as the sampling rate of "
-            "%d. Please report this application use case to the Legion "
-            "developers mailing list.", did, current_samples.size(),
-            SAMPLES_PER_MIGRATION_TEST)
+            "Internal runtime performance warning: equivalence set %llx of "
+            "region (%d,%d,%d) has %zd different users which is the same as "
+            "the sampling rate of %d. Region requirement %d of operation %s "
+            "(UID %lld) triggered this warning. Please report this "
+            "application use case to the Legion developers mailing list.",
+            did, region_node->handle.get_index_space().get_id(),
+            region_node->handle.get_field_space().get_id(),
+            region_node->handle.get_tree_id(), current_samples.size(),
+            SAMPLES_PER_MIGRATION_TEST, analysis.index,
+            (analysis.op->get_operation_kind() == Operation::TASK_OP_KIND) ?
+              static_cast<TaskOp*>(analysis.op)->get_task_name() :
+            analysis.op->get_logging_name(), analysis.op->get_unique_op_id())
         // Reset the data structures for the next run
         current_samples.clear();
         sample_count = 0;

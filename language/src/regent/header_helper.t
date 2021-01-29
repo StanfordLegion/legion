@@ -65,37 +65,43 @@ local function get_task_params(task)
 
       local param_type = param:gettype()
 
-      local terra_type, c_type, cxx_type
-      if base.types.is_region(param_type) then
-        terra_type, c_type, cxx_type = c.legion_logical_region_t, "legion_logical_region_t", "Legion::LogicalRegion"
-      elseif base.types.is_ispace(param_type) then
-        terra_type, c_type, cxx_type = c.legion_index_space_t, "legion_index_space_t", "Legion::IndexSpace"
-      elseif param_type == int32 then
-        terra_type, c_type, cxx_type = int32, "int32_t",  "int32_t"
-      elseif param_type == int64 then
-        terra_type, c_type, cxx_type = int64, "int64_t", "int64_t"
-      elseif param_type == uint32 then
-        terra_type, c_type, cxx_type = uint32, "uint32_t", "uint32_t"
-      elseif param_type == uint64 then
-        terra_type, c_type, cxx_type = uint64, "uint64_t", "uint64_t"
-      elseif param_type == float then
-        terra_type, c_type, cxx_type = float, "float", "float"
-      elseif param_type == double then
-        terra_type, c_type, cxx_type = double, "double", "double"
-      elseif param_type == bool then
-        terra_type, c_type, cxx_type = bool, "bool", "bool"
-      else
-        assert(false, "unknown type " .. tostring(param_type))
+      local function lower_type(t)
+        if base.types.is_region(t) then
+          return c.legion_logical_region_t, "legion_logical_region_t %s", "Legion::LogicalRegion %s"
+        elseif base.types.is_ispace(t) then
+          return c.legion_index_space_t, "legion_index_space_t", "Legion::IndexSpace"
+        elseif t == int32 then
+          return int32, "int32_t %s",  "int32_t %s"
+        elseif t == int64 then
+          return int64, "int64_t %s", "int64_t %s"
+        elseif t == uint32 then
+          return uint32, "uint32_t %s", "uint32_t %s"
+        elseif t == uint64 then
+          return uint64, "uint64_t %s", "uint64_t %s"
+        elseif t == float then
+          return float, "float %s", "float %s"
+        elseif t == double then
+          return double, "double %s", "double %s"
+        elseif t == bool then
+          return bool, "bool %s", "bool %s"
+        elseif t:isarray() then
+          local elt_t, elt_c, elt_cxx = lower_type(t.type)
+          return &elt_t, elt_c .. "[" .. t.N .. "]", elt_cxx .. "[" .. t.N .. "]"
+        else
+          assert(false, "unknown type " .. tostring(t))
+        end
       end
+
+      local terra_type, c_type, cxx_type = lower_type(param_type)
 
       assert(terra_type and c_type and cxx_type)
       result:insert({terra_type, c_type, cxx_type, param:getname()})
 
       -- Add secondary symbols for special types
       if base.types.is_region(param_type) then
-        result:insert({c.legion_logical_region_t, "legion_logical_region_t", "Legion::LogicalRegion", param:getname() .. "_parent"})
-        result:insert({&c.legion_field_id_t, "const legion_field_id_t *", "const std::vector<Legion::FieldID> &", param:getname() .. "_fields"})
-        result:insert({c.size_t, "size_t", false, param:getname() .. "_num_fields"})
+        result:insert({c.legion_logical_region_t, "legion_logical_region_t %s", "Legion::LogicalRegion %s", param:getname() .. "_parent"})
+        result:insert({&c.legion_field_id_t, "const legion_field_id_t * %s", "const std::vector<Legion::FieldID> & %s", param:getname() .. "_fields"})
+        result:insert({c.size_t, "size_t %s", false, param:getname() .. "_num_fields"})
       end
 
       return result
@@ -106,7 +112,7 @@ local function render_c_params(param_list)
   local result = terralib.newlist()
   for _, param in ipairs(param_list) do
     local terra_type, c_type, cxx_type, param_name = unpack(param)
-    result:insert(c_type .. " " .. header_helper.normalize_name(param_name))
+    result:insert(string.format(c_type, header_helper.normalize_name(param_name)))
   end
   return result
 end
@@ -116,7 +122,7 @@ local function render_cxx_params(param_list)
   for _, param in ipairs(param_list) do
     local terra_type, c_type, cxx_type, param_name = unpack(param)
     if cxx_type then
-      result:insert(cxx_type .. " " .. header_helper.normalize_name(param_name))
+      result:insert(string.format(cxx_type, header_helper.normalize_name(param_name)))
     end
   end
   return result
@@ -453,6 +459,8 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
     cast_value = `([param_type] { impl = [arg_value] })
   elseif base.types.is_ispace(param_type) then
     cast_value = `([param_type] { impl = [arg_value] })
+  elseif param_type:isarray() then
+    cast_value = `(@([&param_type]([arg_value])))
   end
 
   local c_field = params_struct_type:getentries()[param_i + 1]

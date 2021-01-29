@@ -72,7 +72,6 @@ namespace Legion {
     __thread AutoLock *local_lock_list = NULL;
     __thread UniqueID implicit_provenance = 0;
     __thread unsigned inside_registration_callback = NO_REGISTRATION_CALLBACK;
-    __thread bool external_implicit_task = false;
 #ifdef DEBUG_LEGION_WAITS
     __thread int meta_task_id = -1;
 #endif
@@ -27789,8 +27788,6 @@ namespace Legion {
       // Wait for the runtime to have started if necessary
       if (!runtime_started_event.has_triggered())
         runtime_started_event.external_wait();
-      // Record that this is an external implicit task
-      external_implicit_task = true;
       SingleTask *local_task = NULL;
       // Now that the runtime is started we can make our context
       if (control_replicable && (total_address_spaces > 1))
@@ -27833,7 +27830,6 @@ namespace Legion {
       ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, 
           NULL/*callback functor*/, Memory::SYSTEM_MEM, NULL/*freefunc*/);
       // Record that this is no longer an implicit external task
-      external_implicit_task = false; 
       implicit_runtime = NULL;
       implicit_context = NULL;
     }
@@ -28308,13 +28304,7 @@ namespace Legion {
       // If this is the first time we've called this on this node then 
       // we need to remove our reference to allow shutdown to proceed
       if (__sync_fetch_and_add(&background_waits, 1) == 0)
-      {
-        // Have to mark this as an external implicit task so that any
-        // waits will be done correctly by this extneral thread
-        external_implicit_task = true;
         the_runtime->decrement_outstanding_top_level_tasks();
-        external_implicit_task = false;
-      }
       return RealmRuntime::get_runtime().wait_for_shutdown();
     }
 
