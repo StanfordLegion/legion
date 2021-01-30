@@ -8887,8 +8887,8 @@ namespace Legion {
       uintptr_t result = 0;
       switch (memory.kind())
       {
-        case SYSTEM_MEM:
-        case SOCKET_MEM:
+        case Memory::SYSTEM_MEM:
+        case Memory::SOCKET_MEM:
           {
             void *ptr = NULL;
             if (posix_memalign(&ptr, 32/*alignment*/, footprint))
@@ -8897,7 +8897,7 @@ namespace Legion {
               result = (uintptr_t)ptr;
             break;
           }
-        case REGDMA_MEM:
+        case Memory::REGDMA_MEM:
           {
             void *ptr = NULL;
             if (posix_memalign(&ptr, 32/*alignment*/, footprint))
@@ -8908,8 +8908,8 @@ namespace Legion {
             break;
           }
 #ifdef LEGION_USE_CUDA
-        case Z_COPY_MEM:
-        case GPU_FB_MEM:
+        case Memory::Z_COPY_MEM:
+        case Memory::GPU_FB_MEM:
           {
             if (needs_deferral)
             {
