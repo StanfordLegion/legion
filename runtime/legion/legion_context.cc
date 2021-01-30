@@ -2084,7 +2084,7 @@ namespace Legion {
       task_local_instances.push_back(std::make_pair(instance, ptr));
 #else
       MemoryManager *manager = runtime->find_memory_manager(memory);
-      const RtEvent wait_on(manager->create_eager_instance(instance, layout));
+      const ApEvent wait_on(manager->create_eager_instance(instance, layout));
       if (!instance.exists())
       {
         const char *mem_names[] = {
@@ -2102,8 +2102,14 @@ namespace Legion {
       }
       task_local_instances.insert(instance);
 #endif
-      if (wait_on.exists() && !wait_on.has_triggered())
-        wait_on.wait();
+      if (wait_on.exists())
+      {
+        bool poisoned = false;
+        if (!wait_on.has_triggered_faultaware(poisoned))
+          wait_on.wait_faultaware(poisoned);
+        if (poisoned)
+          raise_poison_exception();
+      }
       return instance;
     }
 
@@ -2242,8 +2248,8 @@ namespace Legion {
         // create an eager instance in the chosen memory
         MemoryManager *manager = runtime->find_memory_manager(memory);
         const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
-        FutureInstance *instance = 
-          manager->create_future_instance(owner_task,ready,size,true/*eager*/);
+        FutureInstance *instance = manager->create_future_instance(owner_task,
+            owner_task->get_unique_op_id(), ready,size, true/*eager*/);
         // create an external instance for the current allocation
         const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
         const std::vector<size_t> sizes(1, size);
@@ -2298,8 +2304,8 @@ namespace Legion {
         MemoryManager *manager = runtime->find_memory_manager(memory);
         const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
         FutureInstance *instance = 
-          manager->create_future_instance(owner_task, ready,
-                                          source->size, true/*eager*/);
+          manager->create_future_instance(owner_task,
+            owner_task->get_unique_op_id(), ready, source->size, true/*eager*/);
         // issue the copy between them
         Runtime::trigger_event(NULL, ready, 
             instance->copy_from(source, owner_task));

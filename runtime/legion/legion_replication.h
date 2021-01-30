@@ -235,10 +235,23 @@ namespace Legion {
      */
     class FutureAllReduceCollective : public AllGatherCollective<false> {
     public:
-      FutureAllReduceCollective(CollectiveIndexLocation loc, 
-          ReplicateContext *ctx, const ReductionOp *redop, bool deterministic);
-      FutureAllReduceCollective(ReplicateContext *ctx, CollectiveID id,
-                                const ReductionOp *redop, bool deterministic);
+      struct PendingReduce {
+      public:
+        PendingReduce(void) : instance(NULL) { }
+        PendingReduce(FutureInstance *inst, ApEvent pre, ApUserEvent post)
+          : instance(inst), precondition(pre), postcondition(post) { }
+      public:
+        FutureInstance *instance;
+        ApEvent precondition;
+        ApUserEvent postcondition;
+      };
+    public:
+      FutureAllReduceCollective(Operation *op, CollectiveIndexLocation loc, 
+          ReplicateContext *ctx, ReductionOpID redop_id,
+          const ReductionOp *redop, bool deterministic);
+      FutureAllReduceCollective(Operation *op, ReplicateContext *ctx, 
+          CollectiveID id, ReductionOpID redop_id, 
+          const ReductionOp *redop, bool deterministic);
       virtual ~FutureAllReduceCollective(void);
     public:
       virtual void pack_collective_stage(Serializer &rez, int stage);
@@ -246,14 +259,19 @@ namespace Legion {
     public:
       RtEvent async_reduce(FutureInstance *instance, ApEvent &ready_event);
     public:
+      Operation *const op;
       const ReductionOp *const redop;
+      const ReductionOpID redop_id;
       const bool deterministic;
     protected:
+      std::map<int,std::map<ShardID,PendingReduce> > pending_reductions;
+      std::set<ApEvent> shadow_postconditions;
       FutureInstance *instance;
-      ApEvent ready_event;
+      FutureInstance *shadow;
+      ApEvent instance_ready;
+      ApEvent shadow_ready;
       int current_stage;
-      std::map<int,std::map<ShardID,
-            std::pair<FutureInstance*,ApEvent> > > future_instances;
+      bool pack_shadow;
     };
 
     /**

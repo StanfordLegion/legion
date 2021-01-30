@@ -20114,7 +20114,7 @@ namespace Legion {
         {
           MemoryManager *manager = runtime->find_memory_manager(*it);
           FutureInstance *instance = manager->create_future_instance(this, 
-                    completion_event, future_result_size, false/*eager*/);
+            unique_op_id, completion_event, future_result_size, false/*eager*/);
           targets.push_back(instance);
         }
       }

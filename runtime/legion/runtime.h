@@ -212,6 +212,18 @@ namespace Legion {
       public:
         FutureImpl *const impl;
       };
+      struct PendingInstance {
+      public:
+        PendingInstance(void)
+          : op(NULL), uid(0), eager(false) { }
+        PendingInstance(Operation *o, UniqueID id, bool e)
+          : op(o), uid(id), eager(e) { }
+      public:
+        Operation *op;
+        UniqueID uid;
+        std::set<AddressSpaceID> remote_requests;
+        bool eager;
+      };
     public:
       FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
                  AddressSpaceID owner_space, ApEvent complete,
@@ -240,7 +252,8 @@ namespace Legion {
                              bool check_extent = false,
                              bool silence_warnings = false, 
                              const char *warning_string = NULL);
-      RtEvent request_application_instance(Memory target, SingleTask *task);
+      RtEvent request_application_instance(Memory target, SingleTask *task,
+       UniqueID uid, AddressSpaceID source, RtEvent pre = RtEvent::NO_RT_EVENT);
       ApEvent find_application_instance_ready(Memory target, SingleTask *task);
       RtEvent request_internal_buffer(Operation *op, bool eager);
       const void *find_internal_buffer(TaskContext *ctx, size_t &expected_size);
@@ -265,6 +278,7 @@ namespace Legion {
       void set_local(const void *value, size_t size, bool own = false);
       // This will save the value of the future locally
       void unpack_future(Deserializer &derez);
+      void unpack_instances(Deserializer &derez);
       // Reset the future in case we need to restart the
       // computation for resiliency reasons
       bool reset_future(void);
@@ -295,7 +309,7 @@ namespace Legion {
       void finish_set_future(void); // must be holding lock
       void create_pending_instances(void); // must be holding lock
       FutureInstance* find_or_create_instance(Memory memory, Operation *op,
-                                              bool eager,bool need_lock = true);
+                        UniqueID op_uid, bool eager,bool need_lock = true);
       void mark_sampled(void);
       void broadcast_result(std::set<AddressSpaceID> &targets,
                             const bool need_lock);
@@ -313,6 +327,10 @@ namespace Legion {
       static void handle_future_notification(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID source);
       static void handle_future_broadcast(Deserializer &derez, Runtime *rt);
+      static void handle_future_create_instance_request(Deserializer &derez,
+                                    Runtime *runtime, AddressSpaceID source);
+      static void handle_future_create_instance_response(Deserializer &derez,
+                                                         Runtime *runtime);
     public:
       void contribute_to_collective(const DynamicCollective &dc,unsigned count);
       static void handle_contribute_to_collective(const void *args);
@@ -340,8 +358,13 @@ namespace Legion {
       AddressSpaceID result_set_space; // space on which the result was set
       std::map<Memory,FutureInstance*> instances;
       FutureInstance *canonical_instance;
+    private:
       // Instances that need to be made once canonical instance is set
-      std::map<Memory,std::pair<Operation*,bool/*eager*/> > pending_instances;
+      std::map<Memory,PendingInstance> pending_instances;
+      // Requests to create instances on remote nodes
+      std::map<Memory,RtUserEvent> pending_requests;
+      // Annoying case of having effects from pending requests
+      RtEvent pending_precondition;
     private:
       Processor callback_proc;
       FutureFunctor *callback_functor;
@@ -394,7 +417,9 @@ namespace Legion {
       bool is_ready(void) const;
       ApEvent get_ready(void);
       PhysicalInstance get_instance(void);
+      bool deferred_delete(ApEvent done_event) const;
     public:
+      bool can_pack_by_value(void) const;
       bool pack_instance(Serializer &rez, bool pack_ownership,
                          ApEvent ready = ApEvent::NO_AP_EVENT);
       static FutureInstance* unpack_instance(Deserializer &derez, Runtime *rt);
@@ -1078,9 +1103,8 @@ namespace Legion {
     public:
       inline bool is_visible_memory(Memory memory) const
         { return (visible_memories.find(memory) != visible_memories.end()); }
-      inline void find_visible_memories(std::set<Memory> &visible) const
-        { visible = visible_memories; }
-      inline Memory find_best_visible_memory(Memory::Kind kind);
+      void find_visible_memories(std::set<Memory> &visible) const;
+      Memory find_best_visible_memory(Memory::Kind kind) const;
     protected:
       void perform_mapping_operations(void);
       void issue_advertisements(MapperID mid);
@@ -1138,7 +1162,7 @@ namespace Legion {
       // Lock for accessing mappers
       mutable LocalLock mapper_lock;
       // The set of visible memories from this processor
-      std::set<Memory> visible_memories;
+      std::map<Memory,size_t/*bandwidth affinity*/> visible_memories;
     };
 
     /**
@@ -1197,6 +1221,25 @@ namespace Legion {
       public:
         MemoryManager *const manager;
         const PhysicalInstance inst;
+      };
+    public:
+      class FutureInstanceAllocator : public ProfilingResponseHandler {
+      public:
+        FutureInstanceAllocator(void);
+      public:
+        virtual void handle_profiling_response(
+                const ProfilingResponseBase *base,
+                const Realm::ProfilingResponse &response,
+                const void *orig, size_t orig_length);
+        inline bool succeeded(void) const
+        {
+          if (!ready.has_triggered())
+            ready.wait();
+          return success;
+        }
+      private:
+        const RtUserEvent ready;
+        volatile bool success;
       };
 #ifdef LEGION_MALLOC_INSTANCES
     public:
@@ -1315,9 +1358,10 @@ namespace Legion {
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority, bool remote,
                                     bool eager = false);
-      FutureInstance* create_future_instance(Operation *op, ApEvent ready_event,
-                                             size_t size, bool eager);
-      void free_future_instance(PhysicalInstance inst, size_t size, bool eager);
+      FutureInstance* create_future_instance(Operation *op, UniqueID creator_id,
+                                  ApEvent ready_event, size_t size, bool eager);
+      void free_future_instance(PhysicalInstance inst, size_t size, 
+                                RtEvent free_event, bool eager);
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
@@ -2984,6 +3028,10 @@ namespace Legion {
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_future_notification(AddressSpaceID target, Serializer &rez);
       void send_future_broadcast(AddressSpaceID target, Serializer &rez);
+      void send_future_create_instance_request(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_future_create_instance_response(AddressSpaceID target,
+                                                Serializer &rez);
       void send_future_map_request_future(AddressSpaceID target, 
                                           Serializer &rez);
       void send_future_map_response_future(AddressSpaceID target,
@@ -3146,6 +3194,7 @@ namespace Legion {
       void send_remote_trace_update(AddressSpaceID target, Serializer &rez);
       void send_remote_trace_response(AddressSpaceID target, Serializer &rez);
       void send_free_external_allocation(AddressSpaceID target,Serializer &rez);
+      void send_free_future_instance(AddressSpaceID target, Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -3296,6 +3345,9 @@ namespace Legion {
       void handle_future_notification(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_future_broadcast(Deserializer &derez);
+      void handle_future_create_instance_request(Deserializer &derez,
+                                                 AddressSpaceID source);
+      void handle_future_create_instance_response(Deserializer &derez);
       void handle_future_map_future_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_future_map_future_response(Deserializer &derez);
@@ -3449,6 +3501,7 @@ namespace Legion {
                                         AddressSpaceID source);
       void handle_remote_tracing_response(Deserializer &derez);
       void handle_free_external_allocation(Deserializer &derez);
+      void handle_free_future_instance(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);

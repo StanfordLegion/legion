@@ -2742,8 +2742,8 @@ namespace Legion {
                 this->target_proc.id)
           // Request the future memories be created
           const RtEvent future_mapped =
-                futures[idx].impl->request_application_instance(
-                                      future_memories[idx], this);
+            futures[idx].impl->request_application_instance(
+              future_memories[idx], this, unique_op_id, runtime->address_space);
           if (future_mapped.exists())
             map_applied_conditions.insert(future_mapped); 
         }
@@ -2760,7 +2760,8 @@ namespace Legion {
               target_memory = runtime->runtime_system_memory;
           }
           const RtEvent future_mapped =
-            futures[idx].impl->request_application_instance(target_memory,this);
+            futures[idx].impl->request_application_instance(
+                target_memory, this, unique_op_id, runtime->address_space);
           if (future_mapped.exists())
             map_applied_conditions.insert(future_mapped);
         }
@@ -6206,10 +6207,10 @@ namespace Legion {
             runtime->find_local_memory(current_proc, canonical->memory.kind());
           MemoryManager *manager = runtime->find_memory_manager(target);
           const ApUserEvent ready_event = Runtime::create_ap_user_event(NULL);
-          result = manager->create_future_instance(this, ready_event,
-                                    canonical->size, false/*eager*/);
+          result = manager->create_future_instance(this, unique_op_id,
+                        ready_event, canonical->size, false/*eager*/);
           Runtime::trigger_event(NULL, ready_event, 
-                                 result->copy_from(canonical, this));
+                result->copy_from(canonical, this));
         }
       }
       else if (predicate_false_size > 0)
@@ -10960,8 +10961,8 @@ namespace Legion {
             runtime->find_local_memory(point_proc, canonical->memory.kind());
           MemoryManager *manager = runtime->find_memory_manager(target);
           const ApUserEvent ready_event = Runtime::create_ap_user_event(NULL);
-          result = manager->create_future_instance(this, ready_event,
-                                    canonical->size, false/*eager*/);
+          result = manager->create_future_instance(this, unique_op_id,
+                        ready_event, canonical->size, false/*eager*/);
           Runtime::trigger_event(NULL, ready_event, 
                                  result->copy_from(canonical, this));
         }

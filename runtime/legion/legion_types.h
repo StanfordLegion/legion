@@ -804,6 +804,8 @@ namespace Legion {
       SEND_FUTURE_SUBSCRIPTION,
       SEND_FUTURE_NOTIFICATION,
       SEND_FUTURE_BROADCAST,
+      SEND_FUTURE_CREATE_INSTANCE_REQUEST,
+      SEND_FUTURE_CREATE_INSTANCE_RESPONSE,
       SEND_FUTURE_MAP_REQUEST,
       SEND_FUTURE_MAP_RESPONSE,
       SEND_REPL_FUTURE_MAP_REQUEST,
@@ -908,6 +910,7 @@ namespace Legion {
       SEND_REMOTE_TRACE_UPDATE,
       SEND_REMOTE_TRACE_RESPONSE,
       SEND_FREE_EXTERNAL_ALLOCATION,
+      SEND_FREE_FUTURE_INSTANCE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1017,6 +1020,8 @@ namespace Legion {
         "Send Future Subscription",                                   \
         "Send Future Notification",                                   \
         "Send Future Broadcast",                                      \
+        "Send Future Create Instance Request",                        \
+        "Send Future Create Instance Response",                       \
         "Send Future Map Future Request",                             \
         "Send Future Map Future Response",                            \
         "Send Replicate Future Map Request",                          \
@@ -1121,6 +1126,7 @@ namespace Legion {
         "Send Remote Trace Update",                                   \
         "Send Remote Trace Response",                                 \
         "Send Free External Allocation",                              \
+        "Send Free Future Instance",                                  \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
