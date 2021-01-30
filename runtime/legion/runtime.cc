@@ -8321,7 +8321,8 @@ namespace Legion {
                               mapper_id,
                               target_proc,
                               priority,
-                              false/*remote*/);
+                              false/*remote*/,
+                              true/*eager*/);
 
       return manager;
     }
@@ -8433,7 +8434,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MemoryManager::record_created_instance(PhysicalManager *manager,
                            bool acquire, MapperID mapper_id, Processor p, 
-                           GCPriority priority, bool remote)
+                           GCPriority priority, bool remote, bool eager)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8459,6 +8460,7 @@ namespace Legion {
         info.min_priority = priority;
         info.instance_size = instance_size;
         info.external = external;
+        info.eager = eager;
         info.mapper_priorities[
           std::pair<MapperID,Processor>(mapper_id,p)] = priority;
       }
@@ -8520,7 +8522,7 @@ namespace Legion {
     bool MemoryManager::delete_by_size_and_state(const size_t needed_size,
                                                  const InstanceState state,
                                                  const bool larger_only,
-                                                 const bool external)
+                                                 const bool eager)
     //--------------------------------------------------------------------------
     {
       bool pass_complete = true;
@@ -8537,7 +8539,7 @@ namespace Legion {
                   cit->second.begin(); it != cit->second.end(); it++)
             {
               if ((it->second.current_state != COLLECTABLE_STATE) ||
-                  (it->second.external != external))
+                  it->second.external || (it->second.eager != eager))
                 continue;
               const size_t inst_size = it->first->get_instance_size();
               if ((inst_size >= needed_size) || !larger_only)
@@ -8584,7 +8586,7 @@ namespace Legion {
                   cit->second.begin(); it != cit->second.end(); it++)
             {
               if ((it->second.current_state != ACTIVE_STATE) ||
-                  (it->second.external != external))
+                  it->second.external || (it->second.eager != eager))
                 continue;
               const size_t inst_size = it->first->get_instance_size();
               if ((inst_size >= needed_size) || !larger_only)
