@@ -1927,11 +1927,9 @@ namespace Legion {
       log_garbage.spew("Force deleting physical instance " IDFMT " in memory "
                        IDFMT "", instance.id, memory_manager->memory.id);
 #ifndef DISABLE_GC
-
-#ifndef LEGION_MALLOC_INSTANCES
       std::vector<PhysicalInstance::DestroyedField> serdez_fields;
       layout->compute_destroyed_fields(serdez_fields);
-
+#ifndef LEGION_MALLOC_INSTANCES
       // If this is an owned external instance, deallocate it manually
       if (kind == EXTERNAL_OWNED_INSTANCE_KIND)
       {
@@ -3796,8 +3794,10 @@ namespace Legion {
           return NULL;
         }
       }
-      ready = ApEvent(PhysicalInstance::create_external(instance,
-            memory_manager->memory, base_ptr, inst_layout, requests));
+      Realm::ExternalMemoryResource resource(base_ptr,
+          inst_layout->bytes_used, false/*read only*/);
+      ready = ApEvent(PhysicalInstance::create_external_instance(instance,
+                memory_manager->memory, inst_layout, resource, requests));
 #endif
       // If we couldn't make it then we are done
       if (!instance.exists())
