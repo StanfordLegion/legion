@@ -1175,7 +1175,7 @@ namespace Legion {
           : current_state(COLLECTABLE_STATE), 
             deferred_collect(RtUserEvent::NO_RT_USER_EVENT),
             instance_size(0), pending_acquires(0), min_priority(0),
-            external(false) { }
+            external(false), eager(false) { }
       public:
         InstanceState current_state;
         RtUserEvent deferred_collect;
@@ -1183,6 +1183,7 @@ namespace Legion {
         unsigned pending_acquires;
         GCPriority min_priority;
         bool external;
+        bool eager;
         std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
       };
     public:
@@ -1312,7 +1313,8 @@ namespace Legion {
                                     std::vector<bool> &results);
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
-                                    GCPriority priority, bool remote);
+                                    GCPriority priority, bool remote,
+                                    bool eager = false);
       FutureInstance* create_future_instance(Operation *op, ApEvent ready_event,
                                              size_t size, bool eager);
       void free_future_instance(PhysicalInstance inst, size_t size, bool eager);
@@ -1375,7 +1377,7 @@ namespace Legion {
       bool delete_by_size_and_state(const size_t needed_size,
                                     const InstanceState state,
                                     const bool larger_only,
-                                    const bool external = false);
+                                    const bool eager = false);
       RtEvent attach_external_instance(PhysicalManager *manager);
       RtEvent detach_external_instance(PhysicalManager *manager);
     public:
