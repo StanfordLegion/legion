@@ -5388,6 +5388,16 @@ namespace Legion {
             if (is_recording())
               tpl->find_execution_fence_preconditions(execution_preconditions);
             const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
+            // We arrive on our barrier when all our previous operations
+            // have finished executing
+            ApEvent execution_fence_precondition;
+            if (!execution_preconditions.empty())
+              execution_fence_precondition = 
+                  Runtime::merge_events(&trace_info, execution_preconditions);
+            Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/, 
+                                          execution_fence_precondition);
+            if (is_recording())
+              tpl->record_complete_replay(this, execution_fence_precondition);
             // Do our arrival on our mapping fence, we're mapped when
             // everyone is mapped
             if (!map_applied_conditions.empty())
@@ -5396,16 +5406,6 @@ namespace Legion {
             else
               Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
             complete_mapping(mapping_fence_barrier);
-            // We arrive on our barrier when all our previous operations
-            // have finished executing
-            ApEvent execution_fence_precondition;
-            if (!execution_preconditions.empty())
-              execution_fence_precondition = 
-                  Runtime::merge_events(&trace_info, execution_preconditions);
-            if (is_recording())
-              tpl->record_complete_replay(this, execution_fence_precondition);
-            Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/, 
-                                          execution_fence_precondition);
             // We can always trigger the completion event when these are done
             if (!request_early_complete(execution_fence_barrier))
               complete_execution(
