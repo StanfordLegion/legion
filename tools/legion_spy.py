@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2020 Stanford University, NVIDIA Corporation
+# Copyright 2021 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -7618,6 +7618,10 @@ class Task(object):
 
     __repr__ = __str__
 
+    @property
+    def html_safe_name(self):
+        return str(self).replace('<','&lt;').replace('>','&gt;')
+
     def add_operation(self, operation):
         self.operations.append(operation)
 
@@ -8038,7 +8042,7 @@ class Task(object):
             return 
         if not top:
             # Start the cluster 
-            title = str(self)+' (UID: '+str(self.op.uid)+')'
+            title = self.html_safe_name + ' (UID: '+str(self.op.uid)+')'
             if self.point.dim > 0:
                 title += ' Point: ' + self.point.to_string()
             if self.op.replayed:
@@ -10050,30 +10054,30 @@ mem_mem_pat              = re.compile(
 top_index_pat            = re.compile(
     prefix+"Index Space (?P<uid>[0-9a-f]+)")
 index_name_pat           = re.compile(
-    prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>[-$()\w. ]+)")
+    prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>[-$(){}<>:\w. ]+)")
 index_part_pat           = re.compile(
     prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-1]) "+
            "(?P<color>[0-9]+)")
 index_part_name_pat      = re.compile(
-    prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>[-$()\w. ]+)")
+    prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>[-$(){}<>:\w. ]+)")
 index_subspace_pat       = re.compile(
     prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 field_space_pat          = re.compile(
     prefix+"Field Space (?P<uid>[0-9]+)")
 field_space_name_pat     = re.compile(
-    prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>[-$()\w. ]+)")
+    prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>[-$(){}<>:\w. ]+)")
 field_create_pat         = re.compile(
     prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+)")
 field_name_pat           = re.compile(
-    prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>[-$()\w. ]+)")
+    prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>[-$(){}<>:\w. ]+)")
 region_pat               = re.compile(
     prefix+"Region (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+)")
 region_name_pat          = re.compile(
     prefix+"Logical Region Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) "+
-           "(?P<name>[-$()\w. ]+)")
+            "(?P<name>[-$(){}<>:\w. ]+)")
 partition_name_pat       = re.compile(
     prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) "+
-           "(?P<name>[-$()\w. ]+)")
+            "(?P<name>[-$(){}<>:\w. ]+)")
 index_space_point_pat    = re.compile(
     prefix+"Index Space Point (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 index_space_rect_pat     = re.compile(
@@ -10091,7 +10095,7 @@ diff_expr_pat            = re.compile(
     prefix+"Index Space Difference (?P<expr>[0-9]+) (?P<left>[0-9]+) (?P<right>[0-9]+)")
 # Patterns for operations
 task_name_pat            = re.compile(
-    prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>[-$()<>:\w. ]+)")
+    prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>[-$(){}<>:\w. ]+)")
 task_variant_pat         = re.compile(
     prefix+"Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<inner>[0-1]) "+
     "(?P<leaf>[0-1]) (?P<idem>[0-1]+) (?P<name>[-$()<>:\w. ]+)")

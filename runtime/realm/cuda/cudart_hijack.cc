@@ -354,7 +354,7 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaMemGetInfo(size_t *free, size_t *total)
   {
-    /*GPUProcessor *p =*/ get_gpu_or_die("cudaMalloc");
+    /*GPUProcessor *p =*/ get_gpu_or_die("cudaMemGetInfo");
 
     CUresult ret = cuMemGetInfo(free, total);
     if(ret == CUDA_SUCCESS) return cudaSuccess;
@@ -367,30 +367,53 @@ extern "C" {
   {
     /*GPUProcessor *p =*/ get_gpu_or_die("cudaMalloc");
 
-    CUresult ret = cuMemAlloc((CUdeviceptr *)ptr, size);
-    if(ret == CUDA_SUCCESS) return cudaSuccess;
-    assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
-    return cudaErrorMemoryAllocation;
+    // CUDART tolerates size=0, returning nullptr, but the driver API
+    //  does not, so catch that here
+    if(size == 0) {
+      *ptr = 0;
+      return cudaSuccess;
+    } else {
+      CUresult ret = cuMemAlloc((CUdeviceptr *)ptr, size);
+      if(ret == CUDA_SUCCESS) return cudaSuccess;
+      assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
+      return cudaErrorMemoryAllocation;
+    }
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaMallocHost(void **ptr, size_t size)
   {
     get_gpu_or_die("cudaMallocHost");
-    CUresult ret = cuMemAllocHost(ptr, size);
-    if (ret == CUDA_SUCCESS) return cudaSuccess;
-    assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
-    return cudaErrorMemoryAllocation;
+
+    // size=0 is allowed, but the runtime doesn't always do a good job of
+    //  setting *ptr to nullptr, so do it ourselves
+    if(size == 0) {
+      *ptr = 0;
+      return cudaSuccess;
+    } else {
+      CUresult ret = cuMemAllocHost(ptr, size);
+      if (ret == CUDA_SUCCESS) return cudaSuccess;
+      assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
+      return cudaErrorMemoryAllocation;
+    }
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaHostAlloc(void **ptr, size_t size, unsigned int flags)
   {
     get_gpu_or_die("cudaHostAlloc");
-    CUresult ret = cuMemHostAlloc(ptr, size, flags);
-    if (ret == CUDA_SUCCESS) return cudaSuccess;
-    assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
-    return cudaErrorMemoryAllocation;
+
+    // size=0 is allowed, but the runtime doesn't always do a good job of
+    //  setting *ptr to nullptr, so do it ourselves
+    if(size == 0) {
+      *ptr = 0;
+      return cudaSuccess;
+    } else {
+      CUresult ret = cuMemHostAlloc(ptr, size, flags);
+      if (ret == CUDA_SUCCESS) return cudaSuccess;
+      assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
+      return cudaErrorMemoryAllocation;
+    }
   }
 
 #if CUDART_VERSION >= 8000
@@ -400,12 +423,24 @@ extern "C" {
 				unsigned flags /*= cudaMemAttachGlobal*/)
   {
     get_gpu_or_die("cudaMallocManaged");
-    // We don't support cudaMemAttachHost right now
-    assert(flags == cudaMemAttachGlobal);
-    CUresult ret = cuMemAllocManaged((CUdeviceptr*)ptr, size, CU_MEM_ATTACH_GLOBAL);
-    if (ret == CUDA_SUCCESS) return cudaSuccess;
-    assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
-    return cudaErrorMemoryAllocation;
+
+    // size=0 is disallowed by the runtime api, and we need to return
+    //  cudaErrorInvalidValue instead of calling into the driver and having it
+    //  get mad
+    if(size == 0) {
+      // the cuda runtime actually clears this pointer as well
+      *ptr = 0;
+      return cudaErrorInvalidValue;
+    } else {
+      assert((flags == cudaMemAttachGlobal) || (flags == cudaMemAttachHost));
+      CUresult ret = cuMemAllocManaged((CUdeviceptr*)ptr, size,
+				       ((flags == cudaMemAttachGlobal) ?
+					  CU_MEM_ATTACH_GLOBAL :
+					  CU_MEM_ATTACH_HOST));
+      if (ret == CUDA_SUCCESS) return cudaSuccess;
+      assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
+      return cudaErrorMemoryAllocation;
+    }
   }
 
   REALM_PUBLIC_API

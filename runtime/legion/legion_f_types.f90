@@ -1,4 +1,4 @@
-! Copyright 2020 Stanford University, NVIDIA Corporation,
+! Copyright 2021 Stanford University, NVIDIA Corporation,
 !                Los Alamos National Laboratory
 !
 ! Licensed under the Apache License, Version 2.0 (the "License");

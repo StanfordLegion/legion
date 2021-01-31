@@ -1,4 +1,4 @@
--- Copyright 2020 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -29,9 +29,9 @@ task unexposed_task(r : region(ispace(int1d), fs), p : partition(disjoint, r, is
 end
 
 
-task my_regent_task(r : region(ispace(int1d), fs), x : int, y : double, z : bool)
+task my_regent_task(r : region(ispace(int1d), fs), x : int, y : double, z : bool, w : float[4])
 where reads writes(r.{x, y}), reads(r.z) do
-  regentlib.c.printf("Hello from Regent! (values %d %e %d)\n", x, y, z)
+  regentlib.c.printf("Hello from Regent! (values %d %e %d [%.1f, %.1f, %.1f, %.1f])\n", x, y, z, w[0], w[1], w[2], w[3])
   var p = partition(equal, r, ispace(int1d, 2))
   unexposed_task(r, p)
 end
@@ -46,7 +46,12 @@ __demand(__inner)
 task inline_regent_task(r : region(ispace(int1d), fs))
 where reads writes(r.{x, y, z}) do
   regentlib.c.printf("Inline inner task\n")
-  my_regent_task(r, 0, 0.0, false)
+  var w : float[4]
+  w[0] = 1.1
+  w[1] = 2.1
+  w[2] = 3.1
+  w[3] = 4.1
+  my_regent_task(r, 0, 0.0, false, w)
 end
 
 local embed_tasks_dir

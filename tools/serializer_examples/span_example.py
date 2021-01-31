@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2020 Stanford University, NVIDIA Corporation
+# Copyright 2021 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -71,7 +71,6 @@ def log_meta_info(op_id, lg_id, proc_id, create, ready, start, stop):
     task_spans[task_name].append(time_range)
 
 callbacks = {
-    "MessageDesc": noop,
     "MapperCallDesc": noop,
     "RuntimeCallDesc": noop,
     "MetaDesc": log_meta_desc,
@@ -114,6 +113,7 @@ callbacks = {
     "PhysicalInstDimOrderDesc": noop,
     "IndexSpaceSizeDesc": noop,
     "MaxDimDesc": noop,
+    "CopyInstInfo": noop,
 }
 
 

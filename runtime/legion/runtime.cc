@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -72,7 +72,6 @@ namespace Legion {
     __thread AutoLock *local_lock_list = NULL;
     __thread UniqueID implicit_provenance = 0;
     __thread unsigned inside_registration_callback = NO_REGISTRATION_CALLBACK;
-    __thread bool external_implicit_task = false;
 
     const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
     const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
@@ -1853,7 +1852,10 @@ namespace Legion {
       if (!mapped_event.exists() || mapped_event.has_triggered())
       {
         bool poisoned = false;
-        return ready_event.has_triggered_faultaware(poisoned) || poisoned;
+        if (ready_event.has_triggered_faultaware(poisoned) && !poisoned)
+          return true;
+        if (poisoned)
+          implicit_context->raise_poison_exception();
       }
       return valid;
     }
@@ -22951,9 +22953,6 @@ namespace Legion {
       if (!runtime_started_event.has_triggered())
         runtime_started_event.external_wait();
 
-      // Record that this is an external implicit task
-      external_implicit_task = true;
-
       InnerContext *execution_context = NULL;
       // Now that the runtime is started we can make our context
       if (control_replicable && (total_address_spaces > 1))
@@ -23029,7 +23028,6 @@ namespace Legion {
       // this is just a normal finish operation
       ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, NULL);
       // Record that this is no longer an implicit external task
-      external_implicit_task = false; 
       implicit_runtime = NULL;
       implicit_context = NULL;
     }
@@ -23485,13 +23483,7 @@ namespace Legion {
       // If this is the first time we've called this on this node then 
       // we need to remove our reference to allow shutdown to proceed
       if (__sync_fetch_and_add(&background_waits, 1) == 0)
-      {
-        // Have to mark this as an external implicit task so that any
-        // waits will be done correctly by this extneral thread
-        external_implicit_task = true;
         the_runtime->decrement_outstanding_top_level_tasks();
-        external_implicit_task = false;
-      }
       return RealmRuntime::get_runtime().wait_for_shutdown();
     }
 

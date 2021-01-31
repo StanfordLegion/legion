@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2020 Stanford University, NVIDIA Corporation
+# Copyright 2021 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ import json
 import heapq
 import time
 import itertools
+from functools import reduce
 from legion_serializer import LegionProfASCIIDeserializer, LegionProfBinaryDeserializer, GetFileTypeInfo
 
 root_dir = os.path.dirname(os.path.realpath(__file__))
@@ -3488,7 +3489,7 @@ class State(object):
     # Here, we read the legion spy data! We will use this to draw dependency
     # lines in the prof
     def get_op_dependencies(self, file_names):
-        self.spy_state = legion_spy.State(None, False, True, True, True, False)
+        self.spy_state = legion_spy.State(None, False, True, True, True, False, False)
 
         total_matches = 0
 
@@ -3712,7 +3713,7 @@ class State(object):
         all_children = []
         for op in critical_path.path:
             # remove initiation depedencies from the inner critical paths
-            longest_child_path = filter(lambda p: not isinstance(p, HasInitiationDependencies), self.get_longest_child(op))
+            longest_child_path = list(filter(lambda p: not isinstance(p, HasInitiationDependencies), self.get_longest_child(op)))
             all_children = all_children + longest_child_path
         critical_path.path = critical_path.path + all_children
 
@@ -3878,7 +3879,7 @@ class State(object):
 
         critical_path_json_file_name = os.path.join(json_dir, "critical_path.json")
         with open(critical_path_json_file_name, "w") as critical_path_json_file:
-            json.dump(critical_path, critical_path_json_file)
+            json.dump(list(critical_path), critical_path_json_file)
 
         processor_tsv_file = open(processor_tsv_file_name, "w")
         processor_tsv_file.write("full_text\ttext\ttsv\tlevels\n")

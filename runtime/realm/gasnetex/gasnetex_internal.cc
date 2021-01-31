@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1631,8 +1631,7 @@ namespace Realm {
 	  for(int i = 0; i < batch_size; i++) {
 	    int pktidx = head->pktbuf_sent_packets + i;
 	    OutbufMetadata::PktType realtype = realbuf->pktbuf_pkt_types[pktidx].load_acquire();
-	    if(realtype != pkttype) {
-	      assert(realtype == OutbufMetadata::PKTTYPE_INVALID);
+	    if(realtype == OutbufMetadata::PKTTYPE_INVALID) {
 	      uintptr_t pktstart = ((head->pktbuf_sent_packets > 0) ?
 				      head->pktbuf_pkt_ends[pktidx - 1] :
 				      0);
@@ -1642,7 +1641,13 @@ namespace Realm {
 	      memcpy(reinterpret_cast<void *>(realbuf->baseptr + pktstart),
 		     reinterpret_cast<const void *>(head->baseptr + pktstart),
 		     pktend - pktstart);
-	      realbuf->pktbuf_pkt_types[pktidx].store_release(pkttype);
+	      OutbufMetadata::PktType pkttype2 = head->pktbuf_pkt_types[pktidx].load();
+	      realbuf->pktbuf_pkt_types[pktidx].store_release(pkttype2);
+	    } else {
+#ifdef DEBUG_REALM
+	      OutbufMetadata::PktType pkttype2 = head->pktbuf_pkt_types[pktidx].load();
+	      assert(realtype == pkttype2);
+#endif
 	    }
 	  }
 	}

@@ -1,4 +1,4 @@
--- Copyright 2020 Stanford University, Los Alamos National Laboratory
+-- Copyright 2021 Stanford University, Los Alamos National Laboratory
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -1458,6 +1458,57 @@ function cudahelper.generate_region_reduction(cx, loop_symbol, node, rhs, lhs_ty
   else
     return gen(rhs)
   end
+end
+
+-- #####################################
+-- ## Code generation for kernel argument spill
+-- #################
+
+local MAX_SIZE_INLINE_KERNEL_PARAMS = 1024
+
+function cudahelper.check_arguments_need_spill(args)
+  local param_size = 0
+  args:map(function(arg) param_size = param_size + terralib.sizeof(arg.type) end)
+  return param_size > MAX_SIZE_INLINE_KERNEL_PARAMS
+end
+
+function cudahelper.generate_argument_spill(args)
+  local arg_type = terralib.types.newstruct("cuda_kernel_arg")
+  arg_type.entries = terralib.newlist()
+  local mapping = {}
+  for i, symbol in pairs(args) do
+    local field_name
+    field_name = "_arg" .. tostring(i)
+    arg_type.entries:insert({ field_name, symbol.type })
+    mapping[field_name] = symbol
+  end
+
+  local kernel_arg = terralib.newsymbol(&arg_type)
+  local buffer_size = sizeof(arg_type)
+  buffer_size = (buffer_size + 7) / 8 * 8
+
+  local param_pack = terralib.newlist()
+  local param_unpack = terralib.newlist()
+
+  param_pack:insert(quote
+    var [kernel_arg]
+    do
+      var bounds : c.legion_rect_1d_t
+      bounds.lo.x[0] = 0
+      bounds.hi.x[0] = [buffer_size - 1]
+      var buffer = c.legion_deferred_buffer_char_1d_create(bounds, c.Z_COPY_MEM, [&int8](nil))
+      [kernel_arg] =
+        [&arg_type]([&opaque](c.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
+    end
+  end)
+  arg_type.entries:map(function(pair)
+    local field_name, field_type = unpack(pair)
+    local arg = mapping[field_name]
+    param_pack:insert(quote (@[kernel_arg]).[field_name] = [arg] end)
+    param_unpack:insert(quote var [arg] = (@[kernel_arg]).[field_name] end)
+  end)
+
+  return param_pack, param_unpack, kernel_arg
 end
 
 return cudahelper

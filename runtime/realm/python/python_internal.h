@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -73,12 +73,12 @@ namespace Realm {
     PyThreadState *(*PyThreadState_New)(PyInterpreterState *);
     void (*PyThreadState_Clear)(PyThreadState *);
     void (*PyThreadState_Delete)(PyThreadState *);
-    PyThreadState *(*PyThreadState_Get)(void);
 #endif
     void (*PyEval_RestoreThread)(PyThreadState *);
     PyThreadState *(*PyEval_SaveThread)(void);
 
     PyThreadState *(*PyThreadState_Swap)(PyThreadState *);
+    PyThreadState *(*PyThreadState_Get)(void);
 
     void (*PyErr_PrintEx)(int set_sys_last_vars);
 

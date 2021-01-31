@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -151,7 +151,8 @@ namespace Realm {
 #ifdef REALM_USE_STD_ATOMIC
     // do we need a relaxed version of this?
     return value.compare_exchange_strong(expected, newval,
-                                         std::memory_order_acq_rel);
+                                         std::memory_order_acq_rel,
+                                         std::memory_order_acquire);
 #else
     T oldval = __sync_val_compare_and_swap(&value, expected, newval);
     if(oldval == expected) {

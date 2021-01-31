@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -349,8 +349,8 @@ namespace Legion {
         ProfilingInfo(ProfilingResponseHandler *h) 
           : ProfilingResponseBase(h) 
 #ifdef LEGION_PROF_PROVENANCE
-            , provenance(external_implicit_task ? LgEvent::NO_LG_EVENT :
-                LgEvent(Processor::get_current_finish_event()))
+          , provenance(!Processor::get_executing_processor.exists() ?
+          LgEvent::NO_LG_EVENT : LgEvent(Processor::get_current_finish_event()))
 #endif
         { }
       public:

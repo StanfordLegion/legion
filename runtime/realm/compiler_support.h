@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -178,7 +178,7 @@
         typedef __declspec(align(bytes)) origtype newtype
 #else
   #define REALM_ALIGNED_TYPE_CONST(newtype, origtype, bytes) \
-        typedef origtype __attribute__((aligned(bytes))) newtype
+        typedef origtype __attribute__((aligned((bytes)+0))) newtype
 #endif
 
 // REALM_HAVE_CXXABI_H - defined if <cxxabi.h> is available

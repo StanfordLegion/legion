@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -919,8 +919,7 @@ namespace Legion {
         // to ensuring that fence operations are working correctly in the
         // parent context. If not triggered, then defer this until it does.
         // Inner task completion also relies upon this to work correctly
-        bool do_not_care;
-        if (!completion_event.has_triggered_faultaware(do_not_care))
+        if (!completion_event.has_triggered_faultignorant())
         {
           DeferredCommitArgs args(this, do_deactivate);
           runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2020 Stanford University, NVIDIA Corporation
+# Copyright 2021 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -206,6 +206,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
     def search_for_spy_data(self, filename):
         with open(filename, 'rb') as log:
             for line in log:
+                line = line.decode('utf-8')
                 if legion_spy.config_pat.match(line) or \
                    legion_spy.detailed_config_pat.match(line):
                    self.state.has_spy_data = True

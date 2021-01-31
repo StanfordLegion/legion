@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2162,9 +2162,11 @@ namespace Legion {
         ready.subscribe();
         bool poisoned = false;
         if (ready.has_triggered_faultaware(poisoned))
+        {
+          if (poisoned)
+            Internal::implicit_context->raise_poison_exception();
           return true;
-        else if (poisoned)
-          Internal::implicit_context->raise_poison_exception();
+        }
         return false;
       }
       return true; // Empty futures are always ready

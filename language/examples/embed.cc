@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University
+/* Copyright 2021 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -100,6 +100,8 @@ void top_level_task(const Task *task,
     launcher.add_argument_x(12345);
     launcher.add_argument_y(3.14);
     launcher.add_argument_z(true);
+    float w[4] = {0.1, 0.2, 0.3, 0.4};
+    launcher.add_argument_w(w);
     launcher.execute(runtime, ctx);
   }
 
@@ -116,6 +118,8 @@ void top_level_task(const Task *task,
     my_regent_task_launcher_add_argument_x(launcher, 67890, false);
     my_regent_task_launcher_add_argument_y(launcher, 4.56, false);
     my_regent_task_launcher_add_argument_z(launcher, false, false);
+    float w[4] = {1.1, 1.2, 1.3, 1.4};
+    my_regent_task_launcher_add_argument_w(launcher, w, false);
     legion_future_t f = my_regent_task_launcher_execute(c_runtime, c_context, launcher);
     my_regent_task_launcher_destroy(launcher);
     legion_future_destroy(f);

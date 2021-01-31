@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2021,9 +2021,11 @@ namespace Legion {
       const ApEvent mapped_event = Runtime::merge_events(NULL, mapped_events);
       bool poisoned = false;
       if (mapped_event.has_triggered_faultaware(poisoned))
+      {
+        if (poisoned)
+          raise_poison_exception();
         return;
-      if (poisoned)
-        raise_poison_exception();
+      }
       begin_task_wait(true/*from runtime*/);
       mapped_event.wait_faultaware(poisoned);
       if (poisoned)
@@ -7484,18 +7486,20 @@ namespace Legion {
         // because we can't test if they are memoizing or not
         // Their 'get_memoizable' method will always return NULL
         bool poisoned = false;
-        if (current_execution_fence_event.has_triggered_faultaware(poisoned) &&
-            !op->is_internal_op())
+        if (current_execution_fence_event.has_triggered_faultaware(poisoned))
         {
-          // We can only do this optimization safely if we're not 
-          // recording a physical trace, otherwise the physical
-          // trace needs to see this dependence
-          Memoizable *memo = op->get_memoizable();
-          if ((memo == NULL) || !memo->is_recording())
-            current_execution_fence_event = ApEvent::NO_AP_EVENT;
+          if (poisoned)
+            raise_poison_exception();
+          if (!op->is_internal_op())
+          {
+            // We can only do this optimization safely if we're not 
+            // recording a physical trace, otherwise the physical
+            // trace needs to see this dependence
+            Memoizable *memo = op->get_memoizable();
+            if ((memo == NULL) || !memo->is_recording())
+              current_execution_fence_event = ApEvent::NO_AP_EVENT;
+          }
         }
-        if (poisoned)
-          raise_poison_exception();
         return current_execution_fence_event;
       }
       return ApEvent::NO_AP_EVENT;
@@ -8970,7 +8974,8 @@ namespace Legion {
       // Tell the parent context that we are ready for post-end
       // Make a copy of the results if necessary
       TaskContext *parent_ctx = owner_task->get_context();
-      RtEvent effects_done(!external_implicit_task && !inline_task ? 
+      const bool internal_task = Processor::get_executing_processor().exists();
+      RtEvent effects_done(internal_task && !inline_task ? 
           Processor::get_current_finish_event() : Realm::Event::NO_EVENT); 
       if (last_registration.exists() && !last_registration.has_triggered())
         effects_done = Runtime::merge_events(effects_done, last_registration);
@@ -9284,6 +9289,8 @@ namespace Legion {
       bool poisoned = false;
       if (!child_done.has_triggered_faultaware(poisoned))
         child_done.wait_faultaware(poisoned);
+      if (poisoned)
+        raise_poison_exception();
       return true;
     } 
 

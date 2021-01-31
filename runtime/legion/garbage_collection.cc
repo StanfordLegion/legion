@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1958,7 +1958,7 @@ namespace Legion {
       if (transition_event.exists())
       {
         // external tasks can't handle reentrant cases
-        if (external_implicit_task)
+        if (!Processor::get_executing_processor().exists())
           return transition_event;
         // Check for whether we are reentrant
         const RtEvent finish_event(Processor::get_current_finish_event());
@@ -1979,7 +1979,7 @@ namespace Legion {
           (current_state == PENDING_INACTIVE_INVALID_STATE))
       {
         // external implicit tasks can't handle being reentrant
-        if (external_implicit_task)
+        if (!Processor::get_executing_processor().exists())
         {
           transition_event = Runtime::create_rt_user_event();
           return transition_event;
@@ -1994,7 +1994,7 @@ namespace Legion {
         else
           transition_event = Runtime::create_rt_user_event();
       }
-      else if (!external_implicit_task)
+      else if (Processor::get_executing_processor().exists())
       {
 #ifdef DEBUG_LEGION
         assert(!reentrant_event.exists());

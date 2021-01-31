@@ -1,4 +1,4 @@
-/* Copyright 2020 Stanford University, NVIDIA Corporation
+/* Copyright 2021 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4231,18 +4231,21 @@ namespace Legion {
       // We have to pull it onto the stack here though to avoid the race 
       // condition with us getting pre-empted and the task running to completion
       // before we get a chance to trigger the event
-      ApUserEvent chain_task_termination;
-      if (variant->is_leaf())
+      ApEvent chain_precondition;
+      const ApUserEvent chain_task_termination = single_task_termination;
+      if (!variant->is_leaf())
       {
-        chain_task_termination = single_task_termination;
-        single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
+        single_task_termination = Runtime::create_ap_user_event(NULL);
+        chain_precondition = single_task_termination;
       }
+      else // We're going to trigger this right now with no precondition
+        single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
       ApEvent task_launch_event;
       if (inline_task)
       {
         bool poisoned = false;
         if (start_condition.exists() && 
-            !start_condition.has_triggered_faultaware(poisoned) && !poisoned)
+            !start_condition.has_triggered_faultaware(poisoned))
           start_condition.wait_faultaware(poisoned);
         if (poisoned)
           execution_context->raise_poison_exception();
@@ -4253,7 +4256,13 @@ namespace Legion {
                             execution_context, start_condition, true_guard,
                             task_priority, profiling_requests);
       if (chain_task_termination.exists())
-        Runtime::trigger_event(NULL, chain_task_termination, task_launch_event);
+      {
+        if (chain_precondition.exists())
+          Runtime::trigger_event(NULL, chain_task_termination,
+              Runtime::merge_events(NULL, chain_precondition, task_launch_event));
+        else
+          Runtime::trigger_event(NULL, chain_task_termination, task_launch_event);
+      }
       // Finally if this is a predicated task and we have a speculative
       // guard then we need to launch a meta task to handle the case
       // where the task misspeculates
@@ -10210,6 +10219,7 @@ namespace Legion {
           rez.serialize(applied_event);
         }
         runtime->send_slice_collective_instance_request(orig_proc, rez);
+        AutoLock o_lock(op_lock);
         map_applied_conditions.insert(applied_event);
       }
       else
