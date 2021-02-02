@@ -238,11 +238,10 @@ namespace Legion {
       struct PendingReduce {
       public:
         PendingReduce(void) : instance(NULL) { }
-        PendingReduce(FutureInstance *inst, ApEvent pre, ApUserEvent post)
-          : instance(inst), precondition(pre), postcondition(post) { }
+        PendingReduce(FutureInstance *inst, ApUserEvent post)
+          : instance(inst), postcondition(post) { }
       public:
         FutureInstance *instance;
-        ApEvent precondition;
         ApUserEvent postcondition;
       };
     public:
@@ -258,6 +257,9 @@ namespace Legion {
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       RtEvent async_reduce(FutureInstance *instance, ApEvent &ready_event);
+    protected:
+      ApEvent perform_reductions(const std::map<ShardID,PendingReduce> &pend);
+      void finalize(void);
     public:
       Operation *const op;
       const ReductionOp *const redop;
@@ -270,6 +272,8 @@ namespace Legion {
       FutureInstance *shadow;
       ApEvent instance_ready;
       ApEvent shadow_ready;
+      ApUserEvent finished;
+      int last_stage_sends;
       int current_stage;
       bool pack_shadow;
     };
@@ -1773,7 +1777,6 @@ namespace Legion {
     protected:
       virtual void populate_sources(void);
       virtual void all_reduce_serdez(void);
-      virtual RtEvent pre_reduce_redop(void);
       virtual RtEvent all_reduce_redop(void);
     protected:
       BufferExchange *serdez_redop_collective;

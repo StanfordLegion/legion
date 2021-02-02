@@ -318,6 +318,7 @@ namespace Legion {
       LG_MUST_LAUNCH_ID,
       LG_CONTRIBUTE_COLLECTIVE_ID,
       LG_FUTURE_CALLBACK_TASK_ID,
+      LG_DEFERRED_DELETE_FUTURE_INST_TASK_ID,
       LG_TOP_FINISH_TASK_ID,
       LG_MAPPER_TASK_ID,
       LG_DISJOINTNESS_TASK_ID,
@@ -440,6 +441,7 @@ namespace Legion {
         "Must Task Launch",                                       \
         "Contribute Collective",                                  \
         "Future Callback",                                        \
+        "Defer Delete Future Instance",                           \
         "Top Finish",                                             \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
@@ -569,6 +571,7 @@ namespace Legion {
       PARTITION_REPORT_PROFILING_CALL,
       PARTITION_SELECT_SHARDING_FUNCTOR_CALL,
       FILL_SELECT_SHARDING_FUNCTOR_CALL,
+      MAP_FUTURE_MAP_REDUCTION_CALL,
       CONFIGURE_CONTEXT_CALL,
       SELECT_TUNABLE_VALUE_CALL,
       MUST_EPOCH_SELECT_SHARDING_FUNCTOR_CALL,
@@ -625,6 +628,7 @@ namespace Legion {
       "report_profiling (for partition)",           \
       "select sharding functor (for partition)",    \
       "select sharding functor (for fill)",         \
+      "map future map reduction",                   \
       "configure_context",                          \
       "select_tunable_value",                       \
       "select sharding functor (for must epoch)",   \
@@ -910,6 +914,8 @@ namespace Legion {
       SEND_REMOTE_TRACE_UPDATE,
       SEND_REMOTE_TRACE_RESPONSE,
       SEND_FREE_EXTERNAL_ALLOCATION,
+      SEND_CREATE_FUTURE_INSTANCE_REQUEST,
+      SEND_CREATE_FUTURE_INSTANCE_RESPONSE,
       SEND_FREE_FUTURE_INSTANCE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
@@ -1126,6 +1132,8 @@ namespace Legion {
         "Send Remote Trace Update",                                   \
         "Send Remote Trace Response",                                 \
         "Send Free External Allocation",                              \
+        "Send Create Future Instance Request",                        \
+        "Send Create Future Instance Response",                       \
         "Send Free Future Instance",                                  \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \

@@ -1144,8 +1144,11 @@ namespace Legion {
       assert(canonical_instance == NULL);
       assert(instances.empty());
 #endif
-      canonical_instance = instance;
-      instances[instance->memory] = instance;
+      if (instance != NULL)
+      {
+        canonical_instance = instance;
+        instances[instance->memory] = instance;
+      }
       if (!pending_instances.empty())
         create_pending_instances();
       finish_set_future();
@@ -2317,6 +2320,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool FutureInstance::deferred_delete(Operation *op, ApEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      // Quick out of there is nothing to defer
+      if (!done_event.exists())
+        return true;
+      const RtEvent done = Runtime::protect_event(done_event);
+      if (done.has_triggered())
+        return true;
+      if (own_allocation)
+      {
+        if (external_allocation)
+        {
+          // Have to defer freeing the actual allocation until safe
+          DeferDeleteFutureInstanceArgs args(op->get_unique_op_id(), this);
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,done);
+          return false;
+        }
+        else
+        {
+          // Free the future instance through the memory manager
+          MemoryManager *manager = runtime->find_memory_manager(memory);
+          manager->free_future_instance(instance, size, done, eager_allocation); 
+          own_allocation = false;
+        }
+      }
+      else if (own_instance)
+      {
+#ifdef DEBUG_LEGION
+        assert(instance.exists());
+#endif
+        instance.destroy(done);
+        own_instance = false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool FutureInstance::can_pack_by_value(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (is_meta_visible && (size <= LEGION_MAX_RETURN_SIZE));
+    }
+
+    //--------------------------------------------------------------------------
     bool FutureInstance::pack_instance(Serializer &rez, bool pack_ownership,
                                        ApEvent ready)
     //--------------------------------------------------------------------------
@@ -2466,6 +2514,15 @@ namespace Legion {
       }
       return new FutureInstance(value, size, runtime->runtime_system_memory,
             ApEvent::NO_AP_EVENT, runtime, false/*eager*/, true/*external*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureInstance::handle_deferred_delete(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferDeleteFutureInstanceArgs *dargs =
+        (const DeferDeleteFutureInstanceArgs*)args;
+      delete dargs->instance;
     }
 
     /////////////////////////////////////////////////////////////
@@ -9321,9 +9378,57 @@ namespace Legion {
              UniqueID creator_uid, ApEvent ready_event, size_t size, bool eager)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner);
-#endif
+      if (!is_owner)
+      {
+        FutureInstance *volatile result = NULL;
+        // Send a message to the owner to do this and wait for the result
+        const RtUserEvent wait_on = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(&result);
+          rez.serialize(wait_on);
+          rez.serialize(creator_uid);
+          rez.serialize(ready_event);
+          rez.serialize(size);
+          rez.serialize<bool>(eager);
+        }
+        runtime->send_create_future_instance_request(owner_space, rez);
+        wait_on.wait();
+        if (result == NULL)
+        {
+          const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+            REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+          };
+          if (op->get_operation_kind() == Operation::TASK_OP_KIND)
+          {
+            TaskOp *task = static_cast<TaskOp*>(op);
+            REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+                "Failed to allocate eager future buffer for task %s "
+                "(UID %lld) because %s memory " IDFMT " is full. This is "
+                "an eager allocation so you must adjust the percentage of "
+                "this mememory dedicated for eager allocations with "
+                "'-lg:eager_alloc_percentage' flag on the command line.",
+                task->get_task_name(), op->get_unique_op_id(),
+                mem_names[memory.kind()], memory.id)
+          }
+          else
+            REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+                "Failed to allocate eager future buffer for %s (UID %lld) "
+                "in parent task %s (UID %lld) because %s memory " IDFMT 
+                " is full. This is an eager allocation so you must adjust "
+                "the percentage of this mememory dedicated for eager "
+                "jallocations with '-lg:eager_alloc_percentage' flag on the "
+                "command line.", op->get_logging_name(),
+                op->get_unique_op_id(), op->get_context()->get_task_name(),
+                op->get_context()->get_unique_id(),
+                mem_names[memory.kind()], memory.id)
+        }
+        return result;
+      }
       // Create the layout description for this instance
       const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
       const std::vector<size_t> sizes(1, size);
@@ -11830,6 +11935,17 @@ namespace Legion {
               runtime->handle_free_external_allocation(derez);
               break;
             }
+          case SEND_CREATE_FUTURE_INSTANCE_REQUEST:
+            {
+              runtime->handle_create_future_instance_request(derez,
+                                              remote_address_space);
+              break;
+            }
+          case SEND_CREATE_FUTURE_INSTANCE_RESPONSE:
+            {
+              runtime->handle_create_future_instance_response(derez);
+              break;
+            }
           case SEND_FREE_FUTURE_INSTANCE:
             {
               runtime->handle_free_future_instance(derez);
@@ -12197,6 +12313,59 @@ namespace Legion {
         free_external_allocation(proc, data, size, func);
       else
         free(data);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_create_future_instance_request(Deserializer &derez,
+                                                        AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memory memory;
+      derez.deserialize(memory);
+      FutureInstance **target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+      UniqueID uid;
+      derez.deserialize(uid);
+      ApEvent ready_event;
+      derez.deserialize(ready_event);
+      size_t size;
+      derez.deserialize(size);
+      bool eager;
+      derez.deserialize<bool>(eager);
+
+      MemoryManager *manager = find_memory_manager(memory);
+      FutureInstance *result =
+        manager->create_future_instance(NULL, uid, ready_event, size, eager);
+      if (result != NULL)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          result->pack_instance(rez, true/*pack ownership*/);
+          rez.serialize(done);
+        }
+        send_create_future_instance_response(source, rez);
+        delete result;
+      }
+      else
+        Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_create_future_instance_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      FutureInstance **target;
+      derez.deserialize(target);
+      (*target) = FutureInstance::unpack_instance(derez, this);
+      RtUserEvent done;
+      derez.deserialize(done);
+      Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
@@ -22054,6 +22223,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_create_future_instance_request(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_CREATE_FUTURE_INSTANCE_REQUEST,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_create_future_instance_response(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_CREATE_FUTURE_INSTANCE_RESPONSE,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_free_future_instance(AddressSpaceID target,
                                             Serializer &rez)
     //--------------------------------------------------------------------------
@@ -29868,6 +30057,11 @@ namespace Legion {
         case LG_CONTRIBUTE_COLLECTIVE_ID:
           {
             FutureImpl::handle_contribute_to_collective(args);
+            break;
+          }
+        case LG_DEFERRED_DELETE_FUTURE_INST_TASK_ID:
+          {
+            FutureInstance::handle_deferred_delete(args);
             break;
           }
         case LG_TOP_FINISH_TASK_ID:

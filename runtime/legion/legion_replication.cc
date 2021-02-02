@@ -10492,7 +10492,7 @@ namespace Legion {
                          ReductionOpID id, const ReductionOp *op, bool determin)
       : AllGatherCollective(loc, ctx), op(o), redop(op), redop_id(id),
         deterministic(determin), instance(NULL), shadow(NULL),
-        current_stage(-1), pack_shadow(false)
+        last_stage_sends(0), current_stage(-1), pack_shadow(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -10503,7 +10503,7 @@ namespace Legion {
         const ReductionOp* op, bool determin)
       : AllGatherCollective(ctx, id), op(o), redop(op), redop_id(rid),
         deterministic(determin), instance(NULL), shadow(NULL),
-        current_stage(-1), pack_shadow(false)
+        last_stage_sends(0), current_stage(-1), pack_shadow(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -10512,6 +10512,14 @@ namespace Legion {
     FutureAllReduceCollective::~FutureAllReduceCollective(void)
     //--------------------------------------------------------------------------
     {
+      if (shadow != NULL)
+      {
+        ApEvent free_shadow;
+        if (!shadow_postconditions.empty())
+          free_shadow = Runtime::merge_events(NULL, shadow_postconditions);
+        if (shadow->deferred_delete(op, free_shadow))
+          delete shadow;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10531,44 +10539,7 @@ namespace Legion {
           if (next->first == current_stage)
           {
             // Apply all of these to the destination instance
-            ApEvent new_instance_ready;
-            if (deterministic)
-            {
-              new_instance_ready = instance_ready;
-              for (std::map<ShardID,PendingReduce>::const_iterator it =
-                    next->second.begin(); it != next->second.end(); it++)
-              {
-                new_instance_ready = instance->reduce_from(it->second.instance,
-                    op, redop_id, redop, true/*exclusive*/,
-                    Runtime::merge_events(NULL, new_instance_ready, 
-                                          it->second.precondition));
-                if (it->second.postcondition.exists())
-                  Runtime::trigger_event(NULL, it->second.postcondition,
-                                          new_instance_ready);
-                if (it->second.instance->deferred_delete(new_instance_ready))
-                  delete it->second.instance;
-              }
-            }
-            else
-            {
-              std::set<ApEvent> postconditions;
-              for (std::map<ShardID,PendingReduce>::const_iterator it =
-                    next->second.begin(); it != next->second.end(); it++)
-              {
-                const ApEvent post = instance->reduce_from(it->second.instance,
-                    op, redop_id, redop, false/*exclusive*/,
-                    Runtime::merge_events(NULL, instance_ready, 
-                                          it->second.precondition));
-                if (it->second.postcondition.exists())
-                  Runtime::trigger_event(NULL, it->second.postcondition, post);
-                if (post.exists())
-                  postconditions.insert(post);
-                if (it->second.instance->deferred_delete(post))
-                  delete it->second.instance;
-              }
-              if (!postconditions.empty())
-                new_instance_ready = Runtime::merge_events(NULL,postconditions);
-            }
+            ApEvent new_instance_ready = perform_reductions(next->second);
             // Check to see if we'll be able to pack up instance by value
             if (new_instance_ready.exists() || !instance->can_pack_by_value())
             {
@@ -10576,7 +10547,11 @@ namespace Legion {
               // do this in-place without support from Realm
               if (shadow == NULL)
               {
-                // TODO: make the shadow instance
+                MemoryManager *manager =
+                  context->runtime->find_memory_manager(instance->memory);
+                shadow = manager->create_future_instance(op,
+                    op->get_unique_op_id(), ApEvent::NO_AP_EVENT,
+                    instance->size, true/*eager*/);
               }
               // Copy to the shadown instance, make sure to incorporate 
               // any of the shadow postconditions from the previous stage
@@ -10602,39 +10577,65 @@ namespace Legion {
             pending_reductions.erase(next);
           }
         }
+        else
+        {
+#ifdef DEBUG_LEGION
+          // should be stage 0 (first stage)
+          assert(stage == 0);
+          assert(current_stage == -1);
+#endif
+          if (instance_ready.exists() || !instance->can_pack_by_value())
+          {
+            // Have to make a copy in this case
+#ifdef DEBUG_LEGION
+            assert(shadow == NULL);
+#endif
+            MemoryManager *manager =
+              context->runtime->find_memory_manager(instance->memory);
+            shadow = manager->create_future_instance(op,
+                op->get_unique_op_id(), ApEvent::NO_AP_EVENT,
+                instance->size, true/*eager*/);
+            shadow_ready = shadow->copy_from(instance, op, instance_ready);
+            pack_shadow = true;
+          }
+        }
         current_stage = stage;
       }
       rez.serialize(local_shard);
       if (pack_shadow)
       {
-        if (!shadow->pack_instance(rez, false/*pack ownership*/) || 
-            shadow_ready.exists())
+        if (!shadow->pack_instance(rez, false/*pack ownership*/, shadow_ready))
         {
-          rez.serialize(shadow_ready);
           ApUserEvent applied = Runtime::create_ap_user_event(NULL);
           rez.serialize(applied);
           shadow_postconditions.insert(applied);
         }
         else
-        {
-          rez.serialize(shadow_ready);
           rez.serialize(ApUserEvent::NO_AP_USER_EVENT);
-        }
       }
       else
       {
+        if (!instance->pack_instance(rez, false/*pack owner*/, instance_ready))
+        {
 #ifdef DEBUG_LEGION
-        assert(!instance_ready.exists());
-#ifndef NDEBUG
-        bool by_value =
+          assert(stage == -1);
 #endif
-#endif
-        instance->pack_instance(rez, false/*pack ownership*/);
-#ifdef DEBUG_LEGION
-        assert(by_value);
-#endif
-        rez.serialize(ApEvent::NO_AP_EVENT);
-        rez.serialize(ApUserEvent::NO_AP_USER_EVENT);
+          ApUserEvent copy_out = Runtime::create_ap_user_event(NULL);
+          rez.serialize(copy_out);
+          instance_ready = copy_out; 
+        }
+        else
+          rez.serialize(ApUserEvent::NO_AP_USER_EVENT);
+      }
+      // See if this is the last stage, if so we need to check for finalization
+      if (stage == (shard_collective_stages-1) &&
+          (++last_stage_sends == shard_collective_last_radix))
+      {
+        std::map<int,std::map<ShardID,PendingReduce> >::const_iterator finder =
+          pending_reductions.find(stage);
+        if ((finder != pending_reductions.end()) &&
+            (finder->second.size() == shard_collective_last_radix))
+          finalize();
       }
     }
 
@@ -10650,63 +10651,111 @@ namespace Legion {
       derez.deserialize(shard);
       FutureInstance *instance =
         FutureInstance::unpack_instance(derez, context->runtime);
-      ApEvent precondition;
-      derez.deserialize(precondition);
       ApUserEvent postcondition;
       derez.deserialize(postcondition);
-      pending_reductions[stage][shard] = 
-        PendingReduce(instance, precondition, postcondition);
+      std::map<ShardID,PendingReduce> &pending = pending_reductions[stage];
+      pending[shard] = PendingReduce(instance, postcondition);
+      // Check to see if we need to do the finalization
+      if ((!participating && (stage == -1)) ||
+          ((stage == (shard_collective_stages-1)) &&
+           (last_stage_sends == shard_collective_last_radix) &&
+           (pending.size() == shard_collective_last_radix)))
+        finalize();
     }
 
-#if 0
     //--------------------------------------------------------------------------
     RtEvent FutureAllReduceCollective::async_reduce(FutureInstance *inst,
-                                                    ApEvent ready)
+                                                    ApEvent &ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(instance == NULL);
+      assert(!finished.exists());
 #endif
       instance = inst;
-      ready_event = ready;
+      instance_ready = ready;
+      // Create an event for when we are done
+      finished = Runtime::create_ap_user_event(NULL);
+      // Record that this is the event that will trigger when finished
+      ready = finished;
       perform_collective_async();
       return perform_collective_wait(false/*block*/);
     }
     
     //--------------------------------------------------------------------------
-    ApEvent FutureAllReduceCollective::sync_result(void)
+    void FutureAllReduceCollective::finalize(void)
     //--------------------------------------------------------------------------
     {
-      perform_collective_wait(true/*block*/); 
-      // Need to avoid races here so we have to always compute the last stage
-      memcpy(result, value, redop->sizeof_rhs);
-      if (!future_values.empty())
+#ifdef DEBUG_LEGION
+      // Should be exactly one stage left
+      assert(pending_reductions.size() == 1);
+#endif
+      std::map<int,std::map<ShardID,PendingReduce> >::const_iterator last =
+        pending_reductions.begin();
+      if (last->first == -1)
       {
+        // Copy-in last stage which includes our value so we just overwrite
 #ifdef DEBUG_LEGION
-        // Should be at most one stage left
-        assert(future_values.size() == 1);
+        assert(last->second.size() == 1);
 #endif
-        const std::map<int,std::vector<void*> >::const_iterator last = 
-          future_values.begin();
-        if (last->first == -1)
-        {
-          // Special case for the last stage which already includes our
-          // value so just do the overwrite
+        const PendingReduce &pending = last->second.begin()->second;
+        instance_ready =
+          instance->copy_from(pending.instance, op, instance_ready);
+        if (pending.postcondition.exists())
+          Runtime::trigger_event(NULL, pending.postcondition, instance_ready);
+        if (pending.instance->deferred_delete(op, instance_ready))
+          delete pending.instance;
+      }
+      else
+        instance_ready = perform_reductions(last->second);
 #ifdef DEBUG_LEGION
-          assert(last->second.size() == 1);
+      assert(finished.exists());
 #endif
-          memcpy(result, last->second.front(), redop->sizeof_rhs);
-        }
-        else
+      // Trigger the finish event for the collective
+      Runtime::trigger_event(NULL, finished, instance_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FutureAllReduceCollective::perform_reductions(
+                      const std::map<ShardID,PendingReduce> &pending_reductions)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent new_instance_ready;
+      if (deterministic)
+      {
+        new_instance_ready = instance_ready;
+        for (std::map<ShardID,PendingReduce>::const_iterator it =
+              pending_reductions.begin(); it != pending_reductions.end(); it++)
         {
-          // Do the reduction here
-          for (std::vector<void*>::const_iterator it =
-                last->second.begin(); it != last->second.end(); it++)
-            redop->fold(result, *it, 1/*count*/, true/*exclusive*/);
+          new_instance_ready = instance->reduce_from(it->second.instance,
+              op, redop_id, redop, true/*exclusive*/, new_instance_ready);
+          if (it->second.postcondition.exists())
+            Runtime::trigger_event(NULL, it->second.postcondition,
+                                    new_instance_ready);
+          if (it->second.instance->deferred_delete(op, new_instance_ready))
+            delete it->second.instance;
         }
       }
+      else
+      {
+        std::set<ApEvent> postconditions;
+        for (std::map<ShardID,PendingReduce>::const_iterator it =
+              pending_reductions.begin(); it != pending_reductions.end(); it++)
+        {
+          const ApEvent post = instance->reduce_from(it->second.instance,
+              op, redop_id, redop, false/*exclusive*/, instance_ready);
+          if (it->second.postcondition.exists())
+            Runtime::trigger_event(NULL, it->second.postcondition, post);
+          if (post.exists())
+            postconditions.insert(post);
+          if (it->second.instance->deferred_delete(op, post))
+            delete it->second.instance;
+        }
+        if (!postconditions.empty())
+          new_instance_ready = Runtime::merge_events(NULL,postconditions);
+      }
+      return new_instance_ready;
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // All Reduce Collective 

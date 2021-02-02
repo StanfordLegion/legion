@@ -523,6 +523,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void NullMapper::map_future_map_reduction(const MapperContext       ctx,
+                                        const FutureMapReductionInput&  input,
+                                              FutureMapReductionOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      report_unimplemented(__func__, __LINE__);
+    }
+
+    //--------------------------------------------------------------------------
     void NullMapper::configure_context(const MapperContext         ctx,
                                        const Task&                 task,
                                              ContextConfigOutput&  output)

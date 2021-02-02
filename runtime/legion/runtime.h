@@ -394,6 +394,17 @@ namespace Legion {
      */
     class FutureInstance {
     public:
+      struct DeferDeleteFutureInstanceArgs :
+        public LgTaskArgs<DeferDeleteFutureInstanceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_DELETE_FUTURE_INST_TASK_ID;
+      public:
+        DeferDeleteFutureInstanceArgs(UniqueID uid, FutureInstance *inst)
+          : LgTaskArgs<DeferDeleteFutureInstanceArgs>(uid), instance(inst) { }
+      public:
+        FutureInstance *const instance;
+      };
+    public:
       FutureInstance(const void *data, size_t size, Memory memory, 
                      ApEvent ready_event, Runtime *runtime, bool eager, 
                      bool external, bool own_allocation = true,
@@ -417,7 +428,7 @@ namespace Legion {
       bool is_ready(void) const;
       ApEvent get_ready(void);
       PhysicalInstance get_instance(void);
-      bool deferred_delete(ApEvent done_event) const;
+      bool deferred_delete(Operation *op, ApEvent done_event);
     public:
       bool can_pack_by_value(void) const;
       bool pack_instance(Serializer &rez, bool pack_ownership,
@@ -428,6 +439,7 @@ namespace Legion {
                                      bool has_freefunc = false);
       static FutureInstance* create_local(const void *value, size_t size, 
                                           bool own, Runtime *runtime);
+      static void handle_deferred_delete(const void *args);
     public:
       Runtime *const runtime;
       const void *const data;
@@ -3194,6 +3206,10 @@ namespace Legion {
       void send_remote_trace_update(AddressSpaceID target, Serializer &rez);
       void send_remote_trace_response(AddressSpaceID target, Serializer &rez);
       void send_free_external_allocation(AddressSpaceID target,Serializer &rez);
+      void send_create_future_instance_request(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_create_future_instance_response(AddressSpaceID target,
+                                                Serializer &rez);
       void send_free_future_instance(AddressSpaceID target, Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
@@ -3501,6 +3517,9 @@ namespace Legion {
                                         AddressSpaceID source);
       void handle_remote_tracing_response(Deserializer &derez);
       void handle_free_external_allocation(Deserializer &derez);
+      void handle_create_future_instance_request(Deserializer &derez,
+                                                 AddressSpaceID source);
+      void handle_create_future_instance_response(Deserializer &derez);
       void handle_free_future_instance(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);

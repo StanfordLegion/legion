@@ -7991,6 +7991,7 @@ namespace Legion {
           delete (*it);
         reduction_instances.clear();
       }
+      serdez_redop_targets.clear();
       if (future_map_ready.exists() && !future_map_ready.has_triggered())
         Runtime::trigger_event(future_map_ready);
       // Remove our reference to the reduction future
@@ -8717,6 +8718,83 @@ namespace Legion {
             map_applied_conditions.insert(precondition);
         }
       }
+      else if (redop > 0)
+      {
+        // Call premap task here to see if there are any future destinations
+        Mapper::PremapTaskInput input;
+        Mapper::PremapTaskOutput output;
+        // Initialize this to not have a new target processor
+        output.new_target_proc = Processor::NO_PROC;
+        output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+        // Now invoke the mapper call
+        if (mapper == NULL)
+          mapper = runtime->find_mapper(current_proc, map_id);
+        mapper->invoke_premap_task(this, &input, &output);
+        // See if we need to update the new target processor
+        if (output.new_target_proc.exists())
+          this->target_proc = output.new_target_proc;
+        create_future_instances(output.reduction_futures);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::create_future_instances(std::vector<Memory> &target_mems)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(reduction_instances.empty());
+#endif
+      if (!target_mems.empty())
+      {
+        if (target_mems.size() > 1)
+        {
+          std::set<Memory> unique_mems;
+          for (std::vector<Memory>::iterator it =
+                target_mems.begin(); it != target_mems.end(); /*nothing*/)
+          {
+            if (!it->exists())
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Invalid mapper output. Mapper %s requested index task "
+                  "reduction future be mapped to a NO_MEMORY for task %s "
+                  "(UID %lld) which is illegal. All requests for mapping "
+                  "output futures must be mapped to actual memories.",
+                  mapper->get_mapper_name(), get_task_name(), unique_op_id)
+            if (unique_mems.find(*it) == unique_mems.end())
+            {
+              unique_mems.insert(*it);
+              it++;
+            }
+            else
+              it = target_mems.erase(it);
+          }
+        }
+        else if (!(target_mems.begin()->exists()))
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Invalid mapper output. Mapper %s requested index task "
+                "reduction future be mapped to a NO_MEMORY for task %s "
+                "(UID %lld) which is illegal. All requests for mapping "
+                "output futures must be mapped to actual memories.",
+                mapper->get_mapper_name(), get_task_name(), unique_op_id)
+      }
+      else
+        target_mems.push_back(runtime->runtime_system_memory);
+      // If we've got a serdez redop function then we don't know how big
+      // the output is going to be until later, otherwise we know the
+      // output size from the reduction operator
+      if (serdez_redop_fns == NULL) 
+      {
+        reduction_instances.reserve(target_mems.size());
+        for (std::vector<Memory>::const_iterator it =
+              target_mems.begin(); it != target_mems.end(); it++)
+        {
+          MemoryManager *manager = runtime->find_memory_manager(*it);
+          reduction_instances.push_back(
+              manager->create_future_instance(this, unique_op_id,
+                completion_event, reduction_op->sizeof_rhs, false/*eager*/));
+        }
+      }
+      else
+        serdez_redop_targets.swap(target_mems);
     }
 
     //--------------------------------------------------------------------------
@@ -8784,6 +8862,8 @@ namespace Legion {
       // See if we need to update the new target processor
       if (output.new_target_proc.exists())
         this->target_proc = output.new_target_proc;
+      if (redop > 0)
+        create_future_instances(output.reduction_futures);
       // See if we have any profiling requests to handle
       if (!output.copy_prof_requests.empty())
       {
@@ -9653,9 +9733,20 @@ namespace Legion {
       // is so we can make our target instances and complete the mapping
       if (serdez_redop_fns != NULL)
       {
-        // TODO: need to make the reduction instances here now that 
-        // we know how big the output size is
-
+#ifdef DEBUG_LEGION
+        assert(reduction_instances.empty());
+        assert(!serdez_redop_targets.empty());
+#endif
+        reduction_instances.reserve(serdez_redop_targets.size());
+        for (std::vector<Memory>::const_iterator it =
+              serdez_redop_targets.begin(); it !=
+              serdez_redop_targets.end(); it++)
+        {
+          MemoryManager *manager = runtime->find_memory_manager(*it);
+          reduction_instances.push_back(
+              manager->create_future_instance(this, unique_op_id,
+                completion_event, serdez_redop_state_size, false/*eager*/));
+        }
         // Get the mapped precondition note we can now access this
         // without holding the lock because we know we've seen
         // all the responses so no one else will be mutating it.

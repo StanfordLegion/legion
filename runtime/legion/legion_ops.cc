@@ -20053,7 +20053,6 @@ namespace Legion {
       std::set<RtEvent> ready_events;
       // Make sure we subscribe to all these futures before we are mapped
       // in case they need to make any instances
-      
       if (serdez_redop_fns != NULL)
       {
         // We need to request internal buffers here since we actually
@@ -20096,27 +20095,21 @@ namespace Legion {
         }
       }
       // Invoke the mapper to do figure out where to put the data
-      std::set<Memory> target_memories;
+      std::vector<Memory> target_memories;
       invoke_mapper(target_memories);
-      // Remove any memories which already have instances made
-      if (!targets.empty())
+#ifdef DEBUG_LEGION
+      assert(targets.empty());
+      assert(!target_memories.empty());
+#endif
+      // Make the instances for the target memories
+      targets.reserve(target_memories.size());
+      for (std::vector<Memory>::const_iterator it =
+            target_memories.begin(); it != target_memories.end(); it++)
       {
-        for (std::vector<FutureInstance*>::const_iterator it =
-              targets.begin(); it != targets.end(); it++)
-          target_memories.erase((*it)->memory);
-      }
-      // Make the instances if they haven't already been made
-      if (!target_memories.empty())
-      {
-        targets.reserve(targets.size() + target_memories.size());
-        for (std::set<Memory>::const_iterator it =
-              target_memories.begin(); it != target_memories.end(); it++)
-        {
-          MemoryManager *manager = runtime->find_memory_manager(*it);
-          FutureInstance *instance = manager->create_future_instance(this, 
-            unique_op_id, completion_event, future_result_size, false/*eager*/);
-          targets.push_back(instance);
-        }
+        MemoryManager *manager = runtime->find_memory_manager(*it);
+        FutureInstance *instance = manager->create_future_instance(this, 
+          unique_op_id, completion_event, future_result_size, false/*eager*/);
+        targets.push_back(instance);
       }
       // We're done with our mapping at the point we've made all the instances
       complete_mapping();
@@ -20176,6 +20169,58 @@ namespace Legion {
         complete_execution(Runtime::merge_events(ready_events));
       else
         complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::invoke_mapper(std::vector<Memory> &target_memories)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::FutureMapReductionInput input;
+      Mapper::FutureMapReductionOutput output;
+      input.tag = tag;
+      Processor exec_proc = parent_ctx->get_executing_processor();
+      MapperManager *mapper = runtime->find_mapper(exec_proc, mapper_id);
+      mapper->invoke_map_future_map_reduction(this, &input, &output);
+      if (!output.destination_memories.empty())
+      {
+        if (output.destination_memories.size() > 1)
+        {
+          std::set<Memory> unique_memories;
+          for (std::vector<Memory>::iterator it =
+                output.destination_memories.begin(); it !=
+                output.destination_memories.end(); /*nothing*/)
+          {
+            if (!it->exists())
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                    "Invalid mapper output. Mapper %s requested future map "
+                    "reduction future be mapped to a NO_MEMORY for future map "
+                    "reduction operation (%lld) in parent task %s (UID %lld) "
+                    "which is illegal. All requests for mapping output futures "
+                    "must be mapped to actual memories.",
+                    mapper->get_mapper_name(), unique_op_id,
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+            if (unique_memories.find(*it) == unique_memories.end())
+            {
+              unique_memories.insert(*it);
+              it++;
+            }
+            else
+              it = output.destination_memories.erase(it);
+          }
+        }
+        else if (!output.destination_memories.front().exists())
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Invalid mapper output. Mapper %s requested future map "
+                  "reduction future be mapped to a NO_MEMORY for future map "
+                  "reduction operation (%lld) in parent task %s (UID %lld) "
+                  "which is illegal. All requests for mapping output futures "
+                  "must be mapped to actual memories.",
+                  mapper->get_mapper_name(), unique_op_id,
+                  parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        target_memories.swap(output.destination_memories);
+      }
+      else
+        target_memories.push_back(runtime->runtime_system_memory);
     }
 
     //--------------------------------------------------------------------------

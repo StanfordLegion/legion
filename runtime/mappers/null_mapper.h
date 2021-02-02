@@ -232,6 +232,10 @@ namespace Legion {
                                  const Fill&                        fill,
                                  const SelectShardingFunctorInput&  input,
                                        SelectShardingFunctorOutput& output);
+    public:
+      virtual void map_future_map_reduction(const MapperContext     ctx,
+                                  const FutureMapReductionInput&    input,
+                                        FutureMapReductionOutput&   output);
     public: // Task execution mapping calls
       virtual void configure_context(const MapperContext         ctx,
                                      const Task&                 task,

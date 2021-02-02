@@ -1136,6 +1136,7 @@ namespace Legion {
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
+      void create_future_instances(std::vector<Memory> &target_memories);
       void early_map_regions(std::set<RtEvent> &applied_conditions,
                              const std::vector<unsigned> &must_premap);
       void record_origin_mapped_slice(SliceTask *local_slice);
@@ -1180,6 +1181,7 @@ namespace Legion {
       std::vector<RegionTreePath> privilege_paths;
       std::set<SliceTask*> origin_mapped_slices;
       std::vector<FutureInstance*> reduction_instances;
+      std::vector<Memory> serdez_redop_targets;
     protected:
       std::set<RtEvent> map_applied_conditions;
       std::set<ApEvent> complete_effects;

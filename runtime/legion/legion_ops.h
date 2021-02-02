@@ -3870,7 +3870,7 @@ namespace Legion {
     protected:
       void activate_all_reduce(void);
       void deactivate_all_reduce(void);
-      void invoke_mapper(std::set<Memory> &targets);
+      void invoke_mapper(std::vector<Memory> &targets);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
