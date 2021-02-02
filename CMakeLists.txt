@@ -211,7 +211,11 @@ if(Legion_USE_Kokkos)
   cmake_minimum_required(VERSION 3.13)
 
   # cmake uses -DKokkos_DIR=.../lib/cmake to look in non-standard locations
-  find_package(Kokkos REQUIRED)
+  #
+  # starting with Kokkos 3.3.0, including a cuda-enabled Kokkos will mess with
+  #  the global compilation settings unless you ask it not to by requesting
+  #  the 'separable_compilation' component
+  find_package(Kokkos REQUIRED OPTIONAL_COMPONENTS separable_compilation)
 
   # in order to build using Kokkos' exported compile options, we need to use
   #  the same compiler - newer versions of Kokkos will tell us, but for older
