@@ -3552,6 +3552,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalRegion OutputRegionImpl::get_logical_region(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (!is_valid_output_region())
+        REPORT_LEGION_ERROR(ERROR_LOGICAL_REGION_FROM_INVALID_OUTPUT_REGION,
+          "Logical region cannot be retrieved from output region %u of task %s "
+          "(UID: %lld) whose index space is yet to be determined.",
+          index, context->owner_task->get_task_name(),
+          context->owner_task->get_unique_op_id());
+
+      return req.region;
+    }
+
+    //--------------------------------------------------------------------------
+    bool OutputRegionImpl::is_valid_output_region(void) const
+    //--------------------------------------------------------------------------
+    {
+      return !created_region;
+    }
+
+    //--------------------------------------------------------------------------
     void OutputRegionImpl::return_data(size_t new_num_elements,
                                        FieldID field_id,
                                        uintptr_t ptr,
