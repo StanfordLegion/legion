@@ -10580,16 +10580,24 @@ namespace Legion {
         else
         {
 #ifdef DEBUG_LEGION
-          // should be stage 0 (first stage)
-          assert(stage == 0);
-          assert(current_stage == -1);
+          // should be stage 0 (first stage) or final stage 0
+          assert((stage == 0) || (stage == -1));
 #endif
-          if (instance_ready.exists() || !instance->can_pack_by_value())
+          if (stage == -1)
           {
-            // Have to make a copy in this case
 #ifdef DEBUG_LEGION
+            assert(current_stage == (shard_collective_stages-1));
+#endif
+            // No need for packing the shadow on the way out
+            pack_shadow = false;
+          }
+          else if (instance_ready.exists() || !instance->can_pack_by_value())
+          {
+#ifdef DEBUG_LEGION
+            assert(current_stage == -1);
             assert(shadow == NULL);
 #endif
+            // Have to make a copy in this case
             MemoryManager *manager =
               context->runtime->find_memory_manager(instance->memory);
             shadow = manager->create_future_instance(op,
@@ -10604,7 +10612,8 @@ namespace Legion {
       rez.serialize(local_shard);
       if (pack_shadow)
       {
-        if (!shadow->pack_instance(rez, false/*pack ownership*/, shadow_ready))
+        if (!shadow->pack_instance(rez, false/*pack ownership*/,
+                                   true/*other ready*/, shadow_ready))
         {
           ApUserEvent applied = Runtime::create_ap_user_event(NULL);
           rez.serialize(applied);
@@ -10615,7 +10624,8 @@ namespace Legion {
       }
       else
       {
-        if (!instance->pack_instance(rez, false/*pack owner*/, instance_ready))
+        if (!instance->pack_instance(rez, false/*pack owner*/, 
+                                     true/*other ready*/, instance_ready))
         {
 #ifdef DEBUG_LEGION
           assert(stage == -1);
@@ -10629,12 +10639,12 @@ namespace Legion {
       }
       // See if this is the last stage, if so we need to check for finalization
       if (stage == (shard_collective_stages-1) &&
-          (++last_stage_sends == shard_collective_last_radix))
+          (++last_stage_sends == (shard_collective_last_radix-1)))
       {
         std::map<int,std::map<ShardID,PendingReduce> >::const_iterator finder =
           pending_reductions.find(stage);
         if ((finder != pending_reductions.end()) &&
-            (finder->second.size() == shard_collective_last_radix))
+            (finder->second.size() == (shard_collective_last_radix-1)))
           finalize();
       }
     }
@@ -10658,8 +10668,8 @@ namespace Legion {
       // Check to see if we need to do the finalization
       if ((!participating && (stage == -1)) ||
           ((stage == (shard_collective_stages-1)) &&
-           (last_stage_sends == shard_collective_last_radix) &&
-           (pending.size() == shard_collective_last_radix)))
+           (last_stage_sends == (shard_collective_last_radix-1)) &&
+           (pending.size() == (shard_collective_last_radix-1))))
         finalize();
     }
 
@@ -10690,7 +10700,7 @@ namespace Legion {
       // Should be exactly one stage left
       assert(pending_reductions.size() == 1);
 #endif
-      std::map<int,std::map<ShardID,PendingReduce> >::const_iterator last =
+      std::map<int,std::map<ShardID,PendingReduce> >::iterator last =
         pending_reductions.begin();
       if (last->first == -1)
       {
@@ -10708,6 +10718,7 @@ namespace Legion {
       }
       else
         instance_ready = perform_reductions(last->second);
+      pending_reductions.erase(last);
 #ifdef DEBUG_LEGION
       assert(finished.exists());
 #endif

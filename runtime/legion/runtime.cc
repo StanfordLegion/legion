@@ -1149,8 +1149,6 @@ namespace Legion {
         canonical_instance = instance;
         instances[instance->memory] = instance;
       }
-      if (!pending_instances.empty())
-        create_pending_instances();
       finish_set_future();
     }
 
@@ -1179,9 +1177,7 @@ namespace Legion {
         assert(instances.find((*it)->memory) == instances.end());
 #endif
         instances[(*it)->memory] = *it;
-      }
-      if (!pending_instances.empty())
-        create_pending_instances();
+      } 
       finish_set_future();
     }
 
@@ -1221,6 +1217,8 @@ namespace Legion {
     {
       // must be called while we are already holding the lock
       empty = false; 
+      if (!pending_instances.empty())
+        create_pending_instances();
       if (!is_owner())
       {
         // Add an extra reference to prevent this from being collected
@@ -2366,13 +2364,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool FutureInstance::pack_instance(Serializer &rez, bool pack_ownership,
-                                       ApEvent ready)
+                                       bool other_ready, ApEvent ready)
     //--------------------------------------------------------------------------
     {
       rez.serialize(size);
       // Check to see if we can just pass this future instance by value
       if (is_meta_visible && (size <= LEGION_MAX_RETURN_SIZE) &&
-          (!ready_event.exists() || ready_event.has_triggered_faultignorant()))
+          ((other_ready && (!ready.exists() || ready.has_triggered())) ||
+           (!other_ready && (!ready_event.exists() || 
+                              ready_event.has_triggered_faultignorant()))))
       {
         // We can just pass this future by value because we can
         // see it here, it's tiny, and it's ready to be read
@@ -2389,7 +2389,7 @@ namespace Legion {
         rez.serialize(data);
         rez.serialize(memory);
         rez.serialize(instance);
-        if (ready.exists())
+        if (other_ready)
           rez.serialize(ready);
         else
           rez.serialize(ready_event);
@@ -9429,6 +9429,14 @@ namespace Legion {
         }
         return result;
       }
+      // Do a quick check to see if we can handle the easy case
+      if ((size <= LEGION_MAX_RETURN_SIZE) &&
+          (memory == runtime->runtime_system_memory))
+      {
+        // Special case where we can just allocate the buffer locally
+        return new FutureInstance(malloc(size), size, memory, ready_event,
+            runtime, false/*eager*/, true/*external*/, true/*own allocation*/);
+      }
       // Create the layout description for this instance
       const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
       const std::vector<size_t> sizes(1, size);
@@ -9441,7 +9449,7 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);
       RtEvent use_event;
-      PhysicalInstance instance;
+      PhysicalInstance instance = PhysicalInstance::NO_INST;
       if (eager)
       {
         use_event = create_eager_instance(instance, ilg);

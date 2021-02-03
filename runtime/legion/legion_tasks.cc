@@ -7971,6 +7971,7 @@ namespace Legion {
     void IndexTask::deactivate_index_task(void)
     //--------------------------------------------------------------------------
     {
+      reduction_instance = NULL; // we don't own this so clear it
       deactivate_multi();
       privilege_paths.clear();
       if (!origin_mapped_slices.empty())
@@ -8792,6 +8793,13 @@ namespace Legion {
               manager->create_future_instance(this, unique_op_id,
                 completion_event, reduction_op->sizeof_rhs, false/*eager*/));
         }
+#ifdef DEBUG_LEGION
+        assert(reduction_instance == NULL);
+#endif
+        reduction_instance = reduction_instances.front();
+        // Need to initialize this with the reduction value
+        reduction_inst_precondition =
+          reduction_instance->initialize(reduction_op, this);
       }
       else
         serdez_redop_targets.swap(target_mems);
@@ -11410,7 +11418,7 @@ namespace Legion {
               ApEvent completion_precondition = 
                 Runtime::merge_events(NULL, point_completions);
               reduction_instance->pack_instance(rez, true/*pack ownership*/,
-                                                completion_precondition);
+                              true/*other ready*/, completion_precondition);
             }
             else
               reduction_instance->pack_instance(rez, true/*pack ownership*/);

@@ -431,7 +431,8 @@ namespace Legion {
       bool deferred_delete(Operation *op, ApEvent done_event);
     public:
       bool can_pack_by_value(void) const;
-      bool pack_instance(Serializer &rez, bool pack_ownership,
+      bool pack_instance(Serializer &rez, bool pack_ownership, 
+                         bool other_ready = false,
                          ApEvent ready = ApEvent::NO_AP_EVENT);
       static FutureInstance* unpack_instance(Deserializer &derez, Runtime *rt);
     public:
