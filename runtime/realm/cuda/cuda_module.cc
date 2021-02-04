@@ -14,6 +14,7 @@
  */
 
 #include "realm/cuda/cuda_module.h"
+#include "realm/cuda/cuda_internal.h"
 
 #include "realm/tasks.h"
 #include "realm/logging.h"
