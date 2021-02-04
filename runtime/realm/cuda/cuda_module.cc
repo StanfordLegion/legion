@@ -1360,18 +1360,15 @@ namespace Realm {
 
     void GPU::create_dma_channels(Realm::RuntimeImpl *r)
     {
-      // <NEW_DMA>
-      // Not a good design choice
-      // For now, channel_manager will creates all channels
-      // for GPUs in dma_all_gpus
-      register_gpu_in_dma_systems(this);
-      // </NEW_DMA>
-
       // if we don't have any framebuffer memory, we can't do any DMAs
       if(!fbmem)
 	return;
 
+      r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
+
       if(!pinned_sysmems.empty()) {
+	r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
+	r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
 	//r->add_dma_channel(new GPUDMAChannel_H2D(this));
 	//r->add_dma_channel(new GPUDMAChannel_D2H(this));
 
@@ -1393,11 +1390,9 @@ namespace Realm {
 	log_gpu.warning() << "GPU " << proc->me << " has no pinned system memories!?";
       }
 
-      //r->add_dma_channel(new GPUDMAChannel_D2D(this));
-
       // only create a p2p channel if we have peers (and an fb)
       if(!peer_fbs.empty()) {
-	//r->add_dma_channel(new GPUDMAChannel_P2P(this));
+	r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
 
 	// TODO: move into the dma channels themselves
 	for(std::set<Memory>::const_iterator it = peer_fbs.begin();

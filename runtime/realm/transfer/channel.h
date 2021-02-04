@@ -40,10 +40,6 @@
 #include "realm/inst_impl.h"
 #include "realm/bgwork.h"
 
-#ifdef REALM_USE_CUDA
-#include "realm/cuda/cuda_internal.h"
-#endif
-
 namespace Realm {
 
     class XferDes;
@@ -129,26 +125,6 @@ namespace Realm {
       //void *dst_base;
       //size_t nbytes;
     };
-
-#ifdef REALM_USE_CUDA
-    class GPURequest;
-
-    class GPUCompletionEvent : public Cuda::GPUCompletionNotification {
-    public:
-      void request_completed(void);
-
-      GPURequest *req;
-    };
-
-    class GPURequest : public Request {
-    public:
-      const void *src_base;
-      void *dst_base;
-      //off_t src_gpu_off, dst_gpu_off;
-      Cuda::GPU* dst_gpu;
-      GPUCompletionEvent event;
-    };
-#endif
 
     class XferDesFence : public Realm::Operation::AsyncWorkItem {
     public:
@@ -570,43 +546,6 @@ namespace Realm {
       //char *dst_buf_base;
     };
 
-#ifdef REALM_USE_CUDA
-    class GPUChannel;
-
-    class GPUXferDes : public XferDes {
-    public:
-      GPUXferDes(DmaRequest *_dma_request, Channel *_channel,
-		 NodeID _launch_node, XferDesID _guid,
-		 const std::vector<XferDesPortInfo>& inputs_info,
-		 const std::vector<XferDesPortInfo>& outputs_info,
-		 bool _mark_start,
-		 uint64_t _max_req_size, long max_nr, int _priority,
-		 XferDesFence* _complete_fence);
-
-      ~GPUXferDes()
-      {
-        while (!available_reqs.empty()) {
-          GPURequest* gpu_req = (GPURequest*) available_reqs.front();
-          available_reqs.pop();
-          delete gpu_req;
-        }
-      }
-
-      long get_requests(Request** requests, long nr);
-      void notify_request_read_done(Request* req);
-      void notify_request_write_done(Request* req);
-      void flush();
-
-      bool progress_xd(GPUChannel *channel, TimeLimit work_until);
-
-    private:
-      //GPURequest* gpu_reqs;
-      //char *src_buf_base;
-      //char *dst_buf_base;
-      Cuda::GPU *dst_gpu, *src_gpu;
-    };
-#endif
-
     class XferDesFactory {
     protected:
       // do not destroy directly - use release()
@@ -950,33 +889,6 @@ namespace Realm {
       long submit(Request** requests, long nr);
     };
    
-#ifdef REALM_USE_CUDA
-    class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
-    public:
-      GPUChannel(Cuda::GPU* _src_gpu, XferDesKind _kind,
-		 BackgroundWorkManager *bgwork);
-      ~GPUChannel();
-
-      // multiple concurrent cuda copies ok
-      static const bool is_ordered = false;
-
-      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
-				       NodeID launch_node,
-				       XferDesID guid,
-				       const std::vector<XferDesPortInfo>& inputs_info,
-				       const std::vector<XferDesPortInfo>& outputs_info,
-				       bool mark_started,
-				       uint64_t max_req_size, long max_nr, int priority,
-				       XferDesFence *complete_fence);
-
-      long submit(Request** requests, long nr);
-
-    private:
-      Cuda::GPU* src_gpu;
-      //std::deque<Request*> pending_copies;
-    };
-#endif
-
     class FileChannel;
     class DiskChannel;
 
@@ -1043,25 +955,12 @@ namespace Realm {
       DiskChannel* create_disk_channel(BackgroundWorkManager *bgwork);
       FileChannel* create_file_channel(BackgroundWorkManager *bgwork);
       AddressSplitChannel *create_addr_split_channel(BackgroundWorkManager *bgwork);
-#ifdef REALM_USE_CUDA
-      GPUChannel* create_gpu_to_fb_channel(Cuda::GPU* src_gpu,
-					   BackgroundWorkManager *bgwork);
-      GPUChannel* create_gpu_from_fb_channel(Cuda::GPU* src_gpu,
-					     BackgroundWorkManager *bgwork);
-      GPUChannel* create_gpu_in_fb_channel(Cuda::GPU* src_gpu,
-					   BackgroundWorkManager *bgwork);
-      GPUChannel* create_gpu_peer_fb_channel(Cuda::GPU* src_gpu,
-					     BackgroundWorkManager *bgwork);
-#endif
     public:
       MemcpyChannel* memcpy_channel;
       GASNetChannel *gasnet_read_channel, *gasnet_write_channel;
       RemoteWriteChannel* remote_write_channel;
       DiskChannel *disk_channel;
       FileChannel *file_channel;
-#ifdef REALM_USE_CUDA
-      std::map<Cuda::GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
-#endif
       AddressSplitChannel *addr_split_channel;
     };
 
@@ -1312,9 +1211,6 @@ namespace Realm {
 
     XferDesQueue* get_xdq_singleton();
     ChannelManager* get_channel_manager();
-#ifdef REALM_USE_CUDA
-    void register_gpu_in_dma_systems(Cuda::GPU* gpu);
-#endif
     void start_channel_manager(BackgroundWorkManager *bgwork);
     void stop_channel_manager();
 

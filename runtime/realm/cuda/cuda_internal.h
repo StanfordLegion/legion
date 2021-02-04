@@ -30,6 +30,7 @@
 #include "realm/proc_impl.h"
 #include "realm/mem_impl.h"
 #include "realm/bgwork.h"
+#include "realm/transfer/channel.h"
 
 #define CHECK_CUDART(cmd) do { \
   cudaError_t ret = (cmd); \
@@ -750,7 +751,86 @@ namespace Realm {
       NetworkSegment local_segment;
     };
 
+    class GPURequest;
+
+    class GPUCompletionEvent : public GPUCompletionNotification {
+    public:
+      void request_completed(void);
+
+      GPURequest *req;
+    };
+
+    class GPURequest : public Request {
+    public:
+      const void *src_base;
+      void *dst_base;
+      //off_t src_gpu_off, dst_gpu_off;
+      GPU* dst_gpu;
+      GPUCompletionEvent event;
+    };
+
+    class GPUChannel;
+
+    class GPUXferDes : public XferDes {
+    public:
+      GPUXferDes(DmaRequest *_dma_request, Channel *_channel,
+		 NodeID _launch_node, XferDesID _guid,
+		 const std::vector<XferDesPortInfo>& inputs_info,
+		 const std::vector<XferDesPortInfo>& outputs_info,
+		 bool _mark_start,
+		 uint64_t _max_req_size, long max_nr, int _priority,
+		 XferDesFence* _complete_fence);
+
+      ~GPUXferDes()
+      {
+        while (!available_reqs.empty()) {
+          GPURequest* gpu_req = (GPURequest*) available_reqs.front();
+          available_reqs.pop();
+          delete gpu_req;
+        }
+      }
+
+      long get_requests(Request** requests, long nr);
+      void notify_request_read_done(Request* req);
+      void notify_request_write_done(Request* req);
+      void flush();
+
+      bool progress_xd(GPUChannel *channel, TimeLimit work_until);
+
+    private:
+      //GPURequest* gpu_reqs;
+      //char *src_buf_base;
+      //char *dst_buf_base;
+      GPU *dst_gpu, *src_gpu;
+    };
+
+    class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
+    public:
+      GPUChannel(GPU* _src_gpu, XferDesKind _kind,
+		 BackgroundWorkManager *bgwork);
+      ~GPUChannel();
+
+      // multiple concurrent cuda copies ok
+      static const bool is_ordered = false;
+
+      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
+				       NodeID launch_node,
+				       XferDesID guid,
+				       const std::vector<XferDesPortInfo>& inputs_info,
+				       const std::vector<XferDesPortInfo>& outputs_info,
+				       bool mark_started,
+				       uint64_t max_req_size, long max_nr, int priority,
+				       XferDesFence *complete_fence);
+
+      long submit(Request** requests, long nr);
+
+    private:
+      GPU* src_gpu;
+      //std::deque<Request*> pending_copies;
+    };
+
   }; // namespace Cuda
+
 }; // namespace Realm 
 
 #endif
