@@ -3128,6 +3128,10 @@ class LogicalRegion(object):
             self.set_parent(self.state.get_partition(
                 self.index_space.parent.uid, self.field_space.uid, self.tree_id))
 
+    @property
+    def html_safe_name(self):
+        return str(self).replace('<','&lt;').replace('>','&gt;')
+
     def __str__(self):
         if self.name is None:
             return "Region (%d,%d,%d)" % (self.index_space.uid,
@@ -3520,6 +3524,10 @@ class LogicalPartition(object):
             assert self.index_partition.parent
             self.set_parent(self.state.get_region(self.index_partition.parent.uid,
                                                   self.field_space.uid, self.tree_id))
+
+    @property
+    def html_safe_name(self):
+        return str(self).replace('<','&lt;').replace('>','&gt;')
 
     def __str__(self):
         if self.name is None:
@@ -10008,7 +10016,7 @@ class GraphPrinter(object):
         if requirements is not None:
             for i in xrange(len(requirements)):
                 req = requirements[i]
-                region_name = str(req.logical_node)
+                region_name = req.logical_node.html_safe_name
                 line = [str(i), region_name, req.get_privilege_and_coherence()]
                 lines.append(line)
                 if detailed:
