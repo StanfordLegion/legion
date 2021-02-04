@@ -686,6 +686,9 @@ namespace Legion {
     public:
       Memory target_memory(void) const;
     public:
+      LogicalRegion get_logical_region(void) const;
+      bool is_valid_output_region(void) const;
+    public:
       void return_data(size_t num_elements,
                        FieldID field_id,
                        uintptr_t ptr,

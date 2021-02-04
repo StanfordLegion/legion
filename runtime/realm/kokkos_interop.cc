@@ -28,6 +28,19 @@
 #include <cuda_runtime.h>
 #endif
 
+// some compilers (e.g. clang++ 10) will hide symbols that you want to be
+//  public if any template parameters have hidden visibility, even if they
+//  come from an "external" header file...
+// work around this by declaring any of the kokkos execution space types
+//  that we might use below (we don't get the defines to say whether we
+//  actually use them until we include Kokkos_Core.hpp, at which point it's
+//  too late to try to change the visibility)
+namespace Kokkos {
+  class REALM_PUBLIC_API Serial;
+  class REALM_PUBLIC_API OpenMP;
+  class REALM_PUBLIC_API Cuda;
+};
+
 #include <Kokkos_Core.hpp>
 
 #include <stdlib.h>
