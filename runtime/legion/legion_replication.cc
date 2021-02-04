@@ -10670,7 +10670,7 @@ namespace Legion {
           std::map<int,std::map<ShardID,PendingReduce> >::const_iterator 
             finder = pending_reductions.find(stage);
           if ((finder != pending_reductions.end()) &&
-              (finder->second.size() == (shard_collective_last_radix-1)))
+              (finder->second.size() == size_t(shard_collective_last_radix-1)))
             finalize();
         }
         else
@@ -10700,7 +10700,7 @@ namespace Legion {
       if ((!participating && (stage == -1)) ||
           ((stage == (shard_collective_stages-1)) &&
            (last_stage_sends == (shard_collective_last_radix-1)) &&
-           (pending.size() == (shard_collective_last_radix-1))))
+           (pending.size() == size_t(shard_collective_last_radix-1))))
         finalize();
     }
 

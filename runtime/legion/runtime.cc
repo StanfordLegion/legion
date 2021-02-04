@@ -2164,11 +2164,11 @@ namespace Legion {
       {
         void *buffer = malloc(size); 
         redop->init(buffer, 1/*count*/);
-        CopySrcDstField src, dst;
+        Realm::CopySrcDstField src, dst;
         src.set_fill(buffer, size);
         dst.set_field(get_instance(), 0/*field id*/, size);
-        std::vector<CopySrcDstField> srcs(1, src);
-        std::vector<CopySrcDstField> dsts(1, dst);
+        std::vector<Realm::CopySrcDstField> srcs(1, src);
+        std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_fill_request(requests, op);
@@ -2199,11 +2199,11 @@ namespace Legion {
           || (check_source_ready && !source->is_ready()))
       {
         // We need to offload this to realm
-        CopySrcDstField src, dst;
+        Realm::CopySrcDstField src, dst;
         src.set_field(source->get_instance(), 0/*field id*/, size);
         dst.set_field(get_instance(), 0/*field id*/, size);
-        std::vector<CopySrcDstField> srcs(1, src);
-        std::vector<CopySrcDstField> dsts(1, dst);
+        std::vector<Realm::CopySrcDstField> srcs(1, src);
+        std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_copy_request(requests, op);
@@ -2249,12 +2249,12 @@ namespace Legion {
           || !source->is_ready())
       {
         // We need to offload this to realm
-        CopySrcDstField src, dst;
+        Realm::CopySrcDstField src, dst;
         src.set_field(source->get_instance(), 0/*field id*/, size);
         dst.set_field(get_instance(), 0/*field id*/, size);
         dst.set_redop(redop_id, true/*fold*/);
-        std::vector<CopySrcDstField> srcs(1, src);
-        std::vector<CopySrcDstField> dsts(1, dst);
+        std::vector<Realm::CopySrcDstField> srcs(1, src);
+        std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_copy_request(requests, op);
