@@ -44,11 +44,6 @@
 #include "realm/cuda/cuda_module.h"
 #endif
 
-#ifdef REALM_USE_HDF5
-#include "realm/hdf5/hdf5_internal.h"
-#include "realm/hdf5/hdf5_access.h"
-#endif
-
 namespace Realm {
 
     class XferDes;
@@ -152,15 +147,6 @@ namespace Realm {
       //off_t src_gpu_off, dst_gpu_off;
       Cuda::GPU* dst_gpu;
       GPUCompletionEvent event;
-    };
-#endif
-
-#ifdef REALM_USE_HDF5
-    class HDF5Request : public Request {
-    public:
-      void *mem_base; // could be source or dest
-      hid_t dataset_id, datatype_id;
-      hid_t mem_space_id, file_space_id;
     };
 #endif
 
@@ -621,49 +607,6 @@ namespace Realm {
     };
 #endif
 
-#ifdef REALM_USE_HDF5
-    class HDF5Channel;
-
-    class HDF5XferDes : public XferDes {
-    public:
-      HDF5XferDes(DmaRequest *_dma_request, Channel *_channel,
-		  NodeID _launch_node, XferDesID _guid,
-		  const std::vector<XferDesPortInfo>& inputs_info,
-		  const std::vector<XferDesPortInfo>& outputs_info,
-		  bool _mark_start,
-		  uint64_t _max_req_size, long max_nr, int _priority,
-		  XferDesFence* _complete_fence);
-
-      ~HDF5XferDes()
-      {
-        //free(hdf_reqs);
-        //delete lsi;
-      }
-
-      long get_requests(Request** requests, long nr);
-      void notify_request_read_done(Request* req);
-      void notify_request_write_done(Request* req);
-      void flush();
-
-      virtual bool request_available();
-      virtual Request* dequeue_request();
-      virtual void enqueue_request(Request* req);
-
-      bool progress_xd(HDF5Channel *channel, TimeLimit work_until);
-
-    private:
-      bool req_in_use;
-      HDF5Request hdf5_req;
-      std::map<FieldID, HDF5::HDF5Dataset *> datasets;
-      //char *buf_base;
-      //const HDF5Memory::HDFMetadata *hdf_metadata;
-      //std::vector<OffsetsAndSize>::iterator fit;
-      //GenericPointInRectIterator<DIM>* pir;
-      //GenericLinearSubrectIterator<Mapping<DIM, 1> >* lsi;
-      //Layouts::HDFLayoutIterator<DIM>* hli;
-    };
-#endif
-
     class XferDesFactory {
     protected:
       // do not destroy directly - use release()
@@ -1034,29 +977,6 @@ namespace Realm {
     };
 #endif
 
-#ifdef REALM_USE_HDF5
-    // single channel handles both HDF5 reads and writes
-    class HDF5Channel : public SingleXDQChannel<HDF5Channel, HDF5XferDes> {
-    public:
-      HDF5Channel(BackgroundWorkManager *bgwork);
-      ~HDF5Channel();
-
-      // handle HDF5 requests in order - no concurrency
-      static const bool is_ordered = true;
-
-      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
-				       NodeID launch_node,
-				       XferDesID guid,
-				       const std::vector<XferDesPortInfo>& inputs_info,
-				       const std::vector<XferDesPortInfo>& outputs_info,
-				       bool mark_started,
-				       uint64_t max_req_size, long max_nr, int priority,
-				       XferDesFence *complete_fence);
-
-      long submit(Request** requests, long nr);
-    };
-#endif
-
     class FileChannel;
     class DiskChannel;
 
@@ -1113,9 +1033,6 @@ namespace Realm {
         remote_write_channel = NULL;
         disk_channel = NULL;
         file_channel = NULL;
-#ifdef REALM_USE_HDF5
-        hdf5_channel = NULL;
-#endif
 	addr_split_channel = 0;
       }
       ~ChannelManager(void);
@@ -1136,9 +1053,6 @@ namespace Realm {
       GPUChannel* create_gpu_peer_fb_channel(Cuda::GPU* src_gpu,
 					     BackgroundWorkManager *bgwork);
 #endif
-#ifdef REALM_USE_HDF5
-      HDF5Channel* create_hdf5_channel(BackgroundWorkManager *bgwork);
-#endif
     public:
       MemcpyChannel* memcpy_channel;
       GASNetChannel *gasnet_read_channel, *gasnet_write_channel;
@@ -1147,9 +1061,6 @@ namespace Realm {
       FileChannel *file_channel;
 #ifdef REALM_USE_CUDA
       std::map<Cuda::GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
-#endif
-#ifdef REALM_USE_HDF5
-      HDF5Channel *hdf5_channel;
 #endif
       AddressSplitChannel *addr_split_channel;
     };

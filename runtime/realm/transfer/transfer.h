@@ -22,10 +22,6 @@
 #include "realm/memory.h"
 #include "realm/indexspace.h"
 
-#ifdef REALM_USE_HDF5
-#include "realm/hdf5/hdf5_internal.h"
-#endif
-
 namespace Realm {
 
   // the data transfer engine has too much code to have it all be templated on the
@@ -79,6 +75,7 @@ namespace Realm {
     };
 
 #ifdef REALM_USE_HDF5
+    typedef unsigned long long hsize_t;
     struct AddressInfoHDF5 {
       //hid_t dset_id;
       //hid_t dtype_id;

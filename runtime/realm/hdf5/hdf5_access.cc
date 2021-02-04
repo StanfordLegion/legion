@@ -146,5 +146,14 @@ namespace Realm {
 							      const ProfilingRequestSet&, \
 							      Event);
   FOREACH_NT(DOIT)
+#undef DOIT
 
+  template <int N, typename T>
+  /*static*/ Serialization::PolymorphicSerdezSubclass<InstanceLayoutPiece<N,T>, HDF5LayoutPiece<N,T> > HDF5LayoutPiece<N,T>::serdez_subclass;
+
+#define DOIT(N,T) \
+  template class HDF5LayoutPiece<N,T>;
+  FOREACH_NT(DOIT)
+#undef DOIT
+  
 }; // namespace Realm

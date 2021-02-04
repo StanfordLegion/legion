@@ -19,6 +19,7 @@
 #include "realm/mem_impl.h"
 
 #include "realm/transfer/lowlevel_dma.h"
+#include "realm/transfer/channel.h"
 
 #include <hdf5.h>
 
@@ -78,6 +79,68 @@ namespace Realm {
       virtual void release_storage_immediate(RegionInstanceImpl *inst,
 					     bool poisoned,
 					     TimeLimit work_until);
+    };
+
+    class HDF5Request : public Request {
+    public:
+      void *mem_base; // could be source or dest
+      hid_t dataset_id, datatype_id;
+      hid_t mem_space_id, file_space_id;
+    };
+    class HDF5Channel;
+
+    class HDF5XferDes : public XferDes {
+    public:
+      HDF5XferDes(DmaRequest *_dma_request, Channel *_channel,
+		  NodeID _launch_node, XferDesID _guid,
+		  const std::vector<XferDesPortInfo>& inputs_info,
+		  const std::vector<XferDesPortInfo>& outputs_info,
+		  bool _mark_start,
+		  uint64_t _max_req_size, long max_nr, int _priority,
+		  XferDesFence* _complete_fence);
+
+      ~HDF5XferDes()
+      {
+        //free(hdf_reqs);
+        //delete lsi;
+      }
+
+      long get_requests(Request** requests, long nr);
+      void notify_request_read_done(Request* req);
+      void notify_request_write_done(Request* req);
+      void flush();
+
+      virtual bool request_available();
+      virtual Request* dequeue_request();
+      virtual void enqueue_request(Request* req);
+
+      bool progress_xd(HDF5Channel *channel, TimeLimit work_until);
+
+    private:
+      bool req_in_use;
+      HDF5Request hdf5_req;
+      std::map<FieldID, HDF5Dataset *> datasets;
+    };
+
+    // single channel handles both HDF5 reads and writes
+    class HDF5Channel : public SingleXDQChannel<HDF5Channel, HDF5XferDes> {
+    public:
+      HDF5Channel(BackgroundWorkManager *bgwork);
+      ~HDF5Channel();
+
+      // handle HDF5 requests in order - no concurrency
+      static const bool is_ordered = true;
+
+      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
+				       NodeID launch_node,
+				       XferDesID guid,
+				       const std::vector<XferDesPortInfo>& inputs_info,
+				       const std::vector<XferDesPortInfo>& outputs_info,
+				       bool mark_started,
+				       uint64_t max_req_size, long max_nr, int priority,
+				       XferDesFence *complete_fence);
+
+      long submit(Request** requests, long nr);
     };
 
   }; // namespace HDF5

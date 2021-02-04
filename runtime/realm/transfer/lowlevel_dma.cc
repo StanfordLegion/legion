@@ -38,6 +38,10 @@
 #include "realm/cuda/cuda_module.h"
 #endif
 
+#ifdef REALM_USE_HDF5
+#include "realm/hdf5/hdf5_internal.h"
+#endif
+
 #include <queue>
 #include <algorithm>
 #include <iomanip>
