@@ -177,7 +177,11 @@ namespace Legion {
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
         {
-          return f.get_reference<T>(silence_warnings, warning_string);
+          size_t size = sizeof(T);
+          const T *result = static_cast<const T*>(f.get_buffer(
+                Memory::SYSTEM_MEM, &size, true/*check size*/,
+                silence_warnings, warning_string));
+          return *result;
         }
       };
 
@@ -249,7 +253,11 @@ namespace Legion {
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
         {
-          return f.get_result<T>(silence_warnings, warning_string);
+          size_t size = sizeof(T);
+          const T* result = static_cast<const T*>(f.get_buffer(
+                Memory::SYSTEM_MEM, &size, true/*check size*/,
+                silence_warnings, warning_string));
+          return *result;
         }
       };
 

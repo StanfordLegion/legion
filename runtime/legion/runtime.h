@@ -419,7 +419,8 @@ namespace Legion {
     public:
       ApEvent initialize(const ReductionOp *redop, Operation *op);
       ApEvent copy_from(FutureInstance *source, Operation *op,
-                        ApEvent precondition = ApEvent::NO_AP_EVENT);
+                        ApEvent precondition = ApEvent::NO_AP_EVENT,
+                        bool check_source_ready = true);
       ApEvent reduce_from(FutureInstance *source, Operation *op,
                           const ReductionOpID redop_id,
                           const ReductionOp *redop, bool exclusive,

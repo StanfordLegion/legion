@@ -266,13 +266,13 @@ namespace Legion {
       const ReductionOpID redop_id;
       const bool deterministic;
     protected:
+      const ApUserEvent finished;
       std::map<int,std::map<ShardID,PendingReduce> > pending_reductions;
       std::set<ApEvent> shadow_postconditions;
       FutureInstance *instance;
       FutureInstance *shadow;
       ApEvent instance_ready;
       ApEvent shadow_ready;
-      ApUserEvent finished;
       int last_stage_sends;
       int current_stage;
       bool pack_shadow;

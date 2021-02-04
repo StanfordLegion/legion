@@ -2159,7 +2159,8 @@ namespace Legion {
       assert(size == redop->sizeof_rhs);
 #endif
       // Check to see if this is visible or not
-      if (!is_meta_visible)
+      if (!is_meta_visible || 
+          (use_event.exists() && !use_event.has_triggered()))
       {
         void *buffer = malloc(size); 
         redop->init(buffer, 1/*count*/);
@@ -2186,14 +2187,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent FutureInstance::copy_from(FutureInstance *source, Operation *op,
-                                      ApEvent precondition)
+                                  ApEvent precondition, bool check_source_ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(size == source->size);
 #endif
       if (!is_meta_visible || !source->is_meta_visible || 
-          precondition.exists() || !source->is_ready())
+          (use_event.exists() && !use_event.has_triggered()) ||
+          (precondition.exists() && !precondition.has_triggered_faultignorant())
+          || (check_source_ready && !source->is_ready()))
       {
         // We need to offload this to realm
         CopySrcDstField src, dst;
@@ -2207,15 +2210,21 @@ namespace Legion {
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
         if (use_event.exists() && !use_event.has_triggered())
-
           return ApEvent(rect.copy(srcs, dsts, requests,
                   Runtime::merge_events(NULL, source->get_ready(),
                     precondition, ApEvent(use_event))));
         else if (precondition.exists())
-          return ApEvent(rect.copy(srcs, dsts, requests,
+        {
+          if (check_source_ready)
+            return ApEvent(rect.copy(srcs, dsts, requests,
               Runtime::merge_events(NULL, source->get_ready(), precondition)));
-        else
+          else
+            return ApEvent(rect.copy(srcs, dsts, requests, precondition));
+        }
+        else if (check_source_ready)
           return ApEvent(rect.copy(srcs, dsts, requests, source->get_ready()));
+        else
+          return ApEvent(rect.copy(srcs, dsts, requests));
       }
       else
       {
@@ -2235,7 +2244,9 @@ namespace Legion {
       assert(size == source->size);
 #endif
       if (!is_meta_visible || !source->is_meta_visible || 
-          precondition.exists() || !source->is_ready())
+          (use_event.exists() && !use_event.has_triggered()) ||
+          (precondition.exists() && !precondition.has_triggered_faultignorant())
+          || !source->is_ready())
       {
         // We need to offload this to realm
         CopySrcDstField src, dst;
