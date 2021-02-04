@@ -7077,8 +7077,6 @@ namespace Legion {
       // of tracing (e.g. those with control replication) don't work otherwise
       if ((remote_trace_info != NULL) && (remote_trace_info->recording))
         remote_trace_info->request_term_event(single_task_termination);
-      else // Make a new termination event for this point
-        single_task_termination = Runtime::create_ap_user_event(NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -7108,6 +7106,9 @@ namespace Legion {
       {
         slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT,
                     task_effects_complete, acquired_instances);
+        // Record this slice as an origin-mapped slice so that it
+        // will be deactivated accordingly
+        slice_owner->index_owner->record_origin_mapped_slice(slice_owner);
         // This is the remote case, pack it up and ship it over
         // Update our target_proc so that the sending code is correct 
         Serializer rez;
@@ -7119,21 +7120,19 @@ namespace Legion {
           slice_owner->pack_task(rez, target_space);
         }
         runtime->send_remote_task_replay(target_space, rez);
-        // Record this slice as an origin-mapped slice so that it 
-        // will be deactivated accordingly
-        slice_owner->index_owner->record_origin_mapped_slice(slice_owner);
       }
       else
       {
         // This is the local case
+        if (!is_remote())
+          slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT,
+                      task_effects_complete, acquired_instances);
         for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
              it != physical_instances.end(); ++it)
           for (unsigned idx = 0; idx < it->size(); ++idx)
             (*it)[idx].set_ready_event(instance_ready_event);
         update_no_access_regions();
         launch_task();
-        slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT, 
-                    task_effects_complete, acquired_instances);
       }
     }
 

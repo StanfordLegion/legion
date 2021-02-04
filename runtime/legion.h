@@ -3069,6 +3069,11 @@ namespace Legion {
       OutputRegion& operator=(const OutputRegion &rhs);
     public:
       Memory target_memory(void) const;
+      // Returns the logical region of this output region.
+      // The call is legal only when the output region is valid and
+      // will raise an error otherwise.
+      LogicalRegion get_logical_region(void) const;
+      bool is_valid_output_region(void) const;
     public:
       void return_data(size_t num_elements,
                        FieldID field_id,

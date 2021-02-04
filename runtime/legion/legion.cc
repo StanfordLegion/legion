@@ -2747,6 +2747,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalRegion OutputRegion::get_logical_region(void) const
+    //--------------------------------------------------------------------------
+    {
+      return impl->get_logical_region();
+    }
+
+    //--------------------------------------------------------------------------
+    bool OutputRegion::is_valid_output_region(void) const
+    //--------------------------------------------------------------------------
+    {
+      return impl->is_valid_output_region();
+    }
+
+    //--------------------------------------------------------------------------
     void OutputRegion::return_data(size_t num_elements,
                                    FieldID field_id,
                                    void *ptr,

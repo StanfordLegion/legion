@@ -16176,7 +16176,7 @@ namespace Legion {
       map_op->initialize(this, region);
       map_op->initialize_replication(this, inline_mapping_barrier);
       register_inline_mapped_region(region);
-      const ApEvent result = map_op->get_completion_event();
+      const ApEvent result = map_op->get_program_order_event();
       add_to_dependence_queue(map_op);
       return result;
     }
