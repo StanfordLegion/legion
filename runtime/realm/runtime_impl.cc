@@ -783,7 +783,7 @@ namespace Realm {
       nodes[Network::my_node_id].processors.push_back(p);
     }
 
-    void RuntimeImpl::add_dma_channel(DMAChannel *c)
+    void RuntimeImpl::add_dma_channel(Channel *c)
     {
       nodes[c->node].dma_channels.push_back(c);
     }

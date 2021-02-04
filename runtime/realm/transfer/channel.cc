@@ -675,7 +675,8 @@ namespace Realm {
   }
 
 
-      XferDes::XferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+      XferDes::XferDes(DmaRequest *_dma_request, Channel *_channel,
+		       NodeID _launch_node, XferDesID _guid,
 		       const std::vector<XferDesPortInfo>& inputs_info,
 		       const std::vector<XferDesPortInfo>& outputs_info,
 		       bool _mark_start,
@@ -686,7 +687,7 @@ namespace Realm {
 	  transfer_completed(false),
           max_req_size(_max_req_size), priority(_priority),
           guid(_guid),
-          channel(NULL), complete_fence(_complete_fence),
+          channel(_channel), complete_fence(_complete_fence),
 	  progress_counter(0), reference_count(1)
       {
 	input_ports.resize(inputs_info.size());
@@ -2285,20 +2286,20 @@ namespace Realm {
         enqueue_request(req);
       }
 
-      MemcpyXferDes::MemcpyXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+      MemcpyXferDes::MemcpyXferDes(DmaRequest *_dma_request, Channel *_channel,
+				   NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
 				   bool _mark_start,
 				   uint64_t _max_req_size, long max_nr, int _priority,
 				   XferDesFence* _complete_fence)
-	: XferDes(_dma_request, _launch_node, _guid,
+	: XferDes(_dma_request, _channel, _launch_node, _guid,
 		  inputs_info, outputs_info,
 		  _mark_start,
 		  _max_req_size, _priority,
 		  _complete_fence)
 	, memcpy_req_in_use(false)
       {
-        channel = channel_manager->get_memcpy_channel();
 	kind = XFER_MEM_CPY;
 
 	// scan input and output ports to see if any use serdez ops
@@ -2673,13 +2674,14 @@ namespace Realm {
       }
 
 
-      GASNetXferDes::GASNetXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+      GASNetXferDes::GASNetXferDes(DmaRequest *_dma_request, Channel *_channel,
+				   NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
 				   bool _mark_start,
 				   uint64_t _max_req_size, long max_nr, int _priority,
 				   XferDesFence* _complete_fence)
-	: XferDes(_dma_request, _launch_node, _guid,
+	: XferDes(_dma_request, _channel, _launch_node, _guid,
 		  inputs_info, outputs_info,
 		  _mark_start,
 		  _max_req_size, _priority,
@@ -2688,11 +2690,9 @@ namespace Realm {
 	if((inputs_info.size() >= 1) &&
 	   (input_ports[0].mem->kind == MemoryImpl::MKIND_GLOBAL)) {
 	  kind = XFER_GASNET_READ;
-	  channel = get_channel_manager()->get_gasnet_read_channel();
 	} else if((outputs_info.size() >= 1) &&
 		  (output_ports[0].mem->kind == MemoryImpl::MKIND_GLOBAL)) {
 	  kind = XFER_GASNET_WRITE;
-	  channel = get_channel_manager()->get_gasnet_write_channel();
 	} else {
 	  assert(0 && "neither source nor dest of GASNetXferDes is gasnet!?");
 	}
@@ -2767,19 +2767,19 @@ namespace Realm {
       {
       }
 
-      RemoteWriteXferDes::RemoteWriteXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+      RemoteWriteXferDes::RemoteWriteXferDes(DmaRequest *_dma_request, Channel *_channel,
+					     NodeID _launch_node, XferDesID _guid,
 					     const std::vector<XferDesPortInfo>& inputs_info,
 					     const std::vector<XferDesPortInfo>& outputs_info,
 					     bool _mark_start,
 					     uint64_t _max_req_size, long max_nr, int _priority,
 					     XferDesFence* _complete_fence)
-      : XferDes(_dma_request, _launch_node, _guid,
+	: XferDes(_dma_request, _channel, _launch_node, _guid,
 		inputs_info, outputs_info,
 		_mark_start,
 		_max_req_size, _priority,
                 _complete_fence)
       {
-        channel = channel_manager->get_remote_write_channel();
 	kind = XFER_REMOTE_WRITE;
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
         for (int i = 0; i < max_nr; i++) {
@@ -3255,13 +3255,14 @@ namespace Realm {
       }
 
 #ifdef REALM_USE_CUDA
-      GPUXferDes::GPUXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+      GPUXferDes::GPUXferDes(DmaRequest *_dma_request, Channel *_channel,
+			           NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
 				   bool _mark_start,
 				   uint64_t _max_req_size, long max_nr, int _priority,
 				   XferDesFence* _complete_fence)
-	: XferDes(_dma_request, _launch_node, _guid,
+	: XferDes(_dma_request, _channel, _launch_node, _guid,
 		  inputs_info, outputs_info,
 		  _mark_start,
 		  _max_req_size, _priority,
@@ -3308,25 +3309,21 @@ namespace Realm {
 	  if(dst_gpu != 0) {
 	    if(src_gpu == dst_gpu) {
 	      kind = XFER_GPU_IN_FB;
-	      channel = channel_manager->get_gpu_in_fb_channel(src_gpu);
 	      // ignore max_req_size value passed in - it's probably too small
 	      max_req_size = 1 << 30;
 	    } else {
 	      kind = XFER_GPU_PEER_FB;
-	      channel = channel_manager->get_gpu_peer_fb_channel(src_gpu);
 	      // ignore max_req_size value passed in - it's probably too small
 	      max_req_size = 256 << 20;
 	    }
 	  } else {
 	    kind = XFER_GPU_FROM_FB;
-	    channel = channel_manager->get_gpu_from_fb_channel(src_gpu);
 	    if(multihop_copy)
 	      max_req_size = 4 << 20;
 	  }
 	} else {
 	  if(dst_gpu != 0) {
 	    kind = XFER_GPU_TO_FB;
-	    channel = channel_manager->get_gpu_to_fb_channel(dst_gpu);
 	    if(multihop_copy)
 	      max_req_size = 4 << 20;
 	  } else {
@@ -3423,20 +3420,20 @@ namespace Realm {
 #endif
 
 #ifdef REALM_USE_HDF5
-      HDF5XferDes::HDF5XferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+      HDF5XferDes::HDF5XferDes(DmaRequest *_dma_request, Channel *_channel,
+			       NodeID _launch_node, XferDesID _guid,
 			       const std::vector<XferDesPortInfo>& inputs_info,
 			       const std::vector<XferDesPortInfo>& outputs_info,
 			       bool _mark_start,
 			       uint64_t _max_req_size, long max_nr, int _priority,
 			       XferDesFence* _complete_fence)
-	: XferDes(_dma_request, _launch_node, _guid,
+	: XferDes(_dma_request, _channel, _launch_node, _guid,
 		  inputs_info, outputs_info,
 		  _mark_start,
 		  _max_req_size, _priority,
 		  _complete_fence)
 	, req_in_use(false)
       {
-	channel = get_channel_manager()->get_hdf5_channel();
 	if((inputs_info.size() >= 1) &&
 	   (input_ports[0].mem->kind == MemoryImpl::MKIND_HDF)) {
 	  kind = XFER_HDF5_READ;
@@ -3966,12 +3963,166 @@ namespace Realm {
 	return nr_submitted;
       }
 
-      RemoteChannel::RemoteChannel(void)
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SimpleXferDesFactory
+  //
+
+  SimpleXferDesFactory::SimpleXferDesFactory(uintptr_t _channel)
+    : channel(_channel)
+  {}
+
+  void SimpleXferDesFactory::release()
+  {
+    // do nothing since we are a singleton
+  }
+
+  void SimpleXferDesFactory::create_xfer_des(DmaRequest *dma_request,
+					     NodeID launch_node,
+					     NodeID target_node,
+					     XferDesID guid,
+					     const std::vector<XferDesPortInfo>& inputs_info,
+					     const std::vector<XferDesPortInfo>& outputs_info,
+					     bool mark_started,
+					     uint64_t max_req_size, long max_nr, int priority,
+					     XferDesFence *complete_fence)
+  {
+    if(target_node == Network::my_node_id) {
+      // local creation
+      //assert(!inst.exists());
+      LocalChannel *c = reinterpret_cast<LocalChannel *>(channel);
+      XferDes *xd = c->create_xfer_des(dma_request, launch_node, guid,
+				       inputs_info, outputs_info,
+				       mark_started,
+				       max_req_size, max_nr, priority,
+				       complete_fence);
+
+      c->enqueue_ready_xd(xd);
+    } else {
+      // marking the transfer started has to happen locally
+      if(mark_started)
+	dma_request->mark_started();
+      
+      // remote creation
+      Serialization::ByteCountSerializer bcs;
+      {
+	bool ok = ((bcs << inputs_info) &&
+		   (bcs << outputs_info) &&
+		   (bcs << false /*mark_started*/) &&
+		   (bcs << max_req_size) &&
+		   (bcs << max_nr) &&
+		   (bcs << priority));
+	assert(ok);
+      }
+      size_t req_size = bcs.bytes_used();
+      ActiveMessage<SimpleXferDesCreateMessage> amsg(target_node, req_size);
+      //amsg->inst = inst;
+      amsg->complete_fence  = complete_fence;
+      amsg->launch_node = launch_node;
+      amsg->guid = guid;
+      amsg->dma_request = dma_request;
+      amsg->channel = channel;
+      {
+	bool ok = ((amsg << inputs_info) &&
+		   (amsg << outputs_info) &&
+		   (amsg << false /*mark_started*/) &&
+		   (amsg << max_req_size) &&
+		   (amsg << max_nr) &&
+		   (amsg << priority));
+	assert(ok);
+      }
+      amsg.commit();
+
+      // normally ownership of input and output iterators would be taken
+      //  by the local XferDes we create, but here we sent a copy, so delete
+      //  the originals
+      for(std::vector<XferDesPortInfo>::const_iterator it = inputs_info.begin();
+	  it != inputs_info.end();
+	  ++it)
+	delete it->iter;
+
+      for(std::vector<XferDesPortInfo>::const_iterator it = outputs_info.begin();
+	  it != outputs_info.end();
+	  ++it)
+	delete it->iter;
+    }
+  }
+  
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SimpleXferDesCreateMessage
+  //
+
+  /*static*/ void SimpleXferDesCreateMessage::handle_message(NodeID sender,
+							     const SimpleXferDesCreateMessage &args,
+							     const void *msgdata,
+							     size_t msglen)
+  {
+    std::vector<XferDesPortInfo> inputs_info, outputs_info;
+    bool mark_started = false;
+    uint64_t max_req_size = 0;
+    long max_nr = 0;
+    int priority = 0;
+
+    Realm::Serialization::FixedBufferDeserializer fbd(msgdata, msglen);
+
+    bool ok = ((fbd >> inputs_info) &&
+	       (fbd >> outputs_info) &&
+	       (fbd >> mark_started) &&
+	       (fbd >> max_req_size) &&
+	       (fbd >> max_nr) &&
+	       (fbd >> priority));
+    assert(ok);
+    assert(fbd.bytes_left() == 0);
+  
+    //assert(!args.inst.exists());
+    LocalChannel *c = reinterpret_cast<LocalChannel *>(args.channel);
+    XferDes *xd = c->create_xfer_des(args.dma_request, args.launch_node,
+				     args.guid,
+				     inputs_info,
+				     outputs_info,
+				     mark_started,
+				     max_req_size, max_nr, priority,
+				     args.complete_fence);
+
+    c->enqueue_ready_xd(xd);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class LocalChannel
+  //
+
+  LocalChannel::LocalChannel(XferDesKind _kind)
+    : Channel(_kind)
+    , factory_singleton(reinterpret_cast<uintptr_t>(this))
+  {}
+
+  XferDesFactory *LocalChannel::get_factory()
+  {
+    return &factory_singleton;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RemoteChannel
+  //
+
+      RemoteChannel::RemoteChannel(uintptr_t _remote_ptr)
 	: Channel(XFER_NONE)
+	, factory_singleton(_remote_ptr)
       {}
 
       void RemoteChannel::shutdown()
       {}
+
+      XferDesFactory *RemoteChannel::get_factory()
+      {
+	return &factory_singleton;
+      }
 
       long RemoteChannel::submit(Request** requests, long nr)
       {
@@ -4057,6 +4208,21 @@ namespace Realm {
 				      src_serdez_id, dst_serdez_id,
 				      redop_id,
 				      kind_ret, bw_ret, lat_ret);
+      }
+
+      XferDes *MemcpyChannel::create_xfer_des(DmaRequest *dma_request,
+					      NodeID launch_node,
+					      XferDesID guid,
+					      const std::vector<XferDesPortInfo>& inputs_info,
+					      const std::vector<XferDesPortInfo>& outputs_info,
+					      bool mark_started,
+					      uint64_t max_req_size, long max_nr, int priority,
+					      XferDesFence *complete_fence)
+      {
+	return new MemcpyXferDes(dma_request, this, launch_node, guid,
+				 inputs_info, outputs_info,
+				 mark_started, max_req_size, max_nr, priority,
+				 complete_fence);
       }
 
       long MemcpyChannel::submit(Request** requests, long nr)
@@ -4542,6 +4708,21 @@ namespace Realm {
       {
       }
 
+      XferDes *GASNetChannel::create_xfer_des(DmaRequest *dma_request,
+					      NodeID launch_node,
+					      XferDesID guid,
+					      const std::vector<XferDesPortInfo>& inputs_info,
+					      const std::vector<XferDesPortInfo>& outputs_info,
+					      bool mark_started,
+					      uint64_t max_req_size, long max_nr, int priority,
+					      XferDesFence *complete_fence)
+      {
+	return new GASNetXferDes(dma_request, this, launch_node, guid,
+				 inputs_info, outputs_info,
+				 mark_started, max_req_size, max_nr, priority,
+				 complete_fence);
+      }
+
       long GASNetChannel::submit(Request** requests, long nr)
       {
         for (long i = 0; i < nr; i++) {
@@ -4592,6 +4773,21 @@ namespace Realm {
       }
 
       RemoteWriteChannel::~RemoteWriteChannel() {}
+
+      XferDes *RemoteWriteChannel::create_xfer_des(DmaRequest *dma_request,
+						   NodeID launch_node,
+						   XferDesID guid,
+						   const std::vector<XferDesPortInfo>& inputs_info,
+						   const std::vector<XferDesPortInfo>& outputs_info,
+						   bool mark_started,
+						   uint64_t max_req_size, long max_nr, int priority,
+						   XferDesFence *complete_fence)
+      {
+	return new RemoteWriteXferDes(dma_request, this, launch_node, guid,
+				      inputs_info, outputs_info,
+				      mark_started, max_req_size, max_nr, priority,
+				      complete_fence);
+      }
 
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
@@ -4727,6 +4923,21 @@ namespace Realm {
 
       GPUChannel::~GPUChannel()
       {
+      }
+
+      XferDes *GPUChannel::create_xfer_des(DmaRequest *dma_request,
+					   NodeID launch_node,
+					   XferDesID guid,
+					   const std::vector<XferDesPortInfo>& inputs_info,
+					   const std::vector<XferDesPortInfo>& outputs_info,
+					   bool mark_started,
+					   uint64_t max_req_size, long max_nr, int priority,
+					   XferDesFence *complete_fence)
+      {
+	return new GPUXferDes(dma_request, this, launch_node, guid,
+			      inputs_info, outputs_info,
+			      mark_started, max_req_size, max_nr, priority,
+			      complete_fence);
       }
 
       long GPUChannel::submit(Request** requests, long nr)
@@ -4875,6 +5086,21 @@ namespace Realm {
       }
 
       HDF5Channel::~HDF5Channel() {}
+
+      XferDes *HDF5Channel::create_xfer_des(DmaRequest *dma_request,
+					    NodeID launch_node,
+					    XferDesID guid,
+					    const std::vector<XferDesPortInfo>& inputs_info,
+					    const std::vector<XferDesPortInfo>& outputs_info,
+					    bool mark_started,
+					    uint64_t max_req_size, long max_nr, int priority,
+					    XferDesFence *complete_fence)
+      {
+	return new HDF5XferDes(dma_request, this, launch_node, guid,
+			       inputs_info, outputs_info,
+			       mark_started, max_req_size, max_nr, priority,
+			       complete_fence);
+      }
 
       long HDF5Channel::submit(Request** requests, long nr)
       {
@@ -5300,20 +5526,7 @@ namespace Realm {
       }
     }
 
-#define CREATE_MESSAGE_HANDLER(type) \
-ActiveMessageHandlerReg<XferDesCreateMessage<type> > xfer_des_create_ ## type ## _message_handler
-CREATE_MESSAGE_HANDLER(MemcpyXferDes);
-CREATE_MESSAGE_HANDLER(GASNetXferDes);
-CREATE_MESSAGE_HANDLER(RemoteWriteXferDes);
-CREATE_MESSAGE_HANDLER(DiskXferDes);
-CREATE_MESSAGE_HANDLER(FileXferDes);
-#ifdef REALM_USE_CUDA
-CREATE_MESSAGE_HANDLER(GPUXferDes);
-#endif
-#ifdef REALM_USE_HDF5
-CREATE_MESSAGE_HANDLER(HDF5XferDes);
-#endif
-
+ActiveMessageHandlerReg<SimpleXferDesCreateMessage> simple_xfer_des_create_message_handler;
 ActiveMessageHandlerReg<NotifyXferDesCompleteMessage> notify_xfer_des_complete_handler;
 ActiveMessageHandlerReg<XferDesRemoteWriteMessage> xfer_des_remote_write_handler;
 ActiveMessageHandlerReg<XferDesRemoteWriteAckMessage> xfer_des_remote_write_ack_handler;

@@ -39,13 +39,14 @@ static int fsync(int fd)
 
 namespace Realm {
 
-    FileXferDes::FileXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+    FileXferDes::FileXferDes(DmaRequest *_dma_request, Channel *_channel,
+			     NodeID _launch_node, XferDesID _guid,
 			     const std::vector<XferDesPortInfo>& inputs_info,
 			     const std::vector<XferDesPortInfo>& outputs_info,
 			     bool _mark_start,
 			     uint64_t _max_req_size, long max_nr, int _priority,
 			     XferDesFence* _complete_fence)
-      : XferDes(_dma_request, _launch_node, _guid,
+      : XferDes(_dma_request, _channel, _launch_node, _guid,
 		inputs_info, outputs_info,
 		_mark_start,
 		_max_req_size, _priority,
@@ -57,13 +58,11 @@ namespace Realm {
 	kind = XFER_FILE_READ;
 	inst = inputs_info[0].inst;
 	assert(inst.exists());
-	channel = get_channel_manager()->get_file_channel();
       } else if((outputs_info.size() == 1) &&
 		(output_ports[0].mem->kind == MemoryImpl::MKIND_FILE)) {
 	kind = XFER_FILE_WRITE;
 	inst = outputs_info[0].inst;
 	assert(inst.exists());
-	channel = get_channel_manager()->get_file_channel();
       } else {
 	assert(0 && "neither source nor dest of FileXferDes is file!?");
       }
@@ -145,13 +144,14 @@ namespace Realm {
       fsync(file_info->fd);
     }
 
-    DiskXferDes::DiskXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+    DiskXferDes::DiskXferDes(DmaRequest *_dma_request, Channel *_channel,
+			     NodeID _launch_node, XferDesID _guid,
 			     const std::vector<XferDesPortInfo>& inputs_info,
 			     const std::vector<XferDesPortInfo>& outputs_info,
 			     bool _mark_start,
 			     uint64_t _max_req_size, long max_nr, int _priority,
 			     XferDesFence* _complete_fence)
-      : XferDes(_dma_request, _launch_node, _guid,
+      : XferDes(_dma_request, _channel, _launch_node, _guid,
 		inputs_info, outputs_info,
 		_mark_start,
 		_max_req_size, _priority,
@@ -161,7 +161,6 @@ namespace Realm {
       if((inputs_info.size() >= 1) &&
 	 (input_ports[0].mem->kind == MemoryImpl::MKIND_DISK)) {
 	kind = XFER_DISK_READ;
-	channel = get_channel_manager()->get_disk_channel();
 	// all input ports should agree on which fd they target
 	fd = ((Realm::DiskMemory*)(input_ports[0].mem))->fd;
 	for(size_t i = 1; i < input_ports.size(); i++)
@@ -169,7 +168,6 @@ namespace Realm {
       } else if((outputs_info.size() >= 1) &&
 		(output_ports[0].mem->kind == MemoryImpl::MKIND_DISK)) {
 	kind = XFER_DISK_WRITE;
-	channel = get_channel_manager()->get_disk_channel();
 	// all output ports should agree on which fd they target
 	fd = ((Realm::DiskMemory*)(output_ports[0].mem))->fd;
 	for(size_t i = 1; i < output_ports.size(); i++)
@@ -279,6 +277,21 @@ namespace Realm {
     {
     }
 
+    XferDes *FileChannel::create_xfer_des(DmaRequest *dma_request,
+					  NodeID launch_node,
+					  XferDesID guid,
+					  const std::vector<XferDesPortInfo>& inputs_info,
+					  const std::vector<XferDesPortInfo>& outputs_info,
+					  bool mark_started,
+					  uint64_t max_req_size, long max_nr, int priority,
+					  XferDesFence *complete_fence)
+    {
+      return new FileXferDes(dma_request, this, launch_node, guid,
+			     inputs_info, outputs_info,
+			     mark_started, max_req_size, max_nr, priority,
+			     complete_fence);
+    }
+
     long FileChannel::submit(Request** requests, long nr)
     {
       AsyncFileIOContext* aio_ctx = AsyncFileIOContext::get_singleton();
@@ -324,6 +337,21 @@ namespace Realm {
 
     DiskChannel::~DiskChannel()
     {
+    }
+
+    XferDes *DiskChannel::create_xfer_des(DmaRequest *dma_request,
+					  NodeID launch_node,
+					  XferDesID guid,
+					  const std::vector<XferDesPortInfo>& inputs_info,
+					  const std::vector<XferDesPortInfo>& outputs_info,
+					  bool mark_started,
+					  uint64_t max_req_size, long max_nr, int priority,
+					  XferDesFence *complete_fence)
+    {
+      return new DiskXferDes(dma_request, this, launch_node, guid,
+			     inputs_info, outputs_info,
+			     mark_started, max_req_size, max_nr, priority,
+			     complete_fence);
     }
 
     long DiskChannel::submit(Request** requests, long nr)

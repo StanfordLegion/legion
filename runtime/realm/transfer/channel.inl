@@ -67,145 +67,6 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class SimpleXferDesFactory<T>
-  //
-
-  template <typename T>
-  inline SimpleXferDesFactory<T>::SimpleXferDesFactory()
-  {}
-
-  template <typename T>
-  inline SimpleXferDesFactory<T>::~SimpleXferDesFactory()
-  {}
-
-  template <typename T>
-  /*static*/ inline SimpleXferDesFactory<T> *SimpleXferDesFactory<T>::get_singleton()
-  {
-    static SimpleXferDesFactory<T> singleton;
-    return &singleton;
-  }
-  
-  template <typename T>
-  inline void SimpleXferDesFactory<T>::release()
-  {
-    // do nothing since we are a singleton
-  }
-
-  template <typename T>
-  void SimpleXferDesFactory<T>::create_xfer_des(DmaRequest *dma_request,
-						NodeID launch_node,
-						NodeID target_node,
-						XferDesID guid,
-						const std::vector<XferDesPortInfo>& inputs_info,
-						const std::vector<XferDesPortInfo>& outputs_info,
-						bool mark_started,
-						uint64_t max_req_size, long max_nr, int priority,
-						XferDesFence *complete_fence,
-						RegionInstance inst /*= RegionInstance::NO_INST*/)
-  {
-    if(target_node == Network::my_node_id) {
-      // local creation
-      assert(!inst.exists());
-      XferDes *xd = new T(dma_request, launch_node, guid,
-			  inputs_info, outputs_info,
-			  mark_started,
-			  max_req_size, max_nr, priority,
-			  complete_fence);
-
-      xd->channel->enqueue_ready_xd(xd);
-    } else {
-      // marking the transfer started has to happen locally
-      if(mark_started)
-	dma_request->mark_started();
-      
-      // remote creation
-      Serialization::ByteCountSerializer bcs;
-      {
-	bool ok = ((bcs << inputs_info) &&
-		   (bcs << outputs_info) &&
-		   (bcs << false /*mark_started*/) &&
-		   (bcs << max_req_size) &&
-		   (bcs << max_nr) &&
-		   (bcs << priority));
-	assert(ok);
-      }
-      size_t req_size = bcs.bytes_used();
-      ActiveMessage<XferDesCreateMessage<T> > amsg(target_node, req_size);
-      amsg->inst = inst;
-      amsg->complete_fence  = complete_fence;
-      amsg->launch_node = launch_node;
-      amsg->guid = guid;
-      amsg->dma_request = dma_request;
-      {
-	bool ok = ((amsg << inputs_info) &&
-		   (amsg << outputs_info) &&
-		   (amsg << false /*mark_started*/) &&
-		   (amsg << max_req_size) &&
-		   (amsg << max_nr) &&
-		   (amsg << priority));
-	assert(ok);
-      }
-      amsg.commit();
-
-      // normally ownership of input and output iterators would be taken
-      //  by the local XferDes we create, but here we sent a copy, so delete
-      //  the originals
-      for(std::vector<XferDesPortInfo>::const_iterator it = inputs_info.begin();
-	  it != inputs_info.end();
-	  ++it)
-	delete it->iter;
-
-      for(std::vector<XferDesPortInfo>::const_iterator it = outputs_info.begin();
-	  it != outputs_info.end();
-	  ++it)
-	delete it->iter;
-    }
-  }
-  
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class XferDesCreateMessage<T>
-  //
-
-  template <typename T>
-  /*static*/ void XferDesCreateMessage<T>::handle_message(NodeID sender,
-							  const XferDesCreateMessage<T> &args,
-							  const void *msgdata,
-							  size_t msglen)
-  {
-    std::vector<XferDesPortInfo> inputs_info, outputs_info;
-    bool mark_started = false;
-    uint64_t max_req_size = 0;
-    long max_nr = 0;
-    int priority = 0;
-
-    Realm::Serialization::FixedBufferDeserializer fbd(msgdata, msglen);
-
-    bool ok = ((fbd >> inputs_info) &&
-	       (fbd >> outputs_info) &&
-	       (fbd >> mark_started) &&
-	       (fbd >> max_req_size) &&
-	       (fbd >> max_nr) &&
-	       (fbd >> priority));
-    assert(ok);
-    assert(fbd.bytes_left() == 0);
-  
-    assert(!args.inst.exists());
-    XferDes *xd = new T(args.dma_request, args.launch_node,
-			args.guid,
-			inputs_info,
-			outputs_info,
-			mark_started,
-			max_req_size, max_nr, priority,
-			args.complete_fence);
-
-    xd->channel->enqueue_ready_xd(xd);
-  }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class XferDes
   //
 
@@ -389,6 +250,54 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class Channel
+  //
+
+  inline std::ostream& operator<<(std::ostream& os, const Channel& c)
+  {
+    c.print(os);
+    return os;
+  }
+
+  template <typename S>
+  inline bool Channel::serialize_remote_info(S& serializer) const
+  {
+    return ((serializer << node) &&
+	    (serializer << kind) &&
+	    (serializer << reinterpret_cast<uintptr_t>(this)) &&
+	    (serializer << paths));
+  }
+
+  
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RemoteChannel
+  //
+
+  template <typename S>
+  /*static*/ RemoteChannel *RemoteChannel::deserialize_new(S& serializer)
+  {
+    NodeID node;
+    XferDesKind kind;
+    uintptr_t remote_ptr;
+    std::vector<SupportedPath> paths;
+    bool ok = ((serializer >> node) &&
+	       (serializer >> kind) &&
+	       (serializer >> remote_ptr) &&
+	       (serializer >> paths));
+    if(!ok)
+      return 0;
+
+    RemoteChannel *rc = new RemoteChannel(remote_ptr);
+    rc->node = node;
+    rc->kind = kind;
+    rc->paths.swap(paths);
+    return rc;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class SingleXDQChannel<CHANNEL, XD>
   //
 
@@ -398,7 +307,7 @@ namespace Realm {
   SingleXDQChannel<CHANNEL,XD>::SingleXDQChannel(BackgroundWorkManager *bgwork,
 						 XferDesKind _kind,
 						 const std::string &_name)
-    : Channel(_kind)
+    : LocalChannel(_kind)
     , xdq(static_cast<CHANNEL *>(this), _name, CHANNEL::is_ordered)
   {
     xdq.add_to_manager(bgwork);

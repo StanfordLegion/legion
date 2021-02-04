@@ -133,13 +133,15 @@ namespace Realm {
 
     struct MemPathInfo {
       std::vector<Memory> path;
-      std::vector<XferDesKind> xd_kinds;
-      std::vector<NodeID> xd_target_nodes;
+      std::vector<Channel *> xd_channels;
+      //std::vector<XferDesKind> xd_kinds;
+      //std::vector<NodeID> xd_target_nodes;
     };
     
     bool find_shortest_path(Memory src_mem, Memory dst_mem,
 			    CustomSerdezID serdez_id,
-			    MemPathInfo& info);
+			    MemPathInfo& info,
+			    bool skip_final_memcpy = false);
 
   struct OffsetsAndSize {
       FieldID src_field_id, dst_field_id;
@@ -259,9 +261,6 @@ namespace Realm {
       void set(Memory _memory, size_t _size);
     };
 
-    // helper - should come from channels eventually
-    XferDesFactory *get_xd_factory_by_kind(XferDesKind kind);
-    
   //typedef std::set<PendingIBInfo, ComparePendingIBInfo> PriorityIBQueue;
     typedef std::vector<IBInfo> IBVec;
     typedef std::map<InstPair, IBVec> IBByInst;
@@ -334,7 +333,7 @@ namespace Realm {
       //  intermediate buffers
       struct XDTemplate {
 	NodeID target_node;
-	XferDesKind kind;
+	//XferDesKind kind;
 	XferDesFactory *factory;
 	int gather_control_input;
 	int scatter_control_input;
@@ -351,8 +350,8 @@ namespace Realm {
 	std::vector<IO> outputs;
 
 	// helper functions for initializing these things
-	void set_simple(NodeID _target_node, XferDesKind _kind,
-			int _in_edge, int _out_edge);
+	void set_simple(Channel *channel,
+			int in_edge, int out_edge);
       };
       std::vector<XDTemplate> xd_nodes;
       std::vector<IBInfo> ib_edges;

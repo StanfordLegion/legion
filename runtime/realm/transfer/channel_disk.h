@@ -35,7 +35,8 @@ namespace Realm {
 
     class FileXferDes : public XferDes {
     public:
-      FileXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+      FileXferDes(DmaRequest *_dma_request, Channel *_channel,
+		  NodeID _launch_node, XferDesID _guid,
 		  const std::vector<XferDesPortInfo>& inputs_info,
 		  const std::vector<XferDesPortInfo>& outputs_info,
 		  bool _mark_start,
@@ -61,7 +62,8 @@ namespace Realm {
 
     class DiskXferDes : public XferDes {
     public:
-      DiskXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+      DiskXferDes(DmaRequest *_dma_request, Channel *_channel,
+		  NodeID _launch_node, XferDesID _guid,
 		  const std::vector<XferDesPortInfo>& inputs_info,
 		  const std::vector<XferDesPortInfo>& outputs_info,
 		  bool _mark_start,
@@ -93,6 +95,15 @@ namespace Realm {
       // TODO: farm I/O work off to dedicated threads if needed
       static const bool is_ordered = true;
 
+      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
+				       NodeID launch_node,
+				       XferDesID guid,
+				       const std::vector<XferDesPortInfo>& inputs_info,
+				       const std::vector<XferDesPortInfo>& outputs_info,
+				       bool mark_started,
+				       uint64_t max_req_size, long max_nr, int priority,
+				       XferDesFence *complete_fence);
+
       long submit(Request** requests, long nr);
     };
 
@@ -103,6 +114,15 @@ namespace Realm {
 
       // TODO: farm I/O work off to dedicated threads if needed
       static const bool is_ordered = true;
+
+      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
+				       NodeID launch_node,
+				       XferDesID guid,
+				       const std::vector<XferDesPortInfo>& inputs_info,
+				       const std::vector<XferDesPortInfo>& outputs_info,
+				       bool mark_started,
+				       uint64_t max_req_size, long max_nr, int priority,
+				       XferDesFence *complete_fence);
 
       long submit(Request** requests, long nr);
     };

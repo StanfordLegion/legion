@@ -743,41 +743,6 @@ namespace Realm {
     return ib_size;
   }
 
-  // helper - should come from channels eventually
-  XferDesFactory *get_xd_factory_by_kind(XferDesKind kind)
-  {
-    switch(kind) {
-    case XFER_MEM_CPY:
-      return SimpleXferDesFactory<MemcpyXferDes>::get_singleton();
-    case XFER_GASNET_READ:
-    case XFER_GASNET_WRITE:
-      return SimpleXferDesFactory<GASNetXferDes>::get_singleton();
-    case XFER_REMOTE_WRITE:
-      return SimpleXferDesFactory<RemoteWriteXferDes>::get_singleton();
-    case XFER_DISK_READ:
-    case XFER_DISK_WRITE:
-      return SimpleXferDesFactory<DiskXferDes>::get_singleton();
-    case XFER_FILE_READ:
-    case XFER_FILE_WRITE:
-      return SimpleXferDesFactory<FileXferDes>::get_singleton();
-#ifdef REALM_USE_CUDA
-    case XFER_GPU_FROM_FB:
-    case XFER_GPU_TO_FB:
-    case XFER_GPU_IN_FB:
-    case XFER_GPU_PEER_FB:
-      return SimpleXferDesFactory<GPUXferDes>::get_singleton();
-#endif
-#ifdef REALM_USE_HDF5
-    case XFER_HDF5_READ:
-    case XFER_HDF5_WRITE:
-      return SimpleXferDesFactory<HDF5XferDes>::get_singleton();
-#endif
-    default:
-      assert(0);
-      return 0;
-    }
-  }
-
   void IBInfo::set(Memory _memory, size_t _size)
   {
     memory = _memory;
@@ -785,20 +750,18 @@ namespace Realm {
     size = _size;
   }
 
-  void CopyRequest::XDTemplate::set_simple(NodeID _target_node,
-					   XferDesKind _kind,
-					   int _in_edge, int _out_edge)
+  void CopyRequest::XDTemplate::set_simple(Channel *channel,
+					   int in_edge, int out_edge)
   {
-    kind = _kind;
-    factory = get_xd_factory_by_kind(_kind);
+    factory = channel->get_factory();
     gather_control_input = -1;
     scatter_control_input = -1;
-    target_node = _target_node;
+    target_node = channel->node;
     inputs.resize(1);
-    inputs[0].edge_id = _in_edge;
+    inputs[0].edge_id = in_edge;
     inputs[0].indirect_inst = RegionInstance::NO_INST;
     outputs.resize(1);
-    outputs[0].edge_id = _out_edge;
+    outputs[0].edge_id = out_edge;
     outputs[0].indirect_inst = RegionInstance::NO_INST;
   }
   
@@ -969,7 +932,7 @@ namespace Realm {
 	    log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (serdez=" << serdez_id << ")";
 	    assert(0);
 	  }
-	  size_t pathlen = path_info.xd_kinds.size();
+	  size_t pathlen = path_info.xd_channels.size();
 	  size_t xd_idx = xd_nodes.size();
 	  size_t ib_idx = ib_edges.size();
 	  size_t ib_alloc_size = 0;
@@ -979,11 +942,11 @@ namespace Realm {
 	    ib_alloc_size = compute_ib_size(it->second, domain);
 	  }
 	  for(size_t i = 0; i < pathlen; i++) {
-	    xd_nodes[xd_idx].kind = path_info.xd_kinds[i];
-	    xd_nodes[xd_idx].factory = get_xd_factory_by_kind(path_info.xd_kinds[i]);
+	    //xd_nodes[xd_idx].kind = path_info.xd_kinds[i];
+	    xd_nodes[xd_idx].factory = path_info.xd_channels[i]->get_factory();
 	    xd_nodes[xd_idx].gather_control_input = -1;
 	    xd_nodes[xd_idx].scatter_control_input = -1;
-	    xd_nodes[xd_idx].target_node = path_info.xd_target_nodes[i];
+	    xd_nodes[xd_idx].target_node = path_info.xd_channels[i]->node;
 	    xd_nodes[xd_idx].inputs.resize(1);
 	    xd_nodes[xd_idx].inputs[0].edge_id = ((i == 0) ?
 						    XDTemplate::SRC_INST :
@@ -1802,18 +1765,20 @@ namespace Realm {
       return XFER_NONE;
     }
 
-    XferDesKind get_xfer_des(Memory src_mem, Memory dst_mem,
-			     CustomSerdezID src_serdez_id,
-			     CustomSerdezID dst_serdez_id,
-			     ReductionOpID redop_id)
+    Channel *get_xfer_channel(Memory src_mem, Memory dst_mem,
+			      CustomSerdezID src_serdez_id,
+			      CustomSerdezID dst_serdez_id,
+			      ReductionOpID redop_id,
+			      XferDesKind *pkind = 0)
     {
+      Channel *channel = 0;
       XferDesKind kind = XFER_NONE;
 
       // look at the dma channels available on the source node
       NodeID src_node = ID(src_mem).memory_owner_node();
       NodeID dst_node = ID(dst_mem).memory_owner_node();
       const Node& n = get_runtime()->nodes[src_node];
-      for(std::vector<DMAChannel *>::const_iterator it = n.dma_channels.begin();
+      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
 	  it != n.dma_channels.end();
 	  ++it) {
 	unsigned bw = 0;
@@ -1822,6 +1787,7 @@ namespace Realm {
 				src_serdez_id, dst_serdez_id,
 				redop_id,
 				&kind, &bw, &latency)) {
+	  channel = *it;
 	  break;
 	}
       }
@@ -1829,7 +1795,7 @@ namespace Realm {
       // if that didn't work, try the destination node (if different)
       if((kind == XFER_NONE) && (dst_node != src_node)) {
 	const Node& n = get_runtime()->nodes[dst_node];
-	for(std::vector<DMAChannel *>::const_iterator it = n.dma_channels.begin();
+	for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
 	    it != n.dma_channels.end();
 	    ++it) {
 	  unsigned bw = 0;
@@ -1838,6 +1804,7 @@ namespace Realm {
 				  src_serdez_id, dst_serdez_id,
 				  redop_id,
 				  &kind, &bw, &latency)) {
+	    channel = *it;
 	    break;
 	  }
 	}
@@ -1861,29 +1828,34 @@ namespace Realm {
 	}
       }
 #endif
-      return kind;
+      if(pkind) *pkind = kind;
+      return channel;
     }
 
     bool find_shortest_path(Memory src_mem, Memory dst_mem,
 			    CustomSerdezID serdez_id,
-			    MemPathInfo& info)
+			    MemPathInfo& info,
+			    bool skip_final_memcpy /*= false*/)
     {
       // make sure we write a fresh MemPathInfo
       info.path.clear();
-      info.xd_kinds.clear();
-      info.xd_target_nodes.clear();
+      //info.xd_kinds.clear();
+      //info.xd_target_nodes.clear();
 
       // fast case - can we go straight from src to dst?
-      XferDesKind kind = get_xfer_des(src_mem, dst_mem,
-				      serdez_id, serdez_id, 0);
-      if(kind != XFER_NONE) {
-	info.path.resize(2);
-	info.path[0] = src_mem;
-	info.path[1] = dst_mem;
-	info.xd_kinds.push_back(kind);
+      XferDesKind kind;
+      Channel *channel = get_xfer_channel(src_mem, dst_mem,
+					  serdez_id, serdez_id, 0, &kind);
+      if(channel) {
+	info.path.push_back(src_mem);
+	if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
+	  info.path.push_back(dst_mem);
+	  //info.xd_kinds.push_back(kind);
+	  info.xd_channels.push_back(channel);
+	}
       } else {
 	std::map<Memory, std::vector<Memory> > dist;
-	std::map<Memory, std::vector<XferDesKind> > kinds;
+	std::map<Memory, std::vector<Channel *> > channels;
 	std::list<Memory> mems_left;
 	std::queue<Memory> active_nodes;
 	Node* node = &(get_runtime()->nodes[ID(src_mem).memory_owner_node()]);
@@ -1900,12 +1872,12 @@ namespace Realm {
 	}
 	for(std::list<Memory>::iterator it = mems_left.begin(); it != mems_left.end(); ) {
 	  // we know we're doing at least one hop, so no dst_serdez here
-	  kind = get_xfer_des(src_mem, *it, serdez_id, 0, 0);
-	  if(kind != XFER_NONE) {
+	  channel = get_xfer_channel(src_mem, *it, serdez_id, 0, 0);
+	  if(channel) {
 	    std::vector<Memory>& v = dist[*it];
 	    v.push_back(src_mem);
 	    v.push_back(*it);
-	    kinds[*it].push_back(kind);
+	    channels[*it].push_back(channel);
 	    active_nodes.push(*it);
 	    it = mems_left.erase(it);
 	  } else
@@ -1921,25 +1893,32 @@ namespace Realm {
 	  
 	  // can we reach the destination from here (handling potential
 	  //  deserialization?
-	  kind = get_xfer_des(cur, dst_mem, 0, serdez_id, 0);
-	  if(kind != XFER_NONE) {
+	  channel = get_xfer_channel(cur, dst_mem, 0, serdez_id, 0, &kind);
+	  if(channel) {
 	    info.path = dist[cur];
-	    info.path.push_back(dst_mem);
-	    info.xd_kinds = kinds[cur];
-	    info.xd_kinds.push_back(kind);
+	    //info.xd_kinds = kinds[cur];
+	    info.xd_channels = channels[cur];
+	    if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
+	      info.path.push_back(dst_mem);
+	      //info.xd_kinds.push_back(kind);
+	      info.xd_channels.push_back(channel);
+	    }
 	    break;
 	  }
 
 	  // no, look for another intermediate hop
 	  for(std::list<Memory>::iterator it = mems_left.begin(); it != mems_left.end(); ) {
-	    kind = get_xfer_des(cur, *it, 0, 0, 0);
-	    if(kind != XFER_NONE) {
+	    channel = get_xfer_channel(cur, *it, 0, 0, 0);
+	    if(channel) {
 	      std::vector<Memory>& v = dist[*it];
 	      v = dist[cur];
 	      v.push_back(*it);
-	      std::vector<XferDesKind>& k = kinds[*it];
-	      k = kinds[cur];
-	      k.push_back(kind);
+	      //std::vector<XferDesKind>& k = kinds[*it];
+	      //k = kinds[cur];
+	      //k.push_back(kind);
+	      std::vector<Channel *>& c = channels[*it];
+	      c = channels[cur];
+	      c.push_back(channel);
 	      active_nodes.push(*it);
 	      it = mems_left.erase(it);
 	    } else
@@ -1948,13 +1927,6 @@ namespace Realm {
 	}
       }
 
-      // target node is src mem's node for all but gasnet reads
-      info.xd_target_nodes.resize(info.xd_kinds.size());
-      for(size_t i = 0; i < info.xd_kinds.size(); i++) {
-	bool use_dst_mem = (info.xd_kinds[i] == XFER_GASNET_READ);
-	Memory mem = (use_dst_mem ? info.path[i + 1] : info.path[i]);
-	info.xd_target_nodes[i] = ID(mem).memory_owner_node();
-      }
       return true;
     }
 
@@ -2094,6 +2066,14 @@ namespace Realm {
 	    (serializer << tentative_valid));
   }
 
+  std::ostream& operator<<(std::ostream& os, const CopyRequest::XDTemplate::IO& io)
+  {
+    os << io.edge_id;
+    if(io.indirect_inst.exists())
+      os << '(' << io.indirect_inst << ')';
+    return os;
+  }
+
     void CopyRequest::create_xfer_descriptors(void)
     {
       // SJT: this code is pretty broken if there are multiple instance pairs
@@ -2176,11 +2156,10 @@ namespace Realm {
 	
 	NodeID xd_target_node = xdt.target_node;
 	XferDesID xd_guid = xd_ids[i];
-	XferDesKind kind = xdt.kind;
+	//XferDesKind kind = xdt.kind;
 	XferDesFactory *xd_factory = xdt.factory;
 
-	log_new_dma.info() << "xd_nodes[" << i << "]: id=" << std::hex << xd_guid << std::dec << " kind=" << kind;
-	// TODO: put back! << " inputs=" << PrettyVector<int>(xdt.inputs) << " outputs=" << PrettyVector<int>(xdt.outputs);
+	log_new_dma.info() << "xd_nodes[" << i << "]: id=" << std::hex << xd_guid << std::dec << " inputs=" << PrettyVector<XDTemplate::IO>(xdt.inputs) << " outputs=" << PrettyVector<XDTemplate::IO>(xdt.outputs);
 	
 	bool mark_started = false;
 	std::vector<XferDesPortInfo> inputs_info(xdt.inputs.size());
@@ -3339,7 +3318,7 @@ namespace Realm {
           bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
                                        path_info);
           assert(ok);
-          entry.num_hops = path_info.xd_kinds.size();
+          entry.num_hops = path_info.xd_channels.size();
         }
         else
           assert(0);
@@ -3378,7 +3357,7 @@ namespace Realm {
           bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
                                        path_info);
           assert(ok);
-          entry.num_hops = path_info.xd_kinds.size();
+          entry.num_hops = path_info.xd_channels.size();
           cpinfo.inst_info.push_back(entry);
         }
       }

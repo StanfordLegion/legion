@@ -56,7 +56,6 @@ namespace Realm {
   class NetworkSegment;
 
   class Channel; // from transfer/channel.h
-  typedef Channel DMAChannel;
 
     template <typename _ET, size_t _INNER_BITS, size_t _LEAF_BITS>
     class DynamicTableAllocator {
@@ -127,7 +126,7 @@ namespace Realm {
       std::vector<MemoryImpl *> memories;
       std::vector<IBMemory *> ib_memories;
       std::vector<ProcessorImpl *> processors;
-      std::vector<DMAChannel *> dma_channels;
+      std::vector<Channel *> dma_channels;
 
       DynamicTable<RemoteEventTableAllocator> remote_events;
       DynamicTable<BarrierTableAllocator> barriers;
@@ -343,7 +342,7 @@ namespace Realm {
       void add_memory(MemoryImpl *m);
       void add_ib_memory(IBMemory *m);
       void add_processor(ProcessorImpl *p);
-      void add_dma_channel(DMAChannel *c);
+      void add_dma_channel(Channel *c);
       void add_code_translator(CodeTranslator *t);
 
       void add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma);

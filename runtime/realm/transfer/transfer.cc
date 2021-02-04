@@ -1538,6 +1538,29 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class AddressSplitChannel
+  //
+
+  static AddressSplitChannel *local_addrsplit_channel = 0;
+
+  AddressSplitChannel::AddressSplitChannel(BackgroundWorkManager *bgwork)
+    : SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase>(bgwork,
+								     XFER_ADDR_SPLIT,
+								     "address split")
+  {
+    assert(!local_addrsplit_channel);
+    local_addrsplit_channel = this;
+  }
+
+  AddressSplitChannel::~AddressSplitChannel()
+  {
+    assert(local_addrsplit_channel == this);
+    local_addrsplit_channel = 0;
+  }
+
+  
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class XferDesCreateMessage<AddressSplitXferDes<N,T>>
   //
 
@@ -1545,10 +1568,10 @@ namespace Realm {
   class AddressSplitXferDes;
   
   template <int N, typename T>
-  struct XferDesCreateMessage<AddressSplitXferDes<N,T> > : public XferDesCreateMessageBase {
+  struct AddressSplitXferDesCreateMessage : public XferDesCreateMessageBase {
   public:
     static void handle_message(NodeID sender,
-			       const XferDesCreateMessage<AddressSplitXferDes<N,T> > &args,
+			       const AddressSplitXferDesCreateMessage<N,T> &args,
 			       const void *msgdata,
 			       size_t msglen)
     {
@@ -1573,8 +1596,10 @@ namespace Realm {
       assert(ok);
       assert(fbd.bytes_left() == 0);
   
-      assert(!args.inst.exists());
+      //assert(!args.inst.exists());
+      assert(local_addrsplit_channel);
       XferDes *xd = new AddressSplitXferDes<N,T>(args.dma_request,
+						 local_addrsplit_channel,
 						 args.launch_node,
 						 args.guid,
 						 inputs_info,
@@ -1586,7 +1611,7 @@ namespace Realm {
 						 element_size,
 						 spaces);
 
-      xd->channel->enqueue_ready_xd(xd);
+      local_addrsplit_channel->enqueue_ready_xd(xd);
     }
   };
   
@@ -1616,10 +1641,9 @@ namespace Realm {
 				 const std::vector<XferDesPortInfo>& outputs_info,
 				 bool mark_started,
 				 uint64_t max_req_size, long max_nr, int priority,
-				 XferDesFence *complete_fence,
-				 RegionInstance inst = RegionInstance::NO_INST);
+				 XferDesFence *complete_fence);
 
-    static ActiveMessageHandlerReg<XferDesCreateMessage<AddressSplitXferDes<N,T> > > areg;
+    static ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N,T> > areg;
 
   protected:
     size_t bytes_per_element;
@@ -1627,15 +1651,16 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  /*static*/ ActiveMessageHandlerReg<XferDesCreateMessage<AddressSplitXferDes<N,T> > > AddressSplitXferDesFactory<N,T>::areg;
+  /*static*/ ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N,T> > AddressSplitXferDesFactory<N,T>::areg;
   
   template <int N, typename T>
   class AddressSplitXferDes : public AddressSplitXferDesBase {
   protected:
     friend class AddressSplitXferDesFactory<N,T>;
-    friend struct XferDesCreateMessage<AddressSplitXferDes<N,T> >;
+    friend struct AddressSplitXferDesCreateMessage<N,T>;
     
-    AddressSplitXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+    AddressSplitXferDes(DmaRequest *_dma_request, Channel *_channel,
+			NodeID _launch_node, XferDesID _guid,
 			const std::vector<XferDesPortInfo>& inputs_info,
 			const std::vector<XferDesPortInfo>& outputs_info,
 			bool _mark_start,
@@ -1689,13 +1714,15 @@ namespace Realm {
 							const std::vector<XferDesPortInfo>& outputs_info,
 							bool mark_started,
 							uint64_t max_req_size, long max_nr, int priority,
-							XferDesFence *complete_fence,
-							RegionInstance inst /*= RegionInstance::NO_INST*/)
+							XferDesFence *complete_fence)
   {
     if(target_node == Network::my_node_id) {
       // local creation
-      assert(!inst.exists());
-      XferDes *xd = new AddressSplitXferDes<N,T>(dma_request, launch_node, guid,
+      //assert(!inst.exists());
+      assert(local_addrsplit_channel);
+      XferDes *xd = new AddressSplitXferDes<N,T>(dma_request,
+						 local_addrsplit_channel,
+						 launch_node, guid,
 						 inputs_info, outputs_info,
 						 mark_started,
 						 max_req_size, max_nr, priority,
@@ -1703,7 +1730,7 @@ namespace Realm {
 						 bytes_per_element,
 						 spaces);
 
-      xd->channel->enqueue_ready_xd(xd);
+      local_addrsplit_channel->enqueue_ready_xd(xd);
     } else {
       // marking the transfer started has to happen locally
       if(mark_started)
@@ -1723,8 +1750,8 @@ namespace Realm {
 	assert(ok);
       }
       size_t req_size = bcs.bytes_used();
-      ActiveMessage<XferDesCreateMessage<AddressSplitXferDes<N,T> > > amsg(target_node, req_size);
-      amsg->inst = inst;
+      ActiveMessage<AddressSplitXferDesCreateMessage<N,T> > amsg(target_node, req_size);
+      //amsg->inst = inst;
       amsg->complete_fence  = complete_fence;
       amsg->launch_node = launch_node;
       amsg->guid = guid;
@@ -1750,13 +1777,16 @@ namespace Realm {
   // class AddressSplitXferDes<N,T>
   //
 
-  AddressSplitXferDesBase::AddressSplitXferDesBase(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+  AddressSplitXferDesBase::AddressSplitXferDesBase(DmaRequest *_dma_request,
+						   Channel *_channel,
+						   NodeID _launch_node, XferDesID _guid,
 						   const std::vector<XferDesPortInfo>& inputs_info,
 						   const std::vector<XferDesPortInfo>& outputs_info,
 						   bool _mark_start,
 						   uint64_t _max_req_size, long max_nr, int _priority,
 						   XferDesFence* _complete_fence)
-    : XferDes(_dma_request, _launch_node, _guid, inputs_info, outputs_info,
+    : XferDes(_dma_request, _channel, _launch_node, _guid,
+	      inputs_info, outputs_info,
 	      _mark_start, _max_req_size, _priority, _complete_fence)
   {}
 
@@ -1785,7 +1815,8 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  AddressSplitXferDes<N,T>::AddressSplitXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+  AddressSplitXferDes<N,T>::AddressSplitXferDes(DmaRequest *_dma_request, Channel *_channel,
+						NodeID _launch_node, XferDesID _guid,
 						const std::vector<XferDesPortInfo>& inputs_info,
 						const std::vector<XferDesPortInfo>& outputs_info,
 						bool _mark_start,
@@ -1793,7 +1824,7 @@ namespace Realm {
 						XferDesFence* _complete_fence,
 						size_t _element_size,
 						const std::vector<IndexSpace<N,T> >& _spaces)
-    : AddressSplitXferDesBase(_dma_request, _launch_node, _guid,
+    : AddressSplitXferDesBase(_dma_request, _channel, _launch_node, _guid,
 			      inputs_info, outputs_info,
 			      _mark_start, _max_req_size, max_nr, _priority,
 			      _complete_fence)
@@ -1801,9 +1832,7 @@ namespace Realm {
     , element_size(_element_size)
     , point_index(0), point_count(0)
     , output_space_id(-1), output_count(0)
-  {
-    channel = get_channel_manager()->get_address_split_channel();
-  }
+  {}
 
   template <int N, typename T>
   AddressSplitXferDes<N,T>::~AddressSplitXferDes()
@@ -1978,21 +2007,6 @@ namespace Realm {
   
   ////////////////////////////////////////////////////////////////////////
   //
-  // class AddressSplitChannel
-  //
-
-  AddressSplitChannel::AddressSplitChannel(BackgroundWorkManager *bgwork)
-    : SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase>(bgwork,
-								     XFER_ADDR_SPLIT,
-								     "address split")
-  {}
-
-  AddressSplitChannel::~AddressSplitChannel()
-  {}
-
-  
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class IndirectionInfoTyped<N,T,N2,T2>
   //
 
@@ -2080,13 +2094,9 @@ namespace Realm {
   static int add_copy_path(std::vector<CopyRequest::XDTemplate>& xd_nodes,
 			   std::vector<IBInfo>& ib_edges,
 			   int start_edge,
-			   const MemPathInfo& info,
-			   bool skip_final_memcpy)
+			   const MemPathInfo& info)
   {
-    size_t hops = info.xd_kinds.size();
-    if(skip_final_memcpy &&
-       (info.xd_kinds[hops - 1] == XFER_MEM_CPY))
-      hops -= 1;
+    size_t hops = info.xd_channels.size();
 
     if(hops == 0) {
       // no xd's needed at all - return input edge as output
@@ -2098,8 +2108,7 @@ namespace Realm {
     xd_nodes.resize(xd_base + hops);
     ib_edges.resize(ib_base + hops);
     for(size_t i = 0; i < hops; i++) {
-      xd_nodes[xd_base + i].set_simple(info.xd_target_nodes[i],
-				       info.xd_kinds[i],
+      xd_nodes[xd_base + i].set_simple(info.xd_channels[i],
 				       (i == 0) ? start_edge :
 				                  (ib_base + i - 1),
 				       ib_base + i);
@@ -2147,20 +2156,21 @@ namespace Realm {
     // special case - a gather from a single source with no out of range
     //  accesses
     if((spaces.size() == 1) && !oor_possible) {
-      size_t pathlen = path_infos[0].xd_kinds.size();
+      size_t pathlen = path_infos[0].xd_channels.size();
       // HACK!
-      Memory local_ib_mem = ID::make_ib_memory(path_infos[0].xd_target_nodes[0], 0).convert<Memory>();
+      Memory local_ib_mem = ID::make_ib_memory(path_infos[0].xd_channels[0]->node, 0).convert<Memory>();
       // do we have to do anything to get the addresses into a cpu-readable
       //  memory on that node?
       MemPathInfo addr_path;
       bool ok = find_shortest_path(inst.get_location(),
 				   local_ib_mem,
 				   0 /*no serdez*/,
-				   addr_path);
+				   addr_path,
+				   true /*skip_final_memcpy*/);
       assert(ok);
       int addr_edge = add_copy_path(xd_nodes, ib_edges,
 				    CopyRequest::XDTemplate::SRC_INST,
-				    addr_path, true /*skip_memcpy*/);
+				    addr_path);
 
       size_t xd_idx = xd_nodes.size();
       size_t ib_idx = ib_edges.size();
@@ -2168,9 +2178,9 @@ namespace Realm {
       ib_edges.resize(ib_idx + pathlen - 1);
 
       for(size_t i = 0; i < pathlen; i++) {
-	xd_nodes[xd_idx+i].target_node = path_infos[0].xd_target_nodes[i];
-	xd_nodes[xd_idx+i].kind = path_infos[0].xd_kinds[i];
-	xd_nodes[xd_idx+i].factory = get_xd_factory_by_kind(path_infos[0].xd_kinds[i]);
+	xd_nodes[xd_idx+i].target_node = path_infos[0].xd_channels[i]->node;
+	//xd_nodes[xd_idx+i].kind = path_infos[0].xd_kinds[i];
+	xd_nodes[xd_idx+i].factory = path_infos[0].xd_channels[i]->get_factory();
 	xd_nodes[xd_idx+i].gather_control_input = -1;
 	xd_nodes[xd_idx+i].scatter_control_input = -1;
 	if(i == 0) {
@@ -2207,11 +2217,12 @@ namespace Realm {
       bool ok = find_shortest_path(inst.get_location(),
 				   addr_ib_mem,
 				   0 /*no serdez*/,
-				   addr_path);
+				   addr_path,
+				   true /*skip_final_memcpy*/);
       assert(ok);
       int addr_edge = add_copy_path(xd_nodes, ib_edges,
 				    CopyRequest::XDTemplate::SRC_INST,
-				    addr_path, true /*skip_memcpy*/);
+				    addr_path);
       std::vector<int> decoded_addr_edges(spaces.size(), -1);
       int ctrl_edge = -1;
       {
@@ -2221,7 +2232,7 @@ namespace Realm {
 	xd_nodes.resize(xd_base + 1);
 	ib_edges.resize(ib_base + spaces.size() + 1);
 	xd_nodes[xd_base].target_node = addr_node;
-	xd_nodes[xd_base].kind = XFER_ADDR_SPLIT;
+	//xd_nodes[xd_base].kind = XFER_ADDR_SPLIT;
 	assert(!is_ranges && "need range address splitter");
 	xd_nodes[xd_base].factory = new AddressSplitXferDesFactory<N2,T2>(bytes_per_element,
 									  spaces);
@@ -2256,7 +2267,7 @@ namespace Realm {
 	  assert(ok);
 	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
 						decoded_addr_edges[i],
-						path, false /*!skip_memcpy*/);
+						path);
 	}
       }
 
@@ -2272,46 +2283,42 @@ namespace Realm {
 	assert(ok);
 	ctrl_edge = add_copy_path(xd_nodes, ib_edges,
 				  ctrl_edge,
-				  path, false /*!skip_memcpy*/);
+				  path);
       }
 
       // next complication: if all the data paths don't use the same final
       //  step, we need to force them to go through an intermediate
       // also insist that the final step be owned by the destination node
       //  (i.e. the merging should not be done via rdma)
-      XferDesKind last_kind = path_infos[0].xd_kinds[path_infos[0].xd_kinds.size() - 1];
-      bool same_last_kind = true;
+      Channel *last_channel = path_infos[0].xd_channels[path_infos[0].xd_channels.size() - 1];
+      bool same_last_channel = true;
       for(size_t i = 0; i < path_infos.size(); i++) {
-	if(path_infos[i].xd_kinds[path_infos[i].xd_kinds.size() - 1] !=
-	   last_kind) {
-	  same_last_kind = false;
-	  break;
-	}
-	if(path_infos[i].xd_target_nodes[path_infos[i].xd_kinds.size() - 1] != dst_node) {
-	  same_last_kind = false;
+	if(path_infos[i].xd_channels[path_infos[i].xd_channels.size() - 1] !=
+	   last_channel) {
+	  same_last_channel = false;
 	  break;
 	}
       }
-      if(!same_last_kind) {
+      if(!same_last_channel) {
 	// figure out what the final kind will be (might not be the same as
 	//  any of the current paths)
 	MemPathInfo tail_path;
 	bool ok = find_shortest_path(dst_ib_mem, dst_mem,
 				     serdez_id, tail_path);
-	assert(ok && (tail_path.xd_kinds.size() == 1));
-	last_kind = tail_path.xd_kinds[0];
-	// and fix any path that doesn't use that kind
+	assert(ok && (tail_path.xd_channels.size() == 1));
+	last_channel = tail_path.xd_channels[0];
+	// and fix any path that doesn't use that channel
 	for(size_t i = 0; i < path_infos.size(); i++) {
-	  if(path_infos[i].xd_kinds[path_infos[i].xd_kinds.size() - 1] ==
-	     last_kind) continue;
+	  if(path_infos[i].xd_channels[path_infos[i].xd_channels.size() - 1] ==
+	     last_channel) continue;
 	  log_new_dma.print() << "fix " << i << " " << path_infos[i].path[0] << " -> " << dst_ib_mem;
 	  bool ok = find_shortest_path(path_infos[i].path[0], dst_ib_mem,
 				       0 /*no serdez*/, path_infos[i]);
 	  assert(ok);
 	  // append last step
-	  path_infos[i].xd_kinds.push_back(last_kind);
+	  path_infos[i].xd_channels.push_back(last_channel);
 	  path_infos[i].path.push_back(dst_mem);
-	  path_infos[i].xd_target_nodes.push_back(ID(dst_mem).memory_owner_node());
+	  //path_infos[i].xd_target_nodes.push_back(ID(dst_mem).memory_owner_node());
 	}
       }
 
@@ -2320,15 +2327,14 @@ namespace Realm {
       std::vector<int> data_edges(spaces.size(), -1);
       for(size_t i = 0; i < spaces.size(); i++) {
 	const MemPathInfo& mpi = path_infos[path_idx[i]];
-	size_t hops = mpi.xd_kinds.size() - 1;
+	size_t hops = mpi.xd_channels.size() - 1;
 	if(hops > 0) {
 	  size_t xd_base = xd_nodes.size();
 	  size_t ib_base = ib_edges.size();
 	  xd_nodes.resize(xd_base + hops);
 	  ib_edges.resize(ib_base + hops);
 	  for(size_t j = 0; j < hops; j++) {
-	    xd_nodes[xd_base + j].set_simple(mpi.xd_target_nodes[j],
-					     mpi.xd_kinds[j],
+	    xd_nodes[xd_base + j].set_simple(mpi.xd_channels[j],
 					     (j == 0) ? 0 /*fixed below*/ :
 					                (ib_base + j - 1),
 					     ib_base + j);
@@ -2351,8 +2357,8 @@ namespace Realm {
       xd_nodes.resize(xd_idx + 1);
 
       xd_nodes[xd_idx].target_node = ID(dst_mem).memory_owner_node();
-      xd_nodes[xd_idx].kind = last_kind;
-      xd_nodes[xd_idx].factory = get_xd_factory_by_kind(last_kind);
+      //xd_nodes[xd_idx].kind = last_kind;
+      xd_nodes[xd_idx].factory = last_channel->get_factory();
       xd_nodes[xd_idx].gather_control_input = spaces.size();
       xd_nodes[xd_idx].scatter_control_input = -1;
       xd_nodes[xd_idx].outputs.resize(1);
@@ -2362,7 +2368,7 @@ namespace Realm {
 
       for(size_t i = 0; i < spaces.size(); i++) {
 	// can we read (indirectly) right from the source instance?
-	if(path_infos[path_idx[i]].xd_kinds.size() == 1) {
+	if(path_infos[path_idx[i]].xd_channels.size() == 1) {
 	  int ind_idx = xd_nodes[xd_idx].inputs.size();
 	  xd_nodes[xd_idx].inputs.resize(ind_idx + 1);
 	  xd_nodes[xd_idx].inputs[i].edge_id = CopyRequest::XDTemplate::INDIRECT_BASE - ind_idx;
@@ -2418,20 +2424,21 @@ namespace Realm {
     // special case - a scatter to a single destination with no out of
     //  range accesses
     if((spaces.size() == 1) && !oor_possible) {
-      size_t pathlen = path_infos[0].xd_kinds.size();
+      size_t pathlen = path_infos[0].xd_channels.size();
       // HACK!
-      Memory local_ib_mem = ID::make_ib_memory(path_infos[0].xd_target_nodes[pathlen - 1], 0).convert<Memory>();
+      Memory local_ib_mem = ID::make_ib_memory(path_infos[0].xd_channels[pathlen - 1]->node, 0).convert<Memory>();
       // do we have to do anything to get the addresses into a cpu-readable
       //  memory on that node?
       MemPathInfo addr_path;
       bool ok = find_shortest_path(inst.get_location(),
 				   local_ib_mem,
 				   0 /*no serdez*/,
-				   addr_path);
+				   addr_path,
+				   true /*skip_final_memcpy*/);
       assert(ok);
       int addr_edge = add_copy_path(xd_nodes, ib_edges,
 				    CopyRequest::XDTemplate::DST_INST,
-				    addr_path, true /*skip_memcpy*/);
+				    addr_path);
 
       size_t xd_idx = xd_nodes.size();
       size_t ib_idx = ib_edges.size();
@@ -2439,9 +2446,9 @@ namespace Realm {
       ib_edges.resize(ib_idx + pathlen - 1);
 
       for(size_t i = 0; i < pathlen; i++) {
-	xd_nodes[xd_idx+i].target_node = path_infos[0].xd_target_nodes[i];
-	xd_nodes[xd_idx+i].kind = path_infos[0].xd_kinds[i];
-	xd_nodes[xd_idx+i].factory = get_xd_factory_by_kind(path_infos[0].xd_kinds[i]);
+	xd_nodes[xd_idx+i].target_node = path_infos[0].xd_channels[i]->node;
+	//xd_nodes[xd_idx+i].kind = path_infos[0].xd_kinds[i];
+	xd_nodes[xd_idx+i].factory = path_infos[0].xd_channels[i]->get_factory();
 	xd_nodes[xd_idx+i].gather_control_input = -1;
 	xd_nodes[xd_idx+i].scatter_control_input = -1;
 	if(i == (pathlen - 1)) {
@@ -2478,11 +2485,12 @@ namespace Realm {
       bool ok = find_shortest_path(inst.get_location(),
 				   addr_ib_mem,
 				   0 /*no serdez*/,
-				   addr_path);
+				   addr_path,
+				   true /*skip_final_memcpy*/);
       assert(ok);
       int addr_edge = add_copy_path(xd_nodes, ib_edges,
 				    CopyRequest::XDTemplate::DST_INST,
-				    addr_path, true /*skip_memcpy*/);
+				    addr_path);
       std::vector<int> decoded_addr_edges(spaces.size(), -1);
       int ctrl_edge = -1;
       {
@@ -2492,7 +2500,7 @@ namespace Realm {
 	xd_nodes.resize(xd_base + 1);
 	ib_edges.resize(ib_base + spaces.size() + 1);
 	xd_nodes[xd_base].target_node = addr_node;
-	xd_nodes[xd_base].kind = XFER_ADDR_SPLIT;
+	//xd_nodes[xd_base].kind = XFER_ADDR_SPLIT;
 	assert(!is_ranges && "need range address splitter");
 	xd_nodes[xd_base].factory = new AddressSplitXferDesFactory<N2,T2>(bytes_per_element,
 									  spaces);
@@ -2518,7 +2526,7 @@ namespace Realm {
       //  last step of each path is running
       for(size_t i = 0; i < spaces.size(); i++) {
 	// HACK!
-	NodeID dst_node = path_infos[path_idx[i]].xd_target_nodes[path_infos[path_idx[i]].xd_target_nodes.size() - 1];
+	NodeID dst_node = path_infos[path_idx[i]].xd_channels[path_infos[path_idx[i]].xd_channels.size() - 1]->node;
 	Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
 	if(dst_ib_mem != addr_ib_mem) {
 	  MemPathInfo path;
@@ -2528,7 +2536,7 @@ namespace Realm {
 	  assert(ok);
 	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
 						decoded_addr_edges[i],
-						path, false /*!skip_memcpy*/);
+						path);
 	}
       }
 
@@ -2543,40 +2551,40 @@ namespace Realm {
 	assert(ok);
 	ctrl_edge = add_copy_path(xd_nodes, ib_edges,
 				  ctrl_edge,
-				  path, false /*!skip_memcpy*/);
+				  path);
       }
 
       // next complication: if all the data paths don't use the same first
       //  step, we need to force them to go through an intermediate
-      XferDesKind first_kind = path_infos[0].xd_kinds[0];
-      bool same_first_kind = true;
+      Channel *first_channel = path_infos[0].xd_channels[0];
+      bool same_first_channel = true;
       for(size_t i = 1; i < path_infos.size(); i++)
-	if(path_infos[i].xd_kinds[0] != first_kind) {
-	  same_first_kind = false;
+	if(path_infos[i].xd_channels[0] != first_channel) {
+	  same_first_channel = false;
 	  break;
 	}
-      if(!same_first_kind) {
-	// figure out what the first kind will be (might not be the same as
+      if(!same_first_channel) {
+	// figure out what the first channel will be (might not be the same as
 	//  any of the current paths)
 	MemPathInfo head_path;
 	bool ok = find_shortest_path(src_mem, src_ib_mem,
 				     serdez_id, head_path);
-	assert(ok && (head_path.xd_kinds.size() == 1));
-	first_kind = head_path.xd_kinds[0];
-	// and fix any path that doesn't use that kind
+	assert(ok && (head_path.xd_channels.size() == 1));
+	first_channel = head_path.xd_channels[0];
+	// and fix any path that doesn't use that channel
 	for(size_t i = 0; i < path_infos.size(); i++) {
-	  if(path_infos[i].xd_kinds[0] == first_kind) continue;
+	  if(path_infos[i].xd_channels[0] == first_channel) continue;
 
 	  bool ok = find_shortest_path(src_ib_mem,
 				       path_infos[i].path[path_infos[i].path.size() - 1],
 				       0 /*no serdez*/, path_infos[i]);
 	  assert(ok);
 	  // prepend last step
-	  path_infos[i].xd_kinds.insert(path_infos[i].xd_kinds.begin(),
-					first_kind);
+	  path_infos[i].xd_channels.insert(path_infos[i].xd_channels.begin(),
+					   first_channel);
 	  path_infos[i].path.insert(path_infos[i].path.begin(), src_mem);
-	  path_infos[i].xd_target_nodes.insert(path_infos[i].xd_target_nodes.begin(),
-					       ID(src_mem).memory_owner_node());
+	  //path_infos[i].xd_target_nodes.insert(path_infos[i].xd_target_nodes.begin(),
+	  //				       ID(src_mem).memory_owner_node());
 	}
       }
 
@@ -2588,8 +2596,8 @@ namespace Realm {
 	xd_nodes.resize(xd_idx + 1);
 
 	xd_nodes[xd_idx].target_node = ID(src_mem).memory_owner_node();
-	xd_nodes[xd_idx].kind = first_kind;
-	xd_nodes[xd_idx].factory = get_xd_factory_by_kind(first_kind);
+	//xd_nodes[xd_idx].kind = first_kind;
+	xd_nodes[xd_idx].factory = first_channel->get_factory();
 	xd_nodes[xd_idx].gather_control_input = -1;
 	xd_nodes[xd_idx].scatter_control_input = 1;
 	xd_nodes[xd_idx].inputs.resize(2);
@@ -2601,7 +2609,7 @@ namespace Realm {
 
 	for(size_t i = 0; i < spaces.size(); i++) {
 	  // can we write (indirectly) right into the dest instance?
-	  if(path_infos[path_idx[i]].xd_kinds.size() == 1) {
+	  if(path_infos[path_idx[i]].xd_channels.size() == 1) {
 	    int ind_idx = xd_nodes[xd_idx].inputs.size();
 	    xd_nodes[xd_idx].inputs.resize(ind_idx + 1);
 	    xd_nodes[xd_idx].outputs[i].edge_id = CopyRequest::XDTemplate::INDIRECT_BASE - ind_idx;
@@ -2629,7 +2637,7 @@ namespace Realm {
       //  their path added to the graph
       for(size_t i = 0; i < spaces.size(); i++) {
 	const MemPathInfo& mpi = path_infos[path_idx[i]];
-	size_t hops = mpi.xd_kinds.size() - 1;
+	size_t hops = mpi.xd_channels.size() - 1;
 	if(hops > 0) {
 	  assert(data_edges[i] >= 0);
 	  
@@ -2638,8 +2646,7 @@ namespace Realm {
 	  xd_nodes.resize(xd_base + hops);
 	  ib_edges.resize(ib_base + hops - 1);
 	  for(size_t j = 0; j < hops; j++) {
-	    xd_nodes[xd_base + j].set_simple(mpi.xd_target_nodes[j + 1],
-					     mpi.xd_kinds[j + 1],
+	    xd_nodes[xd_base + j].set_simple(mpi.xd_channels[j + 1],
 					     (j == 0) ? data_edges[i] :
 					                (ib_base + j - 1),
 					     ib_base + j);
