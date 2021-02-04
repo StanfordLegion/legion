@@ -102,18 +102,6 @@ namespace Realm {
     virtual bool get_addresses(AddressList &addrlist) = 0;
   };
 
-  template <typename S>
-  inline bool serialize(S& serializer, const TransferIterator& ti)
-  {
-    return Serialization::PolymorphicSerdezHelper<TransferIterator>::serialize(serializer, ti);
-  }
-
-  template <typename S>
-  /*static*/ inline TransferIterator *TransferIterator::deserialize_new(S& deserializer)
-  {
-    return Serialization::PolymorphicSerdezHelper<TransferIterator>::deserialize_new(deserializer);
-  }
-
   class TransferDomain {
   protected:
     TransferDomain(void);
@@ -142,22 +130,8 @@ namespace Realm {
     virtual void print(std::ostream& os) const = 0;
   };
 
-  inline std::ostream& operator<<(std::ostream& os, const TransferDomain& td)
-  {
-    td.print(os); return os;
-  }
-
-  template <typename S>
-  inline bool serialize(S& serializer, const TransferDomain& ci)
-  {
-    return Serialization::PolymorphicSerdezHelper<TransferDomain>::serialize(serializer, ci);
-  }
-
-  template <typename S>
-  /*static*/ inline TransferDomain *TransferDomain::deserialize_new(S& deserializer)
-  {
-    return Serialization::PolymorphicSerdezHelper<TransferDomain>::deserialize_new(deserializer);
-  }
 }; // namespace Realm
+
+#include "realm/transfer/transfer.inl"
 
 #endif // ifndef REALM_TRANSFER_H
