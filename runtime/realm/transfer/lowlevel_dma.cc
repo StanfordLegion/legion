@@ -2135,7 +2135,7 @@ namespace Realm {
       std::vector<IBEdge> ib_next_ids(ib_edges.size(), dfl_edge);
 
       for(size_t i = 0; i < xd_nodes.size(); i++) {
-	XferDesID new_xdid = get_xdq_singleton()->get_guid(xd_nodes[i].target_node);
+	XferDesID new_xdid = XferDesQueue::get_singleton()->get_guid(xd_nodes[i].target_node);
 
 	xd_ids[i] = new_xdid;
 	
@@ -3456,13 +3456,11 @@ namespace Realm {
       //log_dma.add_stream(&std::cerr, Logger::LEVEL_DEBUG, false, false);
       aio_context = new AsyncFileIOContext(256);
       aio_context->add_to_manager(bgwork);
-      start_channel_manager(bgwork);
       ib_req_queue = new PendingIBQueue();
     }
 
     void stop_dma_system(void)
     {
-      stop_channel_manager();
       delete ib_req_queue;
       ib_req_queue = 0;
 #ifdef DEBUG_REALM

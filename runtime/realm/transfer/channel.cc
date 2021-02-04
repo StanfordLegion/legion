@@ -35,12 +35,7 @@ namespace Realm {
     Logger log_request("request");
     Logger log_xd("xd");
 
-      // we use a single queue for all xferDes
-      XferDesQueue *xferDes_queue = 0;
-
-      // we use a single manager to organize all channels
-      static ChannelManager *channel_manager = 0;
-
+  
   // fast memcpy stuff - uses std::copy instead of memcpy to communicate
   //  alignment guarantees to the compiler
   template <typename T>
@@ -678,7 +673,9 @@ namespace Realm {
 		       bool _mark_start,
 		       uint64_t _max_req_size, int _priority,
 		       XferDesFence* _complete_fence)
-        : dma_request(_dma_request), mark_start(_mark_start), launch_node(_launch_node),
+        : dma_request(_dma_request),
+	  xferDes_queue(XferDesQueue::get_singleton()),
+	  mark_start(_mark_start), launch_node(_launch_node),
 	  iteration_completed(false),
 	  transfer_completed(false),
           max_req_size(_max_req_size), priority(_priority),
@@ -3234,10 +3231,10 @@ namespace Realm {
 
 	// if requested, notify (probably-local) next XD
 	if(args.next_xd_guid != XferDes::XFERDES_NO_GUID)
-	  xferDes_queue->update_pre_bytes_write(args.next_xd_guid,
-						args.next_port_idx,
-						args.span_start,
-						datalen);
+	  XferDesQueue::get_singleton()->update_pre_bytes_write(args.next_xd_guid,
+								args.next_port_idx,
+								args.span_start,
+								datalen);
       }
 
       /*static*/ bool RemoteWriteXferDes::Write1DMessage::handle_inline(NodeID sender,
@@ -4425,14 +4422,15 @@ namespace Realm {
 
 	// if requested, notify (probably-local) next XD
 	if(args.next_xd_guid != XferDes::XFERDES_NO_GUID) {
+	  XferDesQueue *xdq = XferDesQueue::get_singleton();
 	  if(args.pre_bytes_total != size_t(-1))
-	    xferDes_queue->update_pre_bytes_total(args.next_xd_guid,
-						  args.next_port_idx,
-						  args.pre_bytes_total);
-	  xferDes_queue->update_pre_bytes_write(args.next_xd_guid,
-						args.next_port_idx,
-						args.span_start,
-						args.span_size);
+	    xdq->update_pre_bytes_total(args.next_xd_guid,
+					args.next_port_idx,
+					args.pre_bytes_total);
+	  xdq->update_pre_bytes_write(args.next_xd_guid,
+				      args.next_port_idx,
+				      args.span_start,
+				      args.span_size);
 	}
 
 	// don't ack empty requests
@@ -4456,7 +4454,7 @@ namespace Realm {
 							    const void *msgdata,
 							    size_t msglen)
       {
-        xferDes_queue->destroy_xferDes(args.guid);
+	XferDesQueue::get_singleton()->destroy_xferDes(args.guid);
       }
 
       /*static*/ void UpdateBytesTotalMessage::handle_message(NodeID sender,
@@ -4464,9 +4462,9 @@ namespace Realm {
 							      const void *msgdata,
 							      size_t msglen)
       {
-        xferDes_queue->update_pre_bytes_total(args.guid,
-					      args.port_idx,
-					      args.pre_bytes_total);
+        XferDesQueue::get_singleton()->update_pre_bytes_total(args.guid,
+							      args.port_idx,
+							      args.pre_bytes_total);
       }
 
       /*static*/ void UpdateBytesWriteMessage::handle_message(NodeID sender,
@@ -4474,10 +4472,10 @@ namespace Realm {
 							      const void *msgdata,
 							      size_t msglen)
       {
-        xferDes_queue->update_pre_bytes_write(args.guid,
-					      args.port_idx,
-					      args.span_start,
-					      args.span_size);
+        XferDesQueue::get_singleton()->update_pre_bytes_write(args.guid,
+							      args.port_idx,
+							      args.span_start,
+							      args.span_size);
       }
 
       /*static*/ void UpdateBytesReadMessage::handle_message(NodeID sender,
@@ -4485,67 +4483,17 @@ namespace Realm {
 							    const void *msgdata,
 							    size_t msglen)
       {
-        xferDes_queue->update_next_bytes_read(args.guid,
-					      args.port_idx,
-					      args.span_start,
-					      args.span_size);
+        XferDesQueue::get_singleton()->update_next_bytes_read(args.guid,
+							      args.port_idx,
+							      args.span_start,
+							      args.span_size);
       }
 
-      XferDesQueue* get_xdq_singleton()
+      /*static*/ XferDesQueue* XferDesQueue::get_singleton()
       {
-        return xferDes_queue;
-      }
-
-      ChannelManager* get_channel_manager()
-      {
-        return channel_manager;
-      }
-
-      ChannelManager::~ChannelManager(void) {
-      }
-
-      MemcpyChannel* ChannelManager::create_memcpy_channel(BackgroundWorkManager *bgwork)
-      {
-        assert(memcpy_channel == NULL);
-        memcpy_channel = new MemcpyChannel(bgwork);
-        return memcpy_channel;
-      }
-      GASNetChannel* ChannelManager::create_gasnet_read_channel(BackgroundWorkManager *bgwork) {
-        assert(gasnet_read_channel == NULL);
-        gasnet_read_channel = new GASNetChannel(bgwork, XFER_GASNET_READ);
-        return gasnet_read_channel;
-      }
-      GASNetChannel* ChannelManager::create_gasnet_write_channel(BackgroundWorkManager *bgwork) {
-        assert(gasnet_write_channel == NULL);
-        gasnet_write_channel = new GASNetChannel(bgwork, XFER_GASNET_WRITE);
-        return gasnet_write_channel;
-      }
-      RemoteWriteChannel* ChannelManager::create_remote_write_channel(BackgroundWorkManager *bgwork) {
-        assert(remote_write_channel == NULL);
-        remote_write_channel = new RemoteWriteChannel(bgwork);
-        return remote_write_channel;
-      }
-      AddressSplitChannel *ChannelManager::create_addr_split_channel(BackgroundWorkManager *bgwork) {
-	assert(addr_split_channel == 0);
-	addr_split_channel = new AddressSplitChannel(bgwork);
-	return addr_split_channel;
-      }
-
-      void start_channel_manager(BackgroundWorkManager *bgwork)
-      {
-        xferDes_queue = new XferDesQueue;
-        channel_manager = new ChannelManager;
-        xferDes_queue->start_worker(channel_manager, bgwork);
-      }
-      FileChannel* ChannelManager::create_file_channel(BackgroundWorkManager *bgwork) {
-        assert(file_channel == NULL);
-        file_channel = new FileChannel(bgwork);
-        return file_channel;
-      }
-      DiskChannel* ChannelManager::create_disk_channel(BackgroundWorkManager *bgwork) {
-        assert(disk_channel == NULL);
-        disk_channel = new DiskChannel(bgwork);
-        return disk_channel;
+	// we use a single queue for all xferDes
+	static XferDesQueue xferDes_queue;
+        return &xferDes_queue;
       }
 
       void XferDesQueue::update_pre_bytes_write(XferDesID xd_guid, int port_idx,
@@ -4639,7 +4587,7 @@ namespace Realm {
 	Event wait_on = xd->request_metadata();
 	if(!wait_on.has_triggered()) {
 	  log_new_dma.info() << "xd metadata wait: xd=" << xd->guid << " ready=" << wait_on;
-	  xd->deferred_enqueue.defer(xferDes_queue, xd, wait_on);
+	  xd->deferred_enqueue.defer(this, xd, wait_on);
 	  return false;
 	}
 
@@ -4669,40 +4617,6 @@ namespace Realm {
 	assert(0);
 
 	return true;
-      }
-
-      void XferDesQueue::start_worker(ChannelManager* channel_manager,
-				      BackgroundWorkManager *bgwork)
-      {
-	RuntimeImpl *r = get_runtime();
-
-	// TODO: numa-specific channels
-        MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(bgwork);
-	GASNetChannel* gasnet_read_channel = channel_manager->create_gasnet_read_channel(bgwork);
-	GASNetChannel* gasnet_write_channel = channel_manager->create_gasnet_write_channel(bgwork);
-	AddressSplitChannel *addr_split_channel = channel_manager->create_addr_split_channel(bgwork);
-	r->add_dma_channel(memcpy_channel);
-	r->add_dma_channel(gasnet_read_channel);
-	r->add_dma_channel(gasnet_write_channel);
-	r->add_dma_channel(addr_split_channel);
-
-	RemoteWriteChannel *remote_channel = channel_manager->create_remote_write_channel(bgwork);
-	DiskChannel *disk_channel = channel_manager->create_disk_channel(bgwork);
-	FileChannel *file_channel = channel_manager->create_file_channel(bgwork);
-        r->add_dma_channel(remote_channel);
-	r->add_dma_channel(disk_channel);
-	r->add_dma_channel(file_channel);
-
-      }
-
-      void stop_channel_manager()
-      {
-        xferDes_queue->stop_worker();
-        delete xferDes_queue;
-        delete channel_manager;
-      }
-
-      void XferDesQueue::stop_worker() {
       }
 
       void XferDes::DeferredXDEnqueue::defer(XferDesQueue *_xferDes_queue,
@@ -4739,7 +4653,7 @@ namespace Realm {
       log_new_dma.info("Destroy XferDes: id(" IDFMT ")", _guid);
       NodeID execution_node = _guid >> (XferDesQueue::NODE_BITS + XferDesQueue::INDEX_BITS);
       if (execution_node == Network::my_node_id) {
-        xferDes_queue->destroy_xferDes(_guid);
+	XferDesQueue::get_singleton()->destroy_xferDes(_guid);
       }
       else {
         XferDesDestroyMessage::send_request(execution_node, _guid);

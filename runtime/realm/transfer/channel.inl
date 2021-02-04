@@ -301,8 +301,6 @@ namespace Realm {
   // class SingleXDQChannel<CHANNEL, XD>
   //
 
-  extern XferDesQueue *xferDes_queue;
-
   template <typename CHANNEL, typename XD>
   SingleXDQChannel<CHANNEL,XD>::SingleXDQChannel(BackgroundWorkManager *bgwork,
 						 XferDesKind _kind,
@@ -325,7 +323,8 @@ namespace Realm {
   void SingleXDQChannel<CHANNEL,XD>::enqueue_ready_xd(XferDes *xd)
   {
     // xferDes_queue needs to know about this for guid->xd translation
-    if(xferDes_queue->enqueue_xferDes_local(xd, false /*!add_to_queue*/))
+    if(xd->xferDes_queue->enqueue_xferDes_local(xd,
+						false /*!add_to_queue*/))
       xdq.enqueue_xd(checked_cast<XD *>(xd));
   }
 

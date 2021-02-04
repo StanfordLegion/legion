@@ -199,6 +199,7 @@ namespace Realm {
     public:
       // a pointer to the DmaRequest that contains this XferDes
       DmaRequest* dma_request;
+      XferDesQueue *xferDes_queue;
       // a boolean indicating if we have marked started
       bool mark_start;
       // ID of the node that launches this XferDes
@@ -937,33 +938,6 @@ namespace Realm {
       static AddressSplitChannel *local_channel;
     };
   
-    class ChannelManager {
-    public:
-      ChannelManager(void) {
-        memcpy_channel = NULL;
-        gasnet_read_channel = gasnet_write_channel = NULL;
-        remote_write_channel = NULL;
-        disk_channel = NULL;
-        file_channel = NULL;
-	addr_split_channel = 0;
-      }
-      ~ChannelManager(void);
-      MemcpyChannel* create_memcpy_channel(BackgroundWorkManager *bgwork);
-      GASNetChannel* create_gasnet_read_channel(BackgroundWorkManager *bgwork);
-      GASNetChannel* create_gasnet_write_channel(BackgroundWorkManager *bgwork);
-      RemoteWriteChannel* create_remote_write_channel(BackgroundWorkManager *bgwork);
-      DiskChannel* create_disk_channel(BackgroundWorkManager *bgwork);
-      FileChannel* create_file_channel(BackgroundWorkManager *bgwork);
-      AddressSplitChannel *create_addr_split_channel(BackgroundWorkManager *bgwork);
-    public:
-      MemcpyChannel* memcpy_channel;
-      GASNetChannel *gasnet_read_channel, *gasnet_write_channel;
-      RemoteWriteChannel* remote_write_channel;
-      DiskChannel *disk_channel;
-      FileChannel *file_channel;
-      AddressSplitChannel *addr_split_channel;
-    };
-
     class CompareXferDes {
     public:
       bool operator() (XferDes* a, XferDes* b) const {
@@ -1164,6 +1138,8 @@ namespace Realm {
       ~XferDesQueue() {
       }
 
+      static XferDesQueue* get_singleton();
+
       XferDesID get_guid(NodeID execution_node)
       {
         // GUID rules:
@@ -1197,22 +1173,12 @@ namespace Realm {
       // returns true if xd is ready, false if enqueue has been deferred
       bool enqueue_xferDes_local(XferDes* xd, bool add_to_queue = true);
 
-      void start_worker(ChannelManager* channel_manager,
-			BackgroundWorkManager *bgwork);
-
-      void stop_worker();
-
     protected:
       std::map<XferDesID, XferDesWithUpdates> guid_to_xd;
       Mutex queues_lock;
       RWLock guid_lock;
       atomic<XferDesID> next_to_assign_idx;
     };
-
-    XferDesQueue* get_xdq_singleton();
-    ChannelManager* get_channel_manager();
-    void start_channel_manager(BackgroundWorkManager *bgwork);
-    void stop_channel_manager();
 
     void destroy_xfer_des(XferDesID _guid);
 }; // namespace Realm

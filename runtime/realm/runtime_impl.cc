@@ -35,6 +35,7 @@
 
 // create xd message and update bytes read/write messages
 #include "realm/transfer/channel.h"
+#include "realm/transfer/channel_disk.h"
 
 #ifdef REALM_USE_KOKKOS
 #include "realm/kokkos_interop.h"
@@ -663,7 +664,17 @@ namespace Realm {
   {
     Module::create_dma_channels(runtime);
 
-    // no dma channels
+    // create the standard set of channels here
+    runtime->add_dma_channel(new MemcpyChannel(&runtime->bgwork));
+    runtime->add_dma_channel(new RemoteWriteChannel(&runtime->bgwork));
+    runtime->add_dma_channel(new AddressSplitChannel(&runtime->bgwork));
+    runtime->add_dma_channel(new FileChannel(&runtime->bgwork));
+    runtime->add_dma_channel(new DiskChannel(&runtime->bgwork));
+    // "GASNet" means global memory here
+    runtime->add_dma_channel(new GASNetChannel(&runtime->bgwork,
+					       XFER_GASNET_READ));
+    runtime->add_dma_channel(new GASNetChannel(&runtime->bgwork,
+					       XFER_GASNET_WRITE));
   }
 
   // create any code translators provided by the module (default == do nothing)
