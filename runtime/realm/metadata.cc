@@ -211,6 +211,8 @@ namespace Realm {
 	assert(remote_copies.contains(sender));
 	remote_copies.remove(sender);
 	last_copy = remote_copies.empty();
+	if(last_copy)
+	  state = STATE_INVALID;
       }
 
       return last_copy;
