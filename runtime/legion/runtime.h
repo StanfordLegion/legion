@@ -432,8 +432,8 @@ namespace Legion {
                           const ReductionOp *redop, bool exclusive,
                           ApEvent precondition = ApEvent::NO_AP_EVENT);
     public:
-      bool is_ready(void) const;
-      ApEvent get_ready(void);
+      bool is_ready(bool check_ready_event = true) const;
+      ApEvent get_ready(bool check_ready_event = true);
       PhysicalInstance get_instance(void);
       bool deferred_delete(Operation *op, ApEvent done_event);
     public:

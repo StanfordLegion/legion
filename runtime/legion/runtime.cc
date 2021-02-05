@@ -2238,7 +2238,7 @@ namespace Legion {
       if (!is_meta_visible || !source->is_meta_visible || 
           (use_event.exists() && !use_event.has_triggered()) ||
           (precondition.exists() && !precondition.has_triggered_faultignorant())
-          || (check_source_ready && !source->is_ready()))
+          || !source->is_ready(check_source_ready))
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
@@ -2253,20 +2253,15 @@ namespace Legion {
         const Rect<1,coord_t> rect(zero, zero);
         if (use_event.exists() && !use_event.has_triggered())
           return ApEvent(rect.copy(srcs, dsts, requests,
-                  Runtime::merge_events(NULL, source->get_ready(),
+              Runtime::merge_events(NULL, source->get_ready(check_source_ready),
                     precondition, ApEvent(use_event))));
         else if (precondition.exists())
-        {
-          if (check_source_ready)
-            return ApEvent(rect.copy(srcs, dsts, requests,
-              Runtime::merge_events(NULL, source->get_ready(), precondition)));
-          else
-            return ApEvent(rect.copy(srcs, dsts, requests, precondition));
-        }
-        else if (check_source_ready)
-          return ApEvent(rect.copy(srcs, dsts, requests, source->get_ready()));
+          return ApEvent(rect.copy(srcs, dsts, requests,
+            Runtime::merge_events(NULL, precondition,
+              source->get_ready(check_source_ready))));
         else
-          return ApEvent(rect.copy(srcs, dsts, requests));
+          return ApEvent(rect.copy(srcs, dsts, requests, 
+                  source->get_ready(check_source_ready)));
       }
       else
       {
@@ -2321,25 +2316,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FutureInstance::is_ready(void) const
+    bool FutureInstance::is_ready(bool check_ready_event) const
     //--------------------------------------------------------------------------
     {
+      if (use_event.exists() && !use_event.has_triggered())
+        return false;
+      if (!check_ready_event)
+        return true;
       if (!ready_event.exists())
         return true;
       return ready_event.has_triggered_faultignorant(); 
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FutureInstance::get_ready(void)
+    ApEvent FutureInstance::get_ready(bool check_ready_event)
     //--------------------------------------------------------------------------
     {
       if (use_event.exists() && !use_event.has_triggered())
       {
-        if (ready_event.exists())
+        if (check_ready_event && ready_event.exists())
           return Runtime::merge_events(NULL, ready_event, ApEvent(use_event));
         return ApEvent(use_event);
       }
-      return ready_event;
+      else if (check_ready_event)
+        return ready_event;
+      else
+        return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
