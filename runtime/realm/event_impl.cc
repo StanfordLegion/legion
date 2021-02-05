@@ -68,7 +68,10 @@ namespace Realm {
   bool Event::has_triggered_faultaware(bool& poisoned) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    if(!id) return true; // special case: NO_EVENT has always triggered
+    if(!id) {
+      poisoned = false;
+      return true; // special case: NO_EVENT has always triggered
+    }
     EventImpl *e = get_runtime()->get_event_impl(*this);
     return e->has_triggered(ID(id).event_generation(), poisoned);
   }
@@ -226,7 +229,10 @@ namespace Realm {
   void Event::wait_faultaware(bool& poisoned) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    if(!id) return;  // special case: never wait for NO_EVENT
+    if(!id) {
+      poisoned = false;
+      return;  // special case: never wait for NO_EVENT
+    }
     EventImpl *e = get_runtime()->get_event_impl(*this);
     EventImpl::gen_t gen = ID(id).event_generation();
 
@@ -286,7 +292,10 @@ namespace Realm {
   void Event::external_wait_faultaware(bool& poisoned) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    if(!id) return;  // special case: never wait for NO_EVENT
+    if(!id) {
+      poisoned = false;
+      return;  // special case: never wait for NO_EVENT
+    }
     EventImpl *e = get_runtime()->get_event_impl(*this);
     EventImpl::gen_t gen = ID(id).event_generation();
 
@@ -328,7 +337,10 @@ namespace Realm {
 					    long long max_ns) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    if(!id) return true;  // special case: never wait for NO_EVENT
+    if(!id) {
+      poisoned = false;
+      return true;  // special case: never wait for NO_EVENT
+    }
     EventImpl *e = get_runtime()->get_event_impl(*this);
     EventImpl::gen_t gen = ID(id).event_generation();
 
