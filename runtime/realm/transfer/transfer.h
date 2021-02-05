@@ -21,6 +21,11 @@
 #include "realm/event.h"
 #include "realm/memory.h"
 #include "realm/indexspace.h"
+#include "realm/atomics.h"
+#include "realm/network.h"
+#include "realm/operation.h"
+#include "realm/transfer/channel.h"
+#include "realm/profiling.h"
 
 namespace Realm {
 
@@ -119,7 +124,21 @@ namespace Realm {
 
     virtual Event request_metadata(void) = 0;
 
+    virtual bool empty(void) const = 0;
     virtual size_t volume(void) const = 0;
+
+    virtual void choose_dim_order(std::vector<int>& dim_order,
+				  const std::vector<CopySrcDstField>& srcs,
+				  const std::vector<CopySrcDstField>& dsts,
+				  const std::vector<IndirectionInfo *>& indirects,
+				  bool force_fortran_order,
+				  size_t max_stride) const = 0;
+
+    virtual TransferIterator *create_iterator(RegionInstance inst,
+					      const std::vector<int>& dim_order,
+					      const std::vector<FieldID>& fields,
+					      const std::vector<size_t>& fld_offsets,
+					      const std::vector<size_t>& fld_sizes) const = 0;
 
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      RegionInstance peer,
@@ -128,6 +147,243 @@ namespace Realm {
 					      const std::vector<size_t>& fld_sizes) const = 0;
 
     virtual void print(std::ostream& os) const = 0;
+  };
+
+  class TransferOperation;
+
+  // copies with generalized scatter and gather have a DAG that describes
+  //  the overall transfer: nodes are transfer descriptors and edges are
+  //  intermediate buffers
+  struct TransferGraph {
+    struct XDTemplate {
+      NodeID target_node;
+      //XferDesKind kind;
+      XferDesFactory *factory;
+      int gather_control_input;
+      int scatter_control_input;
+
+      enum IOType {
+	IO_INST,
+	IO_INDIRECT_INST,
+	IO_EDGE,
+	IO_FILL_DATA
+      };
+      struct IO {
+	IOType iotype;
+	union {
+	  struct {
+	    RegionInstance inst;
+	    unsigned fld_start;
+	    unsigned fld_count;
+	  } inst;
+	  struct {
+	    unsigned ind_idx;
+	    unsigned port;
+	    RegionInstance inst;
+	    unsigned fld_start;
+	    unsigned fld_count;
+	  } indirect;
+	  unsigned edge;
+	  struct {
+	    unsigned fill_start;
+	    unsigned fill_size;
+	  } fill;
+	};
+      };
+      static IO mk_inst(RegionInstance _inst,
+			unsigned _fld_start, unsigned _fld_count);
+      static IO mk_indirect(unsigned _ind_idx, unsigned _port,
+			    RegionInstance _inst,
+			    unsigned _fld_start, unsigned _fld_count);
+      static IO mk_edge(unsigned _edge);
+      static IO mk_fill_data(unsigned _fill_start, unsigned _fill_size);
+
+      std::vector<IO> inputs;  // TODO: short vectors
+      std::vector<IO> outputs;
+
+      // helper functions for initializing these things
+      void set_simple(Channel *channel,
+		      int in_edge, int out_edge);
+    };
+    struct IBInfo {
+      Memory memory;
+      size_t size;
+    };
+    std::vector<XDTemplate> xd_nodes;
+    std::vector<IBInfo> ib_edges;
+  };
+
+#if 0
+  // MOVE HERE
+  class IndirectionInfo {
+  public:
+    virtual ~IndirectionInfo(void) {}
+    virtual Event request_metadata(void) = 0;
+    virtual Memory generate_gather_paths(Memory dst_mem, int dst_edge_id,
+					 size_t bytes_per_element,
+					 CustomSerdezID serdez_id,
+					 std::vector<CopyRequest::XDTemplate>& xd_nodes,
+					 std::vector<IBInfo>& ib_edges) = 0;
+
+    virtual void generate_gather_paths(Memory dst_mem,
+				       unsigned addr_field_idx,
+				       TransferGraph::XDTemplate::IO dst_edge,
+				       size_t bytes_per_element,
+				       CustomSerdezID serdez_id,
+				       std::vector<TransferGraph::XDTemplate>& xd_nodes,
+				       std::vector<TransferGraph::IBInfo>& ib_edges) = 0;
+
+    virtual Memory generate_scatter_paths(Memory src_mem, int src_edge_id,
+					  size_t bytes_per_element,
+					  CustomSerdezID serdez_id,
+					  std::vector<CopyRequest::XDTemplate>& xd_nodes,
+					  std::vector<IBInfo>& ib_edges) = 0;
+
+    virtual void generate_scatter_paths(Memory src_mem,
+					TransferGraph::XDTemplate::IO src_edge,
+					size_t bytes_per_element,
+					CustomSerdezID serdez_id,
+					std::vector<TransferGraph::XDTemplate>& xd_nodes,
+					std::vector<TransferGraph::IBInfo>& ib_edges) = 0;
+
+    virtual RegionInstance get_pointer_instance(void) const = 0;
+      
+    virtual TransferIterator *create_address_iterator(RegionInstance peer) const = 0;
+
+    virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
+						       RegionInstance inst,
+						       const std::vector<FieldID>& fields,
+						       const std::vector<size_t>& fld_offsets,
+						       const std::vector<size_t>& fld_sizes) const = 0;
+
+    virtual void print(std::ostream& os) const = 0;
+  };
+
+  std::ostream& operator<<(std::ostream& os, const IndirectionInfo& ii);
+#endif
+
+  class TransferDesc {
+  public:
+    template <int N, typename T>
+    TransferDesc(IndexSpace<N,T> _is,
+		 const std::vector<CopySrcDstField> &_srcs,
+		 const std::vector<CopySrcDstField> &_dsts,
+		 const std::vector<const typename CopyIndirection<N,T>::Base *> &_indirects,
+		 const ProfilingRequestSet &requests);
+
+  protected:
+    // reference-counted - do not delete directly
+    ~TransferDesc();
+
+  public:
+    void add_reference();
+    void remove_reference();
+
+    // returns true if the analysis is complete, and ib allocation can proceed
+    // if the analysis isn't, returns false and op->allocate_ibs() will be
+    //   called once it is
+    bool request_analysis(TransferOperation *op);
+
+    struct FieldInfo {
+      FieldID id;
+      size_t offset, size;
+      CustomSerdezID serdez_id;
+    };
+
+  protected:
+    atomic<int> refcount;
+
+    void check_analysis_preconditions();
+    void perform_analysis();
+
+    class DeferredAnalysis : public EventWaiter {
+    public:
+      DeferredAnalysis(TransferDesc *_desc);
+      virtual void event_triggered(bool poisoned, TimeLimit work_until);
+      virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
+
+    protected:
+      TransferDesc *desc;
+    };
+    DeferredAnalysis deferred_analysis;
+
+    friend class TransferOperation;
+
+    TransferDomain *domain;
+    std::vector<CopySrcDstField> srcs, dsts;
+    std::vector<IndirectionInfo *> indirects;
+    ProfilingRequestSet prs;
+
+    Mutex mutex;
+    atomic<bool> analysis_complete;
+    std::vector<TransferOperation *> pending_ops;
+    TransferGraph graph;
+    std::vector<int> dim_order;
+    std::vector<FieldInfo> src_fields, dst_fields;
+    void *fill_data;
+    size_t fill_size;
+    ProfilingMeasurements::OperationMemoryUsage prof_usage;
+    ProfilingMeasurements::OperationCopyInfo prof_cpinfo;
+  };
+               
+
+  // a TransferOperation is an application-requested copy/fill/reduce
+  class TransferOperation : public Operation {
+  public:
+    TransferOperation(TransferDesc& _desc,
+		      Event _precondition,
+		      GenEventImpl *_finish_event,
+		      EventImpl::gen_t _finish_gen);
+
+    ~TransferOperation();
+
+    virtual void print(std::ostream& os) const;
+
+    void start_or_defer(void);
+
+    virtual bool mark_ready(void);
+    virtual bool mark_started(void);
+
+    void allocate_ibs();
+    void create_xds();
+
+    void notify_ib_allocation(unsigned ib_index, off_t ib_offset);
+    void notify_xd_completion(XferDesID xd_id);
+
+    class XDLifetimeTracker : public Operation::AsyncWorkItem {
+    public:
+      XDLifetimeTracker(TransferOperation *_op,
+			XferDesID _xd_id);
+      virtual void request_cancellation(void);
+      virtual void print(std::ostream& os) const;
+
+    protected:
+      XferDesID xd_id;
+    };
+
+  protected:
+    virtual void mark_completed(void);
+
+    class DeferredStart : public EventWaiter {
+    public:
+      DeferredStart(TransferOperation *_op);
+      virtual void event_triggered(bool poisoned, TimeLimit work_until);
+      virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
+
+    protected:
+      TransferOperation *op;
+    };
+    DeferredStart deferred_start;
+
+    TransferDesc& desc;
+    Event precondition;
+    std::vector<XferDesID> xd_ids;
+    std::vector<XDLifetimeTracker *> xd_trackers;
+    std::vector<off_t> ib_offsets;
+    atomic<int> ib_responses_needed;
+    int priority;
   };
 
 }; // namespace Realm

@@ -32,7 +32,6 @@
 #include <queue>
 #include <assert.h>
 #include <string.h>
-#include "realm/transfer/lowlevel_dma.h"
 
 #include "realm/id.h"
 #include "realm/runtime_impl.h"
@@ -45,8 +44,33 @@ namespace Realm {
     class XferDes;
     class XferDesQueue;
     class Channel;
+    class DmaRequest;
+    class TransferIterator;
 
     extern Logger log_new_dma;
+
+    typedef unsigned long long XferDesID;
+
+    enum XferDesKind {
+      XFER_NONE,
+      XFER_DISK_READ,
+      XFER_DISK_WRITE,
+      XFER_SSD_READ,
+      XFER_SSD_WRITE,
+      XFER_GPU_TO_FB,
+      XFER_GPU_FROM_FB,
+      XFER_GPU_IN_FB,
+      XFER_GPU_PEER_FB,
+      XFER_MEM_CPY,
+      XFER_GASNET_READ,
+      XFER_GASNET_WRITE,
+      XFER_REMOTE_WRITE,
+      XFER_HDF5_READ,
+      XFER_HDF5_WRITE,
+      XFER_FILE_READ,
+      XFER_FILE_WRITE,
+      XFER_ADDR_SPLIT
+    };
 
     class Request {
     public:
@@ -950,22 +974,26 @@ namespace Realm {
     //typedef std::priority_queue<XferDes*, std::vector<XferDes*>, CompareXferDes> PriorityXferDesQueue;
     typedef std::set<XferDes*, CompareXferDes> PriorityXferDesQueue;
 
+    class TransferOperation;
     struct NotifyXferDesCompleteMessage {
-      XferDesFence* fence;
+      //XferDesFence* fence;
+      TransferOperation *op;
+      XferDesID xd_id;
 
       static void handle_message(NodeID sender,
 				 const NotifyXferDesCompleteMessage &args,
 				 const void *data,
-				 size_t datalen)
-      {
-        args.fence->mark_finished(true/*successful*/);
-      }
+				 size_t datalen);
       static void send_request(NodeID target, XferDesFence* fence)
       {
+	assert(0);
+#if 0
 	ActiveMessage<NotifyXferDesCompleteMessage> amsg(target);
 	amsg->fence = fence;
 	amsg.commit();
+#endif
       }
+      static void send_request(NodeID target, TransferOperation *op, XferDesID xd_id);
     };
 
     struct XferDesRemoteWriteMessage {

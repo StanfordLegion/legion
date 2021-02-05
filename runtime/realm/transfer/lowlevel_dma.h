@@ -24,11 +24,59 @@
 #include "realm/event.h"
 #include "realm/runtime_impl.h"
 #include "realm/inst_impl.h"
+#include "realm/transfer/channel.h"
+#include "realm/circ_queue.h"
 
 namespace Realm {
   class CoreReservationSet;
 
-    struct RemoteIBAllocRequestAsync {
+  // keeps a per-memory queue of pending IB allocation requests
+  class PendingIBQueue {
+  public:
+    // enqueues a request (or handles immediately, if possible)
+    void enqueue_request(Memory tgt_mem, NodeID req_node, uintptr_t req_op,
+			 unsigned ib_index, size_t size);
+
+    // attempts to dequeue pending requests for the specified memory
+    void dequeue_request(Memory tgt_mem);
+
+  protected:
+    Mutex queue_mutex;
+    struct IBAllocRequest {
+      NodeID req_node;
+      uintptr_t req_op;
+      unsigned ib_index;
+      size_t size;
+    };
+    struct PerMemory {
+      int deq_count;  // count of pending dequeuers
+      CircularQueue<IBAllocRequest, 16> requests;
+    };
+    std::map<Memory, PerMemory> queues;
+  };
+
+  extern PendingIBQueue ib_req_queue;
+
+  struct RemoteIBAllocRequest {
+    Memory memory;
+    size_t size;
+    uintptr_t req_op;
+    unsigned ib_index;
+    
+    static void handle_message(NodeID sender, const RemoteIBAllocRequest &args,
+			       const void *data, size_t msglen);
+  };
+
+  struct RemoteIBAllocResponse {
+    uintptr_t req_op;
+    unsigned ib_index;
+    off_t offset;
+
+    static void handle_message(NodeID sender, const RemoteIBAllocResponse &args,
+			       const void *data, size_t msglen);
+  };
+
+  struct RemoteIBAllocRequestAsync {
       Memory memory;
       void *req;
       void *ibinfo;
@@ -108,28 +156,7 @@ namespace Realm {
     extern DmaRequestQueue *dma_queue;
 
     // include files are all tangled up, so some XferDes stuff here...  :(
-    typedef unsigned long long XferDesID;
     class XferDesFactory;
-    enum XferDesKind {
-      XFER_NONE,
-      XFER_DISK_READ,
-      XFER_DISK_WRITE,
-      XFER_SSD_READ,
-      XFER_SSD_WRITE,
-      XFER_GPU_TO_FB,
-      XFER_GPU_FROM_FB,
-      XFER_GPU_IN_FB,
-      XFER_GPU_PEER_FB,
-      XFER_MEM_CPY,
-      XFER_GASNET_READ,
-      XFER_GASNET_WRITE,
-      XFER_REMOTE_WRITE,
-      XFER_HDF5_READ,
-      XFER_HDF5_WRITE,
-      XFER_FILE_READ,
-      XFER_FILE_WRITE,
-      XFER_ADDR_SPLIT
-    };
 
     struct MemPathInfo {
       std::vector<Memory> path;
@@ -360,37 +387,58 @@ namespace Realm {
       Waiter waiter; // if we need to wait on events
     };
 
-    class IndirectionInfo {
-    public:
-      virtual ~IndirectionInfo(void) {}
-      virtual Event request_metadata(void) = 0;
-      virtual Memory generate_gather_paths(Memory dst_mem, int dst_edge_id,
-					   size_t bytes_per_element,
-					   CustomSerdezID serdez_id,
-					   std::vector<CopyRequest::XDTemplate>& xd_nodes,
-					   std::vector<IBInfo>& ib_edges) = 0;
+  class IndirectionInfo {
+  public:
+    virtual ~IndirectionInfo(void) {}
+    virtual Event request_metadata(void) = 0;
+    virtual Memory generate_gather_paths(Memory dst_mem, int dst_edge_id,
+					 size_t bytes_per_element,
+					 CustomSerdezID serdez_id,
+					 std::vector<CopyRequest::XDTemplate>& xd_nodes,
+					 std::vector<IBInfo>& ib_edges) = 0;
 
-      virtual Memory generate_scatter_paths(Memory src_mem, int src_edge_id,
-					    size_t bytes_per_element,
-					    CustomSerdezID serdez_id,
-					    std::vector<CopyRequest::XDTemplate>& xd_nodes,
-					    std::vector<IBInfo>& ib_edges) = 0;
+    virtual void generate_gather_paths(Memory dst_mem,
+				       TransferGraph::XDTemplate::IO dst_edge,
+				       unsigned indirect_idx,
+				       unsigned src_fld_start,
+				       unsigned src_fld_count,
+				       size_t bytes_per_element,
+				       CustomSerdezID serdez_id,
+				       std::vector<TransferGraph::XDTemplate>& xd_nodes,
+				       std::vector<TransferGraph::IBInfo>& ib_edges,
+				       std::vector<TransferDesc::FieldInfo>& src_fields) = 0;
 
-      virtual RegionInstance get_pointer_instance(void) const = 0;
+    virtual Memory generate_scatter_paths(Memory src_mem, int src_edge_id,
+					  size_t bytes_per_element,
+					  CustomSerdezID serdez_id,
+					  std::vector<CopyRequest::XDTemplate>& xd_nodes,
+					  std::vector<IBInfo>& ib_edges) = 0;
+
+    virtual void generate_scatter_paths(Memory src_mem,
+					TransferGraph::XDTemplate::IO src_edge,
+					unsigned indirect_idx,
+					unsigned dst_fld_start,
+					unsigned dst_fld_count,
+					size_t bytes_per_element,
+					CustomSerdezID serdez_id,
+					std::vector<TransferGraph::XDTemplate>& xd_nodes,
+					std::vector<TransferGraph::IBInfo>& ib_edges,
+					std::vector<TransferDesc::FieldInfo>& src_fields) = 0;
+
+    virtual RegionInstance get_pointer_instance(void) const = 0;
       
-      virtual TransferIterator *create_address_iterator(RegionInstance peer) const = 0;
+    virtual TransferIterator *create_address_iterator(RegionInstance peer) const = 0;
 
-      virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
-							 RegionInstance inst,
-							 const std::vector<FieldID>& fields,
-							 const std::vector<size_t>& fld_offsets,
-							 const std::vector<size_t>& fld_sizes) const = 0;
+    virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
+						       RegionInstance inst,
+						       const std::vector<FieldID>& fields,
+						       const std::vector<size_t>& fld_offsets,
+						       const std::vector<size_t>& fld_sizes) const = 0;
 
-      virtual void print(std::ostream& os) const = 0;
-    };
+    virtual void print(std::ostream& os) const = 0;
+  };
 
-    std::ostream& operator<<(std::ostream& os, const IndirectionInfo& ii);
-
+  std::ostream& operator<<(std::ostream& os, const IndirectionInfo& ii);
     class ReduceRequest : public DmaRequest {
     public:
       ReduceRequest(const void *data, size_t datalen,
@@ -592,6 +640,34 @@ namespace Realm {
       aio_context_t aio_ctx;
 #endif
     };
+
+  class WrappingFIFOIterator : public TransferIterator {
+  public:
+    WrappingFIFOIterator(size_t _base, size_t _size);
+
+    template <typename S>
+    static TransferIterator *deserialize_new(S& deserializer);
+      
+    virtual void reset(void);
+    virtual bool done(void);
+
+    virtual size_t step(size_t max_bytes, AddressInfo& info,
+			unsigned flags,
+			bool tentative = false);
+    virtual void confirm_step(void);
+    virtual void cancel_step(void);
+
+    virtual bool get_addresses(AddressList &addrlist);
+
+    static Serialization::PolymorphicSerdezSubclass<TransferIterator, WrappingFIFOIterator> serdez_subclass;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
+
+  protected:
+    size_t base, size, offset, prev_offset;
+    bool tentative_valid;
+  };
 
 };
 

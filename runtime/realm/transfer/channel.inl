@@ -27,46 +27,6 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // struct XferDesPortInfo
-  //
-
-  template <typename S>
-  inline bool serialize(S& s, const XferDesPortInfo& i)
-  {
-    return ((s << i.port_type) &&
-	    (s << i.peer_guid) &&
-	    (s << i.peer_port_idx) &&
-	    (s << i.indirect_port_idx) &&
-	    (s << i.mem) &&
-	    (s << i.inst) &&
-	    (s << i.ib_offset) &&
-	    (s << i.ib_size) &&
-	    (s << *i.iter) &&
-	    (s << i.serdez_id));
-  }
-
-  template <typename S>
-  inline bool deserialize(S& s, XferDesPortInfo& i)
-  {
-    if(!((s >> i.port_type) &&
-	 (s >> i.peer_guid) &&
-	 (s >> i.peer_port_idx) &&
-	 (s >> i.indirect_port_idx) &&
-	 (s >> i.mem) &&
-	 (s >> i.inst) &&
-	 (s >> i.ib_offset) &&
-	 (s >> i.ib_size)))
-      return false;
-    i.iter = TransferIterator::deserialize_new(s);
-    if(!i.iter) return false;
-    if(!((s >> i.serdez_id)))
-      return false;
-    return true;
-  }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class XferDes
   //
 
@@ -190,7 +150,8 @@ namespace Realm {
 
       // if this is the first time we've touched this xd, mark it started
       if(xd->mark_start) {
-	xd->dma_request->mark_started();
+        assert(false);
+	//xd->dma_request->mark_started();
 	xd->mark_start = false;
       }
 
@@ -209,7 +170,8 @@ namespace Realm {
 	    if(!xd->check_for_progress(progress)) {
 	      // just drop the xd here (i.e. do not re-enqueue) - somebody
 	      //  else will (or already has) when new data comes in
-	      log_new_dma.info() << "xd sleeping: xd=" << xd;
+	      log_new_dma.info() << "xd sleeping: xd=" << xd
+				 << " id=" << std::hex << xd->guid << std::dec;
 	      break;
 	    }
 	  }
@@ -332,7 +294,8 @@ namespace Realm {
   void SingleXDQChannel<CHANNEL,XD>::wakeup_xd(XferDes *xd)
   {
     // add this back to the xdq at the front of the list
-    log_new_dma.info() << "xd woken: xd=" << xd;
+    log_new_dma.info() << "xd woken: xd=" << xd
+		       << " id=" << std::hex << xd->guid << std::dec;;
     xdq.enqueue_xd(checked_cast<XD *>(xd), true);
   }
 

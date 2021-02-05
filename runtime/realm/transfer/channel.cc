@@ -23,6 +23,7 @@
 #include "realm/transfer/channel.h"
 #include "realm/transfer/channel_disk.h"
 #include "realm/transfer/transfer.h"
+#include "realm/transfer/lowlevel_dma.h"
 #include "realm/utils.h"
 
 #include <algorithm>
@@ -837,9 +838,13 @@ namespace Realm {
         // notify owning DmaRequest upon completion of this XferDes
         //printf("complete XD = %lu\n", guid);
         if (launch_node == Network::my_node_id) {
-          complete_fence->mark_finished(true/*successful*/);
+	  TransferOperation *op = reinterpret_cast<TransferOperation *>(dma_request);
+	  op->notify_xd_completion(guid);
+          //complete_fence->mark_finished(true/*successful*/);
         } else {
-          NotifyXferDesCompleteMessage::send_request(launch_node, complete_fence);
+	  TransferOperation *op = reinterpret_cast<TransferOperation *>(dma_request);
+	  NotifyXferDesCompleteMessage::send_request(launch_node, op, guid);
+          //NotifyXferDesCompleteMessage::send_request(launch_node, complete_fence);
         }
       }
 
@@ -3639,6 +3644,29 @@ namespace Realm {
 				     args.complete_fence);
 
     c->enqueue_ready_xd(xd);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class NotifyXferDesCompleteMessage
+  //
+
+  /*static*/ void NotifyXferDesCompleteMessage::handle_message(NodeID sender,
+							       const NotifyXferDesCompleteMessage &args,
+							       const void *data,
+							       size_t datalen)
+  {
+    //args.fence->mark_finished(true/*successful*/);
+    args.op->notify_xd_completion(args.xd_id);
+  }
+
+  /*static*/ void NotifyXferDesCompleteMessage::send_request(NodeID target, TransferOperation *op, XferDesID xd_id)
+  {
+    ActiveMessage<NotifyXferDesCompleteMessage> amsg(target);
+    amsg->op = op;
+    amsg->xd_id = xd_id;
+    amsg.commit();
   }
 
 

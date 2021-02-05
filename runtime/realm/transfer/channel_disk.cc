@@ -15,6 +15,7 @@
  */
 
 #include "realm/transfer/channel_disk.h"
+#include "realm/transfer/lowlevel_dma.h"
 
 #ifdef REALM_ON_WINDOWS
 #include <windows.h>

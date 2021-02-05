@@ -62,4 +62,134 @@ namespace Realm {
   }
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // struct XferDesPortInfo
+  //
+
+  template <typename S>
+  inline bool serialize(S& s, const XferDesPortInfo& i)
+  {
+    return ((s << i.port_type) &&
+	    (s << i.peer_guid) &&
+	    (s << i.peer_port_idx) &&
+	    (s << i.indirect_port_idx) &&
+	    (s << i.mem) &&
+	    (s << i.inst) &&
+	    (s << i.ib_offset) &&
+	    (s << i.ib_size) &&
+	    (s << *i.iter) &&
+	    (s << i.serdez_id));
+  }
+
+  template <typename S>
+  inline bool deserialize(S& s, XferDesPortInfo& i)
+  {
+    if(!((s >> i.port_type) &&
+	 (s >> i.peer_guid) &&
+	 (s >> i.peer_port_idx) &&
+	 (s >> i.indirect_port_idx) &&
+	 (s >> i.mem) &&
+	 (s >> i.inst) &&
+	 (s >> i.ib_offset) &&
+	 (s >> i.ib_size)))
+      return false;
+    i.iter = TransferIterator::deserialize_new(s);
+    if(!i.iter) return false;
+    if(!((s >> i.serdez_id)))
+      return false;
+    return true;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferGraph::XDTemplate
+  //
+
+  /*static*/ inline TransferGraph::XDTemplate::IO TransferGraph::XDTemplate::mk_inst(RegionInstance _inst,
+										     unsigned _fld_start, unsigned _fld_count)
+  {
+    IO io;
+    io.iotype = IO_INST;
+    io.inst.inst = _inst;
+    io.inst.fld_start = _fld_start;
+    io.inst.fld_count = _fld_count;
+    return io;
+  }
+
+  /*static*/ inline TransferGraph::XDTemplate::IO TransferGraph::XDTemplate::mk_indirect(unsigned _ind_idx, unsigned _port,
+											 RegionInstance _inst,
+											 unsigned _fld_start, unsigned _fld_count)
+  {
+    IO io;
+    io.iotype = IO_INDIRECT_INST;
+    io.indirect.ind_idx = _ind_idx;
+    io.indirect.port = _port;
+    io.indirect.inst = _inst;
+    io.indirect.fld_start = _fld_start;
+    io.indirect.fld_count = _fld_count;
+    return io;
+  }
+  
+  /*static*/ inline TransferGraph::XDTemplate::IO TransferGraph::XDTemplate::mk_edge(unsigned _edge)
+  {
+    IO io;
+    io.iotype = IO_EDGE;
+    io.edge = _edge;
+    return io;
+  }
+  
+  /*static*/ inline TransferGraph::XDTemplate::IO TransferGraph::XDTemplate::mk_fill_data(unsigned _fill_start, unsigned _fill_size)
+  {
+    IO io;
+    io.iotype = IO_FILL_DATA;
+    io.fill.fill_start = _fill_start;
+    io.fill.fill_size = _fill_size;
+    return io;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferDesc
+  //
+
+  template <int N, typename T>
+  TransferDesc::TransferDesc(IndexSpace<N,T> _is,
+			     const std::vector<CopySrcDstField> &_srcs,
+			     const std::vector<CopySrcDstField> &_dsts,
+			     const std::vector<const typename CopyIndirection<N,T>::Base *> &_indirects,
+			     const ProfilingRequestSet &requests)
+    : refcount(1)
+    , deferred_analysis(this)
+    , srcs(_srcs)
+    , dsts(_dsts)
+    , prs(requests)
+    , analysis_complete(false)
+    , fill_data(0)
+    , fill_size(0)
+  {
+    domain = TransferDomain::construct(_is);
+
+    indirects.resize(_indirects.size());
+    for(size_t i = 0; i < _indirects.size(); i++)
+      indirects[i] = _indirects[i]->create_info(_is);
+
+    check_analysis_preconditions();
+  }
+
+  inline void TransferDesc::add_reference()
+  {
+    refcount.fetch_add(1);
+  }
+
+  inline void TransferDesc::remove_reference()
+  {
+    int prev = refcount.fetch_sub(1);
+    if(prev == 1)
+      delete this;
+  }
+
+
 }; // namespace Realm
