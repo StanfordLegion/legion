@@ -1329,11 +1329,16 @@ namespace Legion {
         Runtime::trigger_event(NULL, ready_event);
         return instance;
       }
+      // Add it to the set of instances
+      instances[memory] = instance;
       // Initialize the instance from one of the existing instances
       FutureInstance *local_instance = NULL;
       for (std::map<Memory,FutureInstance*>::const_iterator it =
             instances.begin(); it != instances.end(); it++)
       {
+        // Skip ourselves
+        if (it->first == memory)
+          continue;
         // See if we find a meta-visible one to copy from, if we
         // do then we can just do this right away
         if (it->second->is_meta_visible)
