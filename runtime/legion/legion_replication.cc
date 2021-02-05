@@ -689,6 +689,9 @@ namespace Legion {
       // If it's empty we're done, otherwise we go back on the queue
       if (!internal_space.exists())
       {
+        // Check to see if we still need to participate in the premap_task call
+        if (must_epoch == NULL)
+          early_map_task();
 #ifdef LEGION_SPY
         // Still have to do this for legion spy
         LegionSpy::log_operation_events(unique_op_id, 

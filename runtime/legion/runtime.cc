@@ -1411,6 +1411,7 @@ namespace Legion {
       if (!pending_instances.empty())
         create_pending_instances();
       Runtime::trigger_event(subscription_event);
+      subscription_event = RtUserEvent::NO_RT_USER_EVENT;
       // Check for any subscribers that we need to tell about the result
       if (!subscribers.empty())
         broadcast_result(subscribers, false/*need lock*/);
@@ -1447,6 +1448,7 @@ namespace Legion {
       canonical_instance = FutureInstance::unpack_instance(derez, runtime);
       if (canonical_instance != NULL)
       {
+        instances[canonical_instance->memory] = canonical_instance;
         size_t num_instances;
         derez.deserialize(num_instances);
         for (unsigned idx = 0; idx < num_instances; idx++)
@@ -1462,6 +1464,7 @@ namespace Legion {
         create_pending_instances();
       empty = false;
       Runtime::trigger_event(subscription_event);
+      subscription_event = RtUserEvent::NO_RT_USER_EVENT;
       if (is_owner())
       {
 #ifdef DEBUG_LEGION
@@ -2436,6 +2439,8 @@ namespace Legion {
     {
       size_t size;
       derez.deserialize(size);
+      if (size == 0)
+        return NULL;
       bool pass_by_value;
       derez.deserialize<bool>(pass_by_value);
       if (pass_by_value)

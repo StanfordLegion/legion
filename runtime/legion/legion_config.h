@@ -142,9 +142,14 @@
 #define LEGION_MAX_DIM     3 // maximum number of dimensions for index spaces
 #endif
 
+// This value used to describe the maximum return size that Legion would
+// permit for future values. We've since relaxed this so futures could 
+// return large opaque buffers. This value now specifies the maximum size
+// that Legion will all for future values to be passed by value without
+// the Realm DMA system being used for actually moving the data.
 #ifndef MAX_RETURN_SIZE // For backwards compatibility
 #ifndef LEGION_MAX_RETURN_SIZE
-#define LEGION_MAX_RETURN_SIZE    2048 // maximum return type size in bytes
+#define LEGION_MAX_RETURN_SIZE    8192 // maximum return type size in bytes
 #endif
 #else
 #ifndef LEGION_MAX_RETURN_SIZE
