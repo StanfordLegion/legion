@@ -8614,7 +8614,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::handle_post_execution(FutureInstance *inst, bool local)
+    void ShardManager::handle_post_execution(FutureInstance *inst, 
+                                    void *metadata, size_t metasize, bool local)
     //--------------------------------------------------------------------------
     {
       bool notify = false;
@@ -8667,16 +8668,25 @@ namespace Legion {
             result->pack_instance(rez, true/*ownership*/);
           else
             rez.serialize<size_t>(0);
+          rez.serialize(metasize);
+          if (metasize > 0)
+            rez.serialize(metadata, metasize);
           runtime->send_replicate_post_execution(owner_space, rez);
           if (result != NULL)
             delete result;
         }
         else
-          original_task->handle_future(result, NULL/*functor*/, 
-                      Processor::NO_PROC, false/*own functor*/);
+        {
+          original_task->handle_future(result, metadata, metasize,
+              NULL/*functor*/, Processor::NO_PROC, false/*own functor*/);
+          // we no longer own this, it got passed through
+          metadata = NULL;
+        }
       }
       if (inst != NULL)
         delete inst;
+      if (metadata != NULL)
+        free(metadata);
     }
 
     //--------------------------------------------------------------------------
@@ -9382,7 +9392,16 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       FutureInstance *instance = FutureInstance::unpack_instance(derez,runtime);
-      manager->handle_post_execution(instance, false/*local*/);
+      size_t metasize;
+      derez.deserialize(metasize);
+      void *metadata = NULL;
+      if (metasize > 0)
+      {
+        metadata = malloc(metasize);
+        memcpy(metadata, derez.get_current_pointer(), metasize);
+        derez.advance_pointer(metasize);
+      }
+      manager->handle_post_execution(instance,metadata,metasize,false/*local*/);
     }
 
     /*static*/ void ShardManager::handle_trigger_complete(

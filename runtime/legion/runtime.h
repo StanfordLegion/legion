@@ -262,6 +262,7 @@ namespace Legion {
                     const char *warning_string = NULL,
                     bool internal = false);
       size_t get_untyped_size(void);
+      const void *get_metadata(size_t *metasize);
       ApEvent get_ready_event(void) const { return future_complete; }
       // A special function for predicates to peek
       // at the boolean value of a future if it is set
@@ -269,8 +270,10 @@ namespace Legion {
       bool get_boolean_value(TaskContext *ctx);
     public:
       // This will simply save the value of the future
-      void set_result(FutureInstance *instance);
-      void set_results(const std::vector<FutureInstance*> &instances);
+      void set_result(FutureInstance *instance, 
+                      void *metadata = NULL, size_t metasize = 0);
+      void set_results(const std::vector<FutureInstance*> &instances,
+                      void *metadata = NULL, size_t metasize = 0);
       void set_result(FutureFunctor *callback_functor, bool own,
                       Processor functor_proc);
       // This is the same as above but for data that we know is visible
@@ -358,6 +361,9 @@ namespace Legion {
       AddressSpaceID result_set_space; // space on which the result was set
       std::map<Memory,FutureInstance*> instances;
       FutureInstance *canonical_instance;
+    private:
+      void *metadata;
+      size_t metasize;
     private:
       // Instances that need to be made once canonical instance is set
       std::map<Memory,PendingInstance> pending_instances;

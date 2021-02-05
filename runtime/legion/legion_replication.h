@@ -2276,7 +2276,8 @@ namespace Legion {
       bool is_total_sharding(void);
     public:
       void handle_post_mapped(bool local, RtEvent precondition);
-      void handle_post_execution(FutureInstance *instance, bool local);
+      void handle_post_execution(FutureInstance *instance, void *metadata,
+                                 size_t metasize, bool local);
       RtEvent trigger_task_complete(bool local, ApEvent effects_done);
       void trigger_task_commit(bool local);
     public:

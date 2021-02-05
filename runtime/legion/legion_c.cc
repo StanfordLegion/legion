@@ -3075,6 +3075,13 @@ legion_future_get_untyped_size(legion_future_t handle_)
   return handle->get_untyped_size();
 }
 
+const void *
+legion_future_get_metadata(legion_future_t handle_, size_t *size)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+  return handle->get_metadata(size);
+}
+
 // -----------------------------------------------------------------------
 // Future Map Operations
 // -----------------------------------------------------------------------

@@ -1353,6 +1353,16 @@ namespace Legion {
        * Return the number of bytes contained in the future.
        */
       size_t get_untyped_size(void) const;
+
+      /**
+       * Return a pointer to the metadata buffer for this future.
+       * Unlike getting a buffer for the future which can exist on
+       * any memory, the metadata is always guaranteed to be on the
+       * host memory.
+       * @param optional pointer to a place to write the size
+       * @return a pointer to the buffer containing the metadata
+       */
+      const void* get_metadata(size_t *size = NULL) const;
     public:
       // These methods provide partial support the C++ future interface
       template<typename T>
@@ -8741,6 +8751,10 @@ namespace Legion {
        * @param freefunc a callback function for freeing owned memory
        *              if this is NULL and owned is true the runtime
        *              will free the memory using the system 'free' function
+       * @param metadataptr a pointer to host memory that contains metadata
+       *              for the future. The runtime will always make a copy
+       *              of this data if it is not NULL.
+       * @param metadatasize the size of the metadata buffer if non-NULL
        */
       static void legion_task_postamble(Runtime *runtime, Context ctx,
                                         const void *retvalptr = NULL,
@@ -8750,7 +8764,9 @@ namespace Legion {
                                           Realm::RegionInstance::NO_INST,
                                         Memory::Kind memory = 
                                           Memory::SYSTEM_MEM,
-                                        void (*freefunc)(void*,size_t) = NULL);
+                                        void (*freefunc)(void*,size_t) = NULL,
+                                        const void *metadataptr = NULL,
+                                        size_t metadatasize = 0);
 
       /**
        * This variant of the Legion task postamble allows users to pass in

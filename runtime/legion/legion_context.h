@@ -517,8 +517,10 @@ namespace Legion {
       virtual void destroy_task_local_instance(PhysicalInstance instance);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                     PhysicalInstance inst, FutureFunctor *callback_functor,
-                    Memory::Kind memory, void (*freefunc)(void*,size_t));
+                    Memory::Kind memory, void (*freefunc)(void*,size_t),
+                    const void *metadataptr, size_t metadatasize);
       virtual void post_end_task(FutureInstance *instance,
+                                 void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor) = 0;
       uintptr_t escape_task_local_instance(PhysicalInstance instance);
@@ -526,7 +528,8 @@ namespace Legion {
                                           Memory memory, RtEvent &done);
       FutureInstance* copy_to_future_inst(Memory memory, FutureInstance *src);
       void begin_misspeculation(void);
-      void end_misspeculation(FutureInstance *instance);
+      void end_misspeculation(FutureInstance *instance,
+                              const void *metadata, size_t metasize);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f) = 0;
@@ -754,9 +757,9 @@ namespace Legion {
       struct PostTaskArgs {
       public:
         PostTaskArgs(TaskContext *ctx, size_t x, RtEvent w,
-                     FutureInstance *i, FutureFunctor *f, bool o)
+            FutureInstance *i, void *m, size_t s, FutureFunctor *f, bool o)
           : context(ctx), index(x), wait_on(w), instance(i), 
-            functor(f), own_functor(o) { }
+            metadata(m), metasize(s), functor(f), own_functor(o) { }
       public:
         inline bool operator<(const PostTaskArgs &rhs) const
           { return index < rhs.index; }
@@ -765,6 +768,8 @@ namespace Legion {
         size_t index;
         RtEvent wait_on;
         FutureInstance *instance;
+        void *metadata;
+        size_t metasize;
         FutureFunctor *functor;
         bool own_functor;
       };
@@ -1265,7 +1270,9 @@ namespace Legion {
       void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                   FutureInstance *instance,
                                   FutureFunctor *callback_functor,
-                                  bool own_callback_functor);
+                                  bool own_callback_functor,
+                                  const void *metadataptr,
+                                  size_t metadatasize);
       bool process_post_end_tasks(void);
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
@@ -1355,8 +1362,10 @@ namespace Legion {
                                                     Legion::Runtime *&runtime);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                         PhysicalInstance inst, FutureFunctor *callback_functor,
-                        Memory::Kind memory, void (*freefunc)(void*,size_t));
+                        Memory::Kind memory, void (*freefunc)(void*,size_t),
+                        const void *metadataptr, size_t metadatasize);
       virtual void post_end_task(FutureInstance *instance,
+                                 void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
     public:
@@ -2129,8 +2138,10 @@ namespace Legion {
       virtual void end_trace(TraceID tid, bool deprecated);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_future,
-                      Memory::Kind memory, void (*freefunc)(void*,size_t));
+                      Memory::Kind memory, void (*freefunc)(void*,size_t),
+                      const void *metadataptr, size_t metadatasize);
       virtual void post_end_task(FutureInstance *instance,
+                                 void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
       virtual ApEvent add_to_dependence_queue(Operation *op, 
@@ -2963,8 +2974,10 @@ namespace Legion {
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
                         PhysicalInstance inst, FutureFunctor *callback_functor,
-                        Memory::Kind memory, void (*freefunc)(void*,size_t));
+                        Memory::Kind memory, void (*freefunc)(void*,size_t),
+                        const void *metadataptr, size_t metadatasize);
       virtual void post_end_task(FutureInstance *instance,
+                                 void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
     public:

@@ -2135,7 +2135,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TaskContext::end_task(const void *res, size_t res_size, bool owned,
      PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor,
-                       Memory::Kind result_kind, void (*freefunc)(void*,size_t))
+                       Memory::Kind result_kind, void (*freefunc)(void*,size_t),
+                       const void *metadataptr, size_t metadatasize)
     //--------------------------------------------------------------------------
     {
       // Finalize output regions by setting realm instances created during
@@ -2222,7 +2223,7 @@ namespace Legion {
       else if (copy_future.exists() && !copy_future.has_triggered())
         effects_done = Runtime::merge_events(effects_done, copy_future);
       parent_ctx->add_to_post_task_queue(this, effects_done, instance,
-                                         callback_functor, owned);
+                   callback_functor, owned, metadataptr, metadatasize);
       if (!inline_task)
 #ifdef DEBUG_LEGION
         runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
@@ -2375,7 +2376,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::end_misspeculation(FutureInstance *instance)
+    void TaskContext::end_misspeculation(FutureInstance *instance,
+                                         const void *metadata, size_t metasize)
     //--------------------------------------------------------------------------
     {
       // Mark that we are done executing this operation
@@ -2388,7 +2390,17 @@ namespace Legion {
 #endif
       Runtime *runtime_ptr = runtime;
       // Call post end task
-      post_end_task(instance, NULL/*functor*/, false/*owner*/);
+      if (metadata != NULL)
+      {
+        // Make a copy of the metadata
+        void *metacopy = malloc(metasize);
+        memcpy(metacopy, metadata, metasize);
+        post_end_task(instance, metacopy, metasize,
+                      NULL/*functor*/, false/*owner*/);
+      }
+      else
+        post_end_task(instance, NULL/*metadata*/, 0/*metasize*/,
+                      NULL/*functor*/, false/*owner*/);
 #ifdef DEBUG_LEGION
       runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
                                                      false/*meta*/);
@@ -7189,9 +7201,17 @@ namespace Legion {
     void InnerContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                               FutureInstance *instance,
                                               FutureFunctor *callback_functor,
-                                              bool own_callback_functor)
+                                              bool own_callback_functor,
+                                              const void *metadataptr,
+                                              size_t metadatasize)
     //--------------------------------------------------------------------------
     {
+      void *metadatacopy = NULL;
+      if (metadataptr != NULL)
+      {
+        metadatacopy = malloc(metadatasize);
+        memcpy(metadatacopy, metadataptr, metadatasize);
+      }
       bool issue_task = false;
       RtEvent precondition;
       const size_t task_index = ctx->get_owner_task()->get_context_index();
@@ -7204,8 +7224,8 @@ namespace Legion {
           // Add a reference to the context the first time we defer this
           add_reference();
         }
-        post_task_queue.push_back(PostTaskArgs(ctx, task_index, wait_on,
-                      instance, callback_functor, own_callback_functor));
+        post_task_queue.push_back(PostTaskArgs(ctx,task_index,wait_on,instance,
+          metadatacopy, metadatasize, callback_functor, own_callback_functor));
         if (post_task_comp_queue.exists())
         {
           // If we've already got a completion queue then use it
@@ -7350,7 +7370,8 @@ namespace Legion {
         std::sort(to_perform.begin(), to_perform.end());
         for (std::vector<PostTaskArgs>::const_iterator it =
               to_perform.begin(); it != to_perform.end(); it++)
-          it->context->post_end_task(it->instance, it->functor,it->own_functor);
+          it->context->post_end_task(it->instance, it->metadata, it->metasize,
+                                     it->functor, it->own_functor);
       }
       // If we didn't launch a next op, then we can remove the reference
       return (next_ctx == NULL);
@@ -9728,7 +9749,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::end_task(const void *res, size_t res_size, bool owned,
      PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor,
-                       Memory::Kind result_kind, void (*freefunc)(void*,size_t))
+                       Memory::Kind result_kind, void (*freefunc)(void*,size_t),
+                       const void *metadataptr, size_t metadatasize)
     //--------------------------------------------------------------------------
     {
       // See if we have any local regions or fields that need to be deallocated
@@ -9874,11 +9896,12 @@ namespace Legion {
         }
       }
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,
-                            callback_functor, result_kind, freefunc);
+          callback_functor, result_kind, freefunc, metadataptr, metadatasize);
     }
 
     //--------------------------------------------------------------------------
     void InnerContext::post_end_task(FutureInstance *instance,
+                                     void *metadata, size_t metasize,
                                      FutureFunctor *callback_functor,
                                      bool own_callback_functor)
     //--------------------------------------------------------------------------
@@ -9886,7 +9909,7 @@ namespace Legion {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
       // Handle the future result
-      owner_task->handle_future(instance, callback_functor,
+      owner_task->handle_future(instance, metadata, metasize, callback_functor,
                                 executing_processor, own_callback_functor);
       // If we weren't a leaf task, compute the conditions for being mapped
       // which is that all of our children are now mapped
@@ -16900,7 +16923,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplicateContext::end_task(const void *res, size_t res_size,bool owned,
      PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor,
-                       Memory::Kind result_kind, void (*freefunc)(void*,size_t))
+                       Memory::Kind result_kind, void (*freefunc)(void*,size_t),
+                       const void *metadataptr, size_t metadatasize)
     //--------------------------------------------------------------------------
     {
       // We have an extra one of these here to handle the case where some
@@ -16911,14 +16935,16 @@ namespace Legion {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_END_TASK);
         hasher.hash(res_size);
+        hasher.hash(metadatasize);
         verify_replicable(hasher, "end_task");
       }
       InnerContext::end_task(res, res_size, owned, deferred_result_instance, 
-                             callback_functor, result_kind, freefunc);
+         callback_functor, result_kind, freefunc, metadataptr, metadatasize);
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::post_end_task(FutureInstance *instance,
+                                         void *metadata, size_t metasize,
                                          FutureFunctor *callback_functor,
                                          bool own_callback_functor)
     //--------------------------------------------------------------------------
@@ -16948,8 +16974,8 @@ namespace Legion {
       // Grab this now before the context might be deleted
       const ShardID local_shard = owner_shard->shard_id;
       // Do the base call
-      InnerContext::post_end_task(instance, callback_functor,
-                                  own_callback_functor);
+      InnerContext::post_end_task(instance, metadata, metasize,
+                                  callback_functor, own_callback_functor);
       // Then delete all the pending collectives that we had
       while (!release_index_spaces.empty())
       {
@@ -21654,7 +21680,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::end_task(const void *res, size_t res_size, bool owned,
      PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor,
-                       Memory::Kind result_kind, void (*freefunc)(void*,size_t))
+                       Memory::Kind result_kind, void (*freefunc)(void*,size_t),
+                       const void *metadataptr, size_t metadatasize)
     //--------------------------------------------------------------------------
     {
       // No local regions or fields permitted in leaf tasks
@@ -21671,11 +21698,12 @@ namespace Legion {
         wait_on.wait();
       } 
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,
-                            callback_functor, result_kind, freefunc); 
+          callback_functor, result_kind, freefunc, metadataptr, metadatasize); 
     }
 
     //--------------------------------------------------------------------------
     void LeafContext::post_end_task(FutureInstance *instance,
+                                    void *metadata, size_t metasize,
                                     FutureFunctor *callback_functor,
                                     bool own_callback_functor)
     //--------------------------------------------------------------------------
@@ -21683,7 +21711,7 @@ namespace Legion {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
       // Handle the future result
-      owner_task->handle_future(instance, callback_functor,
+      owner_task->handle_future(instance, metadata, metasize, callback_functor,
                                 executing_processor, own_callback_functor);
       bool need_complete = false;
       bool need_commit = false;

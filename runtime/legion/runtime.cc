@@ -644,8 +644,9 @@ namespace Legion {
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
 #endif
         future_complete(complete), result_set_space(local_space),
-        canonical_instance(NULL), callback_functor(NULL),
-        own_callback_functor(false), empty(true), sampled(false)
+        canonical_instance(NULL), metadata(NULL), metasize(0),
+        callback_functor(NULL), own_callback_functor(false), empty(true),
+        sampled(false)
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
@@ -676,8 +677,9 @@ namespace Legion {
         producer_uid(uid),
 #endif
         future_complete(complete), result_set_space(local_space),
-        canonical_instance(NULL), callback_functor(NULL),
-        own_callback_functor(false), empty(true), sampled(false)
+        canonical_instance(NULL), metadata(NULL), metasize(0),
+        callback_functor(NULL), own_callback_functor(false), empty(true),
+        sampled(false)
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
@@ -730,6 +732,8 @@ namespace Legion {
         callback_functor->callback_release_future();
       if (own_callback_functor)
         delete callback_functor;
+      if (metadata != NULL)
+        free(metadata);
     }
 
     //--------------------------------------------------------------------------
@@ -1085,6 +1089,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const void* FutureImpl::get_metadata(size_t *size)
+    //--------------------------------------------------------------------------
+    {
+      const RtEvent ready_event = subscribe();
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      if (size != NULL)
+        *size = metasize;
+      return metadata;
+    }
+
+    //--------------------------------------------------------------------------
     FutureInstance* FutureImpl::get_canonical_instance(void)
     //--------------------------------------------------------------------------
     {
@@ -1129,7 +1145,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::set_result(FutureInstance *instance)
+    void FutureImpl::set_result(FutureInstance *instance,void *meta,size_t size)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
@@ -1143,17 +1159,21 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(canonical_instance == NULL);
       assert(instances.empty());
+      assert(metadata == NULL);
 #endif
       if (instance != NULL)
       {
         canonical_instance = instance;
         instances[instance->memory] = instance;
       }
+      metadata = meta;
+      metasize = size;
       finish_set_future();
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::set_results(const std::vector<FutureInstance*> &insts)
+    void FutureImpl::set_results(const std::vector<FutureInstance*> &insts,
+                                 void *meta, size_t size)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
@@ -1168,6 +1188,7 @@ namespace Legion {
       assert(canonical_instance == NULL);
       assert(instances.empty());
       assert(!insts.empty());
+      assert(metadata == NULL);
 #endif
       canonical_instance = insts.front();
       for (std::vector<FutureInstance*>::const_iterator it =
@@ -1177,7 +1198,9 @@ namespace Legion {
         assert(instances.find((*it)->memory) == instances.end());
 #endif
         instances[(*it)->memory] = *it;
-      } 
+      }
+      metadata = meta;
+      metasize = size;
       finish_set_future();
     }
 
@@ -1449,6 +1472,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(empty);
       assert(subscription_event.exists());
+      assert(metadata == NULL);
 #endif
       canonical_instance = FutureInstance::unpack_instance(derez, runtime);
       if (canonical_instance != NULL)
@@ -1464,6 +1488,13 @@ namespace Legion {
           else
             delete inst;
         }
+      }
+      derez.deserialize(metasize);
+      if (metasize > 0)
+      {
+        metadata = malloc(metasize);
+        memcpy(metadata, derez.get_current_pointer(), metasize);
+        derez.advance_pointer(metasize);
       }
       empty = false;
       if (!pending_instances.empty())
@@ -1850,6 +1881,9 @@ namespace Legion {
       }
       else
         rez.serialize<size_t>(0);
+      rez.serialize(metasize);
+      if (metasize > 0)
+        rez.serialize(metadata, metasize);
     }
 
     //--------------------------------------------------------------------------
@@ -28666,7 +28700,8 @@ namespace Legion {
     {
       // this is just a normal finish operation
       ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, 
-          NULL/*callback functor*/, Memory::SYSTEM_MEM, NULL/*freefunc*/);
+          NULL/*callback functor*/, Memory::SYSTEM_MEM, NULL/*freefunc*/,
+          NULL/*metadataptr*/, 0/*metadatasize*/);
       // Record that this is no longer an implicit external task
       implicit_runtime = NULL;
       implicit_context = NULL;

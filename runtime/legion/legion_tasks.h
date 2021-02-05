@@ -512,6 +512,7 @@ namespace Legion {
                     const std::deque<InstanceSet> &parent_regions);
     public:
       virtual void handle_future(FutureInstance *instance,
+                                 void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor) = 0;
@@ -701,6 +702,9 @@ namespace Legion {
       // Only for handling serdez reductions
       void *serdez_redop_state;
       size_t serdez_redop_state_size;
+      // Reduction metadata
+      void *reduction_metadata;
+      size_t reduction_metasize;
       // Temporary storage for future results
       std::map<DomainPoint,FutureInstance*> temporary_futures;
       // used for detecting cases where we've already mapped a mutli task
@@ -775,6 +779,7 @@ namespace Legion {
       virtual void trigger_task_commit(void);
     public:
       virtual void handle_future(FutureInstance *instance,
+                                 void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
@@ -877,6 +882,7 @@ namespace Legion {
                                std::set<RtEvent> &ready_events);
     public:
       virtual void handle_future(FutureInstance *instance,
+                                 void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
@@ -987,6 +993,7 @@ namespace Legion {
               const std::deque<InstanceSet> &parent_regions);
     public:
       virtual void handle_future(FutureInstance *instance,
+                                 void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor); 
@@ -1149,7 +1156,8 @@ namespace Legion {
       void return_slice_mapped(unsigned points, RtEvent applied_condition,
                                ApEvent slice_complete);
       void return_slice_complete(unsigned points, RtEvent applied_condition,
-         const std::map<unsigned,std::map<DomainPoint,size_t> > &output_sizes);
+         const std::map<unsigned,std::map<DomainPoint,size_t> > &output_sizes,
+         void *metadata = NULL, size_t metasize = 0);
       void return_slice_commit(unsigned points, RtEvent applied_condition);
     public:
       void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
@@ -1278,13 +1286,15 @@ namespace Legion {
       virtual void reduce_future(const DomainPoint &point,
                                  FutureInstance *instance);
       void handle_future(const DomainPoint &point, FutureInstance *instance,
-            FutureFunctor *functor, Processor future_proc, bool own_functor); 
+                        void *metadata, size_t metasize, FutureFunctor *functor,
+                        Processor future_proc, bool own_functor); 
     public:
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &point,
                                      bool inline_task);
       size_t enumerate_points(bool inline_task);
-      FutureInstance* get_predicate_false_result(Processor point_proc);
+      FutureInstance* get_predicate_false_result(Processor point_proc,
+                              const void *&metadata, size_t &metasize);
     public:
       void check_target_processors(void) const;
       void update_target_processor(void);

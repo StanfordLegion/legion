@@ -2329,6 +2329,16 @@ namespace Legion {
       return impl->get_untyped_size();
     }
 
+    //--------------------------------------------------------------------------
+    const void* Future::get_metadata(size_t *size) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+                          "Illegal request for metadata from empty future");
+      return impl->get_metadata(size);
+    }
+
     /////////////////////////////////////////////////////////////
     // Future Map 
     /////////////////////////////////////////////////////////////
@@ -7286,11 +7296,13 @@ namespace Legion {
                                                  size_t retvalsize, bool owned,
                                                  Realm::RegionInstance inst,
                                                  Memory::Kind memory,
-                                                 void (*freefunc)(void*,size_t))
+                                                 void (*freefunc)(void*,size_t),
+                                                 const void *metadataptr,
+                                                 size_t metadatasize)
     //--------------------------------------------------------------------------
     {
-      ctx->end_task(retvalptr, retvalsize, owned, inst, 
-                    NULL/*functor*/, memory, freefunc);
+      ctx->end_task(retvalptr, retvalsize, owned, inst, NULL/*functor*/,
+                    memory, freefunc, metadataptr, metadatasize);
     }
 
     //--------------------------------------------------------------------------
@@ -7299,7 +7311,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(NULL, 0, owned, Realm::RegionInstance::NO_INST, 
-                    callback_functor, Memory::SYSTEM_MEM, NULL);
+                    callback_functor, Memory::SYSTEM_MEM, NULL, NULL, 0);
     }
 
     //--------------------------------------------------------------------------

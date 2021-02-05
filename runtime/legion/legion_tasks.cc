@@ -4940,6 +4940,8 @@ namespace Legion {
       serdez_redop_fns = NULL;
       serdez_redop_state = NULL;
       serdez_redop_state_size = 0;
+      reduction_metadata = NULL;
+      reduction_metasize = 0;
       reduction_instance = NULL;
       first_mapping = true;
       children_complete_invoked = false;
@@ -4964,6 +4966,8 @@ namespace Legion {
         delete reduction_instance;
       if (serdez_redop_state != NULL)
         free(serdez_redop_state);
+      if (reduction_metadata != NULL)
+        free(reduction_metadata);
       if (!temporary_futures.empty())
       {
         for (std::map<DomainPoint,FutureInstance*>::const_iterator it =
@@ -6130,6 +6134,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualTask::handle_future(FutureInstance *instance,
+                                       void *metadata, size_t metasize,
                                        FutureFunctor *functor,
                                        Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
@@ -6138,11 +6143,12 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(instance == NULL);
+        assert(metadata == NULL);
 #endif
         result.impl->set_result(functor, own_functor, future_proc);
       }
       else
-        result.impl->set_result(instance);
+        result.impl->set_result(instance, metadata, metasize);
     }
 
     //--------------------------------------------------------------------------
@@ -6197,6 +6203,8 @@ namespace Legion {
       // Pretend like we executed the task
       execution_context->begin_misspeculation();
       FutureInstance *result = NULL;
+      const void *metadata = NULL;
+      size_t metasize = 0;
       if (predicate_false_future.impl != NULL)
       {
         FutureInstance *canonical = 
@@ -6212,11 +6220,12 @@ namespace Legion {
           Runtime::trigger_event(NULL, ready_event, 
                 result->copy_from(canonical, this));
         }
+        metadata = predicate_false_future.impl->get_metadata(&metasize);
       }
       else if (predicate_false_size > 0)
         result = FutureInstance::create_local(predicate_false_result,
             predicate_false_size, false/*own*/, runtime);
-      execution_context->end_misspeculation(result); 
+      execution_context->end_misspeculation(result, metadata, metasize); 
     }
 
     //--------------------------------------------------------------------------
@@ -6944,12 +6953,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PointTask::handle_future(FutureInstance *instance,
+                                  void *metadata, size_t metasize,
                                   FutureFunctor *functor, 
                                   Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
-      slice_owner->handle_future(index_point, instance, functor,
-                                 future_proc, own_functor); 
+      slice_owner->handle_future(index_point, instance, metadata, metasize,
+                                 functor, future_proc, own_functor); 
     }
 
     //--------------------------------------------------------------------------
@@ -7000,9 +7010,11 @@ namespace Legion {
 #endif
       // Pretend like we executed the task
       execution_context->begin_misspeculation();
+      const void *metadata = NULL;
+      size_t metasize = 0;
       FutureInstance *instance = 
-        slice_owner->get_predicate_false_result(current_proc);
-      execution_context->end_misspeculation(instance);
+        slice_owner->get_predicate_false_result(current_proc,metadata,metasize);
+      execution_context->end_misspeculation(instance, metadata, metasize);
     }
 
     //--------------------------------------------------------------------------
@@ -7525,14 +7537,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_future(FutureInstance *instance, 
-                FutureFunctor *functor, Processor future_proc, bool own_functor)
+    void ShardTask::handle_future(FutureInstance *instance, void *metadata,
+                                  size_t metasize, FutureFunctor *functor,
+                                  Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(functor == NULL);
 #endif
-      shard_manager->handle_post_execution(instance, true/*local*/);
+      shard_manager->handle_post_execution(instance, metadata, 
+                                           metasize, true/*local*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9193,7 +9207,10 @@ namespace Legion {
         // Set the future if we actually ran the task or we speculated
         if ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists())
         {
-          reduction_future.impl->set_results(reduction_instances);
+          reduction_future.impl->set_results(reduction_instances, 
+                          reduction_metadata, reduction_metasize);
+          // Clear this since we no longer own the buffer
+          reduction_metadata = NULL;
           reduction_instances.clear();
         }
         // Finally we now have a complete set of effects so we can try
@@ -9659,7 +9676,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::return_slice_complete(unsigned points, RtEvent slice_done,
-               const std::map<unsigned,std::map<DomainPoint,size_t> > &to_merge)
+               const std::map<unsigned,std::map<DomainPoint,size_t> > &to_merge,
+               void *metadata/*= NULL*/, size_t metasize/*= 0*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_RETURN_SLICE_COMPLETE_CALL);
@@ -9694,6 +9712,18 @@ namespace Legion {
         {
           need_trigger = true;
           children_complete_invoked = true;
+        }
+        if (metadata != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(redop > 0);
+#endif
+          if (reduction_metadata == NULL)
+          {
+            reduction_metadata = metadata;
+            reduction_metasize = metasize;
+            metadata = NULL; // mark that we grabbed it
+          }
         }
       }
       if (need_trigger)
@@ -9730,6 +9760,9 @@ namespace Legion {
         complete_execution(finish_index_task_complete());
         trigger_children_complete();
       }
+      // If we didn't grab ownership then free this now
+      if (metadata != NULL)
+        free(metadata);
     }
 
     //--------------------------------------------------------------------------
@@ -9890,6 +9923,19 @@ namespace Legion {
           ApUserEvent done_event;
           derez.deserialize(done_event);
           Runtime::trigger_event(NULL, done_event, completion_event);
+        }
+        size_t metasize;
+        derez.deserialize(metasize);
+        if (metasize > 0)
+        {
+          AutoLock o_lock(op_lock);
+          if (reduction_metadata == NULL)
+          {
+            reduction_metadata = malloc(metasize);
+            memcpy(reduction_metadata, derez.get_current_pointer(), metasize);
+            reduction_metasize = metasize;
+          }
+          derez.advance_pointer(metasize);
         }
       }
       std::map<unsigned,std::map<DomainPoint,size_t> > to_merge;
@@ -10927,6 +10973,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void SliceTask::handle_future(const DomainPoint &point, 
                                   FutureInstance *instance, 
+                                  void *metadata, size_t metasize,
                                   FutureFunctor *functor,
                                   Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
@@ -10938,7 +10985,17 @@ namespace Legion {
         assert(functor == NULL);
         assert(instance != NULL);
 #endif
-        reduce_future(point, instance); 
+        reduce_future(point, instance);
+        if (metadata != NULL)
+        {
+          AutoLock o_lock(op_lock);
+          if (reduction_metadata == NULL)
+          {
+            reduction_metadata = metadata;
+            reduction_metasize = metasize;
+            metadata = NULL; // we took ownership of allocation
+          }
+        }
       }
       else
       {
@@ -10946,13 +11003,19 @@ namespace Legion {
         if (functor != NULL)
         {
 #ifdef DEBUG_LEGION
-          assert(instance != NULL);
+          assert(instance == NULL);
+          assert(metadata == NULL);
 #endif
           f.impl->set_result(functor, own_functor, future_proc);
         }
         else
-          f.impl->set_result(instance);
+        {
+          f.impl->set_result(instance, metadata, metasize);
+          metadata = NULL; // no longer own the allocation
+        }
       }
+      if (metadata != NULL)
+        free(metadata);
     }
 
     //--------------------------------------------------------------------------
@@ -11045,7 +11108,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    FutureInstance* SliceTask::get_predicate_false_result(Processor point_proc)
+    FutureInstance* SliceTask::get_predicate_false_result(Processor point_proc,
+                                        const void *&metadata, size_t &metasize)
     //--------------------------------------------------------------------------
     {
       FutureInstance *result = NULL;
@@ -11064,6 +11128,7 @@ namespace Legion {
           Runtime::trigger_event(NULL, ready_event, 
                                  result->copy_from(canonical, this));
         }
+        metadata = predicate_false_future.impl->get_metadata(&metasize);
       }
       else if (predicate_false_size > 0)
         result = FutureInstance::create_local(predicate_false_result,
@@ -11304,8 +11369,10 @@ namespace Legion {
         assert(reduction_instance == NULL);
         assert(serdez_redop_state == NULL);
 #endif
-        index_owner->return_slice_complete(points.size(),
-                complete_precondition, all_output_sizes);
+        index_owner->return_slice_complete(points.size(), complete_precondition,
+            all_output_sizes, reduction_metadata, reduction_metasize);
+        // No longer own the buffer so clear it
+        reduction_metadata = NULL;
       }
       complete_operation();
     }
@@ -11439,6 +11506,13 @@ namespace Legion {
           __sync_synchronize();
           Runtime::trigger_event(NULL, completion_event, done_event);
         }
+        if (reduction_metadata != NULL)
+        {
+          rez.serialize(reduction_metasize);
+          rez.serialize(reduction_metadata, reduction_metasize);
+        }
+        else
+          rez.serialize<size_t>(0);
       }
       rez.serialize(all_output_sizes.size());
       if (!all_output_sizes.empty())
