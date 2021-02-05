@@ -1460,9 +1460,9 @@ namespace Legion {
             delete inst;
         }
       }
+      empty = false;
       if (!pending_instances.empty())
         create_pending_instances();
-      empty = false;
       Runtime::trigger_event(subscription_event);
       subscription_event = RtUserEvent::NO_RT_USER_EVENT;
       if (is_owner())
