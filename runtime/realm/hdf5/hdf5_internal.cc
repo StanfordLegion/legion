@@ -146,18 +146,15 @@ namespace Realm {
     //
     // class HDF5XferDes
 
-      HDF5XferDes::HDF5XferDes(DmaRequest *_dma_request, Channel *_channel,
+      HDF5XferDes::HDF5XferDes(uintptr_t _dma_op, Channel *_channel,
 			       NodeID _launch_node, XferDesID _guid,
 			       const std::vector<XferDesPortInfo>& inputs_info,
 			       const std::vector<XferDesPortInfo>& outputs_info,
-			       bool _mark_start,
-			       uint64_t _max_req_size, long max_nr, int _priority,
-			       XferDesFence* _complete_fence)
-	: XferDes(_dma_request, _channel, _launch_node, _guid,
+			       int _priority,
+                               const void *_fill_data, size_t _fill_size)
+	: XferDes(_dma_op, _channel, _launch_node, _guid,
 		  inputs_info, outputs_info,
-		  _mark_start,
-		  _max_req_size, _priority,
-		  _complete_fence)
+		  _priority, _fill_data, _fill_size)
 	, req_in_use(false)
       {
 	if((inputs_info.size() >= 1) &&
@@ -369,18 +366,111 @@ namespace Realm {
 
       bool HDF5XferDes::progress_xd(HDF5Channel *channel, TimeLimit work_until)
       {
-	Request *rq;
-	bool did_work = false;
-	do {
-	  long count = get_requests(&rq, 1);
-	  if(count > 0) {
-	    channel->submit(&rq, count);
-	    did_work = true;
-	  } else
-	    break;
-	} while(!work_until.is_expired());
+        if(fill_size == 0) {
+          // old path for copies - TODO: use newer style like fill below
+          Request *rq;
+          bool did_work = false;
+          do {
+            long count = get_requests(&rq, 1);
+            if(count > 0) {
+              channel->submit(&rq, count);
+              did_work = true;
+            } else
+              break;
+          } while(!work_until.is_expired());
 
-	return did_work;
+          return did_work;
+        }
+
+        // fill only path for now
+        bool did_work = false;
+	ReadSequenceCache rseqcache(this, 2 << 20);  // flush after 2MB
+
+        while(true) {
+          size_t control_count = update_control_info(&rseqcache);
+          if(control_count == 0)
+            break;
+
+          bool done = false;
+
+          if(output_control.current_io_port >= 0) {
+            XferPort *out_port = &output_ports[output_control.current_io_port];
+
+            // can't do a single write larger than our (replicated) fill data
+            size_t max_bytes = std::min(control_count, size_t(MAX_FILL_SIZE_IN_BYTES));
+            TransferIterator::AddressInfoHDF5 hdf5_info;
+
+            // always ask the HDF5 size for a step first
+            size_t hdf5_bytes = out_port->iter->step_hdf5(max_bytes, hdf5_info,
+                                                          false /*!tentative*/);
+            assert(hdf5_bytes > 0);
+
+            // if this is bigger than any transfer we've done so far, grow our
+            //  buffer
+            if(hdf5_bytes > fill_size)
+              replicate_fill_data(hdf5_bytes);
+
+            // we'll open datasets on the first touch in this transfer
+            // (TODO: pre-open at instance attach time, but in thread-safe way)
+            HDF5Dataset *dset;
+            {
+              std::map<FieldID, HDF5Dataset *>::const_iterator it = datasets.find(hdf5_info.field_id);
+              if(it != datasets.end()) {
+                dset = it->second;
+              } else {
+                dset = HDF5Dataset::open(hdf5_info.filename->c_str(),
+                                         hdf5_info.dsetname->c_str(),
+                                         (kind == XFER_HDF5_READ));
+                assert(dset != 0);
+                assert(hdf5_info.extent.size() == size_t(dset->ndims));
+                datasets[hdf5_info.field_id] = dset;
+              }
+            }
+
+            std::vector<hsize_t> mem_dims = hdf5_info.extent;
+            hid_t mem_space_id, file_space_id;
+            CHECK_HDF5( mem_space_id = H5Screate_simple(mem_dims.size(),
+                                                        mem_dims.data(), 0) );
+
+            CHECK_HDF5( file_space_id = H5Screate_simple(hdf5_info.dset_bounds.size(),
+                                                         hdf5_info.dset_bounds.data(), 0) );
+            CHECK_HDF5( H5Sselect_hyperslab(file_space_id, H5S_SELECT_SET,
+                                            hdf5_info.offset.data(), 0,
+                                            hdf5_info.extent.data(), 0) );
+
+            CHECK_HDF5( H5Dwrite(dset->dset_id, dset->dtype_id,
+                                 mem_space_id, file_space_id,
+                                 H5P_DEFAULT, fill_data) );
+
+            CHECK_HDF5( H5Sclose(mem_space_id) );
+            CHECK_HDF5( H5Sclose(file_space_id) );
+
+            update_bytes_write(output_control.current_io_port,
+                               out_port->local_bytes_total, hdf5_bytes);
+
+            out_port->local_bytes_total += hdf5_bytes;
+            out_port->local_bytes_cons.fetch_add(hdf5_bytes);
+            done = out_port->iter->done();
+
+            output_control.remaining_count -= hdf5_bytes;
+          }
+
+          did_work = true;
+
+          if(output_control.control_port_idx >= 0)
+            done = ((output_control.remaining_count == 0) &&
+                    output_control.eos_received);
+
+          if(done)
+            iteration_completed.store_release(true);
+
+          if(done || work_until.is_expired())
+            break;
+        }
+
+        rseqcache.flush();
+
+        return did_work;
       }
 
       void HDF5XferDes::notify_request_read_done(Request* req)
@@ -448,23 +538,29 @@ namespace Realm {
 		   Memory::HDF_MEM, false,
 		   bw, latency, false, false, XFER_HDF5_WRITE);
 	}
+
+        // also indicate willingness to handle fills to HDF5 (src == NO_MEMORY)
+        add_path(Memory::NO_MEMORY,
+                 Memory::HDF_MEM, false,
+                 bw, latency, false, false, XFER_HDF5_WRITE);
       }
 
       HDF5Channel::~HDF5Channel() {}
 
-      XferDes *HDF5Channel::create_xfer_des(DmaRequest *dma_request,
+      XferDes *HDF5Channel::create_xfer_des(uintptr_t dma_op,
 					    NodeID launch_node,
 					    XferDesID guid,
 					    const std::vector<XferDesPortInfo>& inputs_info,
 					    const std::vector<XferDesPortInfo>& outputs_info,
-					    bool mark_started,
-					    uint64_t max_req_size, long max_nr, int priority,
-					    XferDesFence *complete_fence)
+					    int priority,
+					    XferDesRedopInfo redop_info,
+					    const void *fill_data, size_t fill_size)
       {
-	return new HDF5XferDes(dma_request, this, launch_node, guid,
+	assert(redop_info.id == 0);
+	return new HDF5XferDes(dma_op, this, launch_node, guid,
 			       inputs_info, outputs_info,
-			       mark_started, max_req_size, max_nr, priority,
-			       complete_fence);
+			       priority,
+                               fill_data, fill_size);
       }
 
       long HDF5Channel::submit(Request** requests, long nr)

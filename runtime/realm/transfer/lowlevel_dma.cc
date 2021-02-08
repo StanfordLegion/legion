@@ -655,7 +655,7 @@ namespace Realm {
 
 #define IB_MAX_SIZE size_t(64 * 1024 * 1024)
 
-    void free_intermediate_buffer(DmaRequest* req, Memory mem, off_t offset, size_t size)
+    void free_intermediate_buffer(Memory mem, off_t offset, size_t size)
     {
       //CopyRequest* cr = (CopyRequest*) req;
       //AutoLock<> al(cr->ib_mutex);
@@ -2313,7 +2313,9 @@ namespace Realm {
 
 	XferDesFence* complete_fence = new XferDesFence(this);
 	add_async_work_item(complete_fence);
-	
+
+	assert(0);
+#if 0
 	xd_factory->create_xfer_des(this, Network::my_node_id, xd_target_node,
 				    xd_guid,
 				    inputs_info,
@@ -2322,6 +2324,10 @@ namespace Realm {
 				    //pre_buf, cur_buf, domain, oasvec_src,
 				    16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
 				    priority, complete_fence);
+#else
+	(void)mark_started;
+	(void)xd_target_node;
+#endif
 	xd_factory->release();
       }
     }

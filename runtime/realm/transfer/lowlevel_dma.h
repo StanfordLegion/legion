@@ -245,7 +245,7 @@ namespace Realm {
       };
     };
 
-    void free_intermediate_buffer(DmaRequest* req, Memory mem, off_t offset, size_t size);
+    void free_intermediate_buffer(Memory mem, off_t offset, size_t size);
 
 
     class MemPairCopier;

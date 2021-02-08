@@ -22,6 +22,7 @@
 #include "realm/transfer/transfer.h"
 
 TYPE_IS_SERIALIZABLE(Realm::Memory);
+TYPE_IS_SERIALIZABLE(Realm::XferDesRedopInfo);
 
 namespace Realm {
 
@@ -147,13 +148,6 @@ namespace Realm {
 	make_active();
 
       // now process this transfer request, paying attention to our deadline
-
-      // if this is the first time we've touched this xd, mark it started
-      if(xd->mark_start) {
-        assert(false);
-	//xd->dma_request->mark_started();
-	xd->mark_start = false;
-      }
 
       while(true) {
 	if(!xd->is_completed()) {

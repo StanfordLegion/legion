@@ -667,21 +667,23 @@ namespace Realm {
   }
 
 
-      XferDes::XferDes(DmaRequest *_dma_request, Channel *_channel,
+      XferDes::XferDes(uintptr_t _dma_op, Channel *_channel,
 		       NodeID _launch_node, XferDesID _guid,
 		       const std::vector<XferDesPortInfo>& inputs_info,
 		       const std::vector<XferDesPortInfo>& outputs_info,
-		       bool _mark_start,
-		       uint64_t _max_req_size, int _priority,
-		       XferDesFence* _complete_fence)
-        : dma_request(_dma_request),
+		       int _priority,
+                       const void *_fill_data, size_t _fill_size)
+        : dma_op(_dma_op),
 	  xferDes_queue(XferDesQueue::get_singleton()),
-	  mark_start(_mark_start), launch_node(_launch_node),
+	  launch_node(_launch_node),
 	  iteration_completed(false),
 	  transfer_completed(false),
-          max_req_size(_max_req_size), priority(_priority),
+          max_req_size(16 << 20 /*TO REMOVE*/), priority(_priority),
           guid(_guid),
-          channel(_channel), complete_fence(_complete_fence),
+          channel(_channel),
+          fill_data(&inline_fill_storage),
+          fill_size(_fill_size),
+          orig_fill_size(_fill_size),
 	  progress_counter(0), reference_count(1)
       {
 	input_ports.resize(inputs_info.size());
@@ -788,6 +790,14 @@ namespace Realm {
 	  output_control.remaining_count = size_t(-1);
 	  output_control.eos_received = false;
 	}
+
+        // allocate a larger buffer if needed for fill data
+        if(fill_size > ALIGNED_FILL_STORAGE_SIZE) {
+          fill_data = malloc(fill_size);
+          assert(fill_data);
+        }
+        if(fill_size > 0)
+          memcpy(fill_data, _fill_data, fill_size);
       }
 
       XferDes::~XferDes() {
@@ -803,6 +813,9 @@ namespace Realm {
 	    it != output_ports.end();
 	    ++it)
 	  delete it->iter;
+
+        if(fill_data != &inline_fill_storage)
+          free(fill_data);
       };
 
       Event XferDes::request_metadata()
@@ -830,21 +843,18 @@ namespace Realm {
 	    it != input_ports.end();
 	    ++it)
 	  if(it->ib_size > 0)
-	    free_intermediate_buffer(dma_request,
-				     it->mem->me,
+	    free_intermediate_buffer(it->mem->me,
 				     it->ib_offset,
 				     it->ib_size);
 
         // notify owning DmaRequest upon completion of this XferDes
         //printf("complete XD = %lu\n", guid);
         if (launch_node == Network::my_node_id) {
-	  TransferOperation *op = reinterpret_cast<TransferOperation *>(dma_request);
+	  TransferOperation *op = reinterpret_cast<TransferOperation *>(dma_op);
 	  op->notify_xd_completion(guid);
-          //complete_fence->mark_finished(true/*successful*/);
         } else {
-	  TransferOperation *op = reinterpret_cast<TransferOperation *>(dma_request);
+	  TransferOperation *op = reinterpret_cast<TransferOperation *>(dma_op);
 	  NotifyXferDesCompleteMessage::send_request(launch_node, op, guid);
-          //NotifyXferDesCompleteMessage::send_request(launch_node, complete_fence);
         }
       }
 
@@ -1101,6 +1111,35 @@ namespace Realm {
       return false;
   }
 
+  void XferDes::replicate_fill_data(size_t new_size)
+  {
+    if(new_size > fill_size) {
+#ifdef DEBUG_REALM
+      assert((fill_size > 0) && ((new_size % orig_fill_size) == 0));
+#endif
+      char *new_fill_data;
+      if(new_size > ALIGNED_FILL_STORAGE_SIZE) {
+        new_fill_data = (char *)malloc(new_size);
+        assert(new_fill_data);
+        memcpy(new_fill_data, fill_data, fill_size /*old size*/);
+      } else {
+        // can still fit in the inline storage, so no bootstrap copy needed
+        new_fill_data = (char *)&inline_fill_storage;
+      }
+      do {
+        // can't increase by more than 2x per copy
+        size_t to_copy = std::min(new_size - fill_size, fill_size);
+        memcpy(new_fill_data + fill_size, new_fill_data, to_copy);
+        fill_size += to_copy;
+      } while(fill_size < new_size);
+
+      // delete old buffer, if it was allocated
+      if(fill_data != &inline_fill_storage)
+        free(fill_data);
+
+      fill_data = new_fill_data;
+    }
+  }
 
     long XferDes::default_get_requests(Request** reqs, long nr,
 				       unsigned flags)
@@ -2252,6 +2291,20 @@ namespace Realm {
 	if(inc_amt > 0) update_progress();
       }
 
+      void XferDes::notify_request_read_done(Request* req)
+      {
+        default_notify_request_read_done(req);
+      }
+
+      void XferDes::notify_request_write_done(Request* req)
+      {
+        default_notify_request_write_done(req);
+      }
+
+      void XferDes::flush()
+      {
+      }
+
       void XferDes::default_notify_request_read_done(Request* req)
       {  
         req->is_read_done = true;
@@ -2284,19 +2337,22 @@ namespace Realm {
         enqueue_request(req);
       }
 
-      MemcpyXferDes::MemcpyXferDes(DmaRequest *_dma_request, Channel *_channel,
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemcpyXferDes
+  //
+
+      MemcpyXferDes::MemcpyXferDes(uintptr_t _dma_op, Channel *_channel,
 				   NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
-				   bool _mark_start,
-				   uint64_t _max_req_size, long max_nr, int _priority,
-				   XferDesFence* _complete_fence)
-	: XferDes(_dma_request, _channel, _launch_node, _guid,
+				   int _priority, XferDesRedopInfo _redop_info)
+	: XferDes(_dma_op, _channel, _launch_node, _guid,
 		  inputs_info, outputs_info,
-		  _mark_start,
-		  _max_req_size, _priority,
-		  _complete_fence)
+		  _priority, 0, 0)
 	, memcpy_req_in_use(false)
+	, redop_info(_redop_info)
       {
 	kind = XFER_MEM_CPY;
 
@@ -2672,18 +2728,196 @@ namespace Realm {
       }
 
 
-      GASNetXferDes::GASNetXferDes(DmaRequest *_dma_request, Channel *_channel,
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemfillXferDes
+  //
+
+  MemfillXferDes::MemfillXferDes(uintptr_t _dma_op, Channel *_channel,
+				 NodeID _launch_node, XferDesID _guid,
+				 const std::vector<XferDesPortInfo>& inputs_info,
+				 const std::vector<XferDesPortInfo>& outputs_info,
+				 int _priority,
+				 const void *_fill_data, size_t _fill_size)
+	: XferDes(_dma_op, _channel, _launch_node, _guid,
+		  inputs_info, outputs_info,
+		  _priority, _fill_data, _fill_size)
+      {
+	kind = XFER_MEM_FILL;
+
+	// no direct input data for us
+	assert(input_control.control_port_idx == -1);
+	input_control.current_io_port = -1;
+      }
+
+      long MemfillXferDes::get_requests(Request** requests, long nr)
+      {
+	// unused
+	assert(0);
+	return 0;
+      }
+
+      bool MemfillXferDes::request_available()
+      {
+	// unused
+	assert(0);
+	return false;
+      }
+
+      Request* MemfillXferDes::dequeue_request()
+      {
+	// unused
+	assert(0);
+	return 0;
+      }
+
+      void MemfillXferDes::enqueue_request(Request* req)
+      {
+	// unused
+	assert(0);
+      }
+
+      bool MemfillXferDes::progress_xd(MemfillChannel *channel,
+				      TimeLimit work_until)
+      {
+	bool did_work = false;
+	ReadSequenceCache rseqcache(this, 2 << 20);
+	WriteSequenceCache wseqcache(this, 2 << 20);
+
+	while(true) {
+	  size_t min_xfer_size = 4096;  // TODO: make controllable
+	  size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
+	  if(max_bytes == 0)
+	    break;
+
+	  XferPort *out_port = 0;
+	  size_t out_span_start = 0;
+	  if(output_control.current_io_port >= 0) {
+	    out_port = &output_ports[output_control.current_io_port];
+	    out_span_start = out_port->local_bytes_total;
+	  }
+
+	  size_t total_bytes = 0;
+	  if(out_port != 0) {
+	    // input and output both exist - transfer what we can
+	    log_xd.info() << "memfill chunk: min=" << min_xfer_size
+			  << " max=" << max_bytes;
+
+	    uintptr_t out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+
+	    while(total_bytes < max_bytes) {
+	      AddressListCursor& out_alc = out_port->addrcursor;
+
+	      uintptr_t out_offset = out_alc.get_offset();
+
+	      // the reported dim is reduced for partially consumed address
+	      //  ranges - whatever we get can be assumed to be regular
+	      int out_dim = out_alc.get_dim();
+
+	      size_t bytes = 0;
+	      size_t bytes_left = max_bytes - total_bytes;
+	      // memfills don't need to be particularly big to achieve
+	      //  peak efficiency, so trim to something that takes
+	      //  10's of us to be responsive to the time limit
+              // NOTE: have to be a little careful and make sure the limit
+              //  is a multiple of the fill size - we'll make it a power-of-2
+              const size_t TARGET_CHUNK_SIZE = 256 << 10; // 256KB
+              if(bytes_left > TARGET_CHUNK_SIZE) {
+                size_t max_chunk = fill_size;
+                while(max_chunk < TARGET_CHUNK_SIZE) max_chunk <<= 1;
+                bytes_left = std::min(bytes_left, max_chunk);
+              }
+
+	      if(out_dim > 0) {
+		size_t ocount = out_alc.remaining(0);
+
+		// contig bytes is always the first dimension
+		size_t contig_bytes = std::min(ocount, bytes_left);
+
+		// catch simple 1D case first
+		if((contig_bytes == bytes_left) ||
+		   ((contig_bytes == ocount) && (out_dim == 1))) {
+		  bytes = contig_bytes;
+		  // we only have one element worth of data, so fill
+		  //  multiple elements by using a "2d" copy with a
+		  //  source stride of 0
+		  size_t repeat_count = contig_bytes / fill_size;
+#ifdef DEBUG_REALM
+		  assert((contig_bytes % fill_size) == 0);
+#endif
+		  memcpy_2d(out_base + out_offset, fill_size,
+			    reinterpret_cast<uintptr_t>(fill_data), 0,
+			    fill_size, repeat_count);
+		  out_alc.advance(0, bytes);
+		} else {
+		  // grow to a 2D fill
+		  ocount = out_alc.remaining(1);
+		  uintptr_t out_lstride = out_alc.get_stride(1);
+
+		  size_t lines = std::min(ocount,
+					  bytes_left / contig_bytes);
+
+		  bytes = contig_bytes * lines;
+		  // we only have one element worth of data, so 2d fill
+		  //  multiple elements by using a "3d" copy with a
+		  //  source stride of 0
+		  size_t repeat_count = contig_bytes / fill_size;
+#ifdef DEBUG_REALM
+		  assert((contig_bytes % fill_size) == 0);
+#endif
+		  memcpy_3d(out_base + out_offset, fill_size, out_lstride,
+			    reinterpret_cast<uintptr_t>(fill_data), 0, 0,
+			    fill_size, repeat_count, lines);
+		  out_alc.advance(1, lines);
+		}
+	      } else {
+		// scatter adddress list
+		assert(0);
+	      }
+
+#ifdef DEBUG_REALM
+	      assert(bytes <= bytes_left);
+#endif
+	      total_bytes += bytes;
+
+	      // stop if it's been too long, but make sure we do at least the
+	      //  minimum number of bytes
+	      if((total_bytes >= min_xfer_size) && work_until.is_expired()) break;
+	    }
+	  } else {
+	    // fill with no output, so just count the bytes
+	    total_bytes = max_bytes;
+	  }
+
+	  // mem fill is always immediate, so handle both skip and copy with
+	  //  the same code
+	  wseqcache.add_span(output_control.current_io_port,
+			     out_span_start, total_bytes);
+	  out_span_start += total_bytes;
+
+	  bool done = record_address_consumption(total_bytes);
+
+	  did_work = true;
+
+	  if(done || work_until.is_expired())
+	    break;
+	}
+
+	rseqcache.flush();
+	wseqcache.flush();
+
+	return did_work;
+      }
+
+
+      GASNetXferDes::GASNetXferDes(uintptr_t _dma_op, Channel *_channel,
 				   NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
-				   bool _mark_start,
-				   uint64_t _max_req_size, long max_nr, int _priority,
-				   XferDesFence* _complete_fence)
-	: XferDes(_dma_request, _channel, _launch_node, _guid,
+				   int _priority)
+	: XferDes(_dma_op, _channel, _launch_node, _guid,
 		  inputs_info, outputs_info,
-		  _mark_start,
-		  _max_req_size, _priority,
-		  _complete_fence)
+		  _priority, 0, 0)
       {
 	if((inputs_info.size() >= 1) &&
 	   (input_ports[0].mem->kind == MemoryImpl::MKIND_GLOBAL)) {
@@ -2694,6 +2928,7 @@ namespace Realm {
 	} else {
 	  assert(0 && "neither source nor dest of GASNetXferDes is gasnet!?");
 	}
+	const int max_nr = 10; // FIXME
         gasnet_reqs = (GASNetRequest*) calloc(max_nr, sizeof(GASNetRequest));
         for (int i = 0; i < max_nr; i++) {
           gasnet_reqs[i].xd = this;
@@ -2765,26 +3000,25 @@ namespace Realm {
       {
       }
 
-      RemoteWriteXferDes::RemoteWriteXferDes(DmaRequest *_dma_request, Channel *_channel,
+      RemoteWriteXferDes::RemoteWriteXferDes(uintptr_t _dma_op, Channel *_channel,
 					     NodeID _launch_node, XferDesID _guid,
 					     const std::vector<XferDesPortInfo>& inputs_info,
 					     const std::vector<XferDesPortInfo>& outputs_info,
-					     bool _mark_start,
-					     uint64_t _max_req_size, long max_nr, int _priority,
-					     XferDesFence* _complete_fence)
-	: XferDes(_dma_request, _channel, _launch_node, _guid,
-		inputs_info, outputs_info,
-		_mark_start,
-		_max_req_size, _priority,
-                _complete_fence)
+					     int _priority)
+	: XferDes(_dma_op, _channel, _launch_node, _guid,
+		  inputs_info, outputs_info,
+		  _priority, 0, 0)
       {
 	kind = XFER_REMOTE_WRITE;
+	requests = 0;
+#if 0
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
           //requests[i].dst_node = dst_node;
           available_reqs.push(&requests[i]);
         }
+#endif
       }
 
       long RemoteWriteXferDes::get_requests(Request** requests, long nr)
@@ -3332,16 +3566,19 @@ namespace Realm {
 	      break;
 	    }
 	    case SupportedPath::LOCAL_KIND: {
-	      src_ok = ((src_mem.kind() == it->src_kind) &&
+	      src_ok = (src_mem.exists() &&
+			(src_mem.kind() == it->src_kind) &&
 			(NodeID(ID(src_mem).memory_owner_node()) == node));
 	      break;
 	    }
 	    case SupportedPath::GLOBAL_KIND: {
-	      src_ok = (src_mem.kind() == it->src_kind) ;
+	      src_ok = (src_mem.exists() &&
+			(src_mem.kind() == it->src_kind));
 	      break;
 	    }
 	    case SupportedPath::LOCAL_RDMA: {
-	      if(NodeID(ID(src_mem).memory_owner_node()) == node) {
+	      if(src_mem.exists() &&
+		 (NodeID(ID(src_mem).memory_owner_node()) == node)) {
 		MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
 		// detection of rdma-ness depends on whether memory is
 		//  local/remote to us, not the channel
@@ -3355,7 +3592,8 @@ namespace Realm {
 	      break;
 	    }
 	    case SupportedPath::REMOTE_RDMA: {
-	      if(NodeID(ID(src_mem).memory_owner_node()) != node) {
+	      if(src_mem.exists() &&
+		 (NodeID(ID(src_mem).memory_owner_node()) != node)) {
 		MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
 		// detection of rdma-ness depends on whether memory is
 		//  local/remote to us, not the channel
@@ -3384,7 +3622,7 @@ namespace Realm {
 	      break;
 	    }
 	    case SupportedPath::GLOBAL_KIND: {
-	      dst_ok = (dst_mem.kind() == it->dst_kind) ;
+	      dst_ok = (dst_mem.kind() == it->dst_kind);
 	      break;
 	    }
 	    case SupportedPath::LOCAL_RDMA: {
@@ -3534,58 +3772,53 @@ namespace Realm {
     // do nothing since we are a singleton
   }
 
-  void SimpleXferDesFactory::create_xfer_des(DmaRequest *dma_request,
+  void SimpleXferDesFactory::create_xfer_des(uintptr_t dma_op,
 					     NodeID launch_node,
 					     NodeID target_node,
 					     XferDesID guid,
 					     const std::vector<XferDesPortInfo>& inputs_info,
 					     const std::vector<XferDesPortInfo>& outputs_info,
-					     bool mark_started,
-					     uint64_t max_req_size, long max_nr, int priority,
-					     XferDesFence *complete_fence)
+					     int priority,
+					     XferDesRedopInfo redop_info,
+					     const void *fill_data,
+					     size_t fill_size)
   {
     if(target_node == Network::my_node_id) {
       // local creation
       //assert(!inst.exists());
       LocalChannel *c = reinterpret_cast<LocalChannel *>(channel);
-      XferDes *xd = c->create_xfer_des(dma_request, launch_node, guid,
+      XferDes *xd = c->create_xfer_des(dma_op, launch_node, guid,
 				       inputs_info, outputs_info,
-				       mark_started,
-				       max_req_size, max_nr, priority,
-				       complete_fence);
+				       priority, redop_info,
+				       fill_data, fill_size);
 
       c->enqueue_ready_xd(xd);
     } else {
-      // marking the transfer started has to happen locally
-      if(mark_started)
-	dma_request->mark_started();
-      
       // remote creation
       Serialization::ByteCountSerializer bcs;
       {
 	bool ok = ((bcs << inputs_info) &&
 		   (bcs << outputs_info) &&
-		   (bcs << false /*mark_started*/) &&
-		   (bcs << max_req_size) &&
-		   (bcs << max_nr) &&
-		   (bcs << priority));
+		   (bcs << priority) &&
+		   (bcs << redop_info));
+	if(ok && (fill_size > 0))
+	  ok = bcs.append_bytes(fill_data, fill_size);
 	assert(ok);
       }
       size_t req_size = bcs.bytes_used();
       ActiveMessage<SimpleXferDesCreateMessage> amsg(target_node, req_size);
       //amsg->inst = inst;
-      amsg->complete_fence  = complete_fence;
       amsg->launch_node = launch_node;
       amsg->guid = guid;
-      amsg->dma_request = dma_request;
+      amsg->dma_op = dma_op;
       amsg->channel = channel;
       {
 	bool ok = ((amsg << inputs_info) &&
 		   (amsg << outputs_info) &&
-		   (amsg << false /*mark_started*/) &&
-		   (amsg << max_req_size) &&
-		   (amsg << max_nr) &&
-		   (amsg << priority));
+		   (amsg << priority) &&
+		   (amsg << redop_info));
+	if(ok && (fill_size > 0))
+	  amsg.add_payload(fill_data, fill_size);
 	assert(ok);
       }
       amsg.commit();
@@ -3617,31 +3850,35 @@ namespace Realm {
 							     size_t msglen)
   {
     std::vector<XferDesPortInfo> inputs_info, outputs_info;
-    bool mark_started = false;
-    uint64_t max_req_size = 0;
-    long max_nr = 0;
     int priority = 0;
+    XferDesRedopInfo redop_info;
 
     Realm::Serialization::FixedBufferDeserializer fbd(msgdata, msglen);
 
     bool ok = ((fbd >> inputs_info) &&
 	       (fbd >> outputs_info) &&
-	       (fbd >> mark_started) &&
-	       (fbd >> max_req_size) &&
-	       (fbd >> max_nr) &&
-	       (fbd >> priority));
+	       (fbd >> priority) &&
+	       (fbd >> redop_info));
     assert(ok);
-    assert(fbd.bytes_left() == 0);
+    const void *fill_data;
+    size_t fill_size;
+    if(fbd.bytes_left() == 0) {
+      fill_data = 0;
+      fill_size = 0;
+    } else {
+      fill_size = fbd.bytes_left();
+      fill_data = fbd.peek_bytes(fill_size);
+    }
   
     //assert(!args.inst.exists());
     LocalChannel *c = reinterpret_cast<LocalChannel *>(args.channel);
-    XferDes *xd = c->create_xfer_des(args.dma_request, args.launch_node,
+    XferDes *xd = c->create_xfer_des(args.dma_op, args.launch_node,
 				     args.guid,
 				     inputs_info,
 				     outputs_info,
-				     mark_started,
-				     max_req_size, max_nr, priority,
-				     args.complete_fence);
+				     priority,
+				     redop_info,
+				     fill_data, fill_size);
 
     c->enqueue_ready_xd(xd);
   }
@@ -3747,6 +3984,12 @@ namespace Realm {
                                                     Memory::SOCKET_MEM };
       static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemcpyChannel
+  //
+
       MemcpyChannel::MemcpyChannel(BackgroundWorkManager *bgwork)
 	: SingleXDQChannel<MemcpyChannel,MemcpyXferDes>(bgwork,
 							XFER_MEM_CPY,
@@ -3790,19 +4033,20 @@ namespace Realm {
 				      kind_ret, bw_ret, lat_ret);
       }
 
-      XferDes *MemcpyChannel::create_xfer_des(DmaRequest *dma_request,
+      XferDes *MemcpyChannel::create_xfer_des(uintptr_t dma_op,
 					      NodeID launch_node,
 					      XferDesID guid,
 					      const std::vector<XferDesPortInfo>& inputs_info,
 					      const std::vector<XferDesPortInfo>& outputs_info,
-					      bool mark_started,
-					      uint64_t max_req_size, long max_nr, int priority,
-					      XferDesFence *complete_fence)
+					      int priority,
+					      XferDesRedopInfo redop_info,
+					      const void *fill_data, size_t fill_size)
       {
-	return new MemcpyXferDes(dma_request, this, launch_node, guid,
+	assert(fill_size == 0);
+	return new MemcpyXferDes(dma_op, this, launch_node, guid,
 				 inputs_info, outputs_info,
-				 mark_started, max_req_size, max_nr, priority,
-				 complete_fence);
+				 priority,
+				 redop_info);
       }
 
       long MemcpyChannel::submit(Request** requests, long nr)
@@ -4264,6 +4508,60 @@ namespace Realm {
       }
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemfillChannel
+  //
+
+  MemfillChannel::MemfillChannel(BackgroundWorkManager *bgwork)
+    : SingleXDQChannel<MemfillChannel,MemfillXferDes>(bgwork,
+						      XFER_MEM_FILL,
+						      "memfill channel")
+  {
+    unsigned bw = 0; // TODO
+    unsigned latency = 0;
+    // any of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM is a valid destination
+    for(size_t i = 0; i < num_cpu_mem_kinds; i++)
+      add_path(Memory::NO_MEMORY,
+	       cpu_mem_kinds[i], false,
+	       bw, latency, false, false, XFER_MEM_FILL);
+
+    xdq.add_to_manager(bgwork);
+  }
+
+  MemfillChannel::~MemfillChannel()
+  {}
+
+  XferDes *MemfillChannel::create_xfer_des(uintptr_t dma_op,
+					   NodeID launch_node,
+					   XferDesID guid,
+					   const std::vector<XferDesPortInfo>& inputs_info,
+					   const std::vector<XferDesPortInfo>& outputs_info,
+					   int priority,
+					   XferDesRedopInfo redop_info,
+					   const void *fill_data, size_t fill_size)
+  {
+    assert(redop_info.id == 0); // TODO: add support
+    assert(fill_size > 0);
+    return new MemfillXferDes(dma_op, this, launch_node, guid,
+			      inputs_info, outputs_info,
+			      priority,
+			      fill_data, fill_size);
+  }
+
+  long MemfillChannel::submit(Request** requests, long nr)
+  {
+    // unused
+    assert(0);
+    return 0;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class GASNetChannel
+  //
+
       GASNetChannel::GASNetChannel(BackgroundWorkManager *bgwork,
 				   XferDesKind _kind)
 	: SingleXDQChannel<GASNetChannel, GASNetXferDes>(bgwork,
@@ -4288,19 +4586,20 @@ namespace Realm {
       {
       }
 
-      XferDes *GASNetChannel::create_xfer_des(DmaRequest *dma_request,
+      XferDes *GASNetChannel::create_xfer_des(uintptr_t dma_op,
 					      NodeID launch_node,
 					      XferDesID guid,
 					      const std::vector<XferDesPortInfo>& inputs_info,
 					      const std::vector<XferDesPortInfo>& outputs_info,
-					      bool mark_started,
-					      uint64_t max_req_size, long max_nr, int priority,
-					      XferDesFence *complete_fence)
+					      int priority,
+					      XferDesRedopInfo redop_info,
+					      const void *fill_data, size_t fill_size)
       {
-	return new GASNetXferDes(dma_request, this, launch_node, guid,
+	assert(redop_info.id == 0);
+	assert(fill_size == 0);
+	return new GASNetXferDes(dma_op, this, launch_node, guid,
 				 inputs_info, outputs_info,
-				 mark_started, max_req_size, max_nr, priority,
-				 complete_fence);
+				 priority);
       }
 
       long GASNetChannel::submit(Request** requests, long nr)
@@ -4354,19 +4653,20 @@ namespace Realm {
 
       RemoteWriteChannel::~RemoteWriteChannel() {}
 
-      XferDes *RemoteWriteChannel::create_xfer_des(DmaRequest *dma_request,
+      XferDes *RemoteWriteChannel::create_xfer_des(uintptr_t dma_op,
 						   NodeID launch_node,
 						   XferDesID guid,
 						   const std::vector<XferDesPortInfo>& inputs_info,
 						   const std::vector<XferDesPortInfo>& outputs_info,
-						   bool mark_started,
-						   uint64_t max_req_size, long max_nr, int priority,
-						   XferDesFence *complete_fence)
+						   int priority,
+						   XferDesRedopInfo redop_info,
+						   const void *fill_data, size_t fill_size)
       {
-	return new RemoteWriteXferDes(dma_request, this, launch_node, guid,
+	assert(redop_info.id == 0);
+	assert(fill_size == 0);
+	return new RemoteWriteXferDes(dma_op, this, launch_node, guid,
 				      inputs_info, outputs_info,
-				      mark_started, max_req_size, max_nr, priority,
-				      complete_fence);
+				      priority);
       }
 
       long RemoteWriteChannel::submit(Request** requests, long nr)

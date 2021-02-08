@@ -196,7 +196,7 @@ namespace Realm {
 			    RegionInstance _inst,
 			    unsigned _fld_start, unsigned _fld_count);
       static IO mk_edge(unsigned _edge);
-      static IO mk_fill_data(unsigned _fill_start, unsigned _fill_size);
+      static IO mk_fill(unsigned _fill_start, unsigned _fill_size);
 
       std::vector<IO> inputs;  // TODO: short vectors
       std::vector<IO> outputs;

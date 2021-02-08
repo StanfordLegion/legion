@@ -40,18 +40,14 @@ static int fsync(int fd)
 
 namespace Realm {
 
-    FileXferDes::FileXferDes(DmaRequest *_dma_request, Channel *_channel,
+    FileXferDes::FileXferDes(uintptr_t _dma_op, Channel *_channel,
 			     NodeID _launch_node, XferDesID _guid,
 			     const std::vector<XferDesPortInfo>& inputs_info,
 			     const std::vector<XferDesPortInfo>& outputs_info,
-			     bool _mark_start,
-			     uint64_t _max_req_size, long max_nr, int _priority,
-			     XferDesFence* _complete_fence)
-      : XferDes(_dma_request, _channel, _launch_node, _guid,
+			     int _priority)
+      : XferDes(_dma_op, _channel, _launch_node, _guid,
 		inputs_info, outputs_info,
-		_mark_start,
-		_max_req_size, _priority,
-                _complete_fence)
+		_priority, 0, 0)
     {
       RegionInstance inst;
       if((inputs_info.size() == 1) &&
@@ -71,6 +67,7 @@ namespace Realm {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
       file_info = static_cast<FileMemory::OpenFileInfo *>(impl->metadata.mem_specific);
 
+      const int max_nr = 10; // FIXME
       file_reqs = (FileRequest*) calloc(max_nr, sizeof(DiskRequest));
       for (int i = 0; i < max_nr; i++) {
         file_reqs[i].xd = this;
@@ -145,18 +142,14 @@ namespace Realm {
       fsync(file_info->fd);
     }
 
-    DiskXferDes::DiskXferDes(DmaRequest *_dma_request, Channel *_channel,
+    DiskXferDes::DiskXferDes(uintptr_t _dma_op, Channel *_channel,
 			     NodeID _launch_node, XferDesID _guid,
 			     const std::vector<XferDesPortInfo>& inputs_info,
 			     const std::vector<XferDesPortInfo>& outputs_info,
-			     bool _mark_start,
-			     uint64_t _max_req_size, long max_nr, int _priority,
-			     XferDesFence* _complete_fence)
-      : XferDes(_dma_request, _channel, _launch_node, _guid,
+			     int _priority)
+      : XferDes(_dma_op, _channel, _launch_node, _guid,
 		inputs_info, outputs_info,
-		_mark_start,
-		_max_req_size, _priority,
-                _complete_fence)
+		_priority, 0, 0)
       , fd(-1) // defer file open
     {
       if((inputs_info.size() >= 1) &&
@@ -177,6 +170,7 @@ namespace Realm {
 	assert(0 && "neither source nor dest of DiskXferDes is disk!?");
       }
 
+      const int max_nr = 10; // FIXME
       disk_reqs = (DiskRequest*) calloc(max_nr, sizeof(DiskRequest));
       for (int i = 0; i < max_nr; i++) {
         disk_reqs[i].xd = this;
@@ -278,19 +272,20 @@ namespace Realm {
     {
     }
 
-    XferDes *FileChannel::create_xfer_des(DmaRequest *dma_request,
+    XferDes *FileChannel::create_xfer_des(uintptr_t dma_op,
 					  NodeID launch_node,
 					  XferDesID guid,
 					  const std::vector<XferDesPortInfo>& inputs_info,
 					  const std::vector<XferDesPortInfo>& outputs_info,
-					  bool mark_started,
-					  uint64_t max_req_size, long max_nr, int priority,
-					  XferDesFence *complete_fence)
+					  int priority,
+					  XferDesRedopInfo redop_info,
+					  const void *fill_data, size_t fill_size)
     {
-      return new FileXferDes(dma_request, this, launch_node, guid,
+      assert(redop_info.id == 0);
+      assert(fill_size == 0);
+      return new FileXferDes(dma_op, this, launch_node, guid,
 			     inputs_info, outputs_info,
-			     mark_started, max_req_size, max_nr, priority,
-			     complete_fence);
+			     priority);
     }
 
     long FileChannel::submit(Request** requests, long nr)
@@ -340,19 +335,20 @@ namespace Realm {
     {
     }
 
-    XferDes *DiskChannel::create_xfer_des(DmaRequest *dma_request,
+    XferDes *DiskChannel::create_xfer_des(uintptr_t dma_op,
 					  NodeID launch_node,
 					  XferDesID guid,
 					  const std::vector<XferDesPortInfo>& inputs_info,
 					  const std::vector<XferDesPortInfo>& outputs_info,
-					  bool mark_started,
-					  uint64_t max_req_size, long max_nr, int priority,
-					  XferDesFence *complete_fence)
+					  int priority,
+					  XferDesRedopInfo redop_info,
+					  const void *fill_data, size_t fill_size)
     {
-      return new DiskXferDes(dma_request, this, launch_node, guid,
+      assert(redop_info.id == 0);
+      assert(fill_size == 0);
+      return new DiskXferDes(dma_op, this, launch_node, guid,
 			     inputs_info, outputs_info,
-			     mark_started, max_req_size, max_nr, priority,
-			     complete_fence);
+			     priority);
     }
 
     long DiskChannel::submit(Request** requests, long nr)

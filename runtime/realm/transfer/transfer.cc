@@ -1562,9 +1562,7 @@ namespace Realm {
 
     // consider destinations first
     for(size_t i = 0; i < dsts.size(); i++) {
-      if(dsts[i].indirect_index < 0) {
-	assert(dsts[i].inst.exists());
-	assert(dsts[i].field_id != FieldID(-1));
+      if((dsts[i].field_id != FieldID(-1)) && dsts[i].inst.exists()) {
 	preferred_dim_order(preferred,
 			    is.bounds, dsts[i].inst, dsts[i].field_id,
 			    trivial, max_stride);
@@ -1578,9 +1576,7 @@ namespace Realm {
 
     // then consider sources
     for(size_t i = 0; i < srcs.size(); i++) {
-      if(srcs[i].indirect_index < 0) {
-	assert(srcs[i].inst.exists());
-	assert(srcs[i].field_id != FieldID(-1));
+      if((srcs[i].field_id != FieldID(-1)) && srcs[i].inst.exists()) {
 	preferred_dim_order(preferred,
 			    is.bounds, srcs[i].inst, srcs[i].field_id,
 			    trivial, max_stride);
@@ -1765,9 +1761,6 @@ namespace Realm {
 			       size_t msglen)
     {
       std::vector<XferDesPortInfo> inputs_info, outputs_info;
-      bool mark_started = false;
-      uint64_t max_req_size = 0;
-      long max_nr = 0;
       int priority = 0;
       size_t element_size;
       std::vector<IndexSpace<N,T> > spaces;
@@ -1776,9 +1769,6 @@ namespace Realm {
 
       bool ok = ((fbd >> inputs_info) &&
 		 (fbd >> outputs_info) &&
-		 (fbd >> mark_started) &&
-		 (fbd >> max_req_size) &&
-		 (fbd >> max_nr) &&
 		 (fbd >> priority) &&
 		 (fbd >> element_size) &&
 		 (fbd >> spaces));
@@ -1787,16 +1777,13 @@ namespace Realm {
   
       //assert(!args.inst.exists());
       assert(local_addrsplit_channel);
-      XferDes *xd = new AddressSplitXferDes<N,T>(args.dma_request,
+      XferDes *xd = new AddressSplitXferDes<N,T>(args.dma_op,
 						 local_addrsplit_channel,
 						 args.launch_node,
 						 args.guid,
 						 inputs_info,
 						 outputs_info,
-						 mark_started,
-						 max_req_size,
-						 max_nr, priority,
-						 args.complete_fence,
+						 priority,
 						 element_size,
 						 spaces);
 
@@ -1822,15 +1809,15 @@ namespace Realm {
   public:
     virtual void release();
 
-    virtual void create_xfer_des(DmaRequest *dma_request,
+    virtual void create_xfer_des(uintptr_t dma_op,
 				 NodeID launch_node,
 				 NodeID target_node,
 				 XferDesID guid,
 				 const std::vector<XferDesPortInfo>& inputs_info,
 				 const std::vector<XferDesPortInfo>& outputs_info,
-				 bool mark_started,
-				 uint64_t max_req_size, long max_nr, int priority,
-				 XferDesFence *complete_fence);
+				 int priority,
+				 XferDesRedopInfo redop_info,
+				 const void *fill_data, size_t fill_size);
 
     static ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N,T> > areg;
 
@@ -1848,13 +1835,11 @@ namespace Realm {
     friend class AddressSplitXferDesFactory<N,T>;
     friend struct AddressSplitXferDesCreateMessage<N,T>;
     
-    AddressSplitXferDes(DmaRequest *_dma_request, Channel *_channel,
+    AddressSplitXferDes(uintptr_t _dma_op, Channel *_channel,
 			NodeID _launch_node, XferDesID _guid,
 			const std::vector<XferDesPortInfo>& inputs_info,
 			const std::vector<XferDesPortInfo>& outputs_info,
-			bool _mark_start,
-			uint64_t _max_req_size, long max_nr, int _priority,
-			XferDesFence* _complete_fence,
+			int _priority,
 			size_t _element_size,
 			const std::vector<IndexSpace<N,T> >& _spaces);
 
@@ -1895,44 +1880,37 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void AddressSplitXferDesFactory<N,T>::create_xfer_des(DmaRequest *dma_request,
+  void AddressSplitXferDesFactory<N,T>::create_xfer_des(uintptr_t dma_op,
 							NodeID launch_node,
 							NodeID target_node,
 							XferDesID guid,
 							const std::vector<XferDesPortInfo>& inputs_info,
 							const std::vector<XferDesPortInfo>& outputs_info,
-							bool mark_started,
-							uint64_t max_req_size, long max_nr, int priority,
-							XferDesFence *complete_fence)
+							int priority,
+							XferDesRedopInfo redop_info,
+							const void *fill_data, size_t fill_size)
   {
+    assert(redop_info.id == 0);
+    assert(fill_size == 0);
     if(target_node == Network::my_node_id) {
       // local creation
       //assert(!inst.exists());
       assert(local_addrsplit_channel);
-      XferDes *xd = new AddressSplitXferDes<N,T>(dma_request,
+      XferDes *xd = new AddressSplitXferDes<N,T>(dma_op,
 						 local_addrsplit_channel,
 						 launch_node, guid,
 						 inputs_info, outputs_info,
-						 mark_started,
-						 max_req_size, max_nr, priority,
-						 complete_fence,
+						 priority,
 						 bytes_per_element,
 						 spaces);
 
       local_addrsplit_channel->enqueue_ready_xd(xd);
     } else {
-      // marking the transfer started has to happen locally
-      if(mark_started)
-	dma_request->mark_started();
-      
       // remote creation
       Serialization::ByteCountSerializer bcs;
       {
 	bool ok = ((bcs << inputs_info) &&
 		   (bcs << outputs_info) &&
-		   (bcs << false /*mark_started*/) &&
-		   (bcs << max_req_size) &&
-		   (bcs << max_nr) &&
 		   (bcs << priority) &&
 		   (bcs << bytes_per_element) &&
 		   (bcs << spaces));
@@ -1941,16 +1919,12 @@ namespace Realm {
       size_t req_size = bcs.bytes_used();
       ActiveMessage<AddressSplitXferDesCreateMessage<N,T> > amsg(target_node, req_size);
       //amsg->inst = inst;
-      amsg->complete_fence  = complete_fence;
       amsg->launch_node = launch_node;
       amsg->guid = guid;
-      amsg->dma_request = dma_request;
+      amsg->dma_op = dma_op;
       {
 	bool ok = ((amsg << inputs_info) &&
 		   (amsg << outputs_info) &&
-		   (amsg << false /*mark_started*/) &&
-		   (amsg << max_req_size) &&
-		   (amsg << max_nr) &&
 		   (amsg << priority) &&
 		   (amsg << bytes_per_element) &&
 		   (amsg << spaces));
@@ -1966,17 +1940,15 @@ namespace Realm {
   // class AddressSplitXferDes<N,T>
   //
 
-  AddressSplitXferDesBase::AddressSplitXferDesBase(DmaRequest *_dma_request,
+  AddressSplitXferDesBase::AddressSplitXferDesBase(uintptr_t _dma_op,
 						   Channel *_channel,
 						   NodeID _launch_node, XferDesID _guid,
 						   const std::vector<XferDesPortInfo>& inputs_info,
 						   const std::vector<XferDesPortInfo>& outputs_info,
-						   bool _mark_start,
-						   uint64_t _max_req_size, long max_nr, int _priority,
-						   XferDesFence* _complete_fence)
-    : XferDes(_dma_request, _channel, _launch_node, _guid,
+						   int _priority)
+    : XferDes(_dma_op, _channel, _launch_node, _guid,
 	      inputs_info, outputs_info,
-	      _mark_start, _max_req_size, _priority, _complete_fence)
+	      _priority, 0, 0)
   {}
 
   long AddressSplitXferDesBase::get_requests(Request** requests, long nr)
@@ -2004,19 +1976,16 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  AddressSplitXferDes<N,T>::AddressSplitXferDes(DmaRequest *_dma_request, Channel *_channel,
+  AddressSplitXferDes<N,T>::AddressSplitXferDes(uintptr_t _dma_op, Channel *_channel,
 						NodeID _launch_node, XferDesID _guid,
 						const std::vector<XferDesPortInfo>& inputs_info,
 						const std::vector<XferDesPortInfo>& outputs_info,
-						bool _mark_start,
-						uint64_t _max_req_size, long max_nr, int _priority,
-						XferDesFence* _complete_fence,
+						int _priority,
 						size_t _element_size,
 						const std::vector<IndexSpace<N,T> >& _spaces)
-    : AddressSplitXferDesBase(_dma_request, _channel, _launch_node, _guid,
+    : AddressSplitXferDesBase(_dma_op, _channel, _launch_node, _guid,
 			      inputs_info, outputs_info,
-			      _mark_start, _max_req_size, max_nr, _priority,
-			      _complete_fence)
+			      _priority)
     , spaces(_spaces)
     , element_size(_element_size)
     , point_index(0), point_count(0)
@@ -4075,7 +4044,7 @@ namespace Realm {
       if(srcs[i].field_id == FieldID(-1))
 	fill_size += srcs[i].size;
 
-    //size_t fill_ofs = 0;
+    size_t fill_ofs = 0;
     if(fill_size > 0) {
       fill_data = malloc(fill_size);
       assert(fill_data);
@@ -4105,7 +4074,62 @@ namespace Realm {
       if(srcs[i].field_id == FieldID(-1)) {
 	// fill
 	assert((dsts[i].indirect_index == -1) && "help: scatter fill!");
-	assert(0);
+
+	src_fields[i] = FieldInfo { FieldID(-1), 0, 0, 0 };
+	dst_fields[i] = FieldInfo { dsts[i].field_id, dsts[i].subfield_offset, dsts[i].size, dsts[i].serdez_id };
+
+	Memory dst_mem = dsts[i].inst.get_location();
+	MemPathInfo path_info;
+	bool ok = find_shortest_path(Memory::NO_MEMORY, dst_mem, serdez_id,
+				     path_info);
+	if(!ok) {
+	  log_new_dma.fatal() << "FATAL: no fill path found for " << dst_mem << " (serdez=" << serdez_id << ")";
+	  assert(0);
+	}
+
+	size_t pathlen = path_info.xd_channels.size();
+	size_t xd_idx = graph.xd_nodes.size();
+	//size_t ib_idx = graph.ib_edges.size();
+
+	graph.xd_nodes.resize(xd_idx + pathlen);
+	if(pathlen > 1) {
+	  log_new_dma.fatal() << "FATAL: multi-hop fill path found for " << dst_mem << " (serdez=" << serdez_id << ")";
+	  assert(0);
+	}
+	// just one node for now
+	{
+	  TransferGraph::XDTemplate& xdn = graph.xd_nodes[xd_idx++];
+	      
+	  //xdn.kind = path_info.xd_kinds[j];
+	  xdn.factory = path_info.xd_channels[0]->get_factory();
+	  xdn.gather_control_input = -1;
+	  xdn.scatter_control_input = -1;
+	  xdn.target_node = path_info.xd_channels[0]->node;
+	  xdn.inputs.resize(1);
+	  xdn.inputs[0] = TransferGraph::XDTemplate::mk_fill(fill_ofs,
+							     combined_field_size);
+	  // FIXME: handle multiple fields
+	  memcpy(static_cast<char *>(fill_data)+fill_ofs,
+		 ((srcs[i].size <= CopySrcDstField::MAX_DIRECT_SIZE) ?
+		    srcs[i].fill_data.direct :
+		    srcs[i].fill_data.indirect),
+		 srcs[i].size);
+	  fill_ofs += srcs[i].size;
+
+	  xdn.outputs.resize(1);
+	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
+							      i, 1);
+	}
+
+        prof_usage.source = Memory::NO_MEMORY;
+        prof_usage.target = dst_mem;
+        prof_usage.size += domain_size * combined_field_size;
+        prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
+              RegionInstance::NO_INST,
+              dsts[i].inst,
+              1 /*num_fields*/,
+              ProfilingMeasurements::OperationCopyInfo::FILL,
+              unsigned(pathlen) });
       } else {
 	src_fields[i] = FieldInfo { srcs[i].field_id, srcs[i].subfield_offset, srcs[i].size, srcs[i].serdez_id };
 	dst_fields[i] = FieldInfo { dsts[i].field_id, dsts[i].subfield_offset, dsts[i].size, dsts[i].serdez_id };
@@ -4489,6 +4513,8 @@ namespace Realm {
       os << "ind(" << io.indirect.ind_idx << "," << io.indirect.port << "," << io.indirect.inst << "," << io.indirect.fld_start << "+" << io.indirect.fld_count << ")"; break;
     case TransferGraph::XDTemplate::IO_EDGE:
       os << "edge(" << io.edge << ")"; break;
+    case TransferGraph::XDTemplate::IO_FILL_DATA:
+      os << "fill(" << io.fill.fill_start << "+" << io.fill.fill_size << ")"; break;
     default:
       assert(0);
     }
@@ -4554,6 +4580,9 @@ namespace Realm {
       NodeID xd_target_node = xdn.target_node;
       XferDesID xd_guid = xd_ids[i];
       XferDesFactory *xd_factory = xdn.factory;
+
+      const void *fill_data = 0;
+      size_t fill_size = 0;
 
       std::vector<XferDesPortInfo> inputs_info(xdn.inputs.size());
       for(size_t j = 0; j < xdn.inputs.size(); j++) {
@@ -4630,6 +4659,15 @@ namespace Realm {
 	    ii.ib_size = tg.ib_edges[xdn.inputs[j].edge].size;
 	    ii.iter = new WrappingFIFOIterator(ii.ib_offset, ii.ib_size);
 	    ii.serdez_id = 0;
+	    break;
+	  }
+	case TransferGraph::XDTemplate::IO_FILL_DATA:
+	  {
+	    // don't actually want an input in this case
+	    assert((j == 0) && (xdn.inputs.size() == 1));
+	    inputs_info.clear();
+	    fill_data = static_cast<const char *>(desc.fill_data) + xdn.inputs[j].fill.fill_start;
+	    fill_size = xdn.inputs[j].fill.fill_size;
 	    break;
 	  }
 	default:
@@ -4802,17 +4840,14 @@ namespace Realm {
       xd_trackers[i] = new XDLifetimeTracker(this, xd_ids[i]);
       add_async_work_item(xd_trackers[i]);
 	
-      xd_factory->create_xfer_des(//this,
-				  reinterpret_cast<DmaRequest *>(this), // HACK!
+      xd_factory->create_xfer_des(reinterpret_cast<uintptr_t>(this),
 				  Network::my_node_id, xd_target_node,
 				  xd_guid,
 				  inputs_info,
 				  outputs_info,
-				  false /*!mark_started*/,
-				  //pre_buf, cur_buf, domain, oasvec_src,
-				  16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
 				  priority,
-				  0 /*complete_fence*/);
+				  XferDesRedopInfo(),
+				  fill_data, fill_size);
     }
 
     // record requested profiling information
@@ -4916,9 +4951,9 @@ namespace Realm {
 			      Event wait_on) const
   {
     bool any_fills_or_reduces = false;
-    for(size_t i = 0; i < srcs.size(); i++)
-      if(srcs[i].field_id == FieldID(-1))
-	any_fills_or_reduces = true;
+    //for(size_t i = 0; i < srcs.size(); i++)
+    //  if(srcs[i].field_id == FieldID(-1))
+    //	any_fills_or_reduces = true;
     for(size_t i = 0; i < dsts.size(); i++)
       if(dsts[i].redop_id != 0)
 	any_fills_or_reduces = true;

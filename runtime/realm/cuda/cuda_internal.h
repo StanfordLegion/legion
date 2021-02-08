@@ -769,17 +769,32 @@ namespace Realm {
       GPUCompletionEvent event;
     };
 
+    class GPUTransferCompletion : public GPUCompletionNotification {
+    public:
+      GPUTransferCompletion(XferDes *_xd, int _read_port_idx,
+                            size_t _read_offset, size_t _read_size,
+                            int _write_port_idx, size_t _write_offset,
+                            size_t _write_size);
+
+      virtual void request_completed(void);
+
+    protected:
+      XferDes *xd;
+      int read_port_idx;
+      size_t read_offset, read_size;
+      int write_port_idx;
+      size_t write_offset, write_size;
+    };
+
     class GPUChannel;
 
     class GPUXferDes : public XferDes {
     public:
-      GPUXferDes(DmaRequest *_dma_request, Channel *_channel,
+      GPUXferDes(uintptr_t _dma_op, Channel *_channel,
 		 NodeID _launch_node, XferDesID _guid,
 		 const std::vector<XferDesPortInfo>& inputs_info,
 		 const std::vector<XferDesPortInfo>& outputs_info,
-		 bool _mark_start,
-		 uint64_t _max_req_size, long max_nr, int _priority,
-		 XferDesFence* _complete_fence);
+		 int _priority);
 
       ~GPUXferDes()
       {
@@ -813,20 +828,63 @@ namespace Realm {
       // multiple concurrent cuda copies ok
       static const bool is_ordered = false;
 
-      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
 				       NodeID launch_node,
 				       XferDesID guid,
 				       const std::vector<XferDesPortInfo>& inputs_info,
 				       const std::vector<XferDesPortInfo>& outputs_info,
-				       bool mark_started,
-				       uint64_t max_req_size, long max_nr, int priority,
-				       XferDesFence *complete_fence);
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size);
 
       long submit(Request** requests, long nr);
 
     private:
       GPU* src_gpu;
       //std::deque<Request*> pending_copies;
+    };
+
+    class GPUfillChannel;
+
+    class GPUfillXferDes : public XferDes {
+    public:
+      GPUfillXferDes(uintptr_t _dma_op, Channel *_channel,
+		     NodeID _launch_node, XferDesID _guid,
+		     const std::vector<XferDesPortInfo>& inputs_info,
+		     const std::vector<XferDesPortInfo>& outputs_info,
+		     int _priority,
+		     const void *_fill_data, size_t _fill_size);
+
+      long get_requests(Request** requests, long nr);
+
+      bool progress_xd(GPUfillChannel *channel, TimeLimit work_until);
+
+    protected:
+      size_t reduced_fill_size;
+    };
+
+    class GPUfillChannel : public SingleXDQChannel<GPUfillChannel, GPUfillXferDes> {
+    public:
+      GPUfillChannel(GPU* _gpu, BackgroundWorkManager *bgwork);
+
+      // multiple concurrent cuda fills ok
+      static const bool is_ordered = false;
+
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
+				       NodeID launch_node,
+				       XferDesID guid,
+				       const std::vector<XferDesPortInfo>& inputs_info,
+				       const std::vector<XferDesPortInfo>& outputs_info,
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size);
+
+      long submit(Request** requests, long nr);
+
+    protected:
+      friend class GPUfillXferDes;
+
+      GPU* gpu;
     };
 
   }; // namespace Cuda

@@ -69,7 +69,8 @@ namespace Realm {
       XFER_HDF5_WRITE,
       XFER_FILE_READ,
       XFER_FILE_WRITE,
-      XFER_ADDR_SPLIT
+      XFER_ADDR_SPLIT,
+      XFER_MEM_FILL,
     };
 
     class Request {
@@ -176,6 +177,15 @@ namespace Realm {
       CustomSerdezID serdez_id;
     };
 
+    struct XferDesRedopInfo {
+      ReductionOpID id;
+      bool is_fold;
+      bool in_place;
+
+      // default constructor == no reduction requested
+      XferDesRedopInfo() : id(0), is_fold(false), in_place(false) {}
+    };
+
     class AddressList {
     public:
       AddressList();
@@ -222,10 +232,8 @@ namespace Realm {
     class XferDes {
     public:
       // a pointer to the DmaRequest that contains this XferDes
-      DmaRequest* dma_request;
+      uintptr_t dma_op;
       XferDesQueue *xferDes_queue;
-      // a boolean indicating if we have marked started
-      bool mark_start;
       // ID of the node that launches this XferDes
       NodeID launch_node;
       //uint64_t /*bytes_submit, */bytes_read, bytes_write/*, bytes_total*/;
@@ -276,8 +284,15 @@ namespace Realm {
       };
       // channel this XferDes describes
       Channel* channel;
-      // event is triggered when the XferDes is completed
-      XferDesFence* complete_fence;
+
+      void *fill_data;
+      size_t fill_size, orig_fill_size;
+      // for most fills, we can use an inline buffer with good alignment
+      static const size_t ALIGNED_FILL_STORAGE_SIZE = 32;
+      struct UnalignedStorage { char data[ALIGNED_FILL_STORAGE_SIZE]; };
+      REALM_ALIGNED_TYPE_CONST(AlignedStorage, UnalignedStorage, 16);
+      AlignedStorage inline_fill_storage;
+
       // xd_lock is designed to provide thread-safety for
       // SIMULTANEOUS invocation to get_requests,
       // notify_request_read_done, and notify_request_write_done
@@ -304,13 +319,12 @@ namespace Realm {
       std::queue<Request*> available_reqs;
 
     public:
-      XferDes(DmaRequest *_dma_request, Channel *_channel,
+      XferDes(uintptr_t _dma_op, Channel *_channel,
 	      NodeID _launch_node, XferDesID _guid,
 	      const std::vector<XferDesPortInfo>& inputs_info,
 	      const std::vector<XferDesPortInfo>& outputs_info,
-	      bool _mark_start,
-              uint64_t _max_req_size, int _priority,
-              XferDesFence* _complete_fence);
+	      int _priority,
+              const void *_fill_data, size_t fill_size);
 
       // transfer descriptors are reference counted rather than explcitly
       //  deleted
@@ -325,11 +339,11 @@ namespace Realm {
 
       virtual long get_requests(Request** requests, long nr) = 0;
 
-      virtual void notify_request_read_done(Request* req) = 0;
+      virtual void notify_request_read_done(Request* req);
 
-      virtual void notify_request_write_done(Request* req) = 0;
+      virtual void notify_request_write_done(Request* req);
 
-      virtual void flush() = 0;
+      virtual void flush();
  
       long default_get_requests(Request** requests, long nr, unsigned flags = 0);
       void default_notify_request_read_done(Request* req);
@@ -461,19 +475,21 @@ namespace Realm {
       //  structures to record that transfers for 'total_bytes' bytes were at
       //  least initiated - return value is whether iteration is complete
       bool record_address_consumption(size_t total_bytes);
+
+      // fills can be more efficient if the fill data is replicated into a larger
+      //  block
+      void replicate_fill_data(size_t new_size);
     };
 
     class MemcpyChannel;
 
     class MemcpyXferDes : public XferDes {
     public:
-      MemcpyXferDes(DmaRequest *_dma_request, Channel *_channel,
+      MemcpyXferDes(uintptr_t _dma_op, Channel *_channel,
 		    NodeID _launch_node, XferDesID _guid,
 		    const std::vector<XferDesPortInfo>& inputs_info,
 		    const std::vector<XferDesPortInfo>& outputs_info,
-		    bool _mark_start,
-		    uint64_t _max_req_size, long max_nr, int _priority,
-		    XferDesFence* _complete_fence);
+		    int _priority, XferDesRedopInfo _redop_info);
 
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
@@ -490,20 +506,39 @@ namespace Realm {
       bool memcpy_req_in_use;
       MemcpyRequest memcpy_req;
       bool has_serdez;
+      XferDesRedopInfo redop_info;
       //const char *src_buf_base, *dst_buf_base;
+    };
+
+    class MemfillChannel;
+
+    class MemfillXferDes : public XferDes {
+    public:
+      MemfillXferDes(uintptr_t _dma_op, Channel *_channel,
+		     NodeID _launch_node, XferDesID _guid,
+		     const std::vector<XferDesPortInfo>& inputs_info,
+		     const std::vector<XferDesPortInfo>& outputs_info,
+		     int _priority,
+		     const void *_fill_data, size_t _fill_size);
+
+      long get_requests(Request** requests, long nr);
+
+      virtual bool request_available();
+      virtual Request* dequeue_request();
+      virtual void enqueue_request(Request* req);
+
+      bool progress_xd(MemfillChannel *channel, TimeLimit work_until);
     };
 
     class GASNetChannel;
 
     class GASNetXferDes : public XferDes {
     public:
-      GASNetXferDes(DmaRequest *_dma_request, Channel *_channel,
+      GASNetXferDes(uintptr_t _dma_op, Channel *_channel,
 		    NodeID _launch_node, XferDesID _guid,
 		    const std::vector<XferDesPortInfo>& inputs_info,
 		    const std::vector<XferDesPortInfo>& outputs_info,
-		    bool _mark_start,
-		    uint64_t _max_req_size, long max_nr, int _priority,
-		    XferDesFence* _complete_fence);
+		    int _priority);
 
       ~GASNetXferDes()
       {
@@ -525,13 +560,11 @@ namespace Realm {
 
     class RemoteWriteXferDes : public XferDes {
     public:
-      RemoteWriteXferDes(DmaRequest *_dma_request, Channel *_channel,
+      RemoteWriteXferDes(uintptr_t _dma_op, Channel *_channel,
 			 NodeID _launch_node, XferDesID _guid,
 			 const std::vector<XferDesPortInfo>& inputs_info,
 			 const std::vector<XferDesPortInfo>& outputs_info,
-			 bool _mark_start,
-			 uint64_t _max_req_size, long max_nr, int _priority,
-			 XferDesFence* _complete_fence);
+			 int _priority);
 
       ~RemoteWriteXferDes()
       {
@@ -579,22 +612,20 @@ namespace Realm {
     public:
       virtual void release() = 0;
 
-      virtual void create_xfer_des(DmaRequest *dma_request,
+      virtual void create_xfer_des(uintptr_t dma_op,
 				   NodeID launch_node,
 				   NodeID target_node,
 				   XferDesID guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
-				   bool mark_started,
-				   uint64_t max_req_size, long max_nr, int priority,
-				   XferDesFence *complete_fence/*,
-				   RegionInstance inst = RegionInstance::NO_INST*/) = 0;
+				   int priority,
+				   XferDesRedopInfo redop_info,
+				   const void *fill_data, size_t fill_size) = 0;
     };
 
     struct XferDesCreateMessageBase {
       //RegionInstance inst;
-      XferDesFence *complete_fence;
-      DmaRequest *dma_request;
+      uintptr_t dma_op;
       XferDesID guid;
       NodeID launch_node;
       uintptr_t channel;
@@ -615,16 +646,15 @@ namespace Realm {
 
       virtual void release();
 
-      virtual void create_xfer_des(DmaRequest *dma_request,
+      virtual void create_xfer_des(uintptr_t dma_op,
 				   NodeID launch_node,
 				   NodeID target_node,
 				   XferDesID guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
-				   bool mark_started,
-				   uint64_t max_req_size, long max_nr, int priority,
-				   XferDesFence *complete_fence/*,
-				   RegionInstance inst = RegionInstance::NO_INST*/);
+				   int priority,
+				   XferDesRedopInfo redop_info,
+				   const void *fill_data, size_t fill_size);
 
     protected:
       uintptr_t channel;
@@ -745,14 +775,14 @@ namespace Realm {
     public:
       LocalChannel(XferDesKind _kind);
 
-      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
 				       NodeID launch_node,
 				       XferDesID guid,
 				       const std::vector<XferDesPortInfo>& inputs_info,
 				       const std::vector<XferDesPortInfo>& outputs_info,
-				       bool mark_started,
-				       uint64_t max_req_size, long max_nr, int priority,
-				       XferDesFence *complete_fence) = 0;
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size) = 0;
 
       virtual XferDesFactory *get_factory();
 
@@ -860,14 +890,37 @@ namespace Realm {
 				 unsigned *bw_ret = 0,
 				 unsigned *lat_ret = 0);
 
-      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
 				       NodeID launch_node,
 				       XferDesID guid,
 				       const std::vector<XferDesPortInfo>& inputs_info,
 				       const std::vector<XferDesPortInfo>& outputs_info,
-				       bool mark_started,
-				       uint64_t max_req_size, long max_nr, int priority,
-				       XferDesFence *complete_fence);
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size);
+
+      virtual long submit(Request** requests, long nr);
+
+      bool is_stopped;
+    };
+
+    class MemfillChannel : public SingleXDQChannel<MemfillChannel, MemfillXferDes> {
+    public:
+      MemfillChannel(BackgroundWorkManager *bgwork);
+
+      // multiple concurrent memfills ok
+      static const bool is_ordered = false;
+
+      ~MemfillChannel();
+
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
+				       NodeID launch_node,
+				       XferDesID guid,
+				       const std::vector<XferDesPortInfo>& inputs_info,
+				       const std::vector<XferDesPortInfo>& outputs_info,
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size);
 
       virtual long submit(Request** requests, long nr);
 
@@ -882,14 +935,14 @@ namespace Realm {
       // no more than one GASNet xfer of each type at a time
       static const bool is_ordered = true;
       
-      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
 				       NodeID launch_node,
 				       XferDesID guid,
 				       const std::vector<XferDesPortInfo>& inputs_info,
 				       const std::vector<XferDesPortInfo>& outputs_info,
-				       bool mark_started,
-				       uint64_t max_req_size, long max_nr, int priority,
-				       XferDesFence *complete_fence);
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size);
 
       long submit(Request** requests, long nr);
     };
@@ -902,14 +955,14 @@ namespace Realm {
       // multiple concurrent RDMAs ok
       static const bool is_ordered = false;
 
-      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
 				       NodeID launch_node,
 				       XferDesID guid,
 				       const std::vector<XferDesPortInfo>& inputs_info,
 				       const std::vector<XferDesPortInfo>& outputs_info,
-				       bool mark_started,
-				       uint64_t max_req_size, long max_nr, int priority,
-				       XferDesFence *complete_fence);
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size);
 
       long submit(Request** requests, long nr);
     };
@@ -921,13 +974,11 @@ namespace Realm {
 
     class AddressSplitXferDesBase : public XferDes {
     protected:
-      AddressSplitXferDesBase(DmaRequest *_dma_request, Channel *_channel,
+      AddressSplitXferDesBase(uintptr_t dma_op, Channel *_channel,
 			      NodeID _launch_node, XferDesID _guid,
 			      const std::vector<XferDesPortInfo>& inputs_info,
 			      const std::vector<XferDesPortInfo>& outputs_info,
-			      bool _mark_start,
-			      uint64_t _max_req_size, long max_nr, int _priority,
-			      XferDesFence* _complete_fence);
+			      int _priority);
 
     public:
       virtual bool progress_xd(AddressSplitChannel *channel, TimeLimit work_until) = 0;
@@ -947,14 +998,14 @@ namespace Realm {
       static const bool is_ordered = false;
 
       // override this to make sure it's never called
-      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
 				       NodeID launch_node,
 				       XferDesID guid,
 				       const std::vector<XferDesPortInfo>& inputs_info,
 				       const std::vector<XferDesPortInfo>& outputs_info,
-				       bool mark_started,
-				       uint64_t max_req_size, long max_nr, int priority,
-				       XferDesFence *complete_fence) { assert(0); return 0; }
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size) { assert(0); return 0; }
 
       virtual long submit(Request** requests, long nr) { assert(0); return 0; }
 

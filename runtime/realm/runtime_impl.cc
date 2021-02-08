@@ -666,6 +666,7 @@ namespace Realm {
 
     // create the standard set of channels here
     runtime->add_dma_channel(new MemcpyChannel(&runtime->bgwork));
+    runtime->add_dma_channel(new MemfillChannel(&runtime->bgwork));
     runtime->add_dma_channel(new RemoteWriteChannel(&runtime->bgwork));
     runtime->add_dma_channel(new AddressSplitChannel(&runtime->bgwork));
     runtime->add_dma_channel(new FileChannel(&runtime->bgwork));

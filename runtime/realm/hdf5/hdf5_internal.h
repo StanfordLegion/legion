@@ -91,19 +91,12 @@ namespace Realm {
 
     class HDF5XferDes : public XferDes {
     public:
-      HDF5XferDes(DmaRequest *_dma_request, Channel *_channel,
+      HDF5XferDes(uintptr_t _dma_op, Channel *_channel,
 		  NodeID _launch_node, XferDesID _guid,
 		  const std::vector<XferDesPortInfo>& inputs_info,
 		  const std::vector<XferDesPortInfo>& outputs_info,
-		  bool _mark_start,
-		  uint64_t _max_req_size, long max_nr, int _priority,
-		  XferDesFence* _complete_fence);
-
-      ~HDF5XferDes()
-      {
-        //free(hdf_reqs);
-        //delete lsi;
-      }
+		  int _priority,
+                  const void *_fill_data, size_t _fill_size);
 
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
@@ -120,6 +113,7 @@ namespace Realm {
       bool req_in_use;
       HDF5Request hdf5_req;
       std::map<FieldID, HDF5Dataset *> datasets;
+      static const size_t MAX_FILL_SIZE_IN_BYTES = 65536;
     };
 
     // single channel handles both HDF5 reads and writes
@@ -131,14 +125,14 @@ namespace Realm {
       // handle HDF5 requests in order - no concurrency
       static const bool is_ordered = true;
 
-      virtual XferDes *create_xfer_des(DmaRequest *dma_request,
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
 				       NodeID launch_node,
 				       XferDesID guid,
 				       const std::vector<XferDesPortInfo>& inputs_info,
 				       const std::vector<XferDesPortInfo>& outputs_info,
-				       bool mark_started,
-				       uint64_t max_req_size, long max_nr, int priority,
-				       XferDesFence *complete_fence);
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size);
 
       long submit(Request** requests, long nr);
     };

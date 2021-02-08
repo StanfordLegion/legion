@@ -140,7 +140,7 @@ namespace Realm {
     return io;
   }
   
-  /*static*/ inline TransferGraph::XDTemplate::IO TransferGraph::XDTemplate::mk_fill_data(unsigned _fill_start, unsigned _fill_size)
+  /*static*/ inline TransferGraph::XDTemplate::IO TransferGraph::XDTemplate::mk_fill(unsigned _fill_start, unsigned _fill_size)
   {
     IO io;
     io.iotype = IO_FILL_DATA;
