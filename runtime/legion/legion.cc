@@ -2340,6 +2340,49 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Future Functor
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FutureFunctor::~FutureFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void* FutureFunctor::callback_get_future(Memory::Kind &kind, size_t &size,
+                                  bool &owned, void (*&freefunc)(void*,size_t),
+                                  const void *&metadata, size_t &metasize)
+    //--------------------------------------------------------------------------
+    {
+      kind = Memory::SYSTEM_MEM;
+      size = callback_get_future_size();
+      owned = true;
+      freefunc = NULL;
+      metadata = NULL;
+      metasize = 0;
+      if (size == 0)
+        return NULL;
+      void *result = malloc(size);
+      callback_pack_future(result, size);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t FutureFunctor::callback_get_future_size(void)
+    //--------------------------------------------------------------------------
+    {
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureFunctor::callback_pack_future(void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Future Map 
     /////////////////////////////////////////////////////////////
 

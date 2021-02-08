@@ -2143,6 +2143,26 @@ namespace Legion {
       // task execution to the output regions' physical managers
       if (!output_regions.empty())
         finalize_output_regions();
+      // See if we need to pull the data in from a callback in the case
+      // where we are going to be doing a reduction immediately, if we
+      // are then we're going to overwrite 'owned' so save it to callback_owned
+      bool callback_owned = false;
+      bool eager_callback = false;
+      if (callback_functor != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(res == NULL);
+        assert(metadataptr == NULL);
+        assert(metadatasize == 0);
+#endif
+        if (owner_task->is_reducing_future())
+        {
+          eager_callback = true;
+          callback_owned = owned;
+          res = callback_functor->callback_get_future(result_kind, res_size,
+                                owned, freefunc, metadataptr, metadatasize);
+        }
+      }
       // If we have a deferred result instance we need to escape that too
       RtEvent copy_future;
       FutureInstance *instance = NULL;
@@ -2150,7 +2170,6 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(res != NULL);
-        assert(callback_functor == NULL);
         assert(freefunc == NULL);
 #endif
         instance = new FutureInstance(res, res_size,
@@ -2163,7 +2182,6 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(res != NULL);
-        assert(callback_functor == NULL);
 #endif
         // We've actually got data to pass back, get the memory
         const Memory memory =
@@ -2176,19 +2194,14 @@ namespace Legion {
         else
           instance = copy_to_future_inst(res, res_size, memory, copy_future);
       }
-      else if ((callback_functor != NULL) && owner_task->is_reducing_future())
+      // If we did an eager callback, restore whether we own it now
+      bool release_callback = false;
+      if (eager_callback)
       {
-        // If we're reducing this future value then just do the callback
-        // now since there is no point in deferring it
-        const size_t callback_size = 
-          callback_functor->callback_get_future_size();
-        void *buffer = malloc(callback_size);
-        callback_functor->callback_pack_future(buffer, callback_size);
-        callback_functor->callback_release_future();
-        if (owned)
-          delete callback_functor;
-        instance = FutureInstance::create_local(buffer, callback_size,
-                                      true/*own allocation*/, runtime);
+        // Release the callback here if we do not own the output and
+        // therefore going to make a copy of it
+        release_callback = !owned;
+        owned = callback_owned;
       }
       // Once there are no more escaping instances we can release the rest
       if (!task_local_instances.empty())
@@ -2222,8 +2235,12 @@ namespace Legion {
       }
       else if (copy_future.exists() && !copy_future.has_triggered())
         effects_done = Runtime::merge_events(effects_done, copy_future);
-      parent_ctx->add_to_post_task_queue(this, effects_done, instance,
-                   callback_functor, owned, metadataptr, metadatasize);
+      if (release_callback)
+        parent_ctx->add_to_post_task_queue(this, effects_done, instance,
+              NULL/*no functor here*/, owned, metadataptr, metadatasize);
+      else
+        parent_ctx->add_to_post_task_queue(this, effects_done, instance,
+                     callback_functor, owned, metadataptr, metadatasize);
       if (!inline_task)
 #ifdef DEBUG_LEGION
         runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
@@ -2235,6 +2252,13 @@ namespace Legion {
       // before returning to ensure the copy is done before source is deleted
       if (!owned && copy_future.exists() && !copy_future.has_triggered())
         copy_future.wait();
+      // See if we can release our callback down
+      if (release_callback)
+      {
+        callback_functor->callback_release_future();
+        if (callback_owned)
+          delete callback_functor;
+      }
     }
 
     //--------------------------------------------------------------------------

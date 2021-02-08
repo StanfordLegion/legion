@@ -4076,11 +4076,17 @@ namespace Legion {
      */
     class FutureFunctor {
     public:
-      virtual ~FutureFunctor(void) { }
+      virtual ~FutureFunctor(void);
     public:
-      virtual size_t callback_get_future_size(void) = 0;
-      virtual void callback_pack_future(void *buffer, size_t size) = 0;
+      virtual void* callback_get_future(Memory::Kind &kind,
+          size_t &size, bool &owned, void (*&freefunc)(void*,size_t),
+          const void *&metadata, size_t &metasize);
       virtual void callback_release_future(void) = 0;
+    public:
+      // These two are deprecated and will be invoked only if 
+      // callback_get_future_instance is not overridden
+      virtual size_t callback_get_future_size(void);
+      virtual void callback_pack_future(void *buffer, size_t size); 
     };
 
     /**

@@ -212,6 +212,15 @@ namespace Legion {
       public:
         FutureImpl *const impl;
       };
+      struct CallbackReleaseArgs : public LgTaskArgs<CallbackReleaseArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_CALLBACK_RELEASE_TASK_ID;
+      public:
+        CallbackReleaseArgs(FutureFunctor *functor, bool own_functor);
+      public:
+        FutureFunctor *const functor;
+        const bool own_functor;
+      };
       struct PendingInstance {
       public:
         PendingInstance(void)
@@ -338,6 +347,7 @@ namespace Legion {
       void contribute_to_collective(const DynamicCollective &dc,unsigned count);
       static void handle_contribute_to_collective(const void *args);
       static void handle_callback(const void *args);
+      static void handle_release(const void *args);
     public:
       // These three fields are only valid on the owner node
       Operation *const producer_op;

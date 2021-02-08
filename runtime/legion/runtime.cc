@@ -729,9 +729,12 @@ namespace Legion {
       if (producer_op != NULL)
         producer_op->remove_mapping_reference(op_gen);
       if (callback_functor != NULL)
-        callback_functor->callback_release_future();
-      if (own_callback_functor)
-        delete callback_functor;
+      {
+        // Dispatch the deletion functionon the callback processor
+        CallbackReleaseArgs args(callback_functor, own_callback_functor); 
+        runtime->issue_application_processor_task(args,
+              LG_LATENCY_WORK_PRIORITY, callback_proc);
+      }
       if (metadata != NULL)
         free(metadata);
     }
@@ -1416,21 +1419,37 @@ namespace Legion {
       assert(callback_functor != NULL);
       assert(subscription_event.exists());
 #endif
-      size_t result_size = callback_functor->callback_get_future_size();
-      void *result = NULL;
-      if (result_size > 0)
+      Memory::Kind mem_kind = Memory::SYSTEM_MEM;
+      size_t result_size = 0;
+      bool owned = false;
+      void (*freefunc)(void*,size_t) = NULL;
+      const void *metaptr = NULL;
+      void *result = callback_functor->callback_get_future(mem_kind,
+                    result_size, owned, freefunc, metaptr, metasize);
+      const Memory memory = runtime->find_local_memory(callback_proc, mem_kind);
+      FutureInstance *instance = new FutureInstance(result, result_size, memory,
+          ApEvent::NO_AP_EVENT, runtime, false/*eager*/, true/*external*/,
+          false/*own allocation*/, PhysicalInstance::NO_INST, freefunc,
+          callback_proc);
+      // If we have any metadata, copy that now
+      if (metasize > 0)
       {
-        result = malloc(result_size);
-        callback_functor->callback_pack_future(result, result_size);
+#ifdef DEBUG_LEGION
+        assert(metadata == NULL);
+#endif
+        metadata = malloc(metasize);
+        memcpy(metadata, metaptr, metasize);
       }
-      callback_functor->callback_release_future();
-      if (own_callback_functor)
-        delete callback_functor;
-      FutureInstance *instance =
-        FutureInstance::create_local(result, result_size, true/*own*/, runtime);
+      if (owned)
+      {
+        // if we took ownership, we can release the functor now
+        callback_functor->callback_release_future();
+        if (own_callback_functor)
+          delete callback_functor;
+        callback_functor = NULL;
+      }
       // Retake the lock and remove the guards
       AutoLock f_lock(future_lock);
-      callback_functor = NULL;
 #ifdef DEBUG_LEGION
       assert(canonical_instance == NULL);
 #endif
@@ -1454,6 +1473,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureImpl::CallbackReleaseArgs::CallbackReleaseArgs(FutureFunctor *f,
+                                                         bool own)
+      : LgTaskArgs<CallbackReleaseArgs>(implicit_provenance),
+        functor(f), own_functor(own)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void FutureImpl::handle_callback(const void *args)
     //--------------------------------------------------------------------------
     {
@@ -1462,6 +1490,16 @@ namespace Legion {
       if (fargs->impl->remove_base_gc_ref(DEFERRED_TASK_REF))
         delete fargs->impl;
     } 
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureImpl::handle_release(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const CallbackReleaseArgs *cargs = (const CallbackReleaseArgs*)args;
+      cargs->functor->callback_release_future();
+      if (cargs->own_functor)
+        delete cargs->functor;
+    }
 
     //--------------------------------------------------------------------------
     void FutureImpl::unpack_future(Deserializer &derez)
@@ -30708,6 +30746,11 @@ namespace Legion {
         case LG_FUTURE_CALLBACK_TASK_ID:
           {
             FutureImpl::handle_callback(args);
+            break;
+          }
+        case LG_CALLBACK_RELEASE_TASK_ID:
+          {
+            FutureImpl::handle_release(args);
             break;
           }
         case LG_REPLAY_SLICE_ID:
