@@ -257,7 +257,127 @@ if(Legion_USE_HWLOC)
 endif()
 
 if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
+  if(Legion_EMBED_GASNet)
+    # we need to configure/build gasnet at cmake configuration time so that
+    #  we can read in libraries and flags and stuff
+    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/embed-gasnet)
+    set(GASNet_SOURCE_DIR ${CMAKE_BINARY_DIR}/embed-gasnet/source)
+    set(GASNet_BUILD_DIR ${CMAKE_BINARY_DIR}/embed-gasnet/build)
+    set(GASNet_INSTALL_DIR ${CMAKE_BINARY_DIR}/embed-gasnet/install)
+    set(GASNet_BUILD_OUTPUT ${CMAKE_BINARY_DIR}/embed-gasnet/build.log)
+    # if we're building shared libraries, we need -fPIC in the gasnet build
+    if(BUILD_SHARED_LIBS)
+      set(GASNET_CFLAGS -fPIC)
+      set(GASNET_CXXFLAGS -fPIC)
+    else()
+      set(GASNET_CFLAGS "")
+      set(GASNET_CXXFLAGS "")
+    endif()
+    # we'll write the GASNet configuration to a file so that we can rebuild
+    #  (only) if it changes
+    set(GASNet_CONFIG_FILE ${CMAKE_BINARY_DIR}/embed-gasnet/config.txt)
+    set(GASNet_CONFIG_SETTINGS "CONDUIT=${GASNet_CONDUIT}" "GASNET_EXTRA_CONFIGURE_ARGS=${Legion_EMBED_GASNet_CONFIGURE_ARGS}" "GASNET_CFLAGS=${GASNET_CFLAGS}" "GASNET_CXXFLAGS=${GASNET_CXXFLAGS}")
+    if(Legion_EMBED_GASNet_VERSION)
+      # make the source directory version-specific
+      set(GASNet_SOURCE_DIR ${CMAKE_BINARY_DIR}/embed-gasnet/${Legion_EMBED_GASNet_VERSION})
+      list(APPEND GASNet_CONFIG_SETTINGS "GASNET_VERSION=${Legion_EMBED_GASNet_VERSION}")
+    endif()
+    if(EXISTS ${GASNet_CONFIG_FILE})
+      file(READ ${GASNet_CONFIG_FILE} PREV_CONFIG_SETTINGS)
+      if("${GASNet_CONFIG_SETTINGS}" STREQUAL "${PREV_CONFIG_SETTINGS}")
+	# configs match - no build needed
+	set(GASNET_BUILD_NEEDED OFF)
+      else()
+	message(STATUS "Embedded GASNet configuration has changed - rebuilding...")
+	file(REMOVE_RECURSE ${GASNet_BUILD_DIR} ${GASNet_INSTALL_DIR} ${GASNet_CONFIG_FILE})
+	# clear any cached paths/conduits/etc.
+	unset(GASNet_INCLUDE_DIR CACHE)
+	unset(GASNet_CONDUITS CACHE)
+	unset(GASNet_THREADING_OPTS CACHE)
+	set(GASNET_BUILD_NEEDED ON)
+      endif()
+    else()
+      message(STATUS "Configuring and building embedded GASNet...")
+      set(GASNET_BUILD_NEEDED ON)
+    endif()
+    if(GASNET_BUILD_NEEDED)
+      if(Legion_EMBED_GASNet_LOCALSRC)
+	# relative paths are relative to the _build_ dir - this does the
+	#  intuitive thing when you do:
+	#     cmake ... -DLegion_EMBED_GASNet_LOCALSRC=relative/to/cwd (source_dir)
+	#  but is a little nonobvious when you type:
+	#     cmake -S (source_dir) -B (build_dir) ... -DLegion_EMBED_GASNet_LOCALSRC=still/relative/to/build_dir
+	get_filename_component(
+	  EMBEDDED_GASNET_SRC
+	  "${Legion_EMBED_GASNet_LOCALSRC}"
+	  ABSOLUTE BASE_DIR ${CMAKE_BINARY_DIR})
+      else()
+	# fetchcontent requires cmake 3.11+
+	cmake_minimum_required(VERSION 3.11)
+	include(FetchContent)
+	FetchContent_Declare(embed-gasnet
+	  GIT_REPOSITORY ${Legion_EMBED_GASNet_GITREPO}
+	  GIT_TAG        ${Legion_EMBED_GASNet_GITREF}
+	  )
+	message(STATUS "Downloading StanfordLegion/gasnet repo from: ${Legion_EMBED_GASNet_GITREPO}")
+	FetchContent_Populate(embed-gasnet)
+	set(EMBEDDED_GASNET_SRC "${embed-gasnet_SOURCE_DIR}")
+      endif()
+      execute_process(
+	COMMAND make -C ${EMBEDDED_GASNET_SRC} GASNET_SOURCE_DIR=${GASNet_SOURCE_DIR} GASNET_BUILD_DIR=${GASNet_BUILD_DIR} GASNET_INSTALL_DIR=${GASNet_INSTALL_DIR} ${GASNet_CONFIG_SETTINGS}
+	RESULT_VARIABLE GASNET_BUILD_STATUS
+	OUTPUT_FILE ${GASNet_BUILD_OUTPUT}
+	ERROR_FILE ${GASNet_BUILD_OUTPUT}
+	)
+      if(GASNET_BUILD_STATUS)
+	message(FATAL_ERROR "GASNet build result = ${GASNET_BUILD_STATUS} - see ${GASNet_BUILD_OUTPUT} for more details")
+      endif()
+      file(WRITE ${GASNet_CONFIG_FILE} "${GASNet_CONFIG_SETTINGS}")
+    endif()
+    # make sure GASNet_ROOT_DIR is defined at the top level
+    set(GASNet_ROOT_DIR ${GASNet_INSTALL_DIR} CACHE STRING "Root directory for GASNet" FORCE)
+    find_package(GASNet REQUIRED)
+    # make a list of the gasnet libraries we need to install along with realm
+    if(BUILD_SHARED_LIBS)
+      # get the list of libraries and filter only those that are not in the
+      #  (gasnet) install dir - the gasnet ones are sucked into librealm.so
+      get_target_property(gasnet_ext_libs GASNet::${GASNet_CONDUIT}-par INTERFACE_LINK_LIBRARIES)
+      list(FILTER gasnet_ext_libs EXCLUDE REGEX "^${GASNet_INSTALL_DIR}")
+      set(GASNET_LINK_LIBRARIES_FOR_INSTALL ${gasnet_ext_libs} PARENT_SCOPE)
+      # cmake won't include GASNet::GASNet in the exported link libraries
+      #  because we're doing a shared build, so force that
+      target_link_libraries(RealmRuntime INTERFACE $<LINK_ONLY:GASNet::GASNet>)
+    else()
+      # get the list of libraries and filter out those that are not in the
+      #  (gasnet) install dir
+      get_target_property(gasnet_all_libs GASNet::${GASNet_CONDUIT}-par INTERFACE_LINK_LIBRARIES)
+      set(gasnet_libs "${gasnet_all_libs}")
+      list(FILTER gasnet_libs INCLUDE REGEX "^${GASNet_INSTALL_DIR}")
+      set(gasnet_installed_libs ${gasnet_libs})
+      string(REGEX REPLACE "${GASNet_INSTALL_DIR}/([^/;]*/)*" "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/" gasnet_installed_libs "${gasnet_all_libs}")
+      install(FILES ${gasnet_libs} DESTINATION ${CMAKE_INSTALL_LIBDIR})
+      set(GASNET_LINK_LIBRARIES_FOR_INSTALL ${gasnet_installed_libs} PARENT_SCOPE)
+    endif()
+  else()
+    # we're using an external GASNet, but we still need to compute the list
+    #  of GASNet-related libraries that applications will need when using an
+    #  installed Legion build
+    # (this way, the application doesn't need to be able to find the original
+    #  GASNet root and pick the right conduit and the like)
+    get_target_property(gasnet_libs GASNet::${GASNet_CONDUIT}-par INTERFACE_LINK_LIBRARIES)
+    if(BUILD_SHARED_LIBS)
+      # filter out the actual gasnet libs because we suck those into librealm.so
+      list(FILTER gasnet_libs EXCLUDE REGEX "^${GASNet_ROOT_DIR}")
+    endif()
+    set(GASNET_LINK_LIBRARIES_FOR_INSTALL ${gasnet_libs} PARENT_SCOPE)
+  endif()
+
   target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
+  # cmake won't include GASNet::GASNet in the exported link libraries
+  #  if we're building shared libraries, so force that
+  if(BUILD_SHARED_LIBS)
+    target_link_libraries(RealmRuntime INTERFACE $<LINK_ONLY:GASNet::GASNet>)
+  endif()
 endif()
 
 if(REALM_USE_MPI)

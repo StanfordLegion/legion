@@ -118,7 +118,8 @@ void LoggingWrapper::map_replicate_task(const MapperContext ctx,
                                         const MapTaskOutput& default_output,
                                         MapReplicateTaskOutput& output) {
   MessageBuffer buf(runtime, ctx);
-  buf.line() << "MAP_REPLICATE_TASK for " << to_string(runtime, ctx, task);
+  buf.line() << "MAP_REPLICATE_TASK for " << to_string(runtime, ctx, task)
+             << " <" << task.get_unique_id() << ">";
   buf.line() << "  INPUT:";
   buf.report(task.regions, input.valid_instances);
   mapper->map_replicate_task(ctx, task, input, default_output, output);
@@ -139,7 +140,8 @@ void LoggingWrapper::slice_task(const MapperContext ctx,
                                 const SliceTaskInput& input,
                                 SliceTaskOutput& output) {
   MessageBuffer buf(runtime, ctx);
-  buf.line() << "SLICE_TASK for " << to_string(runtime, ctx, task);
+  buf.line() << "SLICE_TASK for " << to_string(runtime, ctx, task)
+             << " <" << task.get_unique_id() << ">";
   buf.line() << "  INPUT: " << to_string(runtime, ctx, input.domain);
   mapper->slice_task(ctx, task, input, output);
   buf.line() << "  OUTPUT:";
@@ -155,7 +157,8 @@ void LoggingWrapper::map_task(const MapperContext ctx,
                               const MapTaskInput& input,
                               MapTaskOutput& output) {
   MessageBuffer buf(runtime, ctx);
-  buf.line() << "MAP_TASK for " << to_string(runtime, ctx, task);
+  buf.line() << "MAP_TASK for " << to_string(runtime, ctx, task)
+             << " <" << task.get_unique_id() << ">";
   buf.line() << "  INPUT:";
   buf.report(task.regions, input.valid_instances);
   mapper->map_task(ctx, task, input, output);
@@ -167,13 +170,14 @@ void LoggingWrapper::select_task_sources(const MapperContext ctx,
                                          const SelectTaskSrcInput& input,
                                          SelectTaskSrcOutput& output) {
   MessageBuffer buf(runtime, ctx);
-  buf.line() << "SELECT_TASK_SOURCES for " << to_string(runtime, ctx, task);
+  buf.line() << "SELECT_TASK_SOURCES for " << to_string(runtime, ctx, task)
+             << " <" << task.get_unique_id() << ">";
   buf.line() << "  INPUT:";
   buf.report(task.regions[input.region_req_index],
              input.source_instances,
              input.region_req_index);
   buf.line() << "  TARGET:";
-  buf.line() << "      " << to_string(runtime, ctx, input.target);
+  buf.line() << "    " << to_string(runtime, ctx, input.target);
   mapper->select_task_sources(ctx, task, input, output);
   buf.line() << "  OUTPUT:";
   for (std::deque<PhysicalInstance>::iterator it =
@@ -189,8 +193,8 @@ void LoggingWrapper::map_inline(const MapperContext ctx,
                                 MapInlineOutput& output) {
   MessageBuffer buf(runtime, ctx);
   buf.line() << "MAP_INLINE in "
-             << (inline_op.parent_task == NULL ? "(remote task)" :
-                 to_string(runtime, ctx, *(inline_op.parent_task)));
+             << to_string(runtime, ctx, *(inline_op.get_parent_task()))
+             << " <" << inline_op.get_unique_id() << ">";
   buf.line() << "  INPUT:";
   buf.report(inline_op.requirement, input.valid_instances, 0);
   mapper->map_inline(ctx, inline_op, input, output);
@@ -204,8 +208,8 @@ void LoggingWrapper::select_inline_sources(const MapperContext ctx,
                                            SelectInlineSrcOutput& output) {
   MessageBuffer buf(runtime, ctx);
   buf.line() << "SELECT_INLINE_SOURCES in "
-             << (inline_op.parent_task == NULL ? "(remote task)" :
-                 to_string(runtime, ctx, *(inline_op.parent_task)));
+             << to_string(runtime, ctx, *(inline_op.get_parent_task()))
+             << " <" << inline_op.get_unique_id() << ">";
   buf.line() << "  INPUT:";
   buf.report(inline_op.requirement, input.source_instances, 0);
   buf.line() << "  TARGET:";
