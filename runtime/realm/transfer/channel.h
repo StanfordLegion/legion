@@ -184,6 +184,9 @@ namespace Realm {
 
       // default constructor == no reduction requested
       XferDesRedopInfo() : id(0), is_fold(false), in_place(false) {}
+
+      XferDesRedopInfo(ReductionOpID _id, bool _is_fold, bool _in_place)
+      : id(_id), is_fold(_is_fold), in_place(_in_place) {}
     };
 
     class AddressList {
@@ -472,9 +475,10 @@ namespace Realm {
       size_t get_addresses(size_t min_xfer_size, ReadSequenceCache *rseqcache);
 
       // after a call to 'get_addresses', this call updates the various data
-      //  structures to record that transfers for 'total_bytes' bytes were at
-      //  least initiated - return value is whether iteration is complete
-      bool record_address_consumption(size_t total_bytes);
+      //  structures to record that transfers for 'total_{read,write}_bytes' bytes
+      //  were at least initiated - return value is whether iteration is complete
+      bool record_address_consumption(size_t total_read_bytes,
+                                      size_t total_write_bytes);
 
       // fills can be more efficient if the fill data is replicated into a larger
       //  block
@@ -489,7 +493,7 @@ namespace Realm {
 		    NodeID _launch_node, XferDesID _guid,
 		    const std::vector<XferDesPortInfo>& inputs_info,
 		    const std::vector<XferDesPortInfo>& outputs_info,
-		    int _priority, XferDesRedopInfo _redop_info);
+		    int _priority);
 
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
@@ -506,7 +510,6 @@ namespace Realm {
       bool memcpy_req_in_use;
       MemcpyRequest memcpy_req;
       bool has_serdez;
-      XferDesRedopInfo redop_info;
       //const char *src_buf_base, *dst_buf_base;
     };
 
@@ -528,6 +531,26 @@ namespace Realm {
       virtual void enqueue_request(Request* req);
 
       bool progress_xd(MemfillChannel *channel, TimeLimit work_until);
+    };
+
+    class MemreduceChannel;
+
+    class MemreduceXferDes : public XferDes {
+    public:
+      MemreduceXferDes(uintptr_t _dma_op, Channel *_channel,
+                       NodeID _launch_node, XferDesID _guid,
+                       const std::vector<XferDesPortInfo>& inputs_info,
+                       const std::vector<XferDesPortInfo>& outputs_info,
+                       int _priority,
+                       XferDesRedopInfo _redop_info);
+
+      long get_requests(Request** requests, long nr);
+
+      bool progress_xd(MemreduceChannel *channel, TimeLimit work_until);
+
+    protected:
+      XferDesRedopInfo redop_info;
+      const ReductionOpUntyped *redop;
     };
 
     class GASNetChannel;
@@ -912,6 +935,27 @@ namespace Realm {
       static const bool is_ordered = false;
 
       ~MemfillChannel();
+
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
+				       NodeID launch_node,
+				       XferDesID guid,
+				       const std::vector<XferDesPortInfo>& inputs_info,
+				       const std::vector<XferDesPortInfo>& outputs_info,
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size);
+
+      virtual long submit(Request** requests, long nr);
+
+      bool is_stopped;
+    };
+
+    class MemreduceChannel : public SingleXDQChannel<MemreduceChannel, MemreduceXferDes> {
+    public:
+      MemreduceChannel(BackgroundWorkManager *bgwork);
+
+      // multiple concurrent memreduces ok
+      static const bool is_ordered = false;
 
       virtual XferDes *create_xfer_des(uintptr_t dma_op,
 				       NodeID launch_node,

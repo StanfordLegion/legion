@@ -766,7 +766,7 @@ namespace Realm {
                                                              total_bytes));
 	  out_span_start += total_bytes;
 
-	  done = record_address_consumption(total_bytes);
+	  done = record_address_consumption(total_bytes, total_bytes);
         }
 
         did_work = true;

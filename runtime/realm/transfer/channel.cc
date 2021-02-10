@@ -1063,14 +1063,15 @@ namespace Realm {
     return max_bytes;
   }
 
-  bool XferDes::record_address_consumption(size_t total_bytes)
+  bool XferDes::record_address_consumption(size_t total_read_bytes,
+                                           size_t total_write_bytes)
   {
     bool in_done = false;
     if(input_control.current_io_port >= 0) {
       XferPort *in_port = &input_ports[input_control.current_io_port];
 
-      in_port->local_bytes_total += total_bytes;
-      in_port->local_bytes_cons.fetch_add(total_bytes);
+      in_port->local_bytes_total += total_read_bytes;
+      in_port->local_bytes_cons.fetch_add(total_read_bytes);
 
       if(in_port->peer_guid == XFERDES_NO_GUID)
 	in_done = ((in_port->addrlist.bytes_pending() == 0) &&
@@ -1084,16 +1085,16 @@ namespace Realm {
     if(output_control.current_io_port >= 0) {
       XferPort *out_port = &output_ports[output_control.current_io_port];
 
-      out_port->local_bytes_total += total_bytes;
-      out_port->local_bytes_cons.fetch_add(total_bytes);
+      out_port->local_bytes_total += total_write_bytes;
+      out_port->local_bytes_cons.fetch_add(total_write_bytes);
 
       if(out_port->peer_guid == XFERDES_NO_GUID)
 	out_done = ((out_port->addrlist.bytes_pending() == 0) &&
 		    out_port->iter->done());
     }
 	  
-    input_control.remaining_count -= total_bytes;
-    output_control.remaining_count -= total_bytes;
+    input_control.remaining_count -= total_read_bytes;
+    output_control.remaining_count -= total_write_bytes;
 
     // input or output controls override our notion of done-ness
     if(input_control.control_port_idx >= 0)
@@ -2347,12 +2348,11 @@ namespace Realm {
 				   NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
-				   int _priority, XferDesRedopInfo _redop_info)
+				   int _priority)
 	: XferDes(_dma_op, _channel, _launch_node, _guid,
 		  inputs_info, outputs_info,
 		  _priority, 0, 0)
 	, memcpy_req_in_use(false)
-	, redop_info(_redop_info)
       {
 	kind = XFER_MEM_CPY;
 
@@ -2713,7 +2713,7 @@ namespace Realm {
 			     out_span_start, total_bytes);
 	  out_span_start += total_bytes;
 
-	  bool done = record_address_consumption(total_bytes);
+	  bool done = record_address_consumption(total_bytes, total_bytes);
 
 	  did_work = true;
 
@@ -2895,7 +2895,197 @@ namespace Realm {
 			     out_span_start, total_bytes);
 	  out_span_start += total_bytes;
 
-	  bool done = record_address_consumption(total_bytes);
+	  bool done = record_address_consumption(total_bytes, total_bytes);
+
+	  did_work = true;
+
+	  if(done || work_until.is_expired())
+	    break;
+	}
+
+	rseqcache.flush();
+	wseqcache.flush();
+
+	return did_work;
+      }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemfillXferDes
+  //
+
+      MemreduceXferDes::MemreduceXferDes(uintptr_t _dma_op, Channel *_channel,
+                                         NodeID _launch_node, XferDesID _guid,
+                                         const std::vector<XferDesPortInfo>& inputs_info,
+                                         const std::vector<XferDesPortInfo>& outputs_info,
+                                         int _priority,
+                                         XferDesRedopInfo _redop_info)
+	: XferDes(_dma_op, _channel, _launch_node, _guid,
+		  inputs_info, outputs_info,
+		  _priority, 0, 0)
+        , redop_info(_redop_info)
+      {
+	kind = XFER_MEM_CPY;
+        redop = get_runtime()->reduce_op_table.get(redop_info.id, 0);
+        assert(redop);
+      }
+
+      long MemreduceXferDes::get_requests(Request** requests, long nr)
+      {
+	// unused
+	assert(0);
+	return 0;
+      }
+
+      bool MemreduceXferDes::progress_xd(MemreduceChannel *channel,
+				      TimeLimit work_until)
+      {
+	bool did_work = false;
+	ReadSequenceCache rseqcache(this, 2 << 20);  // flush after 2MB
+	WriteSequenceCache wseqcache(this, 2 << 20);
+
+        const size_t in_elem_size = redop->sizeof_rhs;
+        const size_t out_elem_size = (redop_info.is_fold ? redop->sizeof_rhs : redop->sizeof_lhs);
+        assert(redop_info.in_place);  // TODO: support for out-of-place reduces
+
+	while(true) {
+	  size_t min_xfer_size = 4096;  // TODO: make controllable
+	  size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
+	  if(max_bytes == 0)
+	    break;
+
+	  XferPort *in_port = 0, *out_port = 0;
+	  size_t in_span_start = 0, out_span_start = 0;
+	  if(input_control.current_io_port >= 0) {
+	    in_port = &input_ports[input_control.current_io_port];
+	    in_span_start = in_port->local_bytes_total;
+	  }
+	  if(output_control.current_io_port >= 0) {
+	    out_port = &output_ports[output_control.current_io_port];
+	    out_span_start = out_port->local_bytes_total;
+	  }
+
+          // have to count in terms of elements, which requires redoing some math
+          //  if in/out sizes do not match
+          size_t max_elems;
+          if(in_elem_size == out_elem_size) {
+            max_elems = max_bytes / in_elem_size;
+          } else {
+            max_elems = std::min(input_control.remaining_count / in_elem_size,
+                                 output_control.remaining_count / out_elem_size);
+            if(in_port != 0)
+              max_elems = std::min(max_elems,
+                                   in_port->addrlist.bytes_pending() / in_elem_size);
+            if(out_port != 0)
+              max_elems = std::min(max_elems,
+                                   out_port->addrlist.bytes_pending() / out_elem_size);
+          }
+
+	  size_t total_elems = 0;
+	  if(in_port != 0) {
+	    if(out_port != 0) {
+	      // input and output both exist - transfer what we can
+	      log_xd.info() << "memreduce chunk: min=" << min_xfer_size
+			    << " max_elems=" << max_elems;
+
+	      uintptr_t in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
+	      uintptr_t out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+
+	      while(total_elems < max_elems) {
+		AddressListCursor& in_alc = in_port->addrcursor;
+		AddressListCursor& out_alc = out_port->addrcursor;
+
+		uintptr_t in_offset = in_alc.get_offset();
+		uintptr_t out_offset = out_alc.get_offset();
+
+		// the reported dim is reduced for partially consumed address
+		//  ranges - whatever we get can be assumed to be regular
+		int in_dim = in_alc.get_dim();
+		int out_dim = out_alc.get_dim();
+
+                // the current reduction op interface can reduce multiple elements
+                //  with a fixed address stride, which looks to us like either
+                //  1D (stride = elem_size), or 2D with 1 elem/line
+
+                size_t icount = in_alc.remaining(0) / in_elem_size;
+                size_t ocount = out_alc.remaining(0) / out_elem_size;
+                size_t istride, ostride;
+                if((in_dim > 1) && (icount == 1)) {
+                  in_dim = 2;
+                  icount = in_alc.remaining(1);
+                  istride = in_alc.get_stride(1);
+                } else {
+                  in_dim = 1;
+                  istride = in_elem_size;
+                }
+                if((out_dim > 1) && (ocount == 1)) {
+                  out_dim = 2;
+                  ocount = out_alc.remaining(1);
+                  ostride = out_alc.get_stride(1);
+                } else {
+                  out_dim = 1;
+                  ostride = out_elem_size;
+                }
+
+		size_t elems_left = max_elems - total_elems;
+                size_t elems = std::min(std::min(icount, ocount), elems_left);
+                assert(elems > 0);
+
+                void *out_ptr = reinterpret_cast<void *>(out_base + out_offset);
+                const void *in_ptr = reinterpret_cast<const void *>(in_base + in_offset);
+                if(redop_info.is_fold)
+                  redop->fold_strided(out_ptr, in_ptr,
+                                      ostride, istride,
+                                      elems, false /*!exclusive*/);
+                else
+                  redop->apply_strided(out_ptr, in_ptr,
+                                       ostride, istride,
+                                       elems, false /*!exclusive*/);
+
+                in_alc.advance(in_dim-1,
+                               elems * ((in_dim == 1) ? in_elem_size : 1));
+                out_alc.advance(out_dim-1,
+                                elems * ((out_dim == 1) ? out_elem_size : 1));
+
+#ifdef DEBUG_REALM
+		assert(elems <= elems_left);
+#endif
+		total_elems += elems;
+
+		// stop if it's been too long, but make sure we do at least the
+		//  minimum number of bytes
+		if(((total_elems * in_elem_size) >= min_xfer_size) &&
+                   work_until.is_expired()) break;
+	      }
+	    } else {
+	      // input but no output, so skip input bytes
+              total_elems = max_elems;
+	      in_port->addrcursor.skip_bytes(total_elems * in_elem_size);
+	    }
+	  } else {
+	    if(out_port != 0) {
+	      // output but no input, so skip output bytes
+              total_elems = max_elems;
+	      out_port->addrcursor.skip_bytes(total_elems * out_elem_size);
+	    } else {
+	      // skipping both input and output is possible for simultaneous
+	      //  gather+scatter
+              total_elems = max_elems;
+	    }
+	  }
+
+	  // memcpy is always immediate, so handle both skip and copy with the
+	  //  same code
+	  rseqcache.add_span(input_control.current_io_port,
+			     in_span_start, total_elems * in_elem_size);
+	  in_span_start += total_elems * in_elem_size;
+	  wseqcache.add_span(output_control.current_io_port,
+			     out_span_start, total_elems * out_elem_size);
+	  out_span_start += total_elems * out_elem_size;
+
+	  bool done = record_address_consumption(total_elems * in_elem_size,
+                                                 total_elems * out_elem_size);
 
 	  did_work = true;
 
@@ -3405,7 +3595,7 @@ namespace Realm {
 	    }
 	  }
 
-	  bool done = record_address_consumption(total_bytes);
+	  bool done = record_address_consumption(total_bytes, total_bytes);
 
 	  did_work = true;
 
@@ -4003,7 +4193,7 @@ namespace Realm {
 	  for(size_t j = 0; j < num_cpu_mem_kinds; j++)
 	    add_path(cpu_mem_kinds[i], false,
 		     cpu_mem_kinds[j], false,
-		     bw, latency, true, true, XFER_MEM_CPY);
+		     bw, latency, false, true, XFER_MEM_CPY);
 
 	xdq.add_to_manager(bgwork);
       }
@@ -4042,11 +4232,11 @@ namespace Realm {
 					      XferDesRedopInfo redop_info,
 					      const void *fill_data, size_t fill_size)
       {
+        assert(redop_info.id == 0);
 	assert(fill_size == 0);
 	return new MemcpyXferDes(dma_op, this, launch_node, guid,
 				 inputs_info, outputs_info,
-				 priority,
-				 redop_info);
+				 priority);
       }
 
       long MemcpyChannel::submit(Request** requests, long nr)
@@ -4550,6 +4740,52 @@ namespace Realm {
   }
 
   long MemfillChannel::submit(Request** requests, long nr)
+  {
+    // unused
+    assert(0);
+    return 0;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemreduceChannel
+  //
+
+  MemreduceChannel::MemreduceChannel(BackgroundWorkManager *bgwork)
+    : SingleXDQChannel<MemreduceChannel,MemreduceXferDes>(bgwork,
+                                                          XFER_MEM_CPY,
+                                                          "memreduce channel")
+  {
+    unsigned bw = 0; // TODO
+    unsigned latency = 0;
+    // any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
+    for(size_t i = 0; i < num_cpu_mem_kinds; i++)
+      for(size_t j = 0; j < num_cpu_mem_kinds; j++)
+        add_path(cpu_mem_kinds[i], false,
+                 cpu_mem_kinds[j], false,
+                 bw, latency, true, false, XFER_MEM_CPY);
+
+    xdq.add_to_manager(bgwork);
+  }
+
+  XferDes *MemreduceChannel::create_xfer_des(uintptr_t dma_op,
+                                             NodeID launch_node,
+                                             XferDesID guid,
+                                             const std::vector<XferDesPortInfo>& inputs_info,
+                                             const std::vector<XferDesPortInfo>& outputs_info,
+                                             int priority,
+                                             XferDesRedopInfo redop_info,
+                                             const void *fill_data, size_t fill_size)
+  {
+    assert(redop_info.id != 0); // redop is required
+    assert(fill_size == 0);
+    return new MemreduceXferDes(dma_op, this, launch_node, guid,
+                                inputs_info, outputs_info,
+                                priority, redop_info);
+  }
+
+  long MemreduceChannel::submit(Request** requests, long nr)
   {
     // unused
     assert(0);

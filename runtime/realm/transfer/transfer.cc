@@ -2369,6 +2369,7 @@ namespace Realm {
 	bool ok = find_shortest_path(insts[i].get_location(),
 				     dst_mem,
 				     serdez_id,
+                                     0 /*redop_id*/,
 				     path_infos[idx]);
 	assert(ok);
       }
@@ -2395,6 +2396,7 @@ namespace Realm {
       bool ok = find_shortest_path(inst.get_location(),
 				   local_ib_mem,
 				   0 /*no serdez*/,
+                                   0 /*redop_id*/,
 				   addr_path,
 				   true /*skip_final_memcpy*/);
       assert(ok);
@@ -2447,6 +2449,7 @@ namespace Realm {
       bool ok = find_shortest_path(inst.get_location(),
 				   addr_ib_mem,
 				   0 /*no serdez*/,
+                                   0 /*redop_id*/,
 				   addr_path,
 				   true /*skip_final_memcpy*/);
       assert(ok);
@@ -2493,6 +2496,7 @@ namespace Realm {
 	  MemPathInfo path;
 	  bool ok = find_shortest_path(addr_ib_mem, src_ib_mem,
 				       0 /*no serdez*/,
+                                       0 /*redop_id*/,
 				       path);
 	  assert(ok);
 	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
@@ -2509,6 +2513,7 @@ namespace Realm {
 	MemPathInfo path;
 	bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
 				     0 /*no serdez*/,
+                                     0 /*redop_id*/,
 				     path);
 	assert(ok);
 	ctrl_edge = add_copy_path(xd_nodes, ib_edges,
@@ -2534,7 +2539,7 @@ namespace Realm {
 	//  any of the current paths)
 	MemPathInfo tail_path;
 	bool ok = find_shortest_path(dst_ib_mem, dst_mem,
-				     serdez_id, tail_path);
+				     serdez_id, 0 /*redop_id*/, tail_path);
 	assert(ok && (tail_path.xd_channels.size() == 1));
 	last_channel = tail_path.xd_channels[0];
 	// and fix any path that doesn't use that channel
@@ -2543,7 +2548,7 @@ namespace Realm {
 	     last_channel) continue;
 	  //log_new_dma.print() << "fix " << i << " " << path_infos[i].path[0] << " -> " << dst_ib_mem;
 	  bool ok = find_shortest_path(path_infos[i].path[0], dst_ib_mem,
-				       0 /*no serdez*/, path_infos[i]);
+				       0 /*no serdez*/, 0 /*redop_id*/, path_infos[i]);
 	  assert(ok);
 	  // append last step
 	  path_infos[i].xd_channels.push_back(last_channel);
@@ -2655,7 +2660,8 @@ namespace Realm {
 	bool ok = find_shortest_path(insts[i].get_location(),
 				     dst_mem,
 				     serdez_id,
-				     path_infos[idx]);
+				     0 /*redop_id*/,
+                                     path_infos[idx]);
 	assert(ok);
       }
     }
@@ -2672,7 +2678,8 @@ namespace Realm {
       bool ok = find_shortest_path(inst.get_location(),
 				   local_ib_mem,
 				   0 /*no serdez*/,
-				   addr_path,
+				   0 /*redop_id*/,
+                                   addr_path,
 				   true /*skip_final_memcpy*/);
       assert(ok);
       int addr_edge = add_copy_path(xd_nodes, ib_edges,
@@ -2724,7 +2731,8 @@ namespace Realm {
       bool ok = find_shortest_path(inst.get_location(),
 				   addr_ib_mem,
 				   0 /*no serdez*/,
-				   addr_path,
+				   0 /*redop_id*/,
+                                   addr_path,
 				   true /*skip_final_memcpy*/);
       assert(ok);
       int addr_edge = add_copy_path(xd_nodes, ib_edges,
@@ -2770,7 +2778,8 @@ namespace Realm {
 	  MemPathInfo path;
 	  bool ok = find_shortest_path(addr_ib_mem, src_ib_mem,
 				       0 /*no serdez*/,
-				       path);
+                                       0 /*redop_id*/,
+                                       path);
 	  assert(ok);
 	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
 						decoded_addr_edges[i],
@@ -2786,6 +2795,7 @@ namespace Realm {
 	MemPathInfo path;
 	bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
 				     0 /*no serdez*/,
+                                     0 /*redop_id*/,
 				     path);
 	assert(ok);
 	ctrl_edge = add_copy_path(xd_nodes, ib_edges,
@@ -2811,7 +2821,9 @@ namespace Realm {
 	//  any of the current paths)
 	MemPathInfo tail_path;
 	bool ok = find_shortest_path(dst_ib_mem, dst_mem,
-				     serdez_id, tail_path);
+				     serdez_id,
+                                     0 /*redop_id*/,
+                                     tail_path);
 	assert(ok && (tail_path.xd_channels.size() == 1));
 	last_channel = tail_path.xd_channels[0];
 	// and fix any path that doesn't use that channel
@@ -2820,7 +2832,9 @@ namespace Realm {
 	     last_channel) continue;
 	  //log_new_dma.print() << "fix " << i << " " << path_infos[i].path[0] << " -> " << dst_ib_mem;
 	  bool ok = find_shortest_path(path_infos[i].path[0], dst_ib_mem,
-				       0 /*no serdez*/, path_infos[i]);
+				       0 /*no serdez*/,
+                                       0 /*redop_id*/,
+                                       path_infos[i]);
 	  assert(ok);
 	  // append last step
 	  path_infos[i].xd_channels.push_back(last_channel);
@@ -2923,6 +2937,7 @@ namespace Realm {
 	bool ok = find_shortest_path(src_mem,
 				     insts[i].get_location(),
 				     serdez_id,
+                                     0 /*redop_id*/,
 				     path_infos[idx]);
 	assert(ok);
       }
@@ -2940,6 +2955,7 @@ namespace Realm {
       bool ok = find_shortest_path(inst.get_location(),
 				   local_ib_mem,
 				   0 /*no serdez*/,
+                                   0 /*redop_id*/,
 				   addr_path,
 				   true /*skip_final_memcpy*/);
       assert(ok);
@@ -2992,6 +3008,7 @@ namespace Realm {
       bool ok = find_shortest_path(inst.get_location(),
 				   addr_ib_mem,
 				   0 /*no serdez*/,
+                                   0 /*redop_id*/,
 				   addr_path,
 				   true /*skip_final_memcpy*/);
       assert(ok);
@@ -3039,6 +3056,7 @@ namespace Realm {
 	  MemPathInfo path;
 	  bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
 				       0 /*no serdez*/,
+                                       0 /*redop_id*/,
 				       path);
 	  assert(ok);
 	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
@@ -3054,6 +3072,7 @@ namespace Realm {
 	MemPathInfo path;
 	bool ok = find_shortest_path(addr_ib_mem, src_ib_mem,
 				     0 /*no serdez*/,
+                                     0 /*redop_id*/,
 				     path);
 	assert(ok);
 	ctrl_edge = add_copy_path(xd_nodes, ib_edges,
@@ -3075,7 +3094,9 @@ namespace Realm {
 	//  any of the current paths)
 	MemPathInfo head_path;
 	bool ok = find_shortest_path(src_mem, src_ib_mem,
-				     serdez_id, head_path);
+				     serdez_id,
+                                     0 /*redop_id*/,
+                                     head_path);
 	assert(ok && (head_path.xd_channels.size() == 1));
 	first_channel = head_path.xd_channels[0];
 	// and fix any path that doesn't use that channel
@@ -3084,7 +3105,9 @@ namespace Realm {
 
 	  bool ok = find_shortest_path(src_ib_mem,
 				       path_infos[i].path[path_infos[i].path.size() - 1],
-				       0 /*no serdez*/, path_infos[i]);
+				       0 /*no serdez*/,
+                                       0 /*redop_id*/,
+                                       path_infos[i]);
 	  assert(ok);
 	  // prepend last step
 	  path_infos[i].xd_channels.insert(path_infos[i].xd_channels.begin(),
@@ -3206,6 +3229,7 @@ namespace Realm {
 	bool ok = find_shortest_path(src_mem,
 				     insts[i].get_location(),
 				     serdez_id,
+                                     0 /*redop_id*/,
 				     path_infos[idx]);
 	assert(ok);
       }
@@ -3232,6 +3256,7 @@ namespace Realm {
       bool ok = find_shortest_path(inst.get_location(),
 				   local_ib_mem,
 				   0 /*no serdez*/,
+                                   0 /*redop_id*/,
 				   addr_path,
 				   true /*skip_final_memcpy*/);
       assert(ok);
@@ -3286,6 +3311,7 @@ namespace Realm {
       bool ok = find_shortest_path(inst.get_location(),
 				   addr_ib_mem,
 				   0 /*no serdez*/,
+                                   0 /*redop_id*/,
 				   addr_path,
 				   true /*skip_final_memcpy*/);
       assert(ok);
@@ -3333,6 +3359,7 @@ namespace Realm {
 	  MemPathInfo path;
 	  bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
 				       0 /*no serdez*/,
+                                       0 /*redop_id*/,
 				       path);
 	  assert(ok);
 	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
@@ -3348,6 +3375,7 @@ namespace Realm {
 	MemPathInfo path;
 	bool ok = find_shortest_path(addr_ib_mem, src_ib_mem,
 				     0 /*no serdez*/,
+                                     0 /*redop_id*/,
 				     path);
 	assert(ok);
 	ctrl_edge = add_copy_path(xd_nodes, ib_edges,
@@ -3369,7 +3397,9 @@ namespace Realm {
 	//  any of the current paths)
 	MemPathInfo head_path;
 	bool ok = find_shortest_path(src_mem, src_ib_mem,
-				     serdez_id, head_path);
+				     serdez_id,
+                                     0 /*redop_id*/,
+                                     head_path);
 	assert(ok && (head_path.xd_channels.size() == 1));
 	first_channel = head_path.xd_channels[0];
 	// and fix any path that doesn't use that channel
@@ -3378,7 +3408,9 @@ namespace Realm {
 
 	  bool ok = find_shortest_path(src_ib_mem,
 				       path_infos[i].path[path_infos[i].path.size() - 1],
-				       0 /*no serdez*/, path_infos[i]);
+				       0 /*no serdez*/,
+                                       0 /*redop_id*/,
+                                       path_infos[i]);
 	  assert(ok);
 	  // prepend last step
 	  path_infos[i].xd_channels.insert(path_infos[i].xd_channels.begin(),
@@ -4065,13 +4097,100 @@ namespace Realm {
     //  a smaller number of copies
     assert(srcs.size() == dsts.size());
     for(size_t i = 0; i < srcs.size(); i++) {
-      assert(srcs[i].size == dsts[i].size);
+      assert(srcs[i].redop_id == 0);
+      if(dsts[i].redop_id == 0) {
+        // sizes of fills or copies should match
+        assert(srcs[i].size == dsts[i].size);
+      } else {
+        // redop must exist and match src/dst sizes
+        const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(dsts[i].redop_id, 0);
+        if(redop == 0) {
+          log_dma.fatal() << "no reduction op registered for ID " << dsts[i].redop_id;
+          abort();
+        }
+        size_t exp_dst_size = dsts[i].red_fold ? redop->sizeof_rhs : redop->sizeof_lhs;
+        assert(srcs[i].size == redop->sizeof_rhs);
+        assert(dsts[i].size == exp_dst_size);
+      }
       assert(srcs[i].serdez_id == dsts[i].serdez_id);
 
       size_t combined_field_size = srcs[i].size;
       CustomSerdezID serdez_id = srcs[i].serdez_id;
 
-      if(srcs[i].field_id == FieldID(-1)) {
+      if(dsts[i].redop_id != 0) {
+        // reduction
+	assert((srcs[i].indirect_index == -1) && "help: gather reduce!");
+	assert((dsts[i].indirect_index == -1) && "help: scatter reduce!");
+        assert((srcs[i].serdez_id == 0) &&
+               (dsts[i].serdez_id == 0) && "help: serdez reduce!");
+
+	src_fields[i] = FieldInfo { srcs[i].field_id, srcs[i].subfield_offset, srcs[i].size, srcs[i].serdez_id };
+	dst_fields[i] = FieldInfo { dsts[i].field_id, dsts[i].subfield_offset, dsts[i].size, dsts[i].serdez_id };
+
+        Memory src_mem = srcs[i].inst.get_location();
+        Memory dst_mem = dsts[i].inst.get_location();
+
+        MemPathInfo path_info;
+        bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
+                                     dsts[i].redop_id,
+                                     path_info);
+        if(!ok) {
+          log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (redop=" << dsts[i].redop_id << ")";
+          assert(0);
+        }
+        size_t pathlen = path_info.xd_channels.size();
+        size_t xd_idx = graph.xd_nodes.size();
+        size_t ib_idx = graph.ib_edges.size();
+        size_t ib_alloc_size = 0;
+        graph.xd_nodes.resize(xd_idx + pathlen);
+        if(pathlen > 1) {
+          graph.ib_edges.resize(ib_idx + pathlen - 1);
+          ib_alloc_size = compute_ib_size(combined_field_size,
+                                          domain_size,
+                                          serdez_id);
+        }
+        for(size_t j = 0; j < pathlen; j++) {
+          TransferGraph::XDTemplate& xdn = graph.xd_nodes[xd_idx++];
+
+          //xdn.kind = path_info.xd_kinds[j];
+          xdn.factory = path_info.xd_channels[j]->get_factory();
+          xdn.gather_control_input = -1;
+          xdn.scatter_control_input = -1;
+          xdn.target_node = path_info.xd_channels[j]->node;
+          if(j == (pathlen - 1))
+            xdn.redop = XferDesRedopInfo(dsts[i].redop_id,
+                                         dsts[i].red_fold,
+                                         true /*in_place*/);
+          xdn.inputs.resize(1);
+          xdn.inputs[0] = ((j == 0) ?
+                             TransferGraph::XDTemplate::mk_inst(srcs[i].inst,
+                                                                i, 1) :
+                             TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
+          //xdn.inputs[0].indirect_inst = RegionInstance::NO_INST;
+          xdn.outputs.resize(1);
+          xdn.outputs[0] = ((j == (pathlen - 1)) ?
+                              TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
+                                                                 i, 1) :
+                              TransferGraph::XDTemplate::mk_edge(ib_idx));
+          //xdn.outputs[0].indirect_inst = RegionInstance::NO_INST;
+          if(j < (pathlen - 1)) {
+            TransferGraph::IBInfo& ibe = graph.ib_edges[ib_idx++];
+            ibe.memory = path_info.path[j + 1];
+            ibe.size = ib_alloc_size;
+          }
+        }
+
+        prof_usage.source = src_mem;
+        prof_usage.target = dst_mem;
+        prof_usage.size += domain_size * combined_field_size;
+        prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
+          srcs[i].inst,
+          dsts[i].inst,
+          1 /*num_fields*/,
+          ProfilingMeasurements::OperationCopyInfo::REDUCE,
+          unsigned(pathlen) });
+      }
+      else if(srcs[i].field_id == FieldID(-1)) {
 	// fill
 	assert((dsts[i].indirect_index == -1) && "help: scatter fill!");
 
@@ -4081,6 +4200,7 @@ namespace Realm {
 	Memory dst_mem = dsts[i].inst.get_location();
 	MemPathInfo path_info;
 	bool ok = find_shortest_path(Memory::NO_MEMORY, dst_mem, serdez_id,
+                                     0 /*redop_id*/,
 				     path_info);
 	if(!ok) {
 	  log_new_dma.fatal() << "FATAL: no fill path found for " << dst_mem << " (serdez=" << serdez_id << ")";
@@ -4142,6 +4262,7 @@ namespace Realm {
 
 	    MemPathInfo path_info;
 	    bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
+                                         0 /*redop_id*/,
 					 path_info);
 	    if(!ok) {
 	      log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (serdez=" << serdez_id << ")";
@@ -4307,10 +4428,17 @@ namespace Realm {
 			<< " xds=" << graph.xd_nodes.size()
 			<< " ibs=" << graph.ib_edges.size();
       for(size_t i = 0; i < graph.xd_nodes.size(); i++)
-	log_xplan.debug() << "analysis: plan=" << (void *)this
-			  << " xds[" << i << "]: target=" << graph.xd_nodes[i].target_node
-			  << " inputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
-			  << " outputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs);
+        if(graph.xd_nodes[i].redop.id != 0)
+          log_xplan.debug() << "analysis: plan=" << (void *)this
+                            << " xds[" << i << "]: target=" << graph.xd_nodes[i].target_node
+                            << " inputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
+                            << " outputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs)
+                            << " redop=(" << graph.xd_nodes[i].redop.id << "," << graph.xd_nodes[i].redop.is_fold << "," << graph.xd_nodes[i].redop.in_place << ")";
+        else
+          log_xplan.debug() << "analysis: plan=" << (void *)this
+                            << " xds[" << i << "]: target=" << graph.xd_nodes[i].target_node
+                            << " inputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
+                            << " outputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs);
       for(size_t i = 0; i < graph.ib_edges.size(); i++)
 	log_xplan.debug() << "analysis: plan=" << (void *)this
 			  << " ibs[" << i << "]: memory=" << graph.ib_edges[i].memory
@@ -4846,7 +4974,7 @@ namespace Realm {
 				  inputs_info,
 				  outputs_info,
 				  priority,
-				  XferDesRedopInfo(),
+                                  xdn.redop,
 				  fill_data, fill_size);
     }
 
@@ -4954,9 +5082,9 @@ namespace Realm {
     //for(size_t i = 0; i < srcs.size(); i++)
     //  if(srcs[i].field_id == FieldID(-1))
     //	any_fills_or_reduces = true;
-    for(size_t i = 0; i < dsts.size(); i++)
-      if(dsts[i].redop_id != 0)
-	any_fills_or_reduces = true;
+    //for(size_t i = 0; i < dsts.size(); i++)
+    //  if(dsts[i].redop_id != 0)
+    //	any_fills_or_reduces = true;
 
     if(!any_fills_or_reduces) {
       // create a (one-use) transfer description

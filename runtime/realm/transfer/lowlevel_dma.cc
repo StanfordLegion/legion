@@ -986,7 +986,7 @@ namespace Realm {
 	    continue;
 	  }
 	  MemPathInfo path_info;
-	  bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
+	  bool ok = find_shortest_path(src_mem, dst_mem, serdez_id, 0,
 				       path_info);
 	  if(!ok) {
 	    log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (serdez=" << serdez_id << ")";
@@ -1897,6 +1897,7 @@ namespace Realm {
 
     bool find_shortest_path(Memory src_mem, Memory dst_mem,
 			    CustomSerdezID serdez_id,
+                            ReductionOpID redop_id,
 			    MemPathInfo& info,
 			    bool skip_final_memcpy /*= false*/)
     {
@@ -1908,7 +1909,8 @@ namespace Realm {
       // fast case - can we go straight from src to dst?
       XferDesKind kind;
       Channel *channel = get_xfer_channel(src_mem, dst_mem,
-					  serdez_id, serdez_id, 0, &kind);
+					  serdez_id, serdez_id,
+                                          redop_id, &kind);
       if(channel) {
 	info.path.push_back(src_mem);
 	if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
@@ -1934,7 +1936,7 @@ namespace Realm {
 	  }
 	}
 	for(std::list<Memory>::iterator it = mems_left.begin(); it != mems_left.end(); ) {
-	  // we know we're doing at least one hop, so no dst_serdez here
+	  // we know we're doing at least one hop, so no dst_serdez or redop here
 	  channel = get_xfer_channel(src_mem, *it, serdez_id, 0, 0);
 	  if(channel) {
 	    std::vector<Memory>& v = dist[*it];
@@ -1955,8 +1957,8 @@ namespace Realm {
 	  std::vector<Memory> sub_path = dist[cur];
 	  
 	  // can we reach the destination from here (handling potential
-	  //  deserialization?
-	  channel = get_xfer_channel(cur, dst_mem, 0, serdez_id, 0, &kind);
+	  //  deserialization or reduction)
+	  channel = get_xfer_channel(cur, dst_mem, 0, serdez_id, redop_id, &kind);
 	  if(channel) {
 	    info.path = dist[cur];
 	    //info.xd_kinds = kinds[cur];
@@ -3361,7 +3363,7 @@ namespace Realm {
           Memory src_mem = pair.first.get_location();
           Memory dst_mem = pair.second.get_location();
           MemPathInfo path_info;
-          bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
+          bool ok = find_shortest_path(src_mem, dst_mem, serdez_id, 0,
                                        path_info);
           assert(ok);
           entry.num_hops = path_info.xd_channels.size();
@@ -3400,7 +3402,7 @@ namespace Realm {
           Memory dst_mem = dst.inst.get_location();
           MemPathInfo path_info;
           CustomSerdezID serdez_id = 0;
-          bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
+          bool ok = find_shortest_path(src_mem, dst_mem, serdez_id, 0,
                                        path_info);
           assert(ok);
           entry.num_hops = path_info.xd_channels.size();

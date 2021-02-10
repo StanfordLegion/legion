@@ -167,6 +167,7 @@ namespace Realm {
     
     bool find_shortest_path(Memory src_mem, Memory dst_mem,
 			    CustomSerdezID serdez_id,
+                            ReductionOpID redop_id,
 			    MemPathInfo& info,
 			    bool skip_final_memcpy = false);
 
