@@ -459,7 +459,7 @@ SLIB_REALM_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda
 endif
 endif
 # Add support for Legion GPU reductions
-LEGION_CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
+# LEGION_CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
 # Convert CXXFLAGS and CPPFLAGS to NVCC_FLAGS
 # Need to detect whether nvcc supports them directly or to use -Xcompiler
 NVCC_FLAGS	+= ${shell                                                              \
@@ -895,7 +895,7 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/runtime.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \
 		    $(LG_RT_DIR)/legion/mapper_manager.cc
-LEGION_CUDA_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
+# LEGION_CUDA_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
 # LEGION_INST_SRC will be compiled {MAX_DIM}^2 times in parallel
 LEGION_INST_SRC  += $(LG_RT_DIR)/legion/region_tree_tmpl.cc
 

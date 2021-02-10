@@ -257,7 +257,7 @@ if(Legion_USE_CUDA)
   # define variable for legion_defines.h
   set(LEGION_USE_CUDA ON)
 
-  option(Legion_GPU_REDUCTIONS "Support reductions natively on GPU" ON)
+  option(Legion_GPU_REDUCTIONS "Support reductions natively on GPU" OFF)
   if(Legion_GPU_REDUCTIONS)
     set(LEGION_GPU_REDUCTIONS ON)
   endif()
