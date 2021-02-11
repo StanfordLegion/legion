@@ -8430,6 +8430,9 @@ namespace Legion {
       bool remove_reference;
       {
         AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+        assert(send_references > 0);
+#endif
         remove_reference = (--send_references == 0);
       }
       if (remove_reference && parent->remove_nested_resource_ref(did))
