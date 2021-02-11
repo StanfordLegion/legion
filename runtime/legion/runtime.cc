@@ -12006,7 +12006,8 @@ namespace Legion {
                                     config.prof_logfile.c_str(),
                                     total_address_spaces,
                                     config.prof_footprint_threshold << 20,
-                                    config.prof_target_latency);
+                                    config.prof_target_latency,
+                                    config.slow_config_ok);
       MAPPER_CALL_NAMES(lg_mapper_calls);
       profiler->record_mapper_call_kinds(lg_mapper_calls, LAST_MAPPER_CALL);
 #ifdef DETAILED_LEGION_PROF
@@ -12218,7 +12219,8 @@ namespace Legion {
           {
             Mapper *mapper = 
               new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
-            MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
+            MapperManager *wrapper = 
+             wrap_mapper(this, mapper, 0, it->first, true/*is default mapper*/);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           } 
         }
@@ -14531,7 +14533,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ MapperManager* Runtime::wrap_mapper(Runtime *rt, Mapper *mapper,
-                                                   MapperID map_id, Processor p)
+                                  MapperID map_id, Processor p, bool is_default)
     //--------------------------------------------------------------------------
     {
       MapperManager *manager = NULL;
@@ -14539,19 +14541,19 @@ namespace Legion {
       {
         case Mapper::CONCURRENT_MAPPER_MODEL:
           {
-            manager = new ConcurrentManager(rt, mapper, map_id, p);
+            manager = new ConcurrentManager(rt, mapper, map_id, p, is_default);
             break;
           }
         case Mapper::SERIALIZED_REENTRANT_MAPPER_MODEL:
           {
-            manager = new SerializingManager(rt, mapper, 
-                                             map_id, p, true/*reentrant*/);
+            manager = new SerializingManager(rt, mapper, map_id, p, 
+                                             true/*reentrant*/, is_default);
             break;
           }
         case Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL:
           {
-            manager = new SerializingManager(rt, mapper, 
-                                             map_id, p, false/*reentrant*/);
+            manager = new SerializingManager(rt, mapper, map_id, p,
+                                             false/*reentrant*/, is_default);
             break;
           }
         default:
