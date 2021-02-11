@@ -28,7 +28,7 @@ namespace Mapping {
  * To use with your own mapper, replace any use of `new MyMapper(...)` in your
  * code with `new LoggingWrapper(new MyMapper(...))` and run with
  * `-level mapper=2`. Enabling Realm-level instance reporting might also be
- * useful (`-level inst=2`).
+ * useful (`-level inst=1`).
  *
  * Currently only supports task and inline mapping API calls.
  */

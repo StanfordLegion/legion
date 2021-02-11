@@ -68,7 +68,10 @@ namespace Realm {
   bool Event::has_triggered_faultaware(bool& poisoned) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    if(!id) return true; // special case: NO_EVENT has always triggered
+    if(!id) {
+      poisoned = false;
+      return true; // special case: NO_EVENT has always triggered
+    }
     EventImpl *e = get_runtime()->get_event_impl(*this);
     return e->has_triggered(ID(id).event_generation(), poisoned);
   }
@@ -226,7 +229,10 @@ namespace Realm {
   void Event::wait_faultaware(bool& poisoned) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    if(!id) return;  // special case: never wait for NO_EVENT
+    if(!id) {
+      poisoned = false;
+      return;  // special case: never wait for NO_EVENT
+    }
     EventImpl *e = get_runtime()->get_event_impl(*this);
     EventImpl::gen_t gen = ID(id).event_generation();
 
@@ -236,27 +242,33 @@ namespace Realm {
     // waiting on an event does not count against the low level's time
     DetailedTimer::ScopedPush sp2(TIME_NONE);
 
-    Thread *thread = Thread::self();
-    if(thread) {
-      log_event.info() << "thread blocked: thread=" << thread << " event=" << *this;
-      // see if we are being asked to profile these waits
-      ProfilingMeasurements::OperationEventWaits::WaitInterval *interval = 0;
-      if(thread->get_operation() != 0) {
-	interval = thread->get_operation()->create_wait_interval(*this);
-	if(interval)
-	  interval->record_wait_start();
-      }
-      // describe the condition we want the thread to wait on
-      thread->wait_for_condition(EventTriggeredCondition(e, gen, interval), poisoned);
-      if(interval)
-	interval->record_wait_end();
-      log_event.info() << "thread resumed: thread=" << thread << " event=" << *this << " poisoned=" << poisoned;
+    // if not called from a task, use external_wait instead
+    if(!ThreadLocal::current_processor.exists()) {
+      log_event.info() << "external thread blocked: event=" << *this;
+      e->external_wait(gen, poisoned);
+      log_event.info() << "external thread resumed: event=" << *this;
       return;
     }
 
-    assert(0); // if we're not a Thread, we have a problem
-    return;
-    //assert(ptr != 0);
+    Thread *thread = Thread::self();
+    assert(thread); // all tasks had better have a thread...
+
+    log_event.info() << "thread blocked: thread=" << thread
+                     << " event=" << *this;
+    // see if we are being asked to profile these waits
+    ProfilingMeasurements::OperationEventWaits::WaitInterval *interval = 0;
+    if(thread->get_operation() != 0) {
+      interval = thread->get_operation()->create_wait_interval(*this);
+      if(interval)
+        interval->record_wait_start();
+    }
+    // describe the condition we want the thread to wait on
+    thread->wait_for_condition(EventTriggeredCondition(e, gen, interval),
+                               poisoned);
+    if(interval)
+      interval->record_wait_end();
+    log_event.info() << "thread resumed: thread=" << thread
+                     << " event=" << *this << " poisoned=" << poisoned;
   }
 
   void Event::external_wait(void) const
@@ -280,7 +292,10 @@ namespace Realm {
   void Event::external_wait_faultaware(bool& poisoned) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    if(!id) return;  // special case: never wait for NO_EVENT
+    if(!id) {
+      poisoned = false;
+      return;  // special case: never wait for NO_EVENT
+    }
     EventImpl *e = get_runtime()->get_event_impl(*this);
     EventImpl::gen_t gen = ID(id).event_generation();
 
@@ -322,7 +337,10 @@ namespace Realm {
 					    long long max_ns) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    if(!id) return true;  // special case: never wait for NO_EVENT
+    if(!id) {
+      poisoned = false;
+      return true;  // special case: never wait for NO_EVENT
+    }
     EventImpl *e = get_runtime()->get_event_impl(*this);
     EventImpl::gen_t gen = ID(id).event_generation();
 
