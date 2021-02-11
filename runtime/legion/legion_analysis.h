@@ -1323,12 +1323,14 @@ namespace Legion {
                FieldMaskSet<Update> >::aligned EventFieldUpdates;
     public:
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, unsigned idx,
-                         RtEvent guard_event, bool track_events,
+                         CopyFillGuard *previous, bool track_events,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
                          unsigned src_idx, unsigned dst_idx,
-                         RtEvent guard_event, bool track_events,
-                         PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
+                         CopyFillGuard *previous, bool track_events,
+                         PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
+                         // Used only in the case of copy-across analyses
+                         RtEvent alternate_pre = RtEvent::NO_RT_EVENT);
       CopyFillAggregator(const CopyFillAggregator &rhs);
       virtual ~CopyFillAggregator(void);
     public:
@@ -2485,7 +2487,7 @@ namespace Legion {
            std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
            std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
       void update_set_internal(CopyFillAggregator *&input_aggregator,
-                               const RtEvent guard_event,
+                               CopyFillGuard *previous_guard,
                                Operation *op, const unsigned index,
                                const RegionUsage &usage,
                                IndexSpaceExpression *expr, 
@@ -2497,7 +2499,7 @@ namespace Legion {
                                std::set<RtEvent> &applied_events,
                                const bool record_valid);
       void make_instances_valid(CopyFillAggregator *&aggregator,
-                                const RtEvent guard_event,
+                                CopyFillGuard *previous_guard,
                                 Operation *op, const unsigned index,
                                 const bool track_events,
                                 IndexSpaceExpression *expr,
@@ -2514,7 +2516,7 @@ namespace Legion {
       void issue_update_copies_and_fills(InstanceView *target,
                                 const std::vector<InstanceView*> &source_views,
                                          CopyFillAggregator *&aggregator,
-                                         const RtEvent guard_event,
+                                         CopyFillGuard *previous_guard,
                                          Operation *op, const unsigned index,
                                          const bool track_events,
                                          IndexSpaceExpression *expr,
@@ -2528,7 +2530,8 @@ namespace Legion {
       void apply_reductions(const FieldMaskSet<InstanceView> &reduction_targets,
                             IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &reduction_mask, 
-                            CopyFillAggregator *&aggregator,RtEvent guard_event,
+                            CopyFillAggregator *&aggregator,
+                            CopyFillGuard *previous_guard,
                             Operation *op, const unsigned index, 
                             const bool track_events,
                             const PhysicalTraceInfo &trace_info,
