@@ -4084,7 +4084,6 @@ namespace Realm {
 							       const void *data,
 							       size_t datalen)
   {
-    //args.fence->mark_finished(true/*successful*/);
     args.op->notify_xd_completion(args.xd_id);
   }
 

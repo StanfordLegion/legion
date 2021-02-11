@@ -151,15 +151,6 @@ namespace Realm {
       //size_t nbytes;
     };
 
-    class XferDesFence : public Realm::Operation::AsyncWorkItem {
-    public:
-      XferDesFence(Realm::Operation *op) : Realm::Operation::AsyncWorkItem(op) {}
-      virtual void request_cancellation(void) {
-    	// ignored for now
-      }
-      virtual void print(std::ostream& os) const { os << "XferDesFence"; }
-    };
-
     struct XferDesPortInfo {
       enum /*PortType*/ {
 	DATA_PORT,
@@ -370,30 +361,6 @@ namespace Realm {
 
       // updates the progress counter, waking up the xd if needed
       void update_progress(void);
-
-#if 0
-      void update_pre_bytes_write(size_t new_val) {
-	update_write_lock.lock();
-        if (pre_bytes_write < new_val)
-          pre_bytes_write = new_val;
-        /*uint64_t old_val = pre_bytes_write;
-        while (old_val < new_val) {
-          pre_bytes_write.compare_exchange_strong(old_val, new_val);
-        }*/
-	update_write_lock.unlock();
-      }
-
-      void update_next_bytes_read(size_t new_val) {
-	update_read_lock.lock();
-        if (next_bytes_read < new_val)
-          next_bytes_read = new_val;
-        /*uint64_t old_val = next_bytes_read;
-        while (old_val < new_val) {
-          next_bytes_read.compare_exchange_strong(old_val, new_val);
-        }*/
-	update_read_lock.unlock();
-      }
-#endif
 
       virtual bool request_available()
       {
@@ -787,8 +754,6 @@ namespace Realm {
 		    XferDesKind xd_kind);
 
       std::vector<SupportedPath> paths;
-      // std::deque<Copy_1D> copies_1D;
-      // std::deque<Copy_2D> copies_2D;
     };
 
  
@@ -1011,9 +976,6 @@ namespace Realm {
       long submit(Request** requests, long nr);
     };
    
-    class FileChannel;
-    class DiskChannel;
-
     class AddressSplitChannel;
 
     class AddressSplitXferDesBase : public XferDes {
@@ -1057,21 +1019,8 @@ namespace Realm {
       static AddressSplitChannel *local_channel;
     };
   
-    class CompareXferDes {
-    public:
-      bool operator() (XferDes* a, XferDes* b) const {
-        if(a->priority == b->priority)
-          return (a < b);
-        else 
-          return (a->priority < b->priority);
-      }
-    };
-    //typedef std::priority_queue<XferDes*, std::vector<XferDes*>, CompareXferDes> PriorityXferDesQueue;
-    typedef std::set<XferDes*, CompareXferDes> PriorityXferDesQueue;
-
     class TransferOperation;
     struct NotifyXferDesCompleteMessage {
-      //XferDesFence* fence;
       TransferOperation *op;
       XferDesID xd_id;
 
@@ -1079,15 +1028,7 @@ namespace Realm {
 				 const NotifyXferDesCompleteMessage &args,
 				 const void *data,
 				 size_t datalen);
-      static void send_request(NodeID target, XferDesFence* fence)
-      {
-	assert(0);
-#if 0
-	ActiveMessage<NotifyXferDesCompleteMessage> amsg(target);
-	amsg->fence = fence;
-	amsg.commit();
-#endif
-      }
+
       static void send_request(NodeID target, TransferOperation *op, XferDesID xd_id);
     };
 

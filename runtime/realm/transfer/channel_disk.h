@@ -33,6 +33,8 @@ namespace Realm {
       off_t disk_off;
     };
 
+    class FileChannel;
+
     class FileXferDes : public XferDes {
     public:
       FileXferDes(uintptr_t _dma_op, Channel *_channel,
@@ -57,6 +59,8 @@ namespace Realm {
       FileRequest* file_reqs;
       FileMemory::OpenFileInfo *file_info;
     };
+
+    class DiskChannel;
 
     class DiskXferDes : public XferDes {
     public:

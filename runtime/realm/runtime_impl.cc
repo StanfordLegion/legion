@@ -983,7 +983,7 @@ namespace Realm {
       // remember it when we launch threads in run 
       stack_size = 2 << 20;
       //unsigned cpu_worker_threads = 1;
-      unsigned dma_worker_threads = 1;
+      unsigned dma_worker_threads = 0;  // unused - warning on application use
 #ifdef EVENT_TRACING
       size_t   event_trace_block_size = 1 << 20;
       double   event_trace_exp_arrv_rate = 1e3;
@@ -997,7 +997,7 @@ namespace Realm {
       bool show_reservations = false;
       // are hyperthreads considered to share a physical core
       bool hyperthread_sharing = true;
-      bool pin_dma_threads = false;
+      bool pin_dma_threads = false; // unused - silently ignored on cmdline
       size_t bitset_chunk_size = 32 << 10; // 32KB
       // based on some empirical measurements, 1024 nodes seems like
       //  a reasonable cutoff for switching to twolevel nodeset bitmasks
@@ -1269,9 +1269,6 @@ namespace Realm {
       
       bgwork.start_dedicated_workers(*core_reservations);
 
-      start_dma_worker_threads(dma_worker_threads,
-			       *core_reservations);
-
       PartitioningOpQueue::start_worker_threads(*core_reservations, &bgwork);
 
 #ifdef EVENT_TRACING
@@ -1360,9 +1357,11 @@ namespace Realm {
       
       // start dma system at the very ending of initialization
       // since we need list of local gpus to create channels
-      start_dma_system(dma_worker_threads,
-		       pin_dma_threads, 100
-		       ,*core_reservations, &bgwork);
+      if(dma_worker_threads > 0) {
+        // warn about use of old flags
+        log_runtime.warning() << "-ll:dma specified on command line no longer has effect - use -ll:bgwork to control background worker threads (which include dma work)";
+      }
+      start_dma_system(&bgwork);
 
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
@@ -2093,7 +2092,7 @@ namespace Realm {
 
       // threads that cause inter-node communication have to stop first
       PartitioningOpQueue::stop_worker_threads();
-      stop_dma_worker_threads();
+
       for(std::vector<Channel *>::iterator it = nodes[Network::my_node_id].dma_channels.begin();
 	  it != nodes[Network::my_node_id].dma_channels.end();
 	  ++it)
