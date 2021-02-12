@@ -15966,12 +15966,16 @@ namespace Legion {
                       LEGION_REFINEMENT_PARTITION_PERCENTAGE))
                 {
                   disjoint_complete_below = first->second;
-                  // Same deal with deleting a reverse iterator
-                  // increment first and then get the base
-                  state.disjoint_complete_child_counts.erase(first);
                   // Go through and filter out any child counts for these fields
+                  state.disjoint_complete_child_counts.erase(first);
+                  // filter out the individual children
                   state.disjoint_complete_accesses.filter(
                                   disjoint_complete_below);
+                  // but then relax the mask for these fields so that when
+                  // we go to do the refinement update we know we need to
+                  // traverse down below for those fields
+                  state.disjoint_complete_accesses.relax_valid_mask(
+                                            disjoint_complete_below);
                 }
               }
             }

@@ -862,8 +862,10 @@ namespace Legion {
       FieldMaskSet<RegionTreeNode> disjoint_complete_children;
       // Keep track of the disjoint complete accesses that have been
       // done in other children to track whether we want to change later
-      // For partitions we'll only use the mask here since we know we
-      // never need to store the names of the actual regions
+      // For partitions we'll only store the children to help with the
+      // process of counting. After that we'll remove children and the
+      // summary mask will be all that remains to record which fields
+      // have disjoint and complete accesses
       FieldMaskSet<RegionTreeNode> disjoint_complete_accesses;
       // For partitions only, we record the counts of the numbers of
       // children that we've observed for all fields to see when we're 
