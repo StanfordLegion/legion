@@ -21,9 +21,6 @@
 #include "realm/transfer/lowlevel_dma.h"
 #include "realm/mem_impl.h"
 #include "realm/inst_layout.h"
-#ifdef REALM_USE_HDF5
-#include "realm/hdf5/hdf5_access.h"
-#endif
 
 #ifdef REALM_ON_WINDOWS
 #include <basetsd.h>
@@ -56,15 +53,6 @@ namespace Realm {
     assert(0);
   }
   
-#ifdef REALM_USE_HDF5
-  size_t TransferIterator::step_hdf5(size_t max_bytes, AddressInfoHDF5& info,
-				     bool tentative /*= false*/)
-  {
-    // should never be called
-    return 0;
-  }
-#endif
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -86,10 +74,9 @@ namespace Realm {
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			unsigned flags,
 			bool tentative = false);
-#ifdef REALM_USE_HDF5
-    virtual size_t step_hdf5(size_t max_bytes, AddressInfoHDF5& info,
-			     bool tentative = false);
-#endif
+    virtual size_t step_custom(size_t max_bytes, AddressInfoCustom& info,
+                               bool tentative = false);
+
     virtual void confirm_step(void);
     virtual void cancel_step(void);
 
@@ -320,11 +307,10 @@ namespace Realm {
     return total_bytes;
   }
 
-#ifdef REALM_USE_HDF5
   template <int N, typename T>
-  size_t TransferIteratorBase<N,T>::step_hdf5(size_t max_bytes,
-					      AddressInfoHDF5& info,
-					      bool tentative /*= false*/)
+  size_t TransferIteratorBase<N,T>::step_custom(size_t max_bytes,
+                                                AddressInfoCustom& info,
+                                                bool tentative /*= false*/)
   {
     // check to see if we're done - if not, we'll have a valid rectangle
     if(done() || !have_rect)
@@ -340,82 +326,67 @@ namespace Realm {
       assert(it != inst_layout->fields.end());
       assert((cur_field_offset == 0) &&
 	     (cur_field_size == size_t(it->second.size_in_bytes)) &&
-	     "no support for accessing partial HDF5 fields yet");
+	     "no support for accessing partial fields with step_custom");
       const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
       layout_piece = piece_list.find_piece(cur_point);
       assert(layout_piece != 0);
-      //field_rel_offset = it->second.rel_offset;
-      //log_dma.print() << "F " << field_idx << " " << fields[field_idx] << " : " << it->second.list_idx << " " << field_rel_offset << " " << field_size;
     }
 
-    size_t max_elems = max_bytes / cur_field_size;
     // less than one element?  give up immediately
-    if(max_elems == 0)
+    if(max_bytes < cur_field_size)
       return 0;
 
-    // filename comes from the external resource info
-    const ExternalHDF5Resource *res = checked_cast<ExternalHDF5Resource *>(inst_impl->metadata.ext_resource);
-
-    // std::cout << "step " << this << " " << r << " " << p << " " << field_idx
-    // 	      << " " << max_bytes << ":";
-
-    // HDF5 requires we handle dimensions in order - no permutation allowed
-    // using the current point, find the biggest subrectangle we want to try
-    //  giving out
+    // figure out the subrectangle we'd ideally like to do, staying within
+    //  the max bytes limit
     Rect<N,T> target_subrect;
-    size_t cur_bytes = 0;
     target_subrect.lo = cur_point;
-    if(layout_piece->layout_type == PieceLayoutTypes::HDF5LayoutType) {
-      const HDF5LayoutPiece<N,T> *hlp = static_cast<const HDF5LayoutPiece<N,T> *>(layout_piece);
+    bool grow = true;
+    size_t cur_bytes = cur_field_size;
+    // follow the agreed-upon dimension ordering
+    for(int di = 0; di < N; di++) {
+      int d = dim_order[di];
 
-      info.field_id = cur_field_id;
-      info.filename = &res->filename;
-      info.dsetname = &hlp->dsetname;
+      if(grow) {
+        size_t len = cur_rect.hi[d] - cur_point[d] + 1;
+        size_t piece_limit = layout_piece->bounds.hi[d] - cur_point[d] + 1;
+        if(piece_limit < len) {
+          len = piece_limit;
+          grow = false;
+        }
+        size_t byte_limit = max_bytes / cur_bytes;
+        if(byte_limit < len) {
+          len = byte_limit;
+          grow = false;
+        }
+        target_subrect.hi[d] = cur_point[d] + len - 1;
+        cur_bytes *= len;
+        // if we didn't start this dimension at the lo point, we can't
+        //  grow any further
+        if(cur_point[d] > cur_rect.lo[d])
+          grow = false;
+      } else
+        target_subrect.hi[d] = cur_point[d];
+    }
 
-      bool grow = true;
+    // convert the target rectangle for the dimension-agnostic interface
+    // also make the rectangle _relative_ to the bounds of the piece
+    int64_t target_lo[N], target_hi[N];
+    for(int i = 0; i < N; i++) {
+      target_lo[i] = target_subrect.lo[i] - layout_piece->bounds.lo[i];
+      target_hi[i] = target_subrect.hi[i] - layout_piece->bounds.lo[i];
+    }
+
+    // offer the rectangle - it can be reduced by pruning dimensions
+    int ndims = info.set_rect(inst_impl, layout_piece, N,
+                              target_lo, target_hi, dim_order);
+
+    // if pruning did occur, update target_subrect and cur_bytes to match
+    if(ndims < N) {
+      for(int i = ndims; i < N; i++)
+        target_subrect.hi[dim_order[i]] = target_subrect.lo[dim_order[i]];
       cur_bytes = cur_field_size;
-      // follow the agreed-upon dimension ordering
-      for(int di = 0; di < N; di++) {
-	int d = dim_order[di];
-
-	if(grow) {
-	  size_t len = cur_rect.hi[d] - cur_point[d] + 1;
-	  size_t piece_limit = hlp->bounds.hi[d] - cur_point[d] + 1;
-	  if(piece_limit < len) {
-	    len = piece_limit;
-	    grow = false;
-	  }
-	  size_t byte_limit = max_bytes / cur_bytes;
-	  if(byte_limit < len) {
-	    len = byte_limit;
-	    grow = false;
-	  }
-	  target_subrect.hi[d] = cur_point[d] + len - 1;
-	  cur_bytes *= len;
-	  // if we didn't start this dimension at the lo point, we can't
-	  //  grow any further
-	  if(cur_point[d] > cur_rect.lo[d])
-	    grow = false;
-	} else
-	  target_subrect.hi[d] = cur_point[d];
-      }
-
-      // translate the target_subrect into the dataset's coordinates
-      //   using the dimension order specified in the instance's layout
-      info.dset_bounds.resize(N);
-      info.offset.resize(N);
-      info.extent.resize(N);
-      for(int di = 0; di < N; di++) {
-	int d = dim_order[di];
-
-	info.offset[hlp->dim_order[d]] = (target_subrect.lo[d] - hlp->bounds.lo[d] + hlp->offset[d]);
-	info.extent[hlp->dim_order[d]] = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
-	info.dset_bounds[hlp->dim_order[d]] = (hlp->offset[d] +
-					       (hlp->bounds.hi[d] - hlp->bounds.lo[d]) +
-					       1);
-      }
-    } else {
-      assert(0);
+      for(int i = 0; i < ndims; i++)
+        cur_bytes *= (target_subrect.hi[dim_order[i]] - target_subrect.lo[dim_order[i]] + 1);
     }
 
     // now set 'next_point' to the next point we want - this is just based on
@@ -449,7 +420,6 @@ namespace Realm {
 
     return cur_bytes;
   }
-#endif
   
   template <int N, typename T>
   void TransferIteratorBase<N,T>::confirm_step(void)

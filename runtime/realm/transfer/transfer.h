@@ -79,28 +79,33 @@ namespace Realm {
       size_t plane_stride;
     };
 
-#ifdef REALM_USE_HDF5
-    typedef unsigned long long hsize_t;
-    struct AddressInfoHDF5 {
-      //hid_t dset_id;
-      //hid_t dtype_id;
-      FieldID field_id;  // used to cache open datasets
-      const std::string *filename;
-      const std::string *dsetname;
-      std::vector<hsize_t> dset_bounds;
-      std::vector<hsize_t> offset; // start location in dataset
-      std::vector<hsize_t> extent; // xfer dimensions in memory and dataset
+    // a custom address info interface for cases where linearized
+    //  addresses are not suitable
+    class AddressInfoCustom {
+    protected:
+      virtual ~AddressInfoCustom() {}
+
+    public:
+      // offers an N-D rectangle from a given piece of a given instance,
+      //  along with a specified dimension order
+      // return value is how many dimensions are accepted (0 = single
+      //  point), which can be less than the input if the target has
+      //  strict ordering rules
+      virtual int set_rect(const RegionInstanceImpl *inst,
+                           const InstanceLayoutPieceBase *piece,
+                           int ndims,
+                           const int64_t lo[/*ndims*/],
+                           const int64_t hi[/*ndims*/],
+                           const int order[/*ndims*/]) = 0;
     };
-#endif
 
     // if a step is tentative, it must either be confirmed or cancelled before
     //  another one is possible
     virtual size_t step(size_t max_bytes, AddressInfo& info, unsigned flags,
 			bool tentative = false) = 0;
-#ifdef REALM_USE_HDF5
-    virtual size_t step_hdf5(size_t max_bytes, AddressInfoHDF5& info,
-			     bool tentative = false);
-#endif
+    virtual size_t step_custom(size_t max_bytes, AddressInfoCustom& info,
+                               bool tentative = false) = 0;
+
     virtual void confirm_step(void) = 0;
     virtual void cancel_step(void) = 0;
 

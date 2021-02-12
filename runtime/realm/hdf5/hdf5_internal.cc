@@ -144,6 +144,66 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // class AddressInfoHDF5
+
+    int AddressInfoHDF5::set_rect(const RegionInstanceImpl *inst,
+                                  const InstanceLayoutPieceBase *piece,
+                                  int ndims,
+                                  const int64_t lo[/*ndims*/],
+                                  const int64_t hi[/*ndims*/],
+                                  const int order[/*ndims*/])
+    {
+      // get hdf5 metadata for instance and piece
+      const ExternalHDF5Resource *res = checked_cast<ExternalHDF5Resource *>(inst->metadata.ext_resource);
+      // have to use full dynamic cast for piece since we're moving down
+      //  and then up in the hierarchy
+      const HDF5PieceInfo *info = dynamic_cast<const HDF5PieceInfo *>(piece);
+      assert(res && info);
+
+      // can take pointers to file/dataset names - they won't change
+      filename = &res->filename;
+      dsetname = &info->dsetname;
+
+      // offsets and extents use hdf5 dimensionality
+      int hdf5_dims = info->offset.size();
+      offset.resize(hdf5_dims);
+      extent.resize(hdf5_dims);
+
+      // base case is a single point, offset according to the piece info
+      for(int i = 0; i < hdf5_dims; i++) {
+        offset[i] = info->offset[i];
+        extent[i] = 1;
+      }
+
+      // add in the (potentially-remapped) coordinates of the first point
+      for(int i = 0; i < ndims; i++)
+        offset[info->dim_order[i]] += lo[i];
+
+      // hdf5 doesn't allow transposes, so we can only accept non-trivial
+      //  dimensions in hdf5's order (which is C order, so we have to walk
+      //  higher-indexed dimensions first)
+      int d = 0;
+      int first_nontrivial_hdf5_dim = hdf5_dims;
+      while(d < ndims) {
+        if(lo[order[d]] == hi[order[d]]) {
+          // trivial dimension - accept (extent already == 1)
+        } else {
+          // which hdf5 dim are we doing next?
+          int hd = info->dim_order[order[d]];
+          if((hd < 0) && (hd >= first_nontrivial_hdf5_dim)) {
+            // have to stop here
+            break;
+          }
+          extent[hd] = (hi[order[d]] - lo[order[d]] + 1);
+          first_nontrivial_hdf5_dim = hd;
+        }
+        d++;
+      }
+      return d;
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class HDF5XferDes
 
       HDF5XferDes::HDF5XferDes(uintptr_t _dma_op, Channel *_channel,
@@ -193,8 +253,6 @@ namespace Realm {
 	req_in_use = false;
 	remove_reference();
       }
-
-     extern Logger log_hdf5;
 
       long HDF5XferDes::get_requests(Request** requests, long nr)
       {
@@ -270,11 +328,11 @@ namespace Realm {
 					  in_port->iter);
 
 	  TransferIterator::AddressInfo mem_info;
-	  TransferIterator::AddressInfoHDF5 hdf5_info;
+	  AddressInfoHDF5 hdf5_info;
 
 	  // always ask the HDF5 size for a step first
-	  size_t hdf5_bytes = hdf5_iter->step_hdf5(max_bytes, hdf5_info,
-						   true /*tentative*/);
+	  size_t hdf5_bytes = hdf5_iter->step_custom(max_bytes, hdf5_info,
+                                                     true /*tentative*/);
           if(hdf5_bytes == 0) {
             // not enough space for even a single element - try again later
             break;
@@ -290,7 +348,7 @@ namespace Realm {
 	    // cancel the hdf5 step and try to just step by mem_bytes
 	    assert(mem_bytes < hdf5_bytes);  // should never be larger
 	    hdf5_iter->cancel_step();
-	    hdf5_bytes = hdf5_iter->step_hdf5(mem_bytes, hdf5_info);
+	    hdf5_bytes = hdf5_iter->step_custom(mem_bytes, hdf5_info);
 	    // multi-dimensional hdf5 iterators may round down the size,
 	    //  so re-check the mem bytes
 	    if(hdf5_bytes == mem_bytes) {
@@ -315,7 +373,8 @@ namespace Realm {
 	  // (TODO: pre-open at instance attach time, but in thread-safe way)
 	  HDF5Dataset *dset;
 	  {
-	    std::map<FieldID, HDF5Dataset *>::const_iterator it = datasets.find(hdf5_info.field_id);
+            DatasetMapKey key = { hdf5_info.filename, hdf5_info.dsetname };
+            DatasetMap::const_iterator it = datasets.find(key);
 	    if(it != datasets.end()) {
 	      dset = it->second;
 	    } else {
@@ -324,7 +383,7 @@ namespace Realm {
 				       (kind == XFER_HDF5_READ));
 	      assert(dset != 0);
 	      assert(hdf5_info.extent.size() == size_t(dset->ndims));
-	      datasets[hdf5_info.field_id] = dset;
+	      datasets[key] = dset;
 	    }
 	  }
 
@@ -335,8 +394,7 @@ namespace Realm {
 	  CHECK_HDF5( new_req->mem_space_id = H5Screate_simple(mem_dims.size(), mem_dims.data(), NULL) );
 	  //std::vector<hsize_t> mem_start(DIM, 0);
 	  //CHECK_HDF5( H5Sselect_hyperslab(new_req->mem_space_id, H5S_SELECT_SET, ms_start, NULL, count, NULL) );
-
-	  CHECK_HDF5( new_req->file_space_id = H5Screate_simple(hdf5_info.dset_bounds.size(), hdf5_info.dset_bounds.data(), 0) );
+          CHECK_HDF5( new_req->file_space_id = H5Scopy(dset->dspace_id) );
 	  CHECK_HDF5( H5Sselect_hyperslab(new_req->file_space_id, H5S_SELECT_SET, hdf5_info.offset.data(), 0, hdf5_info.extent.data(), 0) );
 
 	  new_req->nbytes = hdf5_bytes;
@@ -398,11 +456,11 @@ namespace Realm {
 
             // can't do a single write larger than our (replicated) fill data
             size_t max_bytes = std::min(control_count, size_t(MAX_FILL_SIZE_IN_BYTES));
-            TransferIterator::AddressInfoHDF5 hdf5_info;
+            AddressInfoHDF5 hdf5_info;
 
             // always ask the HDF5 size for a step first
-            size_t hdf5_bytes = out_port->iter->step_hdf5(max_bytes, hdf5_info,
-                                                          false /*!tentative*/);
+            size_t hdf5_bytes = out_port->iter->step_custom(max_bytes, hdf5_info,
+                                                            false /*!tentative*/);
             assert(hdf5_bytes > 0);
 
             // if this is bigger than any transfer we've done so far, grow our
@@ -414,7 +472,8 @@ namespace Realm {
             // (TODO: pre-open at instance attach time, but in thread-safe way)
             HDF5Dataset *dset;
             {
-              std::map<FieldID, HDF5Dataset *>::const_iterator it = datasets.find(hdf5_info.field_id);
+              DatasetMapKey key = { hdf5_info.filename, hdf5_info.dsetname };
+              DatasetMap::const_iterator it = datasets.find(key);
               if(it != datasets.end()) {
                 dset = it->second;
               } else {
@@ -423,7 +482,7 @@ namespace Realm {
                                          (kind == XFER_HDF5_READ));
                 assert(dset != 0);
                 assert(hdf5_info.extent.size() == size_t(dset->ndims));
-                datasets[hdf5_info.field_id] = dset;
+                datasets[key] = dset;
               }
             }
 
@@ -432,8 +491,7 @@ namespace Realm {
             CHECK_HDF5( mem_space_id = H5Screate_simple(mem_dims.size(),
                                                         mem_dims.data(), 0) );
 
-            CHECK_HDF5( file_space_id = H5Screate_simple(hdf5_info.dset_bounds.size(),
-                                                         hdf5_info.dset_bounds.data(), 0) );
+            CHECK_HDF5( file_space_id = H5Scopy(dset->dspace_id) );
             CHECK_HDF5( H5Sselect_hyperslab(file_space_id, H5S_SELECT_SET,
                                             hdf5_info.offset.data(), 0,
                                             hdf5_info.extent.data(), 0) );
@@ -503,7 +561,7 @@ namespace Realm {
           // }
         }
 
-	for(std::map<FieldID, HDF5Dataset *>::const_iterator it = datasets.begin();
+	for(DatasetMap::const_iterator it = datasets.begin();
 	    it != datasets.end();
 	    ++it)
 	  it->second->close();

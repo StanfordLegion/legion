@@ -65,6 +65,12 @@ namespace Realm {
 					      const char *dsetname,
 					      bool read_only)
     {
+      // strip off any filename prefix starting with a colon (e.g. rank=nn:)
+      {
+        const char *pos = strchr(filename, ':');
+        if(pos) filename = pos + 1;
+      }
+
       // find or open the file
       bool open_as_rw = !read_only || Config::force_read_write;
       std::pair<std::string, bool> key(filename, open_as_rw);
@@ -136,11 +142,11 @@ namespace Realm {
       dset->file_id = it->second.file_id;
       dset->dset_id = dset_id;
       dset->dtype_id = dtype_id;
+      dset->dspace_id = dspace_id;
       dset->read_only = read_only;
       dset->ndims = ndims;
       // since HDF5 supports growable datasets, we care about the maxdims
       CHECK_HDF5( H5Sget_simple_extent_dims(dspace_id, 0, dset->dset_size) );
-      CHECK_HDF5( H5Sclose(dspace_id) );
 
       // increment the usage count on the file
       it->second.usage_count++;
@@ -160,6 +166,7 @@ namespace Realm {
       assert(it != file_cache.end());
 
       log_hdf5.info() << "H5Dclose(" << dset_id << ")";
+      CHECK_HDF5( H5Sclose(dspace_id) );
       CHECK_HDF5( H5Tclose(dtype_id) );
       CHECK_HDF5( H5Dclose(dset_id) );
 

@@ -34,14 +34,6 @@
 #include <aio.h>
 #endif
 
-#ifdef REALM_USE_CUDA
-#include "realm/cuda/cuda_internal.h"
-#endif
-
-#ifdef REALM_USE_HDF5
-#include "realm/hdf5/hdf5_internal.h"
-#endif
-
 #include <queue>
 #include <algorithm>
 #include <iomanip>
@@ -955,6 +947,15 @@ namespace Realm {
     }
     info.bytes_per_chunk = bytes;
     return bytes;
+  }
+
+  size_t WrappingFIFOIterator::step_custom(size_t max_bytes,
+                                           AddressInfoCustom& info,
+                                           bool tentative /*= false*/)
+  {
+    // not supported
+    assert(0);
+    return 0;
   }
 
   void WrappingFIFOIterator::confirm_step(void)

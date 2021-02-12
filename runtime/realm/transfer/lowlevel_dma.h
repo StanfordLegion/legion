@@ -197,6 +197,8 @@ namespace Realm {
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			unsigned flags,
 			bool tentative = false);
+    virtual size_t step_custom(size_t max_bytes, AddressInfoCustom& info,
+                               bool tentative = false);
     virtual void confirm_step(void);
     virtual void cancel_step(void);
 
