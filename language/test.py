@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, codecs, glob, itertools, json, multiprocessing, os, optparse, re, shutil, subprocess, sys, tempfile, traceback, signal, time
+import argparse, codecs, glob, itertools, json, multiprocessing, os, optparse, re, resource, shutil, subprocess, sys, tempfile, traceback, time
 from collections import OrderedDict
 import regent
 
@@ -54,21 +54,26 @@ def detect_python_interpreter():
         pass
     return sys.executable
 
-def run(filename, debug, verbose, flags, env):
+def run(filename, debug, verbose, timelimit, flags, env):
     args = ((['-mg'] if debug else []) +
             [os.path.basename(filename)] + flags +
             ([] if verbose else ['-level', 'runtime=5,threads=5']))
     if verbose: print('Running', ' '.join(args))
+
+    def set_timeout():
+        resource.setrlimit(resource.RLIMIT_CPU, (timelimit, timelimit))
+
     proc = regent.regent(
         args,
         stdout=None if verbose else subprocess.PIPE,
         stderr=None if verbose else subprocess.STDOUT,
         env=env,
-        cwd=os.path.dirname(os.path.abspath(filename)))
+        cwd=os.path.dirname(os.path.abspath(filename)),
+        preexec_fn=set_timeout)
     try:
         output, _ = proc.communicate()
         retcode = proc.wait()
-    except (KeyboardInterrupt, TestTimeoutException):
+    except KeyboardInterrupt:
         if verbose: print('terminating child process...')
         proc.terminate()
         maxtime = 15
@@ -163,7 +168,7 @@ def find_labeled_flags(filename, prefix, short):
         return flags[:1]
     return flags
 
-def test_compile_fail(filename, debug, verbose, short, py_exe_path, flags, env):
+def test_compile_fail(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
     expected_failure = find_labeled_text(filename, 'fails-with')
     if expected_failure is None:
         raise Exception('No fails-with declaration in compile_fail test')
@@ -171,7 +176,7 @@ def test_compile_fail(filename, debug, verbose, short, py_exe_path, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     try:
         for params in runs_with:
-            run(filename, debug, False, params + flags, env)
+            run(filename, debug, False, timelimit, params + flags, env)
     except TestFailure as e:
         failure = e.output
         lines = set(line.strip() for line in failure.strip().split('\n')
@@ -183,15 +188,15 @@ def test_compile_fail(filename, debug, verbose, short, py_exe_path, flags, env):
     else:
         raise Exception('Expected failure, but test passed')
 
-def test_run_pass(filename, debug, verbose, short, py_exe_path, flags, env):
+def test_run_pass(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     try:
         for params in runs_with:
-            run(filename, debug, verbose, params + flags, env)
+            run(filename, debug, verbose, timelimit, params + flags, env)
     except TestFailure as e:
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
-def test_spy(filename, debug, verbose, short, py_exe_path, flags, env):
+def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
     spy_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     spy_log = os.path.join(spy_dir, 'spy_%.log')
     spy_flags = ['-level', 'legion_spy=2', '-logfile', spy_log]
@@ -200,7 +205,7 @@ def test_spy(filename, debug, verbose, short, py_exe_path, flags, env):
     try:
         for params in runs_with:
             try:
-                cmd = run(filename, debug, verbose, params + flags + spy_flags, env)
+                cmd = run(filename, debug, verbose, timelimit, params + flags + spy_flags, env)
             except TestFailure as e:
                 raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
@@ -213,7 +218,7 @@ def test_spy(filename, debug, verbose, short, py_exe_path, flags, env):
     finally:
         shutil.rmtree(spy_dir)
 
-def test_gc(filename, debug, verbose, short, py_exe_path, flags, env):
+def test_gc(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
     gc_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     gc_log = os.path.join(gc_dir, 'gc_%.log')
     gc_flags = ['-level', 'legion_gc=2', '-logfile', gc_log]
@@ -222,7 +227,7 @@ def test_gc(filename, debug, verbose, short, py_exe_path, flags, env):
     try:
         for params in runs_with:
             try:
-                cmd = run(filename, debug, verbose, params + flags + gc_flags, env)
+                cmd = run(filename, debug, verbose, timelimit, params + flags + gc_flags, env)
             except TestFailure as e:
                 raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
@@ -235,7 +240,7 @@ def test_gc(filename, debug, verbose, short, py_exe_path, flags, env):
     finally:
         shutil.rmtree(gc_dir)
 
-def test_prof(filename, debug, verbose, short, py_exe_path, flags, env):
+def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
     prof_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     prof_log = os.path.join(prof_dir, 'prof_%.gz')
     prof_flags = ['-hl:prof', '1024', '-hl:prof_logfile', prof_log]
@@ -244,7 +249,7 @@ def test_prof(filename, debug, verbose, short, py_exe_path, flags, env):
     try:
         for params in runs_with:
             try:
-                cmd = run(filename, debug, verbose, params + flags + prof_flags, env)
+                cmd = run(filename, debug, verbose, timelimit, params + flags + prof_flags, env)
             except TestFailure as e:
                 raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
@@ -264,31 +269,14 @@ clear = "\033[0m"
 PASS = 'pass'
 FAIL = 'fail'
 INTERRUPT = 'interrupt'
-TIMEOUT = 'timeout'
-
-class TestTimeoutException(Exception):
-    pass
-
-def sigalrm_handler(signum, frame):
-    raise TestTimeoutException
 
 def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, short, py_exe_path):
     test_fn, test_args = test_closure
     saved_temps = []
-    if timelimit:
-        signal.signal(signal.SIGALRM, sigalrm_handler)
-        signal.alarm(timelimit)
     try:
-        test_fn(filename, debug, verbose, short, py_exe_path, *test_args)
-        signal.alarm(0)
+        test_fn(filename, debug, verbose, short, timelimit, py_exe_path, *test_args)
     except KeyboardInterrupt:
         return test_name, filename, [], INTERRUPT, None
-    except TestTimeoutException:
-        return test_name, filename, [], TIMEOUT, None
-    # except driver.CompilerException as e:
-    #     if verbose:
-    #         return test_name, filename, e.saved_temps, FAIL, ''.join(traceback.format_exception(*sys.exc_info()))
-    #     return test_name, filename, e.saved_temps, FAIL, None
     except Exception as e:
         if verbose:
             return test_name, filename, [], FAIL, ''.join(traceback.format_exception(*sys.exc_info()))
@@ -468,11 +456,6 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp
                     elif outcome == FAIL:
                         if quiet: print()
                         print('[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename))
-                        if output is not None: print(output)
-                        test_counters[test_name].failed += 1
-                    elif outcome == TIMEOUT:
-                        if quiet: print()
-                        print('[%sTIMEOUT%s] (%s) %s' % (red, clear, test_name, filename))
                         if output is not None: print(output)
                         test_counters[test_name].failed += 1
                     else:
