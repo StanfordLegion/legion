@@ -2874,7 +2874,7 @@ namespace Legion {
       // Call these from region nodes
       void initialize_versioning_analysis(EquivalenceSet *set,
               const FieldMask &mask, std::set<RtEvent> &applied_events);
-      void initialize_nonexclusive_virtual_analysis(
+      void initialize_nonexclusive_virtual_analysis(const FieldMask &mask,
                                     const FieldMaskSet<EquivalenceSet> &sets,
                                     std::set<RtEvent> &applied_events);
       void compute_equivalence_sets(const ContextID ctx,
@@ -2918,7 +2918,8 @@ namespace Legion {
                                  const FieldMask &mask, bool invalidate_self,
                                  FieldMaskSet<RegionTreeNode> &to_traverse,
                                  FieldMaskSet<EquivalenceSet> &to_untrack,
-                                 std::vector<EquivalenceSet*> &to_release);
+                                 std::vector<EquivalenceSet*> &to_release,
+                                 bool nonexclusive_virtual_mapping_root=false);
       void merge(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
                  FieldMaskSet<EquivalenceSet> &to_untrack);
       void swap(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,

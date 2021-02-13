@@ -18116,6 +18116,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::initialize_nonexclusive_virtual_analysis(
+                                       const FieldMask &mask,
                                        const FieldMaskSet<EquivalenceSet> &sets,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -18128,7 +18129,7 @@ namespace Legion {
       // here even though we don't actually own these sets, we're just
       // marking it so that any analyses stop here. The logical analysis
       // will ensure that we are never refined
-      disjoint_complete |= sets.get_valid_mask();
+      disjoint_complete |= mask;
       WrapperReferenceMutator mutator(applied_events);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             sets.begin(); it != sets.end(); it++)
@@ -18496,7 +18497,8 @@ namespace Legion {
                                       const FieldMask &mask, bool self,
                                       FieldMaskSet<RegionTreeNode> &to_traverse,
                                       FieldMaskSet<EquivalenceSet> &to_untrack,
-                                      std::vector<EquivalenceSet*> &to_release)
+                                      std::vector<EquivalenceSet*> &to_release,
+                                      bool nonexclusive_virtual_mapping_root)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);     
@@ -18560,7 +18562,10 @@ namespace Legion {
                 equivalence_sets.begin(); it != equivalence_sets.end(); it++)
           {
             // Skip any nodes that are not even part of a refinement 
-            if (it->first->region_node != node)
+            // Unless we are a non-exclusive virtual mapping root in
+            // which case we do still want to invalidate these
+            if ((it->first->region_node != node) && 
+                !nonexclusive_virtual_mapping_root)
               continue;
             const FieldMask overlap = it->second & mask;
             if (!overlap)

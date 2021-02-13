@@ -3674,7 +3674,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::check_for_unversioned(unsigned index)
+    bool InnerContext::nonexclusive_virtual_mapping(unsigned index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3689,8 +3689,8 @@ namespace Legion {
       // other privileges we can't so we need to share equivalence sets with
       // other contexts and not make our own refinements. We detect this case
       // here and prevent the logical analysis from ever making a refinement
-      return ((index >= virtual_mapped.size()) || !virtual_mapped[index] ||
-              IS_WRITE(regions[index]));
+      return ((index < virtual_mapped.size()) && virtual_mapped[index] && 
+              !IS_WRITE(regions[index]));
     }
 
     //--------------------------------------------------------------------------
@@ -8866,11 +8866,13 @@ namespace Legion {
           assert(idx1 < version_infos.size());
 #endif
           RegionNode *region_node = runtime->forest->get_node(req.region);
+          const FieldMask user_mask = 
+            region_node->column_source->get_field_mask(req.privilege_fields);
           const FieldMaskSet<EquivalenceSet> &eq_sets =
             version_infos[idx1].get_equivalence_sets();
           // tell the version manager about these equivalence sets
-          region_node->initialize_nonexclusive_virtual_analysis(ctx,
-                                            eq_sets, applied_events);
+          region_node->initialize_nonexclusive_virtual_analysis(ctx, user_mask,
+                                                      eq_sets, applied_events);
           continue;
         }
 #ifdef DEBUG_LEGION
@@ -9015,7 +9017,8 @@ namespace Legion {
         const FieldMask close_mask = 
           node->column_source->get_field_mask(regions[idx].privilege_fields);
         node->invalidate_refinement(tree_context.get_id(), close_mask,
-                      true/*self*/, applied, invalidated_refinements, this);
+                      true/*self*/, applied, invalidated_refinements, this,
+                      nonexclusive_virtual_mapping(idx));
       }
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(is_top_level_task, applied);

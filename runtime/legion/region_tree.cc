@@ -1726,17 +1726,19 @@ namespace Legion {
         FieldMask already_closed_mask;
         FieldMask written_disjoint_complete;
         FieldMaskSet<RefinementOp> refinements;
+        const bool check_for_unversioned = 
+          !op->is_parent_nonexclusive_virtual_mapping(idx);
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
                      projection_info, unopened_mask, already_closed_mask, 
                      written_disjoint_complete, refinements, refinement_tracker,
                      applied_events, true/*track disjoint complete below*/, 
-                     op->check_for_unversioned(idx));
+                     check_for_unversioned);
 #ifdef DEBUG_LEGION
         // should never flow out here unless we're not checking for versioning
         // we aren't checking when we've got an non-read-write virtual mapping
         // because in that case we are sharing equivalence sets with the
         // parent context and therefore are never permitted to do refinements
-        assert(!written_disjoint_complete || !op->check_for_unversioned(idx)); 
+        assert(!written_disjoint_complete || !check_for_unversioned);
 #endif
       }
 #ifdef DEBUG_LEGION
@@ -19488,12 +19490,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::initialize_nonexclusive_virtual_analysis(ContextID ctx,
+                                    const FieldMask &mask,
                                     const FieldMaskSet<EquivalenceSet> &eq_sets,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      manager.initialize_nonexclusive_virtual_analysis(eq_sets, applied_events);
+      manager.initialize_nonexclusive_virtual_analysis(mask, eq_sets,
+                                                       applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -19608,14 +19612,15 @@ namespace Legion {
     void RegionNode::invalidate_refinement(ContextID ctx, const FieldMask &mask, 
                                    bool self, std::set<RtEvent> &applied_events, 
                                    std::vector<EquivalenceSet*> &to_release,
-                                   InnerContext *source_context)
+                                   InnerContext *source_context,
+                                   bool nonexclusive_virtual_mapping_root)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
-      manager.invalidate_refinement(source_context, mask, self, 
-                                    to_traverse, to_untrack, to_release);
+      manager.invalidate_refinement(source_context, mask, self, to_traverse,
+                  to_untrack, to_release, nonexclusive_virtual_mapping_root);
       if (!to_untrack.empty())
       {
         if (source_context == NULL)

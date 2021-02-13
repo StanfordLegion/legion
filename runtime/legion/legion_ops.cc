@@ -1888,10 +1888,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Operation::check_for_unversioned(unsigned index)
+    bool Operation::is_parent_nonexclusive_virtual_mapping(unsigned index)
     //--------------------------------------------------------------------------
     {
-      return parent_ctx->check_for_unversioned(find_parent_index(index));
+      return parent_ctx->nonexclusive_virtual_mapping(find_parent_index(index));
     }
 
     //--------------------------------------------------------------------------

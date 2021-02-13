@@ -1312,7 +1312,7 @@ namespace Legion {
       virtual RefinementOp* get_refinement_op(void);
 #endif
     public:
-      bool check_for_unversioned(unsigned index);
+      bool nonexclusive_virtual_mapping(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
     public:
       // Override by RemoteTask and TopLevelTask
