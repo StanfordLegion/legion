@@ -1732,7 +1732,11 @@ namespace Legion {
                      applied_events, true/*track disjoint complete below*/, 
                      op->check_for_unversioned(idx));
 #ifdef DEBUG_LEGION
-        assert(!written_disjoint_complete); // should never flow out here
+        // should never flow out here unless we're not checking for versioning
+        // we aren't checking when we've got an non-read-write virtual mapping
+        // because in that case we are sharing equivalence sets with the
+        // parent context and therefore are never permitted to do refinements
+        assert(!written_disjoint_complete || !op->check_for_unversioned(idx)); 
 #endif
       }
 #ifdef DEBUG_LEGION
