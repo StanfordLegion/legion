@@ -18115,6 +18115,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VersionManager::initialize_nonexclusive_virtual_analysis(
+                                       const FieldMaskSet<EquivalenceSet> &sets,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock here since we know this is initialization
+#ifdef DEBUG_LEGION
+      assert(disjoint_complete * sets.get_valid_mask());
+#endif
+      // We'll pretend like we're the root of the equivalence set tree
+      // here even though we don't actually own these sets, we're just
+      // marking it so that any analyses stop here. The logical analysis
+      // will ensure that we are never refined
+      disjoint_complete |= sets.get_valid_mask();
+      WrapperReferenceMutator mutator(applied_events);
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            sets.begin(); it != sets.end(); it++)
+        if (equivalence_sets.insert(it->first, it->second))
+          it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
     void VersionManager::compute_equivalence_sets(const ContextID ctx,
                                           IndexSpaceExpression *expr,
                                           EqSetTracker *target,

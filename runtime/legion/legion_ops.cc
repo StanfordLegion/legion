@@ -1888,6 +1888,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool Operation::check_for_unversioned(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      return parent_ctx->check_for_unversioned(find_parent_index(index));
+    }
+
+    //--------------------------------------------------------------------------
     InnerContext* Operation::find_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {

@@ -656,6 +656,8 @@ namespace Legion {
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
     public:
+      // Help for finding whether we should check for unversioned
+      bool check_for_unversioned(unsigned index);
       // Help for finding the contexts for an operation
       InnerContext* find_physical_context(unsigned index);
     public:

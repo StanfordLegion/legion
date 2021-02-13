@@ -489,7 +489,6 @@ namespace Legion {
       virtual RefinementOp* get_refinement_op(void) = 0;
 #endif
     public:
-      virtual InnerContext* find_parent_physical_context(unsigned index) = 0;
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_top_context(InnerContext *previous = NULL) = 0;
     public:
@@ -1313,6 +1312,7 @@ namespace Legion {
       virtual RefinementOp* get_refinement_op(void);
 #endif
     public:
+      bool check_for_unversioned(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
     public:
       // Override by RemoteTask and TopLevelTask
@@ -2939,7 +2939,6 @@ namespace Legion {
       virtual RefinementOp* get_refinement_op(void);
 #endif
     public:
-      virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual void initialize_region_tree_contexts(

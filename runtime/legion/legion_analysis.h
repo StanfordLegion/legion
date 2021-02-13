@@ -2874,6 +2874,9 @@ namespace Legion {
       // Call these from region nodes
       void initialize_versioning_analysis(EquivalenceSet *set,
               const FieldMask &mask, std::set<RtEvent> &applied_events);
+      void initialize_nonexclusive_virtual_analysis(
+                                    const FieldMaskSet<EquivalenceSet> &sets,
+                                    std::set<RtEvent> &applied_events);
       void compute_equivalence_sets(const ContextID ctx,
                                     IndexSpaceExpression *expr,
                                     EqSetTracker *target, 

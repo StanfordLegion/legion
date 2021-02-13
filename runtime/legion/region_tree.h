@@ -4006,6 +4006,9 @@ namespace Legion {
                                          std::set<RtEvent> &applied_events);
       void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
                     const FieldMask &mask, std::set<RtEvent> &applied_events);
+      void initialize_nonexclusive_virtual_analysis(ContextID ctx,
+                                  const FieldMaskSet<EquivalenceSet> &eq_sets,
+                                  std::set<RtEvent> &applied_events);
       void perform_versioning_analysis(ContextID ctx, 
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,

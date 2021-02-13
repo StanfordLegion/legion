@@ -1699,7 +1699,7 @@ namespace Legion {
       // If this is a NO_ACCESS, then we'll have no dependences so we're done
       if (IS_NO_ACCESS(req))
         return;
-      TaskContext *context = op->get_context();
+      InnerContext *context = op->get_context();
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1730,7 +1730,7 @@ namespace Legion {
                      projection_info, unopened_mask, already_closed_mask, 
                      written_disjoint_complete, refinements, refinement_tracker,
                      applied_events, true/*track disjoint complete below*/, 
-                     true/*check unversioned*/);
+                     op->check_for_unversioned(idx));
 #ifdef DEBUG_LEGION
         assert(!written_disjoint_complete); // should never flow out here
 #endif
@@ -19480,6 +19480,16 @@ namespace Legion {
     {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.initialize_versioning_analysis(set, mask, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::initialize_nonexclusive_virtual_analysis(ContextID ctx,
+                                    const FieldMaskSet<EquivalenceSet> &eq_sets,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      manager.initialize_nonexclusive_virtual_analysis(eq_sets, applied_events);
     }
 
     //--------------------------------------------------------------------------
