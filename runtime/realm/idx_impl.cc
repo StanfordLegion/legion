@@ -18,8 +18,47 @@
 #include "realm/idx_impl.h"
 
 #include "realm/deppart/inst_helper.h"
+#include "realm/instance.h"
+
+#include <iomanip>
 
 namespace Realm {
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // struct CopySrcDstField
+
+  std::ostream& operator<<(std::ostream& os, const CopySrcDstField& sd)
+  {
+    if(sd.field_id >= 0) {
+      os << "field(" << sd.field_id;
+      if(sd.indirect_index >= 0)
+	os << ", ind=" << sd.indirect_index;
+      else
+	os << ", inst=" << sd.inst;
+      if(sd.redop_id != 0)
+	os << ", redop=" << sd.redop_id << (sd.red_fold ? "(fold)" : "(apply)");
+      if(sd.serdez_id != 0)
+	os << ", serdez=" << sd.serdez_id;
+      os << ", size=" << sd.size;
+      if(sd.subfield_offset != 0)
+	os << "+" << sd.subfield_offset;
+      os << ")";
+    } else {
+      os << "fill(";
+      if(sd.size <= CopySrcDstField::MAX_DIRECT_SIZE) {
+	os << std::hex << std::setfill('0');
+	// show data in little-endian order
+	for(size_t i = 0; i < sd.size; i++)
+	  os << std::setw(2)
+             << (int)(unsigned char)(sd.fill_data.direct[sd.size - 1 - i]);
+	os << std::dec << ")";
+      } else
+	os << "size=" << sd.size << ")";
+    }
+    return os;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

@@ -1045,6 +1045,10 @@ namespace Legion {
       {
       }
 
+      /**********************************
+       * Printing functions
+       **********************************/
+
       //------------------------------------------------------------------------
       const char* to_string(Processor::Kind kind)
       //------------------------------------------------------------------------
@@ -1140,6 +1144,7 @@ namespace Legion {
         switch (dom.get_dim()) {
 #define CASE(N) case N: return to_string<N>(dom);
           LEGION_FOREACH_N(CASE)
+#undef CASE
           default: assert(false);
         }
         return "";
@@ -1234,16 +1239,20 @@ namespace Legion {
         std::stringstream ss;
         ss << "PhysicalInstance";
         if (inst.is_virtual_instance()) {
-          ss << "(type=VIRTUAL)";
+          ss << "(VIRTUAL)";
           return ss.str();
         }
-        ss << "[" << std::hex << inst.get_instance_id() << std::dec << "]";
-        ss << "(type=";
-        if (inst.is_normal_instance()) { ss << "NORMAL"; }
-        else if (inst.is_reduction_instance()) { ss << "REDUCTION"; }
-        else if (inst.is_external_instance()) { ss << "EXTERNAL"; }
-        else { assert(false); }
-        ss << ",memory=" << inst.get_location();
+        ss << "[" << std::hex << inst.get_instance_id() << std::dec << "](";
+        if (inst.is_reduction_instance()) {
+          ss << "REDUCTION,";
+        }
+        if (inst.is_external_instance()) {
+          ss << "EXTERNAL,";
+        }
+        if (inst.is_collective_instance()) {
+          ss << "COLLECTIVE,";
+        }
+        ss << "memory=" << inst.get_location();
         ss << ",domain=" << to_string(runtime, ctx, inst.get_instance_domain());
         std::set<FieldID> fields;
         inst.get_fields(fields);
@@ -1266,20 +1275,27 @@ namespace Legion {
         ss << "RegionRequirement";
         ss << "[" << req_idx << "]";
         ss << "(privilege=" << to_string(req.privilege);
-        ss << ",restricted="
-           << std::boolalpha << req.is_restricted() << std::noboolalpha;
-        ss << ",prop=" << to_string(req.prop);
+        if (req.is_restricted()) {
+          ss << ",RESTRICTED";
+        }
+        if (req.prop != LEGION_EXCLUSIVE) {
+          ss << ",prop=" << to_string(req.prop);
+        }
+        RegionTreeID tree;
         IndexSpace is;
         FieldSpace fs;
         if (req.region.exists()) {
+          tree = req.region.get_tree_id();
           is = req.region.get_index_space();
           fs = req.region.get_field_space();
         } else {
           assert(req.partition.exists());
+          tree = req.partition.get_tree_id();
           is = runtime->get_parent_index_space(
               ctx, req.partition.get_index_partition());
           fs = req.partition.get_field_space();
         }
+        ss << ",tree=" << tree;
         ss << ",domain=" << to_string(runtime, ctx, is);
         ss << ",fields=" << to_string(runtime, ctx, fs, req.privilege_fields);
         ss << ")";
@@ -1294,7 +1310,9 @@ namespace Legion {
       {
         std::stringstream ss;
         ss << task.get_task_name();
-        ss << "(index_point=" << task.index_point << ")";
+        if (task.is_index_space) {
+          ss << "(index_point=" << task.index_point << ")";
+        }
         return ss.str();
       }
 

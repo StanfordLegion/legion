@@ -28,6 +28,7 @@
 ////////////////////////////////////////////////////////////
 
 #include <cstdio>
+#include <stdlib.h>
 // Need MPI header file
 #include <mpi.h>
 
@@ -134,6 +135,12 @@ void top_level_task(const Task *task,
 
 int main(int argc, char **argv)
 {
+#if defined(GASNET_CONDUIT_IBV) || defined(GASNET_CONDUIT_UCX)
+  // work around GASNet issues during application cleanup:
+  //  ibv conduit (debug build only): https://gasnet-bugs.lbl.gov/bugzilla/show_bug.cgi?id=4166
+  //  ucx conduit (debug and release): https://upc-bugs.lbl.gov/bugzilla/show_bug.cgi?id=4172
+  setenv("GASNET_CATCH_EXIT", "0", 0 /*!overwrite*/);
+#endif
 #if defined(GASNET_CONDUIT_MPI) || defined(REALM_USE_MPI)
   // The GASNet MPI conduit and/or the Realm MPI network layer
   // require that MPI be initialized for multiple threads

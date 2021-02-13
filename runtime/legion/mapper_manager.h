@@ -71,7 +71,7 @@ namespace Legion {
       };
     public:
       MapperManager(Runtime *runtime, Mapping::Mapper *mapper, 
-                    MapperID map_id, Processor p);
+                    MapperID map_id, Processor p, bool is_default);
       virtual ~MapperManager(void);
     public:
       const char* get_mapper_name(void);
@@ -614,6 +614,7 @@ namespace Legion {
       const Processor processor;
       const bool profile_mapper;
       const bool request_valid_instances;
+      const bool is_default_mapper;
     protected:
       mutable LocalLock mapper_lock;
     protected:
@@ -636,7 +637,7 @@ namespace Legion {
     class SerializingManager : public MapperManager {
     public:
       SerializingManager(Runtime *runtime, Mapping::Mapper *mapper,
-                         MapperID map_id, Processor p, bool reentrant);
+         MapperID map_id, Processor p, bool reentrant, bool is_default = false);
       SerializingManager(const SerializingManager &rhs);
       virtual ~SerializingManager(void);
     public:
@@ -694,7 +695,7 @@ namespace Legion {
       };
     public:
       ConcurrentManager(Runtime *runtime, Mapping::Mapper *mapper,
-                        MapperID map_id, Processor p);
+                        MapperID map_id, Processor p, bool is_default = false);
       ConcurrentManager(const ConcurrentManager &rhs);
       virtual ~ConcurrentManager(void);
     public:

@@ -17,6 +17,7 @@
 #include "realm/cmdline.h"
 #include "legion/legion_ops.h"
 #include "legion/legion_tasks.h"
+#include "legion/legion_context.h"
 #include "legion/legion_profiling.h"
 #include "legion/legion_profiling_serializer.h"
 
@@ -1341,14 +1342,15 @@ namespace Legion {
                                    const char *prof_logfile,
                                    const size_t total_runtime_instances,
                                    const size_t footprint_threshold,
-                                   const size_t target_latency)
+                                   const size_t target_latency,
+                                   const bool slow_config_ok)
       : runtime(rt), done_event(Runtime::create_rt_user_event()), 
         output_footprint_threshold(footprint_threshold), 
         output_target_latency(target_latency), target_proc(target), 
 #ifndef DEBUG_LEGION
         total_outstanding_requests(1/*start with guard*/),
 #endif
-        total_memory_footprint(0)
+        total_memory_footprint(0), need_default_mapper_warning(!slow_config_ok)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2376,6 +2378,64 @@ namespace Legion {
         assert(footprint >= diff); // check for wrap-around
 #endif
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::issue_default_mapper_warning(Operation *op,
+                                                   const char *mapper_call_name)
+    //--------------------------------------------------------------------------
+    {
+      // We'll skip any warnings for now with no operation
+      if (op == NULL)
+        return;
+      // We'll only issue this warning once on each node for now
+      if (!__sync_bool_compare_and_swap(&need_default_mapper_warning,
+                                        true/*oldval*/, false/*newval*/))
+        return;
+      // Give a massive warning for profilig when using the default mapper
+      for (int i = 0; i < 2; i++)
+        fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+      for (int i = 0; i < 4; i++)
+        fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
+      for (int i = 0; i < 2; i++)
+        fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+      fprintf(stderr,"!!! YOU ARE PROFILING USING THE DEFAULT MAPPER!!!\n");
+      fprintf(stderr,"!!! THE DEFAULT MAPPER IS NOT FOR PERFORMANCE !!!\n");
+      fprintf(stderr,"!!! PLEASE CUSTOMIZE YOUR MAPPER TO YOUR      !!!\n");
+      fprintf(stderr,"!!! APPLICATION AND TO YOUR TARGET MACHINE    !!!\n");
+      InnerContext *context = op->get_context();
+      if (op->get_operation_kind() == Operation::TASK_OP_KIND)
+      {
+        TaskOp *task = static_cast<TaskOp*>(op);
+        if (context->get_owner_task() != NULL) 
+          fprintf(stderr,"First use of the default mapper in address space %d\n"
+                         "occurred when task %s (UID %lld) in parent task %s "
+                         "(UID %lld)\ninvoked the \"%s\" mapper call\n",
+                         runtime->address_space, task->get_task_name(),
+                         task->get_unique_op_id(), context->get_task_name(),
+                         context->get_unique_id(), mapper_call_name);
+        else
+          fprintf(stderr,"First use of the default mapper in address space %d\n"
+                         "occurred when task %s (UID %lld) invoked the \"%s\" "
+                         "mapper call\n", runtime->address_space,
+                         task->get_task_name(), task->get_unique_op_id(),
+                         mapper_call_name);
+      }
+      else
+        fprintf(stderr,"First use of the default mapper in address space %d\n"
+                       "occurred when %s (UID %lld) in parent task %s "
+                       "(UID %lld)\ninvoked the \"%s\" mapper call\n",
+                       runtime->address_space, op->get_logging_name(),
+                       op->get_unique_op_id(), context->get_task_name(),
+                       context->get_unique_id(), mapper_call_name);
+      for (int i = 0; i < 2; i++)
+        fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+      for (int i = 0; i < 4; i++)
+        fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
+      for (int i = 0; i < 2; i++)
+        fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+      fprintf(stderr,"\n");
+      fflush(stderr);
     }
 
     //--------------------------------------------------------------------------

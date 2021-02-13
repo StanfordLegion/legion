@@ -252,7 +252,7 @@ namespace Legion {
 
         /**
          * Return a balanced assignment of point tasks to processors by LPT
-         * (Lognest-Processing Time) scheduling based on the average
+         * (Longest-Processing Time) scheduling based on the average
          * execution times. Assume that processors of the same kind are
          * homogeneous and only the workload of point tasks can be skwed.
          */
@@ -282,8 +282,9 @@ namespace Legion {
         OptionMap profiling_options;
       };
 
-      // Functions for printing various runtime objects to strings from inside a
-      // mapper.
+      /** @{
+          Functions for printing various runtime objects to strings from inside
+          a mapper. */
 
       const char* to_string(Processor::Kind kind);
 
@@ -322,6 +323,8 @@ namespace Legion {
       std::string to_string(MapperRuntime* runtime,
                             const MapperContext ctx,
                             const Task& task);
+
+      /** @} */
 
     }; // namespace Utilities
   }; // namespace Mapping

@@ -862,8 +862,10 @@ namespace Legion {
       FieldMaskSet<RegionTreeNode> disjoint_complete_children;
       // Keep track of the disjoint complete accesses that have been
       // done in other children to track whether we want to change later
-      // For partitions we'll only use the mask here since we know we
-      // never need to store the names of the actual regions
+      // For partitions we'll only store the children to help with the
+      // process of counting. After that we'll remove children and the
+      // summary mask will be all that remains to record which fields
+      // have disjoint and complete accesses
       FieldMaskSet<RegionTreeNode> disjoint_complete_accesses;
       // For partitions only, we record the counts of the numbers of
       // children that we've observed for all fields to see when we're 
@@ -1323,12 +1325,14 @@ namespace Legion {
                FieldMaskSet<Update> >::aligned EventFieldUpdates;
     public:
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, unsigned idx,
-                         RtEvent guard_event, bool track_events,
+                         CopyFillGuard *previous, bool track_events,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
                          unsigned src_idx, unsigned dst_idx,
-                         RtEvent guard_event, bool track_events,
-                         PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
+                         CopyFillGuard *previous, bool track_events,
+                         PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
+                         // Used only in the case of copy-across analyses
+                         RtEvent alternate_pre = RtEvent::NO_RT_EVENT);
       CopyFillAggregator(const CopyFillAggregator &rhs);
       virtual ~CopyFillAggregator(void);
     public:
@@ -2485,7 +2489,7 @@ namespace Legion {
            std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
            std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
       void update_set_internal(CopyFillAggregator *&input_aggregator,
-                               const RtEvent guard_event,
+                               CopyFillGuard *previous_guard,
                                Operation *op, const unsigned index,
                                const RegionUsage &usage,
                                IndexSpaceExpression *expr, 
@@ -2497,7 +2501,7 @@ namespace Legion {
                                std::set<RtEvent> &applied_events,
                                const bool record_valid);
       void make_instances_valid(CopyFillAggregator *&aggregator,
-                                const RtEvent guard_event,
+                                CopyFillGuard *previous_guard,
                                 Operation *op, const unsigned index,
                                 const bool track_events,
                                 IndexSpaceExpression *expr,
@@ -2514,7 +2518,7 @@ namespace Legion {
       void issue_update_copies_and_fills(InstanceView *target,
                                 const std::vector<InstanceView*> &source_views,
                                          CopyFillAggregator *&aggregator,
-                                         const RtEvent guard_event,
+                                         CopyFillGuard *previous_guard,
                                          Operation *op, const unsigned index,
                                          const bool track_events,
                                          IndexSpaceExpression *expr,
@@ -2528,7 +2532,8 @@ namespace Legion {
       void apply_reductions(const FieldMaskSet<InstanceView> &reduction_targets,
                             IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &reduction_mask, 
-                            CopyFillAggregator *&aggregator,RtEvent guard_event,
+                            CopyFillAggregator *&aggregator,
+                            CopyFillGuard *previous_guard,
                             Operation *op, const unsigned index, 
                             const bool track_events,
                             const PhysicalTraceInfo &trace_info,

@@ -2771,7 +2771,7 @@ namespace Legion {
       MapperManager* find_mapper(MapperID map_id);
       MapperManager* find_mapper(Processor target, MapperID map_id);
       static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper,
-                                        MapperID map_id, Processor proc);
+                MapperID map_id, Processor proc, bool is_default = false);
     public:
       ProjectionID generate_dynamic_projection_id(bool check_context = true);
       ProjectionID generate_library_projection_ids(const char *name,size_t cnt);

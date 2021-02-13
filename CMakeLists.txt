@@ -295,15 +295,32 @@ endif()
 # GASNet configuration
 #------------------------------------------------------------------------------#
 if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
-  set(GASNet_THREADING par)
-  set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
-  find_package(GASNet REQUIRED)
-  if(NOT GASNet_THREADING STREQUAL "par")
-    message(FATAL_ERROR "GASNet threading mode \"${GASNet_THREADING}\" is not currently supported by Legion")
+  option(Legion_EMBED_GASNet "Embed a custom GASNet build in Realm library" OFF)
+  if(Legion_EMBED_GASNet)
+    if(NOT GASNet_CONDUIT)
+      message(FATAL_ERROR "GASNet_CONDUIT must be set when using an embedded GASNet build")
+    endif()
+    # an embedded GASNet uses the stanfordlegion/gasnet helper repository for
+    #  a build wrapper and curated-for-Legion GASNet configurations - it can
+    #  be fetched from github directly (the default) or use a local (and
+    #  perhaps modified) clone of the repository
+    set(Legion_EMBED_GASNet_GITREPO
+      "https://github.com/StanfordLegion/gasnet.git"
+      CACHE STRING "URL for cloning StanfordLegion/gasnet repository")
+    set(Legion_EMBED_GASNet_GITREF
+      "master"
+      CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
+    set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of stanfordlegion/gasnet repository")
+    set(Legion_EMBED_GASNet_VERSION "" CACHE STRING "Override GASNet version to build")
+    set(Legion_EMBED_GASNet_CONFIGURE_ARGS "" CACHE STRING "Extra configuration arguments for GASNet")
+  else()
+    set(GASNet_THREADING par)
+    set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
+    find_package(GASNet REQUIRED)
+    if(NOT GASNet_THREADING STREQUAL "par")
+      message(FATAL_ERROR "GASNet threading mode \"${GASNet_THREADING}\" is not currently supported by Legion")
+    endif()
   endif()
-  install(FILES ${Legion_SOURCE_DIR}/cmake/FindGASNet.cmake
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
-  )
 
   # define variable for realm_defines.h
   if("${Legion_NETWORKS}" MATCHES .*gasnetex.*)
