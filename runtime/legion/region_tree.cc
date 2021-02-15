@@ -5388,11 +5388,23 @@ namespace Legion {
         return lhs;
       if (lhs->is_empty())
         return rhs;
+      lhs = lhs->get_canonical_expression(this);
       if (rhs->is_empty())
         return lhs;
+      rhs = rhs->get_canonical_expression(this);
+      if (lhs == rhs)
+        return lhs;
       std::vector<IndexSpaceExpression*> exprs(2);
-      exprs[0] = lhs;
-      exprs[1] = rhs;
+      if (compare_expressions(lhs, rhs))
+      {
+        exprs[0] = lhs;
+        exprs[1] = rhs;
+      }
+      else
+      {
+        exprs[0] = rhs;
+        exprs[1] = lhs;
+      }
       return union_index_spaces(exprs);
     }
 
@@ -5419,6 +5431,10 @@ namespace Legion {
         return *(exprs.begin());
       if (expressions.size() == 1)
         return expressions[0];
+      // sort them in order by their IDs
+      std::sort(expressions.begin(), expressions.end(), compare_expressions);
+      // remove duplicates
+      std::unique(expressions.begin(), expressions.end());
       // this helps make sure we don't overflow our stack
       while (expressions.size() > MAX_EXPRESSION_FANOUT)
       {
@@ -5446,6 +5462,14 @@ namespace Legion {
           }
         }
         expressions.swap(next_expressions);
+        // canonicalize and uniquify them all again
+        for (unsigned idx = 0; idx < expressions.size(); idx++)
+        {
+          IndexSpaceExpression *&expr = expressions[idx];
+          expr = expr->get_canonical_expression(this);
+        }
+        std::sort(expressions.begin(), expressions.end(), compare_expressions);
+        std::unique(expressions.begin(), expressions.end());
       }
       return union_index_spaces(expressions);
     }
@@ -5538,11 +5562,23 @@ namespace Legion {
         return lhs;
       if (lhs->is_empty())
         return lhs;
+      lhs = lhs->get_canonical_expression(this);
       if (rhs->is_empty())
         return rhs;
+      rhs = rhs->get_canonical_expression(this);
+      if (lhs == rhs)
+        return lhs;
       std::vector<IndexSpaceExpression*> exprs(2);
-      exprs[0] = lhs;
-      exprs[1] = rhs;
+      if (compare_expressions(lhs, rhs))
+      {
+        exprs[0] = lhs;
+        exprs[1] = rhs;
+      }
+      else
+      {
+        exprs[0] = rhs;
+        exprs[1] = lhs;
+      }
       return intersect_index_spaces(exprs);
     }
 
@@ -5559,10 +5595,17 @@ namespace Legion {
       std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
       // Do a quick pass to see if any of them are empty in which case we 
       // know that the result of the whole intersection is empty
-      for (std::vector<IndexSpaceExpression*>::const_iterator it = 
-            expressions.begin(); it != expressions.end(); it++)
-        if ((*it)->is_empty())
-          return (*it);
+      for (unsigned idx = 0; idx < expressions.size(); idx++)
+      {
+        IndexSpaceExpression *&expr = expressions[idx];
+        if (expr->is_empty())
+          return expr;
+        expr = expr->get_canonical_expression(this);
+      }
+      // sort them in order by their IDs
+      std::sort(expressions.begin(), expressions.end(), compare_expressions);
+      // remove duplicates
+      std::unique(expressions.begin(), expressions.end());
       // this helps make sure we don't overflow our stack
       while (expressions.size() > MAX_EXPRESSION_FANOUT)
       {
@@ -5591,6 +5634,16 @@ namespace Legion {
           }
         }
         expressions.swap(next_expressions);
+        // canonicalize and uniquify them all again
+        for (unsigned idx = 0; idx < expressions.size(); idx++)
+        {
+          IndexSpaceExpression *&expr = expressions[idx];
+          if (expr->is_empty())
+            return expr;
+          expr = expr->get_canonical_expression(this);
+        }
+        std::sort(expressions.begin(), expressions.end(), compare_expressions);
+        std::unique(expressions.begin(), expressions.end());
       }
       return intersect_index_spaces(expressions);
     }
@@ -5693,8 +5746,8 @@ namespace Legion {
           return lhs;
       }
       std::vector<IndexSpaceExpression*> expressions(2);
-      expressions[0] = lhs;
-      expressions[1] = rhs;
+      expressions[0] = lhs->get_canonical_expression(this);
+      expressions[1] = rhs->get_canonical_expression(this);
       // See if we can find it in read-only mode
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);

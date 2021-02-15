@@ -16,7 +16,7 @@
 namespace Legion {
   namespace Internal {
 
-    LEGION_EXTERN_LOGGER_DECLARATIONS
+    LEGION_EXTERN_LOGGER_DECLARATIONS 
 
 #ifdef DEFINE_NT_TEMPLATES
     /////////////////////////////////////////////////////////////

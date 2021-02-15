@@ -813,6 +813,9 @@ namespace Legion {
     public:
       IndexSpaceExpression* subtract_index_spaces(IndexSpaceExpression *lhs,
                   IndexSpaceExpression *rhs, OperationCreator *creator = NULL);
+    private:
+      static inline bool compare_expressions(IndexSpaceExpression *one,
+                                             IndexSpaceExpression *two);
     public:
       // Methods for removing index space expression when they are done
       void invalidate_index_space_expression(
@@ -1065,6 +1068,10 @@ namespace Legion {
       }
       inline size_t get_num_dims(void) const
         { return NT_TemplateHelper::get_dim(type_tag); }
+    public:
+      // Convert this index space expression to the canonical one that
+      // represents all expressions that are all congruent
+      IndexSpaceExpression* get_canonical_expression(RegionTreeForest *forest);
     protected:
       template<int DIM, typename T>
       inline ApEvent issue_fill_internal(RegionTreeForest *forest,
@@ -3664,6 +3671,14 @@ namespace Legion {
     }; 
 
     // some inline implementations
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool RegionTreeForest::compare_expressions(
+                           IndexSpaceExpression *one, IndexSpaceExpression *two)
+    //--------------------------------------------------------------------------
+    {
+      return (one->expr_id < two->expr_id);
+    }
 #ifndef DEBUG_LEGION
     //--------------------------------------------------------------------------
     inline IndexSpaceNode* IndexTreeNode::as_index_space_node(void)
