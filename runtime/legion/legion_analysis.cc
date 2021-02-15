@@ -14809,7 +14809,7 @@ namespace Legion {
           target_insts;
         for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
         {
-          const FieldMask &dst_mask = 
+          const FieldMask &dst_mask =
             analysis.target_instances[idx].get_valid_fields();
           // Compute a tmp mask based on the dst mask
           FieldMask source_mask;
@@ -14824,12 +14824,17 @@ namespace Legion {
             source_mask.set_bit(finder->second);
             fidx = dst_mask.find_next_set(fidx+1);
           }
-#ifdef DEBUG_LEGION
-          assert(!(source_mask - src_mask));
-#endif
+          // This might not be the right equivalence set for all the
+          // target instances, so filter down to the ones we apply to
+          const FieldMask overlap = src_mask & source_mask;
+          if (!overlap)
+            continue;
           target_insts[analysis.across_helpers[idx]].insert(
-              analysis.target_views[idx], source_mask);
+              analysis.target_views[idx], overlap);
         }
+#ifdef DEBUG_LEGION
+        assert(!target_insts.empty());
+#endif
         for (LegionMap<CopyAcrossHelper*,
               FieldMaskSet<InstanceView> >::aligned::const_iterator it = 
               target_insts.begin(); it != target_insts.end(); it++)
@@ -14859,13 +14864,17 @@ namespace Legion {
         FieldMaskSet<InstanceView> target_instances;
         for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
         {
-          const FieldMask &mask = 
+          // This might not be the right equivalence set for all the
+          // target instances, so filter down to the ones we apply to
+          const FieldMask mask = src_mask &
             analysis.target_instances[idx].get_valid_fields();
-#ifdef DEBUG_LEGION
-          assert(!(mask - src_mask));
-#endif
+          if (!mask)
+            continue;
           target_instances.insert(analysis.target_views[idx], mask);
         }
+#ifdef DEBUG_LEGION
+        assert(!target_instances.empty());
+#endif
         make_instances_valid(across_aggregator, NULL/*no guard*/,
             analysis.op, analysis.src_index, true/*track events*/, expr, 
             expr_covers, src_mask, target_instances, analysis.source_views,
