@@ -2663,8 +2663,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TraceViewSet::filter_independent_fields(IndexSpaceExpression *expr,
+                                                 FieldMask &mask) const
+    //--------------------------------------------------------------------------
+    {
+      FieldMask independent = mask;
+      for (ViewExprs::const_iterator vit =
+            conditions.begin(); vit != conditions.end(); vit++)
+      {
+        if (independent * vit->second.get_valid_mask())
+          continue;
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); it++)
+        {
+          const FieldMask overlap = it->second & independent;
+          if (!overlap)
+            continue;
+          IndexSpaceExpression *overlap_expr = 
+            forest->intersect_index_spaces(it->first, expr);
+          if (!overlap_expr->is_empty())
+          {
+            independent -= overlap;
+            if (!independent)
+              break;
+          }
+        }
+        if (!independent)
+          break;
+      }
+      if (!!independent)
+        mask -= independent;
+    }
+
+    //--------------------------------------------------------------------------
     bool TraceViewSet::subsumed_by(const TraceViewSet &set, 
-                                   FailedPrecondition *condition) const
+                    bool allow_independent, FailedPrecondition *condition) const
     //--------------------------------------------------------------------------
     {
       for (ViewExprs::const_iterator vit = 
@@ -2675,6 +2708,21 @@ namespace Legion {
           FieldMask mask = it->second;
           if (!set.dominates(vit->first, it->first, mask))
           {
+            if (allow_independent)
+            {
+              // If we're allowing independent views, that means the set
+              // does not need to dominate the view as long as there are no
+              // views in the set that overlap logically with the test view
+              // This allows us to handle the read-only precondition case
+              // where we have read-only views that show up in the preconditions
+              // but do not appear logically anywhere in the postconditions
+              set.filter_independent_fields(it->first, mask);
+              // If all the fields are independent from anything that was
+              // written in the postcondition then we know this is a
+              // read-only precondition that does not need to be subsumed
+              if (!mask)
+                continue;
+            }
             if (condition != NULL)
             {
               condition->view = vit->first;
@@ -3324,7 +3372,7 @@ namespace Legion {
     {
       bool replayable = true;
       if ((precondition_views != NULL) && ((postcondition_views == NULL) ||
-            !precondition_views->subsumed_by(*postcondition_views, failed)))
+          !precondition_views->subsumed_by(*postcondition_views, true, failed)))
       {
         replayable = false;
         not_subsumed = true;

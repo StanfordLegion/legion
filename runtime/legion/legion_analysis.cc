@@ -15284,10 +15284,16 @@ namespace Legion {
             tracing_postconditions->invalidate(view, expr, user_mask);
           return;
         }
+        // Do not record read-only postconditions
+        if (IS_READ_ONLY(usage))
+          return;
       }
+#ifdef DEBUG_LEGION
+      assert(HAS_WRITE(usage));
+#endif
       if (tracing_postconditions != NULL)
       {
-        if (invalidates && HAS_WRITE(usage))
+        if (invalidates)
           tracing_postconditions->invalidate_all_but(view, expr, user_mask);
       }
       else
