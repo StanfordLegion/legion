@@ -9,6 +9,7 @@ import os
 import tempfile
 import subprocess
 import base64
+import re
 
 parser = argparse.ArgumentParser(description='Generate Dockerfile from GitLab CI YAML configuration file')
 parser.add_argument('-b', '--branch', type=str, default='master',
@@ -60,7 +61,7 @@ def generate_script(args, cfg, job):
 
     for cmd in job['script']:
         if args.keep:
-            cmd = cmd.replace('test.py', 'test.py --keep || /bin/true')
+            cmd = re.sub(r'(test\.py[^\n]*)', '\\1 --keep || /bin/true', cmd)
         s += cmd.replace('\\n','\n')
         if not cmd.endswith('\n'):
             s += '\n'
@@ -75,14 +76,6 @@ def generate_dockerfile(args, cfg, job, script=None):
         s += 'ENV {}="{}"\n'.format(k, v)
     for k, v in job.get('variables', {}).items():
         s += 'ENV {}="{}"\n'.format(k, v)
-
-    if script:
-        b64 = base64.b64encode(bytes(script, 'latin-1')).decode('latin-1')
-        b64 = b64.replace('\n', '\\\n')
-        s += 'RUN echo \\\n' + b64 + ' | base64 -d > script.sh\n'
-    else:
-        s += 'COPY script.sh .\n'
-    s += 'RUN chmod a+x ./script.sh\n'
 
     if args.localtree:
         reclone = False
@@ -113,6 +106,14 @@ def generate_dockerfile(args, cfg, job, script=None):
     else:
         s += 'RUN git clone -b {} {} repo\n'.format(args.branch, args.repo)
     s += 'WORKDIR "/repo"\n'
+
+    if script:
+        b64 = base64.b64encode(bytes(script, 'latin-1')).decode('latin-1')
+        b64 = b64.replace('\n', '\\\n')
+        s += 'RUN echo \\\n' + b64 + ' | base64 -d > /script.sh\n'
+    else:
+        s += 'COPY script.sh /\n'
+    s += 'RUN chmod a+x /script.sh\n'
 
     if not args.noscript:
         s += 'RUN /script.sh\n'

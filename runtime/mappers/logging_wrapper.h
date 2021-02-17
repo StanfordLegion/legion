@@ -23,7 +23,12 @@ namespace Mapping {
 
 /**
  * \class LoggingWrapper
- * Adds logging to a wrapped mapper (use -level mapper=X).
+ * Logs the inputs and outputs of callbacks invoked on the wrapped mapper.
+ *
+ * To use with your own mapper, replace any use of `new MyMapper(...)` in your
+ * code with `new LoggingWrapper(new MyMapper(...))` and run with
+ * `-level mapper=2`. Enabling Realm-level instance reporting might also be
+ * useful (`-level inst=1`).
  *
  * Currently only supports task and inline mapping API calls.
  */

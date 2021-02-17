@@ -522,7 +522,8 @@ namespace Legion {
                      const char *prof_logname,
                      const size_t total_runtime_instances,
                      const size_t footprint_threshold,
-                     const size_t target_latency);
+                     const size_t target_latency,
+                     const bool slow_config_ok);
       LegionProfiler(const LegionProfiler &rhs);
       virtual ~LegionProfiler(void);
     public:
@@ -633,6 +634,8 @@ namespace Legion {
 #endif
     public:
       void update_footprint(size_t diff, LegionProfInstance *inst);
+    public:
+      void issue_default_mapper_warning(Operation *op, const char *call_name);
     private:
       void create_thread_local_profiling_instance(void);
     public:
@@ -657,41 +660,18 @@ namespace Legion {
     private:
       // For knowing when we need to start dumping early
       size_t total_memory_footprint;
+    private:
+      // Issue the default mapper warning
+      bool need_default_mapper_warning;
     public:
       void record_index_space_point_desc(
           LegionProfInstance::IndexSpacePointDesc &i);
       void record_index_space_rect_desc(
           LegionProfInstance::IndexSpaceRectDesc &i);
       template <int DIM, typename T>
-      void record_index_space_point(IDType handle, const Point<DIM, T> &point); 
-#if 0
-      {
-	LegionProfInstance::IndexSpacePointDesc ispace_point_desc;
-	ispace_point_desc.unique_id = handle;
-	ispace_point_desc.dim = (unsigned)DIM;
-	ispace_point_desc.point0 = (long long) point[0];
-	ispace_point_desc.point1 = (DIM < 2) ? 0: (long long) point[1];
-	ispace_point_desc.point2 = (DIM < 3) ? 0: (long long) point[2];
-	record_index_space_point_desc(ispace_point_desc);
-      };
-#endif
-
+      void record_index_space_point(IDType handle, const Point<DIM, T> &point);
       template<int DIM, typename T>
-      void record_index_space_rect(IDType handle, const Rect<DIM, T> &rect); 
-#if 0
-      {
-	LegionProfInstance::IndexSpaceRectDesc ispace_rect_desc;
-	ispace_rect_desc.unique_id = handle;
-	ispace_rect_desc.dim = DIM;
-	ispace_rect_desc.rect_lo0 = (long long) rect.lo[0];
-	ispace_rect_desc.rect_lo1 = (DIM < 2) ? 0: (long long) rect.lo[1];
-	ispace_rect_desc.rect_lo2 = (DIM < 3) ? 0: (long long) rect.lo[2];
-	ispace_rect_desc.rect_hi0 = (long long) rect.hi[0];
-	ispace_rect_desc.rect_hi1 = (DIM < 2) ? 0: (long long) rect.hi[1];
-	ispace_rect_desc.rect_hi2 = (DIM < 3) ? 0: (long long) rect.hi[2];
-	record_index_space_rect_desc(ispace_rect_desc);
-      };
-#endif
+      void record_index_space_rect(IDType handle, const Rect<DIM, T> &rect);
     };
 
     class DetailedProfiler {

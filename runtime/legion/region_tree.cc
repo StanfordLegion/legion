@@ -1699,7 +1699,7 @@ namespace Legion {
       // If this is a NO_ACCESS, then we'll have no dependences so we're done
       if (IS_NO_ACCESS(req))
         return;
-      TaskContext *context = op->get_context();
+      InnerContext *context = op->get_context();
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1726,13 +1726,19 @@ namespace Legion {
         FieldMask already_closed_mask;
         FieldMask written_disjoint_complete;
         FieldMaskSet<RefinementOp> refinements;
+        const bool check_for_unversioned = 
+          !op->is_parent_nonexclusive_virtual_mapping(idx);
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
                      projection_info, unopened_mask, already_closed_mask, 
                      written_disjoint_complete, refinements, refinement_tracker,
                      applied_events, true/*track disjoint complete below*/, 
-                     true/*check unversioned*/);
+                     check_for_unversioned);
 #ifdef DEBUG_LEGION
-        assert(!written_disjoint_complete); // should never flow out here
+        // should never flow out here unless we're not checking for versioning
+        // we aren't checking when we've got an non-read-write virtual mapping
+        // because in that case we are sharing equivalence sets with the
+        // parent context and therefore are never permitted to do refinements
+        assert(!written_disjoint_complete || !check_for_unversioned);
 #endif
       }
 #ifdef DEBUG_LEGION
@@ -8430,6 +8436,9 @@ namespace Legion {
       bool remove_reference;
       {
         AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+        assert(send_references > 0);
+#endif
         remove_reference = (--send_references == 0);
       }
       if (remove_reference && parent->remove_nested_resource_ref(did))
@@ -15963,12 +15972,16 @@ namespace Legion {
                       LEGION_REFINEMENT_PARTITION_PERCENTAGE))
                 {
                   disjoint_complete_below = first->second;
-                  // Same deal with deleting a reverse iterator
-                  // increment first and then get the base
-                  state.disjoint_complete_child_counts.erase(first);
                   // Go through and filter out any child counts for these fields
+                  state.disjoint_complete_child_counts.erase(first);
+                  // filter out the individual children
                   state.disjoint_complete_accesses.filter(
                                   disjoint_complete_below);
+                  // but then relax the mask for these fields so that when
+                  // we go to do the refinement update we know we need to
+                  // traverse down below for those fields
+                  state.disjoint_complete_accesses.relax_valid_mask(
+                                            disjoint_complete_below);
                 }
               }
             }
@@ -19476,6 +19489,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionNode::initialize_nonexclusive_virtual_analysis(ContextID ctx,
+                                    const FieldMask &mask,
+                                    const FieldMaskSet<EquivalenceSet> &eq_sets,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      manager.initialize_nonexclusive_virtual_analysis(mask, eq_sets,
+                                                       applied_events);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionNode::perform_versioning_analysis(ContextID ctx,
                                                  InnerContext *parent_ctx,
                                                  VersionInfo *version_info,
@@ -19587,14 +19612,15 @@ namespace Legion {
     void RegionNode::invalidate_refinement(ContextID ctx, const FieldMask &mask, 
                                    bool self, std::set<RtEvent> &applied_events, 
                                    std::vector<EquivalenceSet*> &to_release,
-                                   InnerContext *source_context)
+                                   InnerContext *source_context,
+                                   bool nonexclusive_virtual_mapping_root)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
-      manager.invalidate_refinement(source_context, mask, self, 
-                                    to_traverse, to_untrack, to_release);
+      manager.invalidate_refinement(source_context, mask, self, to_traverse,
+                  to_untrack, to_release, nonexclusive_virtual_mapping_root);
       if (!to_untrack.empty())
       {
         if (source_context == NULL)

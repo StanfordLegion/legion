@@ -97,7 +97,70 @@ namespace Realm {
   {
     return log_level;
   }
-  
+
+  inline bool Logger::want_spew(void) const
+  {
+#ifndef REALM_LOGGING_DO_SPEW
+    return false;
+#else
+    return (log_level <= LEVEL_SPEW);
+#endif
+  }
+
+  inline bool Logger::want_debug(void) const
+  {
+#ifndef REALM_LOGGING_DO_DEBUG
+    return false;
+#else
+    return (log_level <= LEVEL_DEBUG);
+#endif
+  }
+
+  inline bool Logger::want_info(void) const
+  {
+#ifndef REALM_LOGGING_DO_INFO
+    return false;
+#else
+    return (log_level <= LEVEL_INFO);
+#endif
+  }
+
+  inline bool Logger::want_print(void) const
+  {
+#ifndef REALM_LOGGING_DO_PRINT
+    return false;
+#else
+    return (log_level <= LEVEL_PRINT);
+#endif
+  }
+
+  inline bool Logger::want_warning(void) const
+  {
+#ifndef REALM_LOGGING_DO_WARNING
+    return false;
+#else
+    return (log_level <= LEVEL_WARNING);
+#endif
+  }
+
+  inline bool Logger::want_error(void) const
+  {
+#ifndef REALM_LOGGING_DO_ERROR
+    return false;
+#else
+    return (log_level <= LEVEL_ERROR);
+#endif
+  }
+
+  inline bool Logger::want_fatal(void) const
+  {
+#ifndef REALM_LOGGING_DO_FATAL
+    return false;
+#else
+    return (log_level <= LEVEL_FATAL);
+#endif
+  }
+
   inline LoggerMessage Logger::spew(void)
   {
 #ifndef REALM_LOGGING_DO_SPEW           // static early out
