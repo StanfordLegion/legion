@@ -2633,11 +2633,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, TRIGGER_SINGLE_CALL);
-      // Special case here for top-level tasks, they make it here without
-      // going through the earlier pipeline stages, so they still need
-      // to run select_task_options
-      if (is_top_level_task())
-        select_task_options(false/*prioritize*/);
       if (is_remote())
       {
         if (distribute_task())
