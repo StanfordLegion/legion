@@ -17,7 +17,7 @@ Regent requires:
   * Python 3.5 or newer (for the self-installer and test suite)
   * LLVM and Clang **with headers**:
       * LLVM 3.8 is recommended for use with CUDA
-      * LLVM 3.5-3.9 and 5-11 are also supported
+      * LLVM 3.9 and 5-11 are also supported
   * *Optional (but recommended)*: CMake 3.5 or newer
 
 Regent also has a number of transitive dependencies via Legion:
