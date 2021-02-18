@@ -367,7 +367,7 @@ namespace Legion {
                             ReductionOpID redop = 0, 
                             bool no_access = false,
                             bool exact = false,
-                            bool collective = false,
+                            Domain collective = Domain(),
                             size_t max_pieces = SIZE_MAX,
                             int max_overhead = 0);
     public:
@@ -388,7 +388,7 @@ namespace Legion {
       bool is_virtual(void) const;
       bool is_reduction(void) const;
       bool is_file(void) const;
-      inline bool is_collective(void) const { return collective; }
+      inline bool is_collective(void) const { return collective.exists(); }
       inline bool is_no_access(void) const { return no_access; }
       inline bool is_exact(void) const { return exact; }
       // For backwards compatibility
@@ -396,9 +396,9 @@ namespace Legion {
     public:
       SpecializedKind kind;
       ReductionOpID  redop;
+      Domain    collective;
       size_t    max_pieces;
       int     max_overhead;
-      bool      collective;
       bool       no_access;
       bool           exact;
     };
