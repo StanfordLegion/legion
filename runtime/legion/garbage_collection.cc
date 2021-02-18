@@ -448,6 +448,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool DistributedCollectable::check_resource_and_increment(
+                                                ReferenceSource source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      if (current_state == DELETED_STATE)
+        return false;
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_base_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifndef DEBUG_LEGION_GC
+      int previous = __sync_fetch_and_add(&resource_references, cnt);
+#ifdef DEBUG_LEGION
+      assert(previous >= 0);
+#endif
+      if (previous == 0)
+        has_resource_references = true;
+#else
+      resource_references++;
+      std::map<ReferenceSource,int>::iterator finder = 
+        detailed_base_resource_references.find(source);
+      if (finder == detailed_base_resource_references.end())
+        detailed_base_resource_references[source] = cnt;
+      else
+        finder->second += cnt;
+      if (resource_references > cnt)
+        return true;
+#ifdef DEBUG_LEGION
+      assert(!has_resource_references);
+#endif
+      has_resource_references = true;
+#endif
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     void DistributedCollectable::add_resource_reference(void)
     //--------------------------------------------------------------------------
     {

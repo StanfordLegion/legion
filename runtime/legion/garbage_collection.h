@@ -84,7 +84,8 @@ namespace Legion {
       TRACE_REF = 26,
       AGGREGATORE_REF = 27,
       FIELD_STATE_REF = 28,
-      LAST_SOURCE_REF = 29,
+      CANONICAL_REF = 29,
+      LAST_SOURCE_REF = 30,
     };
 
     enum ReferenceKind {
@@ -124,6 +125,7 @@ namespace Legion {
       "Physical Trace Reference",                   \
       "Aggregator Reference",                       \
       "Field State Reference",                      \
+      "Canonical Index Space Expression Reference", \
     }
 
     extern Realm::Logger log_garbage;
@@ -319,6 +321,7 @@ namespace Legion {
     public:
       // Atomic check and increment operations 
       inline bool check_valid_and_increment(ReferenceSource source,int cnt = 1);
+      bool check_resource_and_increment(ReferenceSource source ,int cnt = 1);
     private:
       void add_gc_reference(ReferenceMutator *mutator);
       bool remove_gc_reference(ReferenceMutator *mutator);
