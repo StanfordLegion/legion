@@ -4006,6 +4006,10 @@ namespace Legion {
                                          std::set<RtEvent> &applied_events);
       void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
                     const FieldMask &mask, std::set<RtEvent> &applied_events);
+      void initialize_nonexclusive_virtual_analysis(ContextID ctx,
+                                  const FieldMask &mask,
+                                  const FieldMaskSet<EquivalenceSet> &eq_sets,
+                                  std::set<RtEvent> &applied_events);
       void perform_versioning_analysis(ContextID ctx, 
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,
@@ -4027,7 +4031,8 @@ namespace Legion {
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,bool self,
                                  std::set<RtEvent> &applied_events, 
                                  std::vector<EquivalenceSet*> &to_release,
-                                 InnerContext *source_context);
+                                 InnerContext *source_context,
+                                 bool nonexclusive_virtual_root = false);
       void record_refinement(ContextID ctx, EquivalenceSet *set, 
                              const FieldMask &mask,
                              std::set<RtEvent> &applied_eventssymbolic);

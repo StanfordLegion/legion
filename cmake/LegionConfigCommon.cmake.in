@@ -1,11 +1,14 @@
 # GASNet is a private dependency and only needs to be pulled in for static
 # builds
-set(Legion_USE_GASNet @Legion_USE_GASNet@)
-if((NOT @BUILD_SHARED_LIBS@) AND Legion_USE_GASNet)
-  set(GASNet_THREADING @GASNet_THREADING@)
-  set(GASNet_PREFERRED_CONDUITS @GASNet_PREFERRED_CONDUITS@)
-  set(GASNet_ROOT_DIR @GASNet_ROOT_DIR@)
-  find_package(GASNet REQUIRED)
+set(Legion_NETWORKS @Legion_NETWORKS@)
+set(Legion_EMBED_GASNet @Legion_EMBED_GASNet@)
+if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
+  # define a GASNet::GASNet package that just points at:
+  #  gasnet libs (embedded or external) for static builds
+  #  external libs (e.g. mpi) needed in all cases
+  cmake_minimum_required(VERSION 3.11)  # required for adding libs to imported target
+  add_library(GASNet::GASNet INTERFACE IMPORTED)
+  target_link_libraries(GASNet::GASNet INTERFACE @GASNET_LINK_LIBRARIES_FOR_INSTALL@)
 endif()
 
 # LLVM is a private dependency and only needs to be pulled in for static

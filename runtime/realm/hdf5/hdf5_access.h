@@ -32,7 +32,7 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  class HDF5LayoutPiece : public InstanceLayoutPiece<N,T> {
+  class REALM_PUBLIC_API HDF5LayoutPiece : public InstanceLayoutPiece<N,T> {
   public:
     HDF5LayoutPiece(void);
 

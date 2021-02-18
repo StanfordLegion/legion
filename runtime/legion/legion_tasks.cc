@@ -4313,7 +4313,17 @@ namespace Legion {
             execution_context->add_physical_region(clone_requirements[idx],
                 false/*mapped*/, map_id, tag, unmap_events[idx],
                 true/*virtual mapped*/, physical_instances[idx]);
-            if (virtual_mapped[idx] && !no_access_regions[idx])
+            // For virtual mappings, there are two approaches here
+            // 1. For read-write privileges we can do copy-in/copy-out
+            // on the equivalence sets since we know that we're the 
+            // only one that is going to be mutating them, this will
+            // allow us to do things like refinements for them
+            // 2. For any other kind of privilege, we need to make sure
+            // that we see updates from other tasks potentially running
+            // and mapping in parallel on the same equivalence sets, so
+            // we aren't going to make our own equivalence set
+            if (virtual_mapped[idx] && !no_access_regions[idx] &&
+                IS_WRITE(clone_requirements[idx]))
               equivalence_sets[idx] = create_initial_equivalence_set(idx);
           }
           else if (do_inner_task_optimization)

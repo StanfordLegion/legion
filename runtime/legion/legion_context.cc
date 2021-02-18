@@ -3674,6 +3674,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool InnerContext::nonexclusive_virtual_mapping(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(regions.size() == virtual_mapped.size());
+      assert(regions.size() == parent_req_indexes.size());
+#endif
+      // There is a very strange case here for virtual mappings
+      // More comments on this when we initialize the region tree contexts
+      // With read-write privileges on a virtual mapping, we can do
+      // copy-in/copy-out of the equivalence set meta-data so we can make
+      // our own local equivalence sets and do refinements on them, but for
+      // other privileges we can't so we need to share equivalence sets with
+      // other contexts and not make our own refinements. We detect this case
+      // here and prevent the logical analysis from ever making a refinement
+      return ((index < virtual_mapped.size()) && virtual_mapped[index] && 
+              !IS_WRITE(regions[index]));
+    }
+
+    //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_parent_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
@@ -8834,7 +8854,28 @@ namespace Legion {
         const RegionUsage usage(req);
 #ifdef DEBUG_LEGION
         assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
-        assert(eq_set != NULL);
+#endif
+        if (eq_set == NULL)
+        {
+          // Handle the case where we have a virtual mapping for a
+          // non-write privilege and therefore we're just going to
+          // seed our state with the equivalence sets and not allow
+          // them to ever be refined in this context
+#ifdef DEBUG_LEGION
+          assert(virtual_mapped[idx1] && !IS_WRITE(usage));
+          assert(idx1 < version_infos.size());
+#endif
+          RegionNode *region_node = runtime->forest->get_node(req.region);
+          const FieldMask user_mask = 
+            region_node->column_source->get_field_mask(req.privilege_fields);
+          const FieldMaskSet<EquivalenceSet> &eq_sets =
+            version_infos[idx1].get_equivalence_sets();
+          // tell the version manager about these equivalence sets
+          region_node->initialize_nonexclusive_virtual_analysis(ctx, user_mask,
+                                                      eq_sets, applied_events);
+          continue;
+        }
+#ifdef DEBUG_LEGION
         assert(eq_set->region_node->handle == req.region);
 #endif
         RegionNode *region_node = eq_set->region_node;
@@ -8932,6 +8973,7 @@ namespace Legion {
         else
         {
 #ifdef DEBUG_LEGION
+          assert(IS_WRITE(usage));
           assert(idx1 < version_infos.size());
 #endif
           // virtual mapping case, just clone all the equivalence sets
@@ -8975,7 +9017,8 @@ namespace Legion {
         const FieldMask close_mask = 
           node->column_source->get_field_mask(regions[idx].privilege_fields);
         node->invalidate_refinement(tree_context.get_id(), close_mask,
-                      true/*self*/, applied, invalidated_refinements, this);
+                      true/*self*/, applied, invalidated_refinements, this,
+                      nonexclusive_virtual_mapping(idx));
       }
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(is_top_level_task, applied);
@@ -9683,9 +9726,16 @@ namespace Legion {
           close_op->initialize(this, idx, physical_instances[idx]);
           add_to_dependence_queue(close_op);
         }
-        else
+        else if (IS_WRITE(regions[idx]))
         {
           // Make a virtual close op to close up the instance
+          // This will clone out the equivalence sets to our 
+          // enclosing set of equivalence sets. Note we only
+          // do this for read-write privileges where we know
+          // that no one else can be modifying the enclosing
+          // sets at the same time. For other privileges we're
+          // already using the original set without any local
+          // refinements so we don't need to do the copy out
           VirtualCloseOp *close_op = 
             runtime->get_available_virtual_close_op();
           close_op->initialize(this, idx, regions[idx],
@@ -21603,14 +21653,6 @@ namespace Legion {
 #else
     RefinementOp* LeafContext::get_refinement_op(void)
 #endif
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* LeafContext::find_parent_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
       assert(false);

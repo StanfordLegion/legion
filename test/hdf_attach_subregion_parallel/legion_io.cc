@@ -496,6 +496,11 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
       H5Gclose(shard_group_id);
       H5Fclose(shard_file_id);
 
+      // eliminate memory leaks
+      free(gp);
+      free(ds);
+      free(shard_dims);
+
       status = H5Lcreate_external(pieces[i].shard_name, iterator->second.c_str(),
           link_group_2_id, ds_name_stream.str().c_str(),
           H5P_DEFAULT, H5P_DEFAULT);
