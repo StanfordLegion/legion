@@ -3042,6 +3042,10 @@ class Field(object):
         else:
             return self.name + ' (' + str(self.fid) + ')'
 
+    @property
+    def html_safe_name(self):
+        return str(self).replace('<','&lt;').replace('>','&gt;')
+
     __repr__ = __str__
 
 class FieldSpace(object):
@@ -10070,7 +10074,7 @@ class RealmCopy(RealmBase):
                     redop = self.redops[fidx]
                     line = []
                     # Do the field labels first
-                    line.append(str(src_field))
+                    line.append(src_field.html_safe_name)
                     local_rows = 1
                     if has_src_indirect:
                         assert src_index is not None
@@ -10084,7 +10088,7 @@ class RealmCopy(RealmBase):
                                 str(self.indirections.get_indirect_field(dst_index)))
                         local_rows = max(local_rows, 
                                 self.indirections.get_group_size(dst_index))
-                    line.append(str(dst_field))
+                    line.append(dst_field.html_safe_name)
                     if first_field:
                         # Count how many rows there are for each field
                         num_rows = num_fields
@@ -10155,14 +10159,14 @@ class RealmCopy(RealmBase):
                     line = []
                     if src_field == dst_field:
                         if redop != 0:
-                            line.append(str(src_field)+' Redop='+str(redop))
+                            line.append(src_field.html_safe_name+' Redop='+str(redop))
                         else:
-                            line.append(str(src_field))
+                            line.append(src_field.html_safe_name)
                     else:
                         if redop != 0:
-                            line.append(str(src_field)+':'+str(dst_field)+' Redop='+str(redop))
+                            line.append(src_field.html_safe_name+':'+dst_field.html_safe_name+' Redop='+str(redop))
                         else:
-                            line.append(str(src_field)+':'+str(dst_field))
+                            line.append(src_field.html_safe_name+':'+dst_field.html_safe_name)
                     line.append(str(src_inst)+':'+str(dst_inst))
                     if first_field:
                         line.insert(0, {"label" : "Fields",
@@ -10305,7 +10309,7 @@ class RealmFill(RealmBase):
                 dst_field = self.fields[fidx]
                 dst_inst = self.dsts[fidx]
                 line = []
-                line.append(str(dst_field))
+                line.append(dst_field.html_safe_name)
                 line.append(str(dst_inst))
                 if first_field:
                     line.insert(0, {"label" : "Fields",
@@ -10750,7 +10754,7 @@ class GraphPrinter(object):
                         if first_field:
                             line.append({"label" : "Fields", "rowspan" : len(req.fields)})
                             first_field = False
-                        line.append(str(f))
+                        line.append(f.html_safe_name)
                         if mappings is not None and i in mappings:
                             line.append(str(mappings[i][f.fid]))
                         else:

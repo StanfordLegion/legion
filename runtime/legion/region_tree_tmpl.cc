@@ -118,7 +118,8 @@ namespace Legion {
   template class Internal::IndexPartNodeT<INST_N1,T>; \
   template class Internal::IndexSpaceUnion<INST_N1,T>; \
   template class Internal::IndexSpaceIntersection<INST_N1,T>; \
-  template class Internal::IndexSpaceDifference<INST_N1,T>;
+  template class Internal::IndexSpaceDifference<INST_N1,T>; \
+  template class Internal::RemoteExpression<INST_N1,T>;
   
 
   FOREACH_T(DOIT_T)
