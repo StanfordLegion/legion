@@ -5,7 +5,7 @@ This directory contains the compiler for the Regent language.
 ## Quickstart for Ubuntu
 
 ```
-sudo apt-get install llvm-3.5-dev libclang-3.5-dev clang-3.5
+sudo apt-get install build-essential cmake git llvm-6.0-dev libclang-6.0-dev clang-6.0 libedit-dev libncurses5-dev zlib1g-dev
 ./install.py --debug
 ./regent.py examples/circuit.rg
 ```
@@ -17,8 +17,8 @@ Regent requires:
   * Python 3.5 or newer (for the self-installer and test suite)
   * LLVM and Clang **with headers**:
       * LLVM 3.8 is recommended for use with CUDA
-      * LLVM 3.5 is recommended for debugging (other versions will be missing debug symbols)
-      * LLVM 3.5-3.9 and 6.0 are also supported
+      * LLVM 3.5-3.9 and 5-11 are also supported
+  * *Optional (but recommended)*: CMake 3.5 or newer
 
 Regent also has a number of transitive dependencies via Legion:
 
