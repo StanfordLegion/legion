@@ -22917,7 +22917,6 @@ namespace Legion {
                                 false/*track parent*/,true/*top level task*/);
       // Set this to be the current processor
       top_task->set_current_proc(target);
-      top_task->select_task_options(false/*prioritize*/);
       increment_outstanding_top_level_tasks();
       // Launch a task to deactivate the top-level context
       // when the top-level task is done

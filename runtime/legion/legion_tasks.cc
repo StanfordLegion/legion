@@ -2633,6 +2633,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, TRIGGER_SINGLE_CALL);
+      // Special case here for top-level tasks, they make it here without
+      // going through the earlier pipeline stages, so they still need
+      // to run select_task_options
+      if (is_top_level_task())
+        select_task_options(false/*prioritize*/);
       if (is_remote())
       {
         if (distribute_task())
@@ -7640,19 +7645,17 @@ namespace Legion {
         // Passed all the error checking tests so register it
         // Always defer the users, the point tasks will do that
         // for themselves when they map their regions
-        const bool track_effects = 
-          (!atomic_locks.empty() || !arrive_barriers.empty());
         ApEvent effects_done = 
           runtime->forest->physical_perform_updates_and_registration(
                               regions[*it], version_info, 
                               this, *it, init_precondition, completion_event,
                               chosen_instances, 
                               PhysicalTraceInfo(trace_info, *it), 
-                              applied_conditions,
+                              applied_conditions
 #ifdef DEBUG_LEGION
-                              get_logging_name(), unique_op_id,
+                              , get_logging_name(), unique_op_id
 #endif
-                              track_effects);
+                              );
         if (effects_done.exists())
           complete_effects.insert(effects_done);
       }
