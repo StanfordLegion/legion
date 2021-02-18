@@ -6115,7 +6115,7 @@ namespace Legion {
       {
         RezCheck z2(rez);
         rez.serialize(remote_expr_id);
-        origin->pack_expression_structure(rez, source, true/*top*/);
+        origin->pack_expression_value(rez, source);
         rez.serialize(done_event);
       }
       runtime->send_index_space_remote_expression_response(source, rez);
@@ -6129,7 +6129,7 @@ namespace Legion {
       DerezCheck z(derez);
       IndexSpaceExprID remote_expr_id;
       derez.deserialize(remote_expr_id); 
-      IndexSpaceExpression *result = unpack_expression_structure(derez, source);
+      IndexSpaceExpression *result = unpack_expression_value(derez, source);
       result->add_expression_reference();
       {
         AutoLock l_lock(lookup_is_op_lock);
@@ -6159,7 +6159,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionTreeForest::unpack_expression_structure(
+    IndexSpaceExpression* RegionTreeForest::unpack_expression_value(
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -6175,82 +6175,16 @@ namespace Legion {
         result->send_remote_gc_decrement(source);
         return result;
       }
-      bool is_local;
-      derez.deserialize(is_local);
-      if (is_local)
+      bool local;
+      derez.deserialize<bool>(local);
+      if (local)
       {
-        IndexSpaceExpression *local_expr;
-        derez.deserialize(local_expr);
-        return local_expr;
+        IndexSpaceExpression *result;
+        derez.deserialize(result);
+        return result;
       }
-      // Not an index space, so it is an operation, unpack all the arguments
-      // to the operation and see if we can find equivalence ones on this node
-      size_t num_sub_expressions;
-      derez.deserialize(num_sub_expressions);
-#ifdef DEBUG_LEGION
-      assert(num_sub_expressions != 1); // should be 0 or >= 2
-      assert(num_sub_expressions <= MAX_EXPRESSION_FANOUT);
-#endif
-      std::vector<IndexSpaceExpression*> expressions(num_sub_expressions);
-      for (unsigned idx = 0; idx < num_sub_expressions; idx++)
-        expressions[idx] = unpack_expression_structure(derez, source);
-      // Now figure out which kind of operation we're making here
-      IndexSpaceOperation::OperationKind op_kind;
-      derez.deserialize(op_kind);
-      switch (op_kind)
-      {
-        case IndexSpaceOperation::UNION_OP_KIND:
-          {
-            // Sort the expressions so they're in the same order
-            // as if they had come from the local node
-            if (num_sub_expressions > 0)
-            {
-              std::sort(expressions.begin(), expressions.end(), 
-                        std::less<IndexSpaceExpression*>());
-              RemoteUnionOpCreator creator(this, derez, expressions);
-              return union_index_spaces(expressions, &creator);  
-            }
-            else
-            {
-              // This is an empty expression so just make it and return
-              RemoteUnionOpCreator creator(this, derez, expressions);
-              return creator.consume();
-            }
-          }
-        case IndexSpaceOperation::INTERSECT_OP_KIND:
-          {
-            // Sort the expressions so they're in the same order
-            // as if they had come from the local node
-            if (num_sub_expressions > 0)
-            {
-              std::sort(expressions.begin(), expressions.end(), 
-                        std::less<IndexSpaceExpression*>());
-              RemoteIntersectionOpCreator creator(this, derez, expressions);
-              return intersect_index_spaces(expressions, &creator);
-            }
-            else
-            {
-              // This is an empty expression so just make it and return
-              RemoteIntersectionOpCreator creator(this, derez, expressions);
-              return creator.consume();
-            }
-          }
-        case IndexSpaceOperation::DIFFERENCE_OP_KIND:
-          {
-#ifdef DEBUG_LEGION
-            assert(num_sub_expressions == 2);
-#endif
-            RemoteDifferenceOpCreator creator(this, derez, 
-                            expressions[0], expressions[1]);
-            return subtract_index_spaces(expressions[0],
-                                expressions[1], &creator);
-          }
-        default:
-          assert(false);
-      }
-      // Should never get here
-      assert(false);
-      return NULL;
+      RemoteExpressionCreator creator(this, derez);
+      return creator.consume(); 
     }
 
     /////////////////////////////////////////////////////////////
@@ -8333,6 +8267,38 @@ namespace Legion {
 
       IndexSpaceNode *node = forest->get_node(handle);
       node->release_color(color);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::pack_expression(Serializer &rez, AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      if (target != context->runtime->address_space)
+      {
+        rez.serialize<bool>(false/*local*/);
+        rez.serialize<bool>(true/*index space*/);
+        rez.serialize(handle);
+      }
+      else
+      {
+        rez.serialize<bool>(true/*local*/);
+        rez.serialize<IndexSpaceExpression*>(this);
+      }
+    }
+    
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::pack_expression_value(Serializer &rez,
+                                               AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<bool>(true/*index space*/);
+      rez.serialize(handle);
+      // Make sure this doesn't get collected until we're unpacked
+      // This could be a performance bug since it will block if we
+      // have to send a reference to a remote node, but that should
+      // never actually happen
+      LocalReferenceMutator mutator;
+      add_base_gc_ref(REMOTE_DID_REF, &mutator);
     }
 
     //--------------------------------------------------------------------------

@@ -842,8 +842,8 @@ namespace Legion {
                                              AddressSpaceID source);
       void handle_remote_expression_invalidation(Deserializer &derez);
     protected:
-      IndexSpaceExpression* unpack_expression_structure(Deserializer &derez,
-                                                        AddressSpaceID source);
+      IndexSpaceExpression* unpack_expression_value(Deserializer &derez,
+                                                    AddressSpaceID source);
     public:
       Runtime *const runtime;
     protected:
@@ -988,9 +988,8 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
-      virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target,
-                                             const bool top) = 0;
+      virtual void pack_expression_value(Serializer &rez,
+                                         AddressSpaceID target) = 0;
       virtual bool try_add_canonical_reference(void) = 0;
       virtual bool remove_canonical_reference(void) = 0;
       virtual void add_expression_reference(bool expr_tree = false) = 0;
@@ -1195,6 +1194,7 @@ namespace Legion {
         UNION_OP_KIND,
         INTERSECT_OP_KIND,
         DIFFERENCE_OP_KIND,
+        REMOTE_EXPRESSION_KIND,
       };
     public:
       IndexSpaceOperation(TypeTag tag, OperationKind kind,
@@ -1210,9 +1210,8 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
-      virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target,
-                                             const bool top) = 0;
+      virtual void pack_expression_value(Serializer &rez,
+                                         AddressSpaceID target) = 0;
       virtual bool try_add_canonical_reference(void);
       virtual bool remove_canonical_reference(void);
       virtual void add_expression_reference(bool expr_tree = false);
@@ -1221,8 +1220,6 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                       DistributedID did, RtEvent initialized,
                       std::set<RtEvent> *applied) = 0;
-      virtual void activate_remote(void) = 0;
-
     public:
       void invalidate_operation(std::deque<IndexSpaceOperation*> &to_remove);
     protected:
@@ -1267,11 +1264,9 @@ namespace Legion {
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
-      virtual void activate_remote(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
-      virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target,
-                                             const bool top) = 0;
+      virtual void pack_expression_value(Serializer &rez,
+                                         AddressSpaceID target) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                           DistributedID did, RtEvent initialized,
@@ -1362,9 +1357,7 @@ namespace Legion {
     public:
       IndexSpaceUnion& operator=(const IndexSpaceUnion &rhs);
     public:
-      virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target,
-                                             const bool top);
+      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool remove_operation(RegionTreeForest *forest);
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
@@ -1391,36 +1384,6 @@ namespace Legion {
       const std::vector<IndexSpaceExpression*> &exprs;
     };
 
-    class RemoteUnionOpCreator : public OperationCreator {
-    public:
-      RemoteUnionOpCreator(RegionTreeForest *f, Deserializer &d,
-                           const std::vector<IndexSpaceExpression*> &e)
-        : forest(f), type_tag(unpack_type_tag(d)), exprs(e), derez(d) 
-      { NT_TemplateHelper::demux<RemoteUnionOpCreator>(type_tag, this); }
-    public:
-      template<typename N, typename T>
-      static inline void demux(RemoteUnionOpCreator *creator)
-      {
-        creator->produce(new IndexSpaceUnion<N::N,T>(creator->exprs, 
-                                  creator->forest, creator->derez));
-      }
-    public:
-      // Nothing to do for this
-      virtual void create_operation(void) { }
-    public:
-      static inline TypeTag unpack_type_tag(Deserializer &derez)
-      {
-        TypeTag tag;
-        derez.deserialize(tag);
-        return tag;
-      } 
-    public:
-      RegionTreeForest *const forest;
-      const TypeTag type_tag;
-      const std::vector<IndexSpaceExpression*> &exprs;
-      Deserializer &derez;
-    };
-
     template<int DIM, typename T>
     class IndexSpaceIntersection : public IndexSpaceOperationT<DIM,T> {
     public:
@@ -1433,9 +1396,7 @@ namespace Legion {
     public:
       IndexSpaceIntersection& operator=(const IndexSpaceIntersection &rhs);
     public:
-      virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target,
-                                             const bool top);
+      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool remove_operation(RegionTreeForest *forest);
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
@@ -1462,36 +1423,6 @@ namespace Legion {
       const std::vector<IndexSpaceExpression*> &exprs;
     };
 
-    class RemoteIntersectionOpCreator : public OperationCreator {
-    public:
-      RemoteIntersectionOpCreator(RegionTreeForest *f, Deserializer &d,
-                           const std::vector<IndexSpaceExpression*> &e)
-        : forest(f), type_tag(unpack_type_tag(d)), exprs(e), derez(d) 
-      { NT_TemplateHelper::demux<RemoteIntersectionOpCreator>(type_tag, this); }
-    public:
-      template<typename N, typename T>
-      static inline void demux(RemoteIntersectionOpCreator *creator)
-      {
-        creator->produce(new IndexSpaceIntersection<N::N,T>(creator->exprs,
-                                          creator->forest, creator->derez));
-      } 
-    public:
-      // Nothing to do for this
-      virtual void create_operation(void) { }
-    public:
-      static inline TypeTag unpack_type_tag(Deserializer &derez)
-      {
-        TypeTag tag;
-        derez.deserialize(tag);
-        return tag;
-      }
-    public:
-      RegionTreeForest *const forest;
-      const TypeTag type_tag;
-      const std::vector<IndexSpaceExpression*> &exprs;
-      Deserializer &derez;
-    };
-
     template<int DIM, typename T>
     class IndexSpaceDifference : public IndexSpaceOperationT<DIM,T> {
     public:
@@ -1504,9 +1435,7 @@ namespace Legion {
     public:
       IndexSpaceDifference& operator=(const IndexSpaceDifference &rhs);
     public:
-      virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target,
-                                             const bool top);
+      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool remove_operation(RegionTreeForest *forest);
     protected:
       IndexSpaceExpression *const lhs;
@@ -1535,18 +1464,34 @@ namespace Legion {
       IndexSpaceExpression *const rhs;
     };
 
-    class RemoteDifferenceOpCreator : public OperationCreator {
+    /**
+     * \class RemoteExpression
+     * A copy of an expression that lives on a remote node.
+     */
+    template<int DIM, typename T>
+    class RemoteExpression : public IndexSpaceOperationT<DIM,T> {
     public:
-      RemoteDifferenceOpCreator(RegionTreeForest *f, Deserializer &d,
-                                IndexSpaceExpression *l,IndexSpaceExpression *r)
-        : forest(f), type_tag(unpack_type_tag(d)), lhs(l), rhs(r), derez(d) 
-      { NT_TemplateHelper::demux<RemoteDifferenceOpCreator>(type_tag, this); }
+      RemoteExpression(Deserializer &derez, RegionTreeForest *context);
+      RemoteExpression(const RemoteExpression<DIM,T> &rhs);
+      virtual ~RemoteExpression(void);
+    public:
+      RemoteExpression& operator=(const RemoteExpression &op);
+    public:
+      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
+      virtual bool remove_operation(RegionTreeForest *forest);
+    };
+
+    class RemoteExpressionCreator : public OperationCreator {
+    public:
+      RemoteExpressionCreator(RegionTreeForest *f, Deserializer &d)
+        : forest(f), type_tag(unpack_type_tag(d)), derez(d)
+      { NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, this); }
     public:
       template<typename N, typename T>
-      static inline void demux(RemoteDifferenceOpCreator *creator)
+      static inline void demux(RemoteExpressionCreator *creator)
       {
-        creator->produce(new IndexSpaceDifference<N::N,T>(creator->lhs,
-                              creator->rhs, creator->forest, creator->derez));
+        creator->produce(
+            new RemoteExpression<N::N,T>(creator->derez, creator->forest));
       }
     public:
       // Nothing to do for this
@@ -1557,12 +1502,10 @@ namespace Legion {
         TypeTag tag;
         derez.deserialize(tag);
         return tag;
-      } 
+      }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
-      IndexSpaceExpression *const lhs;
-      IndexSpaceExpression *const rhs;
       Deserializer &derez;
     };
 
@@ -1820,10 +1763,8 @@ namespace Legion {
       virtual bool set_domain(const Domain &domain, AddressSpaceID space) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
-      virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target,
-                                             const bool top) = 0;
+      virtual void pack_expression(Serializer &rez, AddressSpaceID target);
+      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool try_add_canonical_reference(void);
       virtual bool remove_canonical_reference(void);
       virtual void add_expression_reference(bool expr_tree = false);
@@ -2008,10 +1949,6 @@ namespace Legion {
       virtual bool set_domain(const Domain &domain, AddressSpaceID space);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target);
-      virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target,
-                                             const bool top);
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                                 DistributedID did, RtEvent initialized,
                                 std::set<RtEvent> *applied);
