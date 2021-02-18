@@ -131,21 +131,15 @@ variables:
 .gasnet1_mpi: &gasnet1_mpi
   REALM_NETWORKS: "gasnet1"
   CONDUIT: "mpi"
-  # can't change the default until the ucx-conduit/mpi-interop issue is resolved
-  GASNET_VERSION: "GASNet-2020.11.0-memory_kinds_prototype"
 .gasnetex_mpi: &gasnetex_mpi
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "mpi"
-  # can't change the default until the ucx-conduit/mpi-interop issue is resolved
-  GASNET_VERSION: "GASNet-2020.11.0-memory_kinds_prototype"
 .gasnetex_mpi_debug: &gasnetex_mpi_debug
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "mpi"
   GASNET_DEBUG: "1"
   # GASNet headers are not guaranteed to be warning-free in debug mode
   WARN_AS_ERROR: "0"
-  # can't change the default until the ucx-conduit/mpi-interop issue is resolved
-  GASNET_VERSION: "GASNet-2020.11.0-memory_kinds_prototype"
 .gasnetex_mpi_nightly: &gasnetex_mpi_nightly
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "mpi"
@@ -158,6 +152,11 @@ variables:
   CONDUIT: "ucx"
   UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.8.0/ucx-1.8.0.tar.gz"
   UCX_WARN_UNUSED_ENV_VARS: "n"
+.gasnet_embed_local : &gasnet_embed_local
+  EMBED_GASNET: "1"
+  EMBED_GASNET_LOCAL: "1"
+.gasnet_embed_remote : &gasnet_embed_remote
+  EMBED_GASNET: "1"
 .mpi: &mpi
   REALM_NETWORKS: "mpi"
   # mpich-3.2
@@ -243,13 +242,22 @@ before_script:
       export LAUNCHER="mpirun -n 2"
       export MPICH_CXX=${CXX}
       if [[ "$REALM_NETWORKS" == gasnet* ]]; then
-        if [[ "$GASNET_DEBUG" -eq 1 ]]; then
-          export GASNET_ROOT="$PWD/gasnet/debug"
+        if [[ "$EMBED_GASNET" -eq 1 ]]; then
+          if [[ "$EMBED_GASNET_LOCAL" -eq 1 ]]; then
+            # clone gasnet, but make it read only since we want an embedded build
+            git clone https://github.com/StanfordLegion/gasnet.git gasnet
+            chmod -R a-w gasnet
+            export EMBED_GASNET_SRC="$PWD/gasnet"
+          fi
         else
-          export GASNET_ROOT="$PWD/gasnet/release"
+          git clone https://github.com/StanfordLegion/gasnet.git gasnet
+          make -C gasnet -j$THREADS
+          if [[ "$GASNET_DEBUG" -eq 1 ]]; then
+            export GASNET_ROOT="$PWD/gasnet/debug"
+          else
+            export GASNET_ROOT="$PWD/gasnet/release"
+          fi
         fi
-        git clone https://github.com/StanfordLegion/gasnet.git gasnet
-        make -C gasnet -j$THREADS
       fi
     fi
   - |
@@ -607,6 +615,23 @@ gcc49_cxx11_debug_gasnet1_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx11_normal, *gasnet1_mpi, *regent, *incremental]
+#   * Embedded GASNet builds (local and remote, static and shared)
+gcc49_cxx11_release_gasnet1_mpi_embedlocal_cmake_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_local, *cmake, *ctest, *legion]
+gcc49_cxx11_release_gasnet1_mpi_embedremote_cmake_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_remote, *cmake, *ctest, *legion]
+gcc49_cxx11_release_shared_gasnet1_mpi_embedlocal_cmake_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *shared, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_local, *cmake, *ctest, *legion]
+gcc49_cxx11_release_shared_gasnet1_mpi_embedremote_cmake_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *shared, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_remote, *cmake, *ctest, *legion]
 #   * GASNet-EX (native API, 2020.11.0+)
 gcc49_cxx11_release_gasnetex_mpi_legion:
   <<: [*linux_compute, *image, *tests]

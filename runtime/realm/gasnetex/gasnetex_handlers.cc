@@ -668,7 +668,7 @@ namespace Realm {
     {
       gex_TM_t pair = gex_TM_Pair(src_ep, tgt_ep_index);
       unsigned nargs = 2 + ((hdr_bytes - 1) / sizeof(gex_AM_Arg_t));
-#if GEX_VERSION <= 20201100
+#if REALM_GEX_RELEASE == 20201100
       // GEX: in 2020.11.0, call below may be a macro that doesn't use
       //  'pair' or 'nargs'
       (void) pair;
@@ -1152,7 +1152,7 @@ namespace Realm {
     {
       gex_TM_t pair = gex_TM_Pair(src_ep, tgt_ep_index);
       unsigned nargs = 2 + ((hdr_bytes - 1) / sizeof(gex_AM_Arg_t));
-#if GEX_VERSION <= 20201100
+#if REALM_GEX_RELEASE == 20201100
       // GEX: in 2020.11.0, call below may be a macro that doesn't use
       //  'pair' or 'nargs'
       (void) pair;
@@ -1745,80 +1745,80 @@ namespace Realm {
 
   namespace GASNetEXHandlers {
 
-#define GEX_COMPREPLY_HANDLER(narg, fname)				\
+#define REALM_GEX_COMPREPLY_HANDLER(narg, fname)				\
   { HIDX_COMPREPLY(narg), reinterpret_cast<void(*)()>(fname), GEX_FLAG_AM_REQREP|GEX_FLAG_AM_SHORT, narg, nullptr, #fname }
-#define GEX_SHORTREQ_HANDLER(narg, fname)				\
+#define REALM_GEX_SHORTREQ_HANDLER(narg, fname)				\
   { HIDX_SHORTREQ(narg), reinterpret_cast<void(*)()>(fname), GEX_FLAG_AM_REQUEST|GEX_FLAG_AM_SHORT, narg, nullptr, #fname }
-#define GEX_MEDREQ_HANDLER(narg, fname)					\
+#define REALM_GEX_MEDREQ_HANDLER(narg, fname)					\
   { HIDX_MEDREQ(narg), reinterpret_cast<void(*)()>(fname), GEX_FLAG_AM_REQUEST|GEX_FLAG_AM_MEDIUM, narg, nullptr, #fname }
-#define GEX_LONGREQ_HANDLER(narg, fname)				\
+#define REALM_GEX_LONGREQ_HANDLER(narg, fname)				\
   { HIDX_LONGREQ(narg), reinterpret_cast<void(*)()>(fname), GEX_FLAG_AM_REQUEST|GEX_FLAG_AM_LONG, narg, nullptr, #fname }
 
     gex_AM_Entry_t handler_table[] = {
-      GEX_SHORTREQ_HANDLER(2, handle_request_short_2),
-      GEX_SHORTREQ_HANDLER(3, handle_request_short_3),
-      GEX_SHORTREQ_HANDLER(4, handle_request_short_4),
-      GEX_SHORTREQ_HANDLER(5, handle_request_short_5),
-      GEX_SHORTREQ_HANDLER(6, handle_request_short_6),
-      GEX_SHORTREQ_HANDLER(7, handle_request_short_7),
-      GEX_SHORTREQ_HANDLER(8, handle_request_short_8),
-      GEX_SHORTREQ_HANDLER(9, handle_request_short_9),
-      GEX_SHORTREQ_HANDLER(10, handle_request_short_10),
-      GEX_SHORTREQ_HANDLER(11, handle_request_short_11),
-      GEX_SHORTREQ_HANDLER(12, handle_request_short_12),
-      GEX_SHORTREQ_HANDLER(13, handle_request_short_13),
-      GEX_SHORTREQ_HANDLER(14, handle_request_short_14),
-      GEX_SHORTREQ_HANDLER(15, handle_request_short_15),
-      GEX_SHORTREQ_HANDLER(16, handle_request_short_16),
+      REALM_GEX_SHORTREQ_HANDLER(2, handle_request_short_2),
+      REALM_GEX_SHORTREQ_HANDLER(3, handle_request_short_3),
+      REALM_GEX_SHORTREQ_HANDLER(4, handle_request_short_4),
+      REALM_GEX_SHORTREQ_HANDLER(5, handle_request_short_5),
+      REALM_GEX_SHORTREQ_HANDLER(6, handle_request_short_6),
+      REALM_GEX_SHORTREQ_HANDLER(7, handle_request_short_7),
+      REALM_GEX_SHORTREQ_HANDLER(8, handle_request_short_8),
+      REALM_GEX_SHORTREQ_HANDLER(9, handle_request_short_9),
+      REALM_GEX_SHORTREQ_HANDLER(10, handle_request_short_10),
+      REALM_GEX_SHORTREQ_HANDLER(11, handle_request_short_11),
+      REALM_GEX_SHORTREQ_HANDLER(12, handle_request_short_12),
+      REALM_GEX_SHORTREQ_HANDLER(13, handle_request_short_13),
+      REALM_GEX_SHORTREQ_HANDLER(14, handle_request_short_14),
+      REALM_GEX_SHORTREQ_HANDLER(15, handle_request_short_15),
+      REALM_GEX_SHORTREQ_HANDLER(16, handle_request_short_16),
 
-      GEX_MEDREQ_HANDLER(2, handle_request_medium_2),
-      GEX_MEDREQ_HANDLER(3, handle_request_medium_3),
-      GEX_MEDREQ_HANDLER(4, handle_request_medium_4),
-      GEX_MEDREQ_HANDLER(5, handle_request_medium_5),
-      GEX_MEDREQ_HANDLER(6, handle_request_medium_6),
-      GEX_MEDREQ_HANDLER(7, handle_request_medium_7),
-      GEX_MEDREQ_HANDLER(8, handle_request_medium_8),
-      GEX_MEDREQ_HANDLER(9, handle_request_medium_9),
-      GEX_MEDREQ_HANDLER(10, handle_request_medium_10),
-      GEX_MEDREQ_HANDLER(11, handle_request_medium_11),
-      GEX_MEDREQ_HANDLER(12, handle_request_medium_12),
-      GEX_MEDREQ_HANDLER(13, handle_request_medium_13),
-      GEX_MEDREQ_HANDLER(14, handle_request_medium_14),
-      GEX_MEDREQ_HANDLER(15, handle_request_medium_15),
-      GEX_MEDREQ_HANDLER(16, handle_request_medium_16),
+      REALM_GEX_MEDREQ_HANDLER(2, handle_request_medium_2),
+      REALM_GEX_MEDREQ_HANDLER(3, handle_request_medium_3),
+      REALM_GEX_MEDREQ_HANDLER(4, handle_request_medium_4),
+      REALM_GEX_MEDREQ_HANDLER(5, handle_request_medium_5),
+      REALM_GEX_MEDREQ_HANDLER(6, handle_request_medium_6),
+      REALM_GEX_MEDREQ_HANDLER(7, handle_request_medium_7),
+      REALM_GEX_MEDREQ_HANDLER(8, handle_request_medium_8),
+      REALM_GEX_MEDREQ_HANDLER(9, handle_request_medium_9),
+      REALM_GEX_MEDREQ_HANDLER(10, handle_request_medium_10),
+      REALM_GEX_MEDREQ_HANDLER(11, handle_request_medium_11),
+      REALM_GEX_MEDREQ_HANDLER(12, handle_request_medium_12),
+      REALM_GEX_MEDREQ_HANDLER(13, handle_request_medium_13),
+      REALM_GEX_MEDREQ_HANDLER(14, handle_request_medium_14),
+      REALM_GEX_MEDREQ_HANDLER(15, handle_request_medium_15),
+      REALM_GEX_MEDREQ_HANDLER(16, handle_request_medium_16),
 
-      GEX_LONGREQ_HANDLER(2, handle_request_long_2),
-      GEX_LONGREQ_HANDLER(3, handle_request_long_3),
-      GEX_LONGREQ_HANDLER(4, handle_request_long_4),
-      GEX_LONGREQ_HANDLER(5, handle_request_long_5),
-      GEX_LONGREQ_HANDLER(6, handle_request_long_6),
-      GEX_LONGREQ_HANDLER(7, handle_request_long_7),
-      GEX_LONGREQ_HANDLER(8, handle_request_long_8),
-      GEX_LONGREQ_HANDLER(9, handle_request_long_9),
-      GEX_LONGREQ_HANDLER(10, handle_request_long_10),
-      GEX_LONGREQ_HANDLER(11, handle_request_long_11),
-      GEX_LONGREQ_HANDLER(12, handle_request_long_12),
-      GEX_LONGREQ_HANDLER(13, handle_request_long_13),
-      GEX_LONGREQ_HANDLER(14, handle_request_long_14),
-      GEX_LONGREQ_HANDLER(15, handle_request_long_15),
-      GEX_LONGREQ_HANDLER(16, handle_request_long_16),
+      REALM_GEX_LONGREQ_HANDLER(2, handle_request_long_2),
+      REALM_GEX_LONGREQ_HANDLER(3, handle_request_long_3),
+      REALM_GEX_LONGREQ_HANDLER(4, handle_request_long_4),
+      REALM_GEX_LONGREQ_HANDLER(5, handle_request_long_5),
+      REALM_GEX_LONGREQ_HANDLER(6, handle_request_long_6),
+      REALM_GEX_LONGREQ_HANDLER(7, handle_request_long_7),
+      REALM_GEX_LONGREQ_HANDLER(8, handle_request_long_8),
+      REALM_GEX_LONGREQ_HANDLER(9, handle_request_long_9),
+      REALM_GEX_LONGREQ_HANDLER(10, handle_request_long_10),
+      REALM_GEX_LONGREQ_HANDLER(11, handle_request_long_11),
+      REALM_GEX_LONGREQ_HANDLER(12, handle_request_long_12),
+      REALM_GEX_LONGREQ_HANDLER(13, handle_request_long_13),
+      REALM_GEX_LONGREQ_HANDLER(14, handle_request_long_14),
+      REALM_GEX_LONGREQ_HANDLER(15, handle_request_long_15),
+      REALM_GEX_LONGREQ_HANDLER(16, handle_request_long_16),
 
-      GEX_COMPREPLY_HANDLER(1, handle_completion_reply_1),
-      GEX_COMPREPLY_HANDLER(2, handle_completion_reply_2),
-      GEX_COMPREPLY_HANDLER(3, handle_completion_reply_3),
-      GEX_COMPREPLY_HANDLER(4, handle_completion_reply_4),
-      GEX_COMPREPLY_HANDLER(5, handle_completion_reply_5),
-      GEX_COMPREPLY_HANDLER(6, handle_completion_reply_6),
-      GEX_COMPREPLY_HANDLER(7, handle_completion_reply_7),
-      GEX_COMPREPLY_HANDLER(8, handle_completion_reply_8),
-      GEX_COMPREPLY_HANDLER(9, handle_completion_reply_9),
-      GEX_COMPREPLY_HANDLER(10, handle_completion_reply_10),
-      GEX_COMPREPLY_HANDLER(11, handle_completion_reply_11),
-      GEX_COMPREPLY_HANDLER(12, handle_completion_reply_12),
-      GEX_COMPREPLY_HANDLER(13, handle_completion_reply_13),
-      GEX_COMPREPLY_HANDLER(14, handle_completion_reply_14),
-      GEX_COMPREPLY_HANDLER(15, handle_completion_reply_15),
-      GEX_COMPREPLY_HANDLER(16, handle_completion_reply_16),
+      REALM_GEX_COMPREPLY_HANDLER(1, handle_completion_reply_1),
+      REALM_GEX_COMPREPLY_HANDLER(2, handle_completion_reply_2),
+      REALM_GEX_COMPREPLY_HANDLER(3, handle_completion_reply_3),
+      REALM_GEX_COMPREPLY_HANDLER(4, handle_completion_reply_4),
+      REALM_GEX_COMPREPLY_HANDLER(5, handle_completion_reply_5),
+      REALM_GEX_COMPREPLY_HANDLER(6, handle_completion_reply_6),
+      REALM_GEX_COMPREPLY_HANDLER(7, handle_completion_reply_7),
+      REALM_GEX_COMPREPLY_HANDLER(8, handle_completion_reply_8),
+      REALM_GEX_COMPREPLY_HANDLER(9, handle_completion_reply_9),
+      REALM_GEX_COMPREPLY_HANDLER(10, handle_completion_reply_10),
+      REALM_GEX_COMPREPLY_HANDLER(11, handle_completion_reply_11),
+      REALM_GEX_COMPREPLY_HANDLER(12, handle_completion_reply_12),
+      REALM_GEX_COMPREPLY_HANDLER(13, handle_completion_reply_13),
+      REALM_GEX_COMPREPLY_HANDLER(14, handle_completion_reply_14),
+      REALM_GEX_COMPREPLY_HANDLER(15, handle_completion_reply_15),
+      REALM_GEX_COMPREPLY_HANDLER(16, handle_completion_reply_16),
 
       { HIDX_LONG_AS_GET,
 	reinterpret_cast<void(*)()>(handle_request_rget),

@@ -13,13 +13,13 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_static_cast_partition1.rg:23: static_cast requires partition type as argument 2, got int32
---   var y = static_cast(partition(disjoint, r, ispace(int1d)), 1)
---                     ^
+-- uninitialized_region.rg:23: variable of type region(int32) must be initialized
+--   var r : region(int)
+--     ^
 
 import "regent"
 
-task f(r : region(ispace(int1d), int))
-  var y = static_cast(partition(disjoint, r, ispace(int1d)), 1)
+task main()
+  var r : region(int)
 end
-f:compile()
+regentlib.start(main)

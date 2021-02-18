@@ -3968,9 +3968,15 @@ namespace Legion {
         gather_versions.resize(gather_size);
         for (unsigned idx = 0; idx < gather_size; idx++)
         {
-          src_indirect_requirements[idx] = 
-            launcher.src_indirect_requirements[idx];
-          src_indirect_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
+          RegionRequirement &req = src_indirect_requirements[idx];
+          req = launcher.src_indirect_requirements[idx];
+          req.flags |= LEGION_NO_ACCESS_FLAG;
+          if (req.privilege_fields.size() != 1)
+            REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT, 
+                "Source indirect region requirement %d for copy op in "
+                "parent task %s (ID %lld) has %zd fields, but exactly one "
+                "field is required.", idx, parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id(), req.privilege_fields.size())
         }
         if (launcher.src_indirect_is_range.size() != gather_size)
           REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
@@ -4011,9 +4017,15 @@ namespace Legion {
         scatter_versions.resize(scatter_size);
         for (unsigned idx = 0; idx < scatter_size; idx++)
         {
-          dst_indirect_requirements[idx] = 
-            launcher.dst_indirect_requirements[idx];
-          dst_indirect_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
+          RegionRequirement &req = dst_indirect_requirements[idx];
+          req = launcher.dst_indirect_requirements[idx];
+          req.flags |= LEGION_NO_ACCESS_FLAG;
+          if (req.privilege_fields.size() != 1)
+            REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT, 
+                "Destination indirect region requirement %d for copy op in "
+                "parent task %s (ID %lld) has %zd fields, but exactly one "
+                "field is required.", idx, parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id(), req.privilege_fields.size())
         }
         if (launcher.dst_indirect_is_range.size() != scatter_size)
           REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
@@ -4343,6 +4355,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           const RegionRequirement &req = src_indirect_requirements[idx];
+#ifdef DEBUG_LEGION
+          assert(req.privilege_fields.size() == 1);
+#endif
           LegionSpy::log_logical_requirement(unique_op_id, offset + idx,
                                              true/*region*/,
                                              req.region.index_space.id,
@@ -4352,7 +4367,7 @@ namespace Legion {
                                              req.prop, req.redop,
                                              req.parent.index_space.id);
           LegionSpy::log_requirement_fields(unique_op_id, offset + idx, 
-                                            req.instance_fields);
+                                            req.privilege_fields);
         }
       }
       if (!dst_indirect_requirements.empty())
@@ -4362,6 +4377,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           const RegionRequirement &req = dst_indirect_requirements[idx];
+#ifdef DEBUG_LEGION
+          assert(req.privilege_fields.size() == 1);
+#endif
           LegionSpy::log_logical_requirement(unique_op_id, offset + idx,
                                              true/*region*/,
                                              req.region.index_space.id,
@@ -4371,7 +4389,7 @@ namespace Legion {
                                              req.prop, req.redop,
                                              req.parent.index_space.id);
           LegionSpy::log_requirement_fields(unique_op_id, offset + idx, 
-                                            req.instance_fields);
+                                            req.privilege_fields);
         }
       }
     }
@@ -6315,9 +6333,15 @@ namespace Legion {
         gather_versions.resize(gather_size);
         for (unsigned idx = 0; idx < gather_size; idx++)
         {
-          src_indirect_requirements[idx] = 
-            launcher.src_indirect_requirements[idx];
-          src_indirect_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
+          RegionRequirement &req = src_indirect_requirements[idx];
+          req = launcher.src_indirect_requirements[idx];
+          req.flags |= LEGION_NO_ACCESS_FLAG;
+          if (req.privilege_fields.size() != 1)
+            REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT, 
+                "Source indirect region requirement %d for copy op in "
+                "parent task %s (ID %lld) has %zd fields, but exactly one "
+                "field is required.", idx, parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id(), req.privilege_fields.size())
         }
         if (launcher.src_indirect_is_range.size() != gather_size)
           REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
@@ -6362,9 +6386,15 @@ namespace Legion {
         scatter_versions.resize(scatter_size);
         for (unsigned idx = 0; idx < scatter_size; idx++)
         {
-          dst_indirect_requirements[idx] = 
-            launcher.dst_indirect_requirements[idx];
-          dst_indirect_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
+          RegionRequirement &req = dst_indirect_requirements[idx];
+          req = launcher.dst_indirect_requirements[idx];
+          req.flags |= LEGION_NO_ACCESS_FLAG;
+          if (req.privilege_fields.size() != 1)
+            REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT, 
+                "Destination indirect region requirement %d for copy op in "
+                "parent task %s (ID %lld) has %zd fields, but exactly one "
+                "field is required.", idx, parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id(), req.privilege_fields.size())
         }
         if (launcher.dst_indirect_is_range.size() != scatter_size)
           REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
@@ -6553,6 +6583,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           const RegionRequirement &req = src_indirect_requirements[idx];
+#ifdef DEBUG_LEGION
+          assert(req.privilege_fields.size() == 1);
+#endif
           const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
                            (req.handle_type == LEGION_REGION_PROJECTION);
           const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
@@ -6567,7 +6600,7 @@ namespace Legion {
                     req.partition.tree_id,
               req.privilege, req.prop, req.redop, req.parent.index_space.id);
           LegionSpy::log_requirement_fields(unique_op_id, offset + idx, 
-                                            req.instance_fields);
+                                            req.privilege_fields);
           if (proj)
             LegionSpy::log_requirement_projection(unique_op_id, offset + idx,
                                                   req.projection);
@@ -6580,6 +6613,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           const RegionRequirement &req = dst_indirect_requirements[idx];
+#ifdef DEBUG_LEGION
+          assert(req.privilege_fields.size() == 1);
+#endif
           const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
                            (req.handle_type == LEGION_REGION_PROJECTION);
           const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
@@ -6594,7 +6630,7 @@ namespace Legion {
                     req.partition.tree_id,
               req.privilege, req.prop, req.redop, req.parent.index_space.id);
           LegionSpy::log_requirement_fields(unique_op_id, offset + idx, 
-                                            req.instance_fields);
+                                            req.privilege_fields);
           if (proj)
             LegionSpy::log_requirement_projection(unique_op_id, offset + idx,
                                                   req.projection);

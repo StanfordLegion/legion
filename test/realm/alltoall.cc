@@ -19,7 +19,7 @@ enum {
 };
 
 namespace TestConfig {
-  size_t size = 64; // default to 64 MB
+  size_t size = 64 << 20; // default to 64 MB
   bool full_barrier = false;
 };
 
@@ -108,12 +108,12 @@ void measure_all_to_all(Memory::Kind memkind, const char *description,
   local_instances.resize(local_memories.size());
   for (unsigned idx = 0; idx < local_memories.size(); ++idx) {
     RegionInstance::create_instance(local_instances[idx], local_memories[idx],
-        bounds, field_sizes, 0/*nop*/, ProfilingRequestSet()).external_wait();
+        bounds, field_sizes, 0/*nop*/, ProfilingRequestSet()).wait();
     assert(local_instances[idx].exists());
   }
   // Wait for everyone to be done making their instances
   hookup_barrier.arrive();
-  hookup_barrier.external_wait();
+  hookup_barrier.wait();
   hookup_barrier = hookup_barrier.advance_barrier();
 
   // Run a generation for each remote rank, do this hierarchically so that 
@@ -147,7 +147,7 @@ void measure_all_to_all(Memory::Kind memkind, const char *description,
     }
     // Wait for all the ranks to be done
     hookup_barrier.arrive();
-    hookup_barrier.external_wait();
+    hookup_barrier.wait();
     hookup_barrier = hookup_barrier.advance_barrier();
   }
   std::vector<Exchange> exchanges(local_memories.size());
@@ -165,7 +165,7 @@ void measure_all_to_all(Memory::Kind memkind, const char *description,
       Event done = remote_procs[next_rank].spawn(HOOKUP_TASK_ID, 
           &exchanges.front(), exchanges.size() * sizeof(Exchange));
       hookup_barrier.arrive(1, done);
-      hookup_barrier.external_wait();
+      hookup_barrier.wait();
       hookup_barrier = hookup_barrier.advance_barrier();
     }
   }
@@ -182,7 +182,7 @@ void measure_all_to_all(Memory::Kind memkind, const char *description,
   // Start our graph
   start.trigger();
   // Wait for everyone to arrive on the barrier
-  execution_barrier.get_previous_phase().external_wait();
+  execution_barrier.get_previous_phase().wait();
   // Stop the timer
   const long long t2 = Clock::current_time_in_nanoseconds(); 
 
@@ -209,7 +209,7 @@ void measure_all_to_all(Memory::Kind memkind, const char *description,
 
   // Wait for everyone to be done with clean up
   hookup_barrier.arrive();
-  hookup_barrier.external_wait();
+  hookup_barrier.wait();
   hookup_barrier = hookup_barrier.advance_barrier();
 }
 
@@ -224,7 +224,6 @@ int main(int argc, char **argv)
     .add_option_bool("-full", TestConfig::full_barrier);
   bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
   assert(ok);
-  TestConfig::size <<= 20; // convert MB to bytes
 
   const size_t total_ranks = Machine::get_machine().get_address_space_count();
   const Processor local = Machine::ProcessorQuery(Machine::get_machine())
@@ -258,7 +257,7 @@ int main(int argc, char **argv)
 
   // make sure everyone is done registering their tasks before starting
   rt.collective_spawn_by_kind(Processor::LOC_PROC, STARTUP_TASK_ID, 0, 0, 
-      true/*one per node*/, Event::merge_events(reg0, reg1, reg2)).external_wait();
+      true/*one per node*/, Event::merge_events(reg0, reg1, reg2)).wait();
 
   if (rank == 0) {
     hookup_barrier = Barrier::create_barrier(total_ranks);
@@ -267,7 +266,7 @@ int main(int argc, char **argv)
     for (unsigned idx = 1; idx < total_ranks; ++idx)
       remote_procs[idx].spawn(BARRIER_TASK_ID, barriers, 2 * sizeof(Barrier));
   } else {
-    barriers_ready.external_wait();
+    barriers_ready.wait();
   }
 
   measure_all_to_all(Memory::SYSTEM_MEM, "System Memory",

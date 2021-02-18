@@ -76,6 +76,8 @@ namespace Realm {
     } fill_data;
   };
 
+  std::ostream& operator<<(std::ostream& os, const CopySrcDstField& sd);
+
   template <int N, typename T = int> struct IndexSpaceIterator;
   template <int N, typename T = int> class SparsityMap;
 

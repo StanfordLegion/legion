@@ -364,6 +364,22 @@ function hideLoaderIcon() {
   }
 }
 
+function get_time_str(time_val, convert)
+{
+    if (convert) {
+	if (time_val >= 1000000) {
+	    var val = time_val/1000000;
+	    val = parseFloat(val.toFixed(3))
+		return val.toString() + " sec";
+	}
+	if (time_val >= 1000) {
+	    var val = time_val/1000;
+	    val = parseFloat(val.toFixed(3))
+		return val.toString() + " ms";
+	}
+    }
+    return time_val.toString() + " us";
+}
 
 function getMouseOver() {
   var paneWidth = $("#timeline").width();
@@ -388,14 +404,16 @@ function getMouseOver() {
     var descTexts = [];
     var total = d.end - d.start;
     var delay = d.start - d.ready;
+    total = parseFloat(total.toFixed(3))
+    delay = parseFloat(delay.toFixed(3))
     var initiation = "";
     // Insert texts in reverse order
     if ((d.ready != undefined) && (d.ready != "") && (delay != 0)) {
-	descTexts.push("Ready State: " + delay + "us");
+	descTexts.push("Ready State: " + get_time_str(delay,false));
     }
-    descTexts.push("End:   " + d.end + "us");
-    descTexts.push("Start: " + d.start + "us");
-    descTexts.push("Total: " + total + "us");
+    descTexts.push("End:   " + get_time_str(d.end, false));
+    descTexts.push("Start: " + get_time_str(d.start, false));
+    descTexts.push("Total: " + get_time_str(total, true));
     if ((d.initiation != undefined) && d.initiation != "") {
       descTexts.push("Initiator: " + state.operations[d.initiation].desc);
     } 

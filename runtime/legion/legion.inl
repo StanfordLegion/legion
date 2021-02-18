@@ -169,39 +169,19 @@ namespace Legion {
         }
       };
 
-#if __cplusplus >= 201703L
-      template<typename T, typename = int>
-      struct HasBuffer : std::false_type { };
+      template <typename T>
+      struct IsSerdezType {
+        typedef char yes; typedef long no;
 
-      template<typename T>
-      struct HasBuffer<T, decltype((void) T::legion_buffer_size, 0)>
-                        : std::true_type { };
+        template <typename C>
+        static yes test(decltype(&C::legion_buffer_size),
+                        decltype(&C::legion_serialize),
+                        decltype(&C::legion_deserialize));
+        template <typename C> static no test(...);
 
-      template<typename T, typename = int>
-      struct HasSerialize : std::false_type { };
-
-      template<typename T>
-      struct HasSerialize<T, decltype((void) T::legion_serialize, 0)>
-                          : std::true_type { };
-
-      template<typename T, typename = int>
-      struct HasDeserialize : std::false_type { };
-
-      template<typename T>
-      struct HasDeserialize<T, decltype((void) T::legion_deserialize, 0)>
-                            : std::true_type { };
-
-      template<typename T>
-      struct IsSerdezType : 
-        std::conjunction<HasBuffer<T>,HasSerialize<T>,HasDeserialize<T> > { };
-#else
-      template<typename T, typename = int>
-      struct IsSerdezType : std::false_type { };
-
-      template<typename T>
-      struct IsSerdezType<T, decltype((void) T::legion_serialize, 0)>
-                          : std::true_type { };
-#endif
+        static constexpr bool value =
+          sizeof(test<T>(nullptr, nullptr, nullptr)) == sizeof(yes);
+      };
 
       template<typename T, bool IS_STRUCT>
       struct StructHandler {

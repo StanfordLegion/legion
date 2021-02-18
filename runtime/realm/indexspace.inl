@@ -121,6 +121,7 @@ namespace Realm {
 
   inline CopySrcDstField& CopySrcDstField::operator=(const CopySrcDstField& copy_from)
   {
+    if(this == &copy_from) return *this; // self-assignment
     if((field_id != FieldID(-1)) && (size > MAX_DIRECT_SIZE) && fill_data.indirect)
       free(fill_data.indirect);
 

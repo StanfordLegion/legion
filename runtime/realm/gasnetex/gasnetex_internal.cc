@@ -2546,7 +2546,7 @@ namespace Realm {
 
     xmitsrcs.push_back(new XmitSrc(this, 0 /*ep_index*/));
 
-#if GEX_VERSION >= 20201101
+#if REALM_GEX_API >= 1300
     // once we've done the basic init, shut off verbose errors from GASNet
     //  and we'll report failures ourselves
     gex_System_SetVerboseErrors(0);
@@ -2595,7 +2595,7 @@ namespace Realm {
     log_gex_bind.info() << "segment bind?: base=" << base << " size=" << size
 			<< " mtype=" << memtype << " extra=" << memextra;
 
-#if GEX_VERSION <= 20201100 && !defined(GASNET_CONDUIT_IBV)
+#if (REALM_GEX_RELEASE == 20201100) && !defined(GASNET_CONDUIT_IBV)
     // in 2020.11.0, conduits other than ibv would assert-fail in
     //  gex_EP_Create, so don't even attempt binding
     return false;

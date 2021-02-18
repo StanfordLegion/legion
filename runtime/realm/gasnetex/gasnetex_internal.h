@@ -34,12 +34,28 @@
 #endif
 #include <gasnetex.h>
 
-// GASNet-EX uses year.month for major.minor, and we'll assume no more
-//  than 100 patch levels in order to form a monotonically increasing
-//  GEX_VERSION
-#define GEX_VERSION ((10000*GASNET_RELEASE_VERSION_MAJOR)+(100*GASNET_RELEASE_VERSION_MINOR)+GASNET_RELEASE_VERSION_PATCH)
-#if GEX_VERSION < 20201100
-#error Realm depends on GASNet-EX features that first appeared in the 2020.11.0 release.  For earlier versions of GASNet-EX, use the legacy API via the gasnet1 network layer.
+// there are two independent "version" that we may need to consider for
+//  conditional compilation:
+//
+// 1) REALM_GEX_RELEASE refers to specific releases - GASNet-EX uses year.month
+//      for major.minor, and we'll assume no more than 100 patch levels to
+//      avoid conflicts, but there is no guarantee of chronological
+//      monotonicity of behavior, so tests should be either equality against
+//      a specific release or a bounded comparison when two or more consecutive
+//      releases are of interest.  However, there should never be anything of
+//      form: if REALM_GEX_RELEASE >= xyz
+#define REALM_GEX_RELEASE ((10000*GASNET_RELEASE_VERSION_MAJOR)+(100*GASNET_RELEASE_VERSION_MINOR)+GASNET_RELEASE_VERSION_PATCH)
+
+// 2) REALM_GEX_API refers to versioning of the GASNet-EX specification -
+//      currently this is defined in terms of major.minor, but we'll include
+//      space for a patch level if that ever becomes important.  In contrast to
+//      the release numbering, we will assume that the specification is
+//      roughly monotonic in that a change is expected to remain in future
+//      specs except for hopefully-uncommon cases where it changes again
+#define REALM_GEX_API  ((10000*GEX_SPEC_VERSION_MAJOR)+(100*GEX_SPEC_VERSION_MINOR))
+
+#if REALM_GEX_API < 1200
+#error Realm depends on GASNet-EX features that first appeared in the 0.12 spec, first available in the 2020.11.0 release.  For earlier versions of GASNet-EX, use the legacy API via the gasnet1 network layer.
   #include <stop_compilation_due_to_gasnetex_version_mismatch>
 #endif
 
@@ -47,7 +63,7 @@
 //  rather than emulated by their reference implementation - those defines
 //  aren't there for 2020.11.0, but the only one that version has that we
 //  care about is NPAM medium
-#if GEX_VERSION == 20201100
+#if REALM_GEX_RELEASE == 20201100
   // NOTE: technically it's only native for the IBV/ARIES/SMP conduits,
   //  but enable it as well on the MPI conduit so that we get more test
   //  coverage of the code paths (and it's probably not making the MPI

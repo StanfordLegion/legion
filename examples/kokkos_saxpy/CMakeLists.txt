@@ -22,6 +22,10 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
+# request Kokkos "separable_compilation" to avoid messing with the compilation
+#  of other projects
+find_package(Kokkos REQUIRED OPTIONAL_COMPONENTS separable_compilation)
+
 # see if we have kokkos-kernels available
 find_package(KokkosKernels QUIET)
 

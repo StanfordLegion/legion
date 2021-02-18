@@ -3038,6 +3038,10 @@ class Field(object):
         else:
             return self.name + ' (' + str(self.fid) + ')'
 
+    @property
+    def html_safe_name(self):
+        return str(self).replace('<','&lt;').replace('>','&gt;')
+
     __repr__ = __str__
 
 class FieldSpace(object):
@@ -3127,6 +3131,10 @@ class LogicalRegion(object):
         if not self.parent and self.index_space.parent is not None:
             self.set_parent(self.state.get_partition(
                 self.index_space.parent.uid, self.field_space.uid, self.tree_id))
+
+    @property
+    def html_safe_name(self):
+        return str(self).replace('<','&lt;').replace('>','&gt;')
 
     def __str__(self):
         if self.name is None:
@@ -3520,6 +3528,10 @@ class LogicalPartition(object):
             assert self.index_partition.parent
             self.set_parent(self.state.get_region(self.index_partition.parent.uid,
                                                   self.field_space.uid, self.tree_id))
+
+    @property
+    def html_safe_name(self):
+        return str(self).replace('<','&lt;').replace('>','&gt;')
 
     def __str__(self):
         if self.name is None:
@@ -4249,12 +4261,18 @@ class LogicalState(object):
         assert 0 in close.reqs
         close_req = close.reqs[0]
         for prev_op,prev_req in closed_users:
+            # Can skip it if it is the close creator
+            if prev_op is close.creator:
+                continue
             if op != prev_op or req.index != prev_req.index:
                 dep = MappingDependence(prev_op, close, prev_req.index,
                                         close_req.index, TRUE_DEPENDENCE)
                 prev_op.add_outgoing(dep)
                 close.add_incoming(dep)
         for prev_op,prev_req in previous_deps:
+            # Can skip it if it is the close creator
+            if prev_op is close.creator:
+                continue
             if op != prev_op or req.index != prev_req.index:
                 dep = MappingDependence(prev_op, close, prev_req.index,
                                         close_req.index, TRUE_DEPENDENCE)
@@ -9338,7 +9356,7 @@ class RealmCopy(RealmBase):
                     redop = self.redops[fidx]
                     line = []
                     # Do the field labels first
-                    line.append(str(src_field))
+                    line.append(src_field.html_safe_name)
                     local_rows = 1
                     if has_src_indirect:
                         assert src_index is not None
@@ -9352,7 +9370,7 @@ class RealmCopy(RealmBase):
                                 str(self.indirections.get_indirect_field(dst_index)))
                         local_rows = max(local_rows, 
                                 self.indirections.get_group_size(dst_index))
-                    line.append(str(dst_field))
+                    line.append(dst_field.html_safe_name)
                     if first_field:
                         # Count how many rows there are for each field
                         num_rows = num_fields
@@ -9423,14 +9441,14 @@ class RealmCopy(RealmBase):
                     line = []
                     if src_field == dst_field:
                         if redop != 0:
-                            line.append(str(src_field)+' Redop='+str(redop))
+                            line.append(src_field.html_safe_name+' Redop='+str(redop))
                         else:
-                            line.append(str(src_field))
+                            line.append(src_field.html_safe_name)
                     else:
                         if redop != 0:
-                            line.append(str(src_field)+':'+str(dst_field)+' Redop='+str(redop))
+                            line.append(src_field.html_safe_name+':'+dst_field.html_safe_name+' Redop='+str(redop))
                         else:
-                            line.append(str(src_field)+':'+str(dst_field))
+                            line.append(src_field.html_safe_name+':'+dst_field.html_safe_name)
                     line.append(str(src_inst)+':'+str(dst_inst))
                     if first_field:
                         line.insert(0, {"label" : "Fields",
@@ -9573,7 +9591,7 @@ class RealmFill(RealmBase):
                 dst_field = self.fields[fidx]
                 dst_inst = self.dsts[fidx]
                 line = []
-                line.append(str(dst_field))
+                line.append(dst_field.html_safe_name)
                 line.append(str(dst_inst))
                 if first_field:
                     line.insert(0, {"label" : "Fields",
@@ -10008,7 +10026,7 @@ class GraphPrinter(object):
         if requirements is not None:
             for i in xrange(len(requirements)):
                 req = requirements[i]
-                region_name = str(req.logical_node)
+                region_name = req.logical_node.html_safe_name
                 line = [str(i), region_name, req.get_privilege_and_coherence()]
                 lines.append(line)
                 if detailed:
@@ -10018,7 +10036,7 @@ class GraphPrinter(object):
                         if first_field:
                             line.append({"label" : "Fields", "rowspan" : len(req.fields)})
                             first_field = False
-                        line.append(str(f))
+                        line.append(f.html_safe_name)
                         if mappings is not None and i in mappings:
                             line.append(str(mappings[i][f.fid]))
                         else:

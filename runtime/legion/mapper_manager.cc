@@ -47,10 +47,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MapperManager::MapperManager(Runtime *rt, Mapping::Mapper *mp, 
-                                 MapperID mid, Processor p)
+                                 MapperID mid, Processor p, bool is_default)
       : runtime(rt), mapper(mp), mapper_id(mid), processor(p),
         profile_mapper(runtime->profiler != NULL),
-        request_valid_instances(mp->request_valid_instances())
+        request_valid_instances(mp->request_valid_instances()),
+        is_default_mapper(is_default)
     //--------------------------------------------------------------------------
     {
     }
@@ -3633,7 +3634,7 @@ namespace Legion {
                                                            MappingCallKind kind)
     //--------------------------------------------------------------------------
     {
-      MAPPER_CALL_NAMES(call_names); 
+      static MAPPER_CALL_NAMES(call_names); 
 #ifdef DEBUG_LEGION
       assert(kind < LAST_MAPPER_CALL);
 #endif
@@ -3736,8 +3737,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SerializingManager::SerializingManager(Runtime *rt, Mapping::Mapper *mp,
-                             MapperID map_id, Processor p, bool init_reentrant)
-      : MapperManager(rt, mp, map_id, p), executing_call(NULL), paused_calls(0),
+             MapperID map_id, Processor p, bool init_reentrant, bool def)
+      : MapperManager(rt,mp,map_id,p,def),executing_call(NULL),paused_calls(0),
         allow_reentrant(init_reentrant), permit_reentrant(init_reentrant), 
         pending_pause_call(false), pending_finish_call(false)
     //--------------------------------------------------------------------------
@@ -3746,7 +3747,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SerializingManager::SerializingManager(const SerializingManager &rhs)
-      : MapperManager(NULL,NULL,0,Processor::NO_PROC), allow_reentrant(false)
+      : MapperManager(NULL, NULL, 0, Processor::NO_PROC, false), 
+        allow_reentrant(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3887,9 +3889,15 @@ namespace Legion {
       // Wake up a pending mapper call to run if necessary
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
-      if (!precondition.exists() && profile_mapper) 
+      if (profile_mapper)
+      {
+        if (is_default_mapper)
+          runtime->profiler->issue_default_mapper_warning(op,
+                                  get_mapper_call_name(kind));
         // Record our start time in this case since there is no continuation
-        result->start_time = Realm::Clock::current_time_in_nanoseconds();
+        if (!precondition.exists())
+          result->start_time = Realm::Clock::current_time_in_nanoseconds();
+      }
       // else the continuation will initialize the start time
       return result;
     }
@@ -4063,15 +4071,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ConcurrentManager::ConcurrentManager(Runtime *rt, Mapping::Mapper *mp,
-                                         MapperID map_id, Processor p)
-      : MapperManager(rt, mp, map_id, p), lock_state(UNLOCKED_STATE)
+                                         MapperID map_id, Processor p, bool def)
+      : MapperManager(rt, mp, map_id, p, def), lock_state(UNLOCKED_STATE)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ConcurrentManager::ConcurrentManager(const ConcurrentManager &rhs)
-      : MapperManager(NULL,NULL,0,Processor::NO_PROC)
+      : MapperManager(NULL, NULL, 0, Processor::NO_PROC, false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4221,7 +4229,12 @@ namespace Legion {
       MappingCallInfo *result = allocate_call_info(kind, op, true/*need lock*/);
       // Record our mapper start time when we're ready to run
       if (profile_mapper)
+      {
+        if (is_default_mapper)
+          runtime->profiler->issue_default_mapper_warning(op,
+                                  get_mapper_call_name(kind));
         result->start_time = Realm::Clock::current_time_in_nanoseconds();
+      }
       return result;
     }
 

@@ -67,7 +67,17 @@ namespace Realm {
     
     const std::string& get_name(void) const;
     LoggingLevel get_level(void) const;
-    
+
+    // boolean tests to see if the specified logging level is active - lets
+    //  complicated logging messages be put inside conditionals
+    bool want_spew(void) const;
+    bool want_debug(void) const;
+    bool want_info(void) const;
+    bool want_print(void) const;
+    bool want_warning(void) const;
+    bool want_error(void) const;
+    bool want_fatal(void) const;
+
     LoggerMessage spew(void);
     LoggerMessage debug(void);
     LoggerMessage info(void);

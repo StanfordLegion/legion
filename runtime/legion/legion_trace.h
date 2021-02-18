@@ -492,6 +492,7 @@ namespace Legion {
       ApEvent fix_trace(PhysicalTemplate *tpl, Operation *op,
                 std::set<RtEvent> &applied_events, bool has_blocking_call);
       void record_intermediate_execution_fence(FenceOp *fence);
+      void chain_replays(FenceOp *replay_op);
     public:
       const std::vector<Processor> &get_replay_targets(void)
         { return replay_targets; }
@@ -502,6 +503,8 @@ namespace Legion {
       const LegionTrace *logical_trace;
     private:
       mutable LocalLock trace_lock;
+      FenceOp *previous_replay;
+      UniqueID previous_replay_gen;
       PhysicalTemplate* current_template;
       std::vector<PhysicalTemplate*> templates;
       unsigned nonreplayable_count;
