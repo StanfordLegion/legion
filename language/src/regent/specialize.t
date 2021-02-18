@@ -2031,18 +2031,10 @@ local function make_symbols(cx, node, var_name)
   report.error(node, "mismatch in specialization: expected a symbol or list of symbols but got value of type " .. tostring(type(var_name)))
 end
 
-function specialize.top_task_param(cx, node)
-  -- Hack: Params which are regions can be recursive on the name of
-  -- the region so introduce the symbol before type checking to allow
-  -- for this recursion.
-  local params = make_symbols(cx, node, node.param_name)
-
+function specialize.top_task_param(cx, node, params)
   local result = terralib.newlist()
   for _, param in ipairs(params) do
     local param_name, symbol = unpack(param)
-
-    cx.env:insert(node, param_name, symbol)
-    if not std.is_symbol(param_name) then cx.env:insert(node, symbol, symbol) end
 
     local param_type
     if std.is_symbol(param_name) then
@@ -2085,9 +2077,27 @@ function specialize.top_task_param(cx, node)
 end
 
 function specialize.top_task_params(cx, node)
+  -- Hack: Params which are regions can be recursive on the name of
+  -- the region so introduce the symbol before completing specialization to allow
+  -- for this recursion.
+  local symbols = node:map(
+    function(node)
+      local params = make_symbols(cx, node, node.param_name)
+      for _, param in ipairs(params) do
+        local param_name, symbol = unpack(param)
+        cx.env:insert(node, param_name, symbol)
+        if not std.is_symbol(param_name) then cx.env:insert(node, symbol, symbol) end
+      end
+
+      return terralib.newlist({node, params})
+    end)
+
   return data.flatmap(
-    function(param) return specialize.top_task_param(cx, param) end,
-    node)
+    function(group)
+      local param, symbol = unpack(group)
+      return specialize.top_task_param(cx, param, symbol)
+    end,
+    symbols)
 end
 
 function specialize.top_task(cx, node)
