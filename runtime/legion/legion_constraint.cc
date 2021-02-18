@@ -630,8 +630,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     SpecializedConstraint::SpecializedConstraint(SpecializedKind k,
       ReductionOpID r, bool no, bool ext, Domain c, size_t pieces, int overhead)
-      : kind(k), redop(r), max_pieces(pieces), max_overhead(overhead), 
-        collective(c), no_access(no), exact(ext)
+      : kind(k), redop(r), collective(c), max_pieces(pieces),
+        max_overhead(overhead), no_access(no), exact(ext)
     //-------------------------------------------------------------------------
     {
       if (redop != 0)
