@@ -501,6 +501,27 @@ namespace Legion {
     };
 
     /**
+     * \class ExternalResourcesImpl
+     * This class provides the backing data structure for a collection of
+     * physical regions that represent external data that have been attached
+     * to logical regions in the same region tree
+     */
+    class ExternalResourcesImpl : public Collectable,
+                                  public LegionHeapify<ExternalResourcesImpl> {
+    public:
+      static const AllocationType alloc_type = EXTERNAL_RESOURCES_ALLOC;
+    public:
+      ExternalResourcesImpl(void);
+      ExternalResourcesImpl(const ExternalResourcesImpl &rhs);
+      ~ExternalResourcesImpl(void);
+    public:
+      ExternalResourcesImpl& operator=(const ExternalResourcesImpl &rhs);
+    public:
+      size_t size(void) const;
+      PhysicalRegion get_region(unsigned index) const;
+    };
+
+    /**
      * \class GrantImpl
      * This is the base implementation of a grant object.
      * The grant implementation remembers the locks that
@@ -2009,11 +2030,6 @@ namespace Legion {
     public:
       void fill_fields(Context ctx, const FillLauncher &launcher);
       void fill_fields(Context ctx, const IndexFillLauncher &launcher);
-      PhysicalRegion attach_external_resource(Context ctx,
-                                              const AttachLauncher &launcher);
-      Future detach_external_resource(Context ctx, PhysicalRegion region, 
-                                      const bool flush, const bool unordered);
-      void progress_unordered_operations(Context ctx);
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
       void issue_copy_operation(Context ctx, const IndexCopyLauncher &launcher);
     public:

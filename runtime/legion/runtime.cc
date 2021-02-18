@@ -13567,36 +13567,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion Runtime::attach_external_resource(Context ctx, 
-                                                 const AttachLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context attach external resource!");
-      return ctx->attach_resource(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region,
-                                         const bool flush, const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context detach external resource!");
-      return ctx->detach_resource(region, flush, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::progress_unordered_operations(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context progress unordered ops")
-      return ctx->progress_unordered_operations();
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::issue_copy_operation(Context ctx,const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -21896,6 +21866,8 @@ namespace Legion {
           return "Future Map";
         case PHYSICAL_REGION_ALLOC:
           return "Physical Region";
+        case EXTERNAL_RESOURCES_ALLOC:
+          return "External Resources";
         case STATIC_TRACE_ALLOC:
           return "Static Trace";
         case DYNAMIC_TRACE_ALLOC:

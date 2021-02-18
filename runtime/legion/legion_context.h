@@ -356,8 +356,13 @@ namespace Legion {
       virtual void issue_release(const ReleaseLauncher &launcher) = 0;
       virtual PhysicalRegion attach_resource(
                                   const AttachLauncher &launcher) = 0;
+      virtual ExternalResources attach_resources(
+                                  const IndexAttachLauncher &launcher,
+                                  bool deduplicate_across_shards) = 0;
       virtual Future detach_resource(PhysicalRegion region, 
                                      const bool flush,const bool unordered) = 0;
+      virtual Future detach_resources(ExternalResources resources,
+                                    const bool flush, const bool unordered) = 0;
       virtual void progress_unordered_operations(void) = 0;
       virtual FutureMap execute_must_epoch(
                                  const MustEpochLauncher &launcher) = 0;
@@ -1079,8 +1084,13 @@ namespace Legion {
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
+      virtual ExternalResources attach_resources(
+                                        const IndexAttachLauncher &launcher,
+                                        bool deduplicate_across_shards);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual Future detach_resources(ExternalResources resources,
+                                      const bool flush, const bool unordered);
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
@@ -1762,8 +1772,13 @@ namespace Legion {
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
+      virtual ExternalResources attach_resources(
+                                          const IndexAttachLauncher &launcher,
+                                          bool deduplicate_across_shards);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual Future detach_resources(ExternalResources resources,
+                                      const bool flush, const bool unordered);
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);

@@ -6463,16 +6463,17 @@ namespace Legion {
 
       /**
        * Detach multiple external resources that were all created by 
-       * a common call to 'attach_external_resources'. This method is also
-       * a "collective" method meaning that different shards in control
-       * replicated contexts are allowed to pass in external resources
-       * and they will be treated correctly.
+       * a common call to 'attach_external_resources'. 
        * @param ctx enclosing task context
-       * @param regions vector of regions representing an external 
-       *        physical resource to detach
+       * @param external the external resources to detach 
+       * @param flush copy out data to the physical region before detaching
+       * @param unordered set to true if this is performed by a different
+       *          thread than the one for the task (e.g a garbage collector)
        * @return an empty future indicating when the resources are detached
        */
-      Future detach_external_resources(Context ctx, ExternalResources external);
+      Future detach_external_resources(Context ctx, ExternalResources external,
+                                       const bool flush = true,
+                                       const bool unordered = false);
 
       /**
        * Force progress on unordered operations. After performing one
