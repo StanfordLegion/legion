@@ -76,7 +76,6 @@ namespace Legion {
       IndexSpaceExpression* consume(void);
     public:
       virtual void create_operation(void) = 0;
-      virtual IndexSpaceExpression* find_congruence(void) = 0;
     protected:
       IndexSpaceOperation *result;
     };
@@ -813,6 +812,9 @@ namespace Legion {
     public:
       IndexSpaceExpression* subtract_index_spaces(IndexSpaceExpression *lhs,
                   IndexSpaceExpression *rhs, OperationCreator *creator = NULL);
+    public:
+      IndexSpaceExpression* find_canonical_expression(IndexSpaceExpression *ex);
+      void remove_canonical_expression(IndexSpaceExpression *expr, size_t vol);
     private:
       static inline bool compare_expressions(IndexSpaceExpression *one,
                                              IndexSpaceExpression *two);
@@ -847,6 +849,7 @@ namespace Legion {
     protected:
       mutable LocalLock lookup_lock;
       mutable LocalLock lookup_is_op_lock;
+      mutable LocalLock congruence_lock;
     private:
       // The lookup lock must be held when accessing these
       // data structures
@@ -870,6 +873,12 @@ namespace Legion {
       // Remote expressions
       std::map<IndexSpaceExprID,IndexSpaceExpression*> remote_expressions;
       std::map<IndexSpaceExprID,RtEvent> pending_remote_expressions;
+    private:
+      // In order for the symbolic analysis to work, we need to know that
+      // we don't have multiple symbols for congruent expressions. This data
+      // structure is used to find congruent expressions where they exist
+      std::map<std::pair<size_t,TypeTag>,
+               std::set<IndexSpaceExpression*> > canonical_expressions;
     public:
       static const unsigned MAX_EXPRESSION_FANOUT = 32;
     };
@@ -982,6 +991,8 @@ namespace Legion {
       virtual void pack_expression_structure(Serializer &rez,
                                              AddressSpaceID target,
                                              const bool top) = 0;
+      virtual bool try_add_canonical_reference(void) = 0;
+      virtual bool remove_canonical_reference(void) = 0;
       virtual void add_expression_reference(bool expr_tree = false) = 0;
       virtual bool remove_expression_reference(bool expr_tree = false) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
@@ -1049,6 +1060,9 @@ namespace Legion {
                            bool compact,LayoutConstraintKind *unsat_kind = NULL,
                            unsigned *unsat_index = NULL,void **piece_list =NULL,
                            size_t *piece_list_size = NULL) = 0;
+    public:
+      virtual IndexSpaceExpression* find_congruent_expression(
+                  std::set<IndexSpaceExpression*> &expressions) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
       static AddressSpaceID get_owner_space(IndexSpaceExprID id, Runtime *rt);
@@ -1149,12 +1163,19 @@ namespace Legion {
                                unsigned *unsat_index, void **piece_list = NULL,
                                size_t *piece_list_size = NULL) const;
     public:
+      template<int DIM, typename T>
+      inline IndexSpaceExpression* find_congruent_expression_internal(
+                        std::set<IndexSpaceExpression*> &expressions);
+    public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source);
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source,
                          bool &is_local,bool &is_index_space,IndexSpace &handle,
                          IndexSpaceExprID &remote_expr_id, RtEvent &wait_for);
+      static void finalize_canonical(size_t volume, RegionTreeForest *forest,
+                                     IndexSpaceExpression *original,
+                                     IndexSpaceExpression *canonical);
     public:
       const TypeTag type_tag;
       const IndexSpaceExprID expr_id;
@@ -1162,48 +1183,13 @@ namespace Legion {
       LocalLock &expr_lock;
     protected:
       std::set<IndexSpaceOperation*> parent_operations;
+      IndexSpaceExpression *canonical;
       size_t volume;
       bool has_volume;
       bool empty, has_empty;
     };
 
-    // Shared functionality between index space operation and
-    // remote expressions
-    class IntermediateExpression : 
-      public IndexSpaceExpression, public Collectable {
-    public:
-      IntermediateExpression(TypeTag tag, RegionTreeForest *ctx);
-      IntermediateExpression(TypeTag tag, RegionTreeForest *ctx, 
-                             IndexSpaceExprID expr_id);
-      virtual ~IntermediateExpression(void);
-    public:
-      virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
-                                           bool need_tight_result) = 0;
-      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
-      virtual void tighten_index_space(void) = 0;
-      virtual bool check_empty(void) = 0;
-      virtual size_t get_volume(void) = 0;
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
-      virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target,
-                                             const bool top) = 0;
-      virtual void add_expression_reference(bool expr_tree = false);
-      virtual bool remove_expression_reference(bool expr_tree = false);
-      virtual bool remove_operation(RegionTreeForest *forest) = 0;
-      virtual IndexSpaceNode* create_node(IndexSpace handle,
-                      DistributedID did, RtEvent initialized,
-                      std::set<RtEvent> *applied) = 0;
-    protected:
-      void record_remote_expression(AddressSpaceID target);
-    public:
-      RegionTreeForest *const context;
-    protected:
-      mutable LocalLock inter_lock;
-    protected:
-      std::set<AddressSpaceID> *remote_exprs;
-    };
-
-    class IndexSpaceOperation : public IntermediateExpression {
+    class IndexSpaceOperation : public IndexSpaceExpression,public Collectable {
     public:
       enum OperationKind {
         UNION_OP_KIND,
@@ -1227,15 +1213,20 @@ namespace Legion {
       virtual void pack_expression_structure(Serializer &rez,
                                              AddressSpaceID target,
                                              const bool top) = 0;
-      virtual bool remove_operation(RegionTreeForest *forest) = 0;
+      virtual bool try_add_canonical_reference(void);
+      virtual bool remove_canonical_reference(void);
+      virtual void add_expression_reference(bool expr_tree = false);
       virtual bool remove_expression_reference(bool expr_tree = false);
+      virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                       DistributedID did, RtEvent initialized,
                       std::set<RtEvent> *applied) = 0;
-      virtual IndexSpaceExpression* find_congruence(void) = 0;
       virtual void activate_remote(void) = 0;
+
     public:
       void invalidate_operation(std::deque<IndexSpaceOperation*> &to_remove);
+    protected:
+      void record_remote_expression(AddressSpaceID target);
     public:
       static inline IndexSpaceExprID unpack_expr_id(Deserializer &derez)
         {
@@ -1250,9 +1241,14 @@ namespace Legion {
           return origin_expr;
         }
     public:
+      RegionTreeForest *const context;
       const OperationKind op_kind;
       IndexSpaceExpression *const origin_expr;
       const AddressSpaceID origin_space;
+    protected:
+      mutable LocalLock inter_lock;
+    protected:
+      std::set<AddressSpaceID> *remote_exprs;
     private:
       int invalidated;
     };
@@ -1282,7 +1278,6 @@ namespace Legion {
                           std::set<RtEvent> *applied);
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
-      virtual IndexSpaceExpression* find_congruence(void) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -1343,6 +1338,9 @@ namespace Legion {
                            unsigned *unsat_index = NULL,void **piece_list =NULL, 
                            size_t *piece_list_size = NULL);
     public:
+      virtual IndexSpaceExpression* find_congruent_expression(
+                  std::set<IndexSpaceExpression*> &expressions);
+    public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
     protected:
@@ -1368,7 +1366,6 @@ namespace Legion {
                                              AddressSpaceID target,
                                              const bool top);
       virtual bool remove_operation(RegionTreeForest *forest);
-      virtual IndexSpaceExpression* find_congruence(void);
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
     }; 
@@ -1388,8 +1385,6 @@ namespace Legion {
     public:
       virtual void create_operation(void)
         { NT_TemplateHelper::demux<UnionOpCreator>(type_tag, this); }
-      virtual IndexSpaceExpression* find_congruence(void)
-        { return result->find_congruence(); }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
@@ -1412,9 +1407,6 @@ namespace Legion {
     public:
       // Nothing to do for this
       virtual void create_operation(void) { }
-      // We know there is no congruence or it would have been found on the owner
-      virtual IndexSpaceExpression* find_congruence(void)
-        { result->activate_remote(); return NULL; }
     public:
       static inline TypeTag unpack_type_tag(Deserializer &derez)
       {
@@ -1445,7 +1437,6 @@ namespace Legion {
                                              AddressSpaceID target,
                                              const bool top);
       virtual bool remove_operation(RegionTreeForest *forest);
-      virtual IndexSpaceExpression* find_congruence(void);
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
     };
@@ -1465,8 +1456,6 @@ namespace Legion {
     public:
       virtual void create_operation(void)
         { NT_TemplateHelper::demux<IntersectionOpCreator>(type_tag, this); }
-      virtual IndexSpaceExpression* find_congruence(void)
-        { return result->find_congruence(); }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
@@ -1489,9 +1478,6 @@ namespace Legion {
     public:
       // Nothing to do for this
       virtual void create_operation(void) { }
-      // We know there is no congruence or it would have been found on the owner
-      virtual IndexSpaceExpression* find_congruence(void)
-        { result->activate_remote(); return NULL; }
     public:
       static inline TypeTag unpack_type_tag(Deserializer &derez)
       {
@@ -1522,7 +1508,6 @@ namespace Legion {
                                              AddressSpaceID target,
                                              const bool top);
       virtual bool remove_operation(RegionTreeForest *forest);
-      virtual IndexSpaceExpression* find_congruence(void);
     protected:
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;
@@ -1543,8 +1528,6 @@ namespace Legion {
     public:
       virtual void create_operation(void)
         { NT_TemplateHelper::demux<DifferenceOpCreator>(type_tag, this); }
-      virtual IndexSpaceExpression* find_congruence(void)
-        { return result->find_congruence(); }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
@@ -1568,9 +1551,6 @@ namespace Legion {
     public:
       // Nothing to do for this
       virtual void create_operation(void) { }
-      // We know there is no congruence or it would have been found on the owner
-      virtual IndexSpaceExpression* find_congruence(void)
-        { result->activate_remote(); return NULL; }
     public:
       static inline TypeTag unpack_type_tag(Deserializer &derez)
       {
@@ -1844,6 +1824,8 @@ namespace Legion {
       virtual void pack_expression_structure(Serializer &rez,
                                              AddressSpaceID target,
                                              const bool top) = 0;
+      virtual bool try_add_canonical_reference(void);
+      virtual bool remove_canonical_reference(void);
       virtual void add_expression_reference(bool expr_tree = false);
       virtual bool remove_expression_reference(bool expr_tree = false);
       virtual bool remove_operation(RegionTreeForest *forest);
@@ -2255,6 +2237,9 @@ namespace Legion {
                            bool compact,LayoutConstraintKind *unsat_kind = NULL,
                            unsigned *unsat_index = NULL,void **piece_list =NULL, 
                            size_t *piece_list_size = NULL);
+    public:
+      virtual IndexSpaceExpression* find_congruent_expression(
+                  std::set<IndexSpaceExpression*> &expressions);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
