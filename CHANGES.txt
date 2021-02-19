@@ -7,6 +7,9 @@ Version ??.??.? (???? ??, ????)
         now aggregated into region requirements and sorted by the
         index of the first field in the field space among the set of
         fields for each reduction.
+    - Add support for the `-o` flag to compile executables and
+        libraries. When used, this flag causes `regentlib.start` to
+        save the program and return, rather than running it
 
 version 20.12.0 (December 28, 2020)
   * Build
