@@ -43,6 +43,8 @@ variables:
 .clang38: &clang38
   CXX: "clang++-3.8"
   F90: "gfortran-5"
+  # clang3.8 seems to generate bad code for some newer x86 cpus
+  MARCH: "haswell"
 .clang7: &clang7
   CXX: "clang++-7"
   F90: "gfortran-5"

@@ -724,6 +724,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmdline.append('-DBUILD_SHARED_LIBS=ON')
     else:
         cmdline.append('-DBUILD_SHARED_LIBS=OFF')
+    # if MARCH is set in the environment, give that to cmake as BUILD_MARCH
+    if 'MARCH' in env:
+        cmdline.append('-DBUILD_MARCH=' + env['MARCH'])
     # last argument to cmake is the root of the tree
     cmdline.append(root_dir)
 
