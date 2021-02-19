@@ -1,5 +1,5 @@
 name: ci_tests
-on: push
+on: [push, pull_request]
 jobs:
   test1:
     name: Test 1
@@ -94,10 +94,9 @@ jobs:
         run: |
           curl -L -O http://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
           tar xf clang+llvm-6.0.0-x86_64-apple-darwin.tar.xz
-          PATH=$PWD/clang+llvm-6.0.0-x86_64-apple-darwin/bin:$PATH
           export CMAKE_PREFIX_PATH=$PWD/clang+llvm-6.0.0-x86_64-apple-darwin
           export INCLUDE_PATH="$(xcrun --sdk macosx --show-sdk-path)/usr/include"
-          export SDKROOT=`xcrun --show-sdk-path`
+          export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
           ./test.py
         env:
           TEST_LEGION_CXX: 0
