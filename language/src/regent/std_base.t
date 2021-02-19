@@ -21,6 +21,13 @@ local base = {}
 
 base.config, base.args = config.args()
 
+-- Some extra argument management.
+if string.len(base.config["o"]) == 0 then
+  base.config["o"] = false
+else
+  base.config["offline"] = true -- Force offline mode when output is used.
+end
+
 -- Hack: Terra symbols don't support the hash() method so monkey patch
 -- it in here. This allows deterministic hashing of Terra symbols,
 -- which is currently required by OpenMP codegen.
