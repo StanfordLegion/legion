@@ -133,7 +133,7 @@ def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_
     subprocess.check_call(['make', '-j', str(thread_count)], cwd=build_dir)
     subprocess.check_call(['make', 'install'], cwd=build_dir)
 
-def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, llvm_dir, cache, is_cray, thread_count):
+def build_terra(terra_dir, terra_branch, terra_lua, use_cmake, cmake_exe, llvm_dir, cache, is_cray, thread_count):
     if cache:
         assert not use_cmake
         subprocess.check_call(['make', 'download'], cwd=terra_dir)
@@ -146,10 +146,14 @@ def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, llvm_dir, cache, 
             ('CXX', os.environ['HOST_CXX']),
         ]))
 
+    if terra_lua is not None:
+        assert use_cmake
+
     if use_cmake:
         flags = [
             '-DCMAKE_PREFIX_PATH=%s' % llvm_dir,
             '-DCMAKE_INSTALL_PREFIX=%s' % os.path.join(terra_dir, 'release'),
+            '-DTERRA_LUA=%s' % (terra_lua or 'moonjit'),
         ]
         subprocess.check_call(
             [cmake_exe] + flags + [terra_dir],
@@ -334,7 +338,7 @@ def check_dirty_build(name, build_result, component_dir):
 
 def driver(prefix_dir=None, scratch_dir=None, cache=False,
            legion_use_cmake=False, extra_flags=[], llvm_version=None,
-           terra_url=None, terra_branch=None, terra_use_cmake=None,
+           terra_url=None, terra_branch=None, terra_lua=None, terra_use_cmake=None,
            thread_count=None, insecure=False):
     if not cache:
         if 'CC' not in os.environ:
@@ -464,7 +468,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         git_clone(terra_dir, terra_url, terra_branch)
     if not os.path.exists(terra_build_dir):
         try:
-            build_terra(terra_dir, terra_branch, terra_use_cmake, cmake_exe, llvm_install_dir, cache, is_cray, thread_count)
+            build_terra(terra_dir, terra_branch, terra_lua, terra_use_cmake, cmake_exe, llvm_install_dir, cache, is_cray, thread_count)
         except Exception as e:
             report_build_failure('terra', terra_dir, e)
     else:
@@ -528,6 +532,10 @@ if __name__ == '__main__':
         '--terra-branch', dest='terra_branch', required=False,
         default='luajit2.1',
         help='Branch of Terra repository to checkout.')
+    parser.add_argument(
+        '--terra-lua', dest='terra_lua', required=False,
+        default=None,
+        help='Lua implementation to use for Terra (luajit or moonjit).')
     parser.add_argument(
         '--terra-cmake', dest='terra_use_cmake', action='store_true', default=None,
         help='Use CMake to build Terra.')
