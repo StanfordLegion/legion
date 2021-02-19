@@ -1,5 +1,5 @@
 name: ci_tests
-on: push
+on: [push, pull_request]
 jobs:
   test1:
     name: Test 1
