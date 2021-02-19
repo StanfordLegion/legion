@@ -48,6 +48,13 @@ function config.make_default_option(flag, name, flag_type, value)
     default_option)
 end
 
+function config.add_default_options(prefix, options, result)
+  for k, v in pairs(options) do
+    result:insert(
+      config.make_default_option(prefix .. k, k, type(v), v))
+  end
+end
+
 function config.is_default_option(opt)
   return getmetatable(opt) == default_option
 end
