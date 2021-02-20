@@ -4157,6 +4157,9 @@ function type_check.stat_var(cx, node)
     if value and not std.validate_implicit_cast(value_type, var_type) then
       report.error(node, "type mismatch in var: expected " .. tostring(var_type) .. " but got " .. tostring(value_type))
     end
+    if not value and std.type_supports_constraints(var_type) then
+      report.error(node, "variable of type " .. tostring(var_type) .. " must be initialized")
+    end
   else
     if not value then
       report.error(node, "type must be specified for uninitialized variables")

@@ -1575,7 +1575,8 @@ namespace Legion {
       // as a task that just depends on futures once those futures 
       // are ready on a local processor where the parent task
       // is executing. We call this a local function task and it 
-      // must not have any region requirements. This task will
+      // must not have any region requirements. It must als be a 
+      // pure function with no side effects. This task will
       // not have the option of being distributed to remote nodes.
       bool                               local_function_task;
     public:
@@ -3435,6 +3436,7 @@ namespace Legion {
       unsigned                            steal_count;
       bool                                stealable;
       bool                                speculated;
+      bool                                local_function;
     };
 
     /**
