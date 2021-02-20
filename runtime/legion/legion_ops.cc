@@ -759,11 +759,6 @@ namespace Legion {
                            LgPriority priority/*= LG_THROUGHPUT_WORK_PRIORITY*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      // Only index space tasks should come through this path
-      if (get_operation_kind() == TASK_OP_KIND)
-        assert(dynamic_cast<IndexTask*>(this) != NULL);
-#endif
       Processor p = parent_ctx->get_executing_processor();
       runtime->add_to_local_queue(p, this, priority, wait_on);
     }
