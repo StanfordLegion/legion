@@ -3466,6 +3466,73 @@ namespace Legion {
     };
 
     /**
+     * \class IndexAttachOp
+     * This provides support for doing index space attach
+     * operations where we are attaching external resources
+     * to many subregions of a region tree with a single operation
+     */
+    class IndexAttachOp : public Operation,public LegionHeapify<IndexAttachOp> {
+    public:
+      static const AllocationType alloc_type = ATTACH_OP_ALLOC;
+    public:
+      IndexAttachOp(Runtime *rt);
+      IndexAttachOp(const IndexAttachOp &rhs);
+      virtual ~IndexAttachOp(void);
+    public:
+      IndexAttachOp& operator=(const IndexAttachOp &rhs);
+    public:
+      ExternalResources initialize(InnerContext *ctx, ProjectionID pid,
+                                   RegionTreeNode *upper_bound,
+                                   const IndexAttachLauncher &launcher,
+                                   const std::vector<unsigned> &indexes);
+      inline const RegionRequirement& get_requirement(void) const
+        { return requirement; }
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual size_t get_region_count(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+      virtual void trigger_commit(void);
+    protected:
+      void check_privilege(void);
+    protected:
+      RegionRequirement                             requirement;
+      RegionTreePath                                privilege_path;
+      IndexSpaceNode*                               launch_space;
+      std::vector<PointAttachOp*>                   points;
+      std::set<RtEvent>                             commit_preconditions;
+      unsigned                                      points_committed;
+      bool                                          commit_request;
+    };
+    
+    /**
+     * \class PointAttachOp
+     * An individual attach operation inside of an index attach operation
+     */
+    class PointAttachOp : public AttachOp {
+    public:
+      PointAttachOp(Runtime *rt);
+      PointAttachOp(const PointAttachOp &rhs);
+      virtual ~PointAttachOp(void);
+    public:
+      PointAttachOp& operator=(const PointAttachOp &rhs);
+    public:
+      PhysicalRegionImpl* initialize(IndexAttachOp *owner,
+          const IndexAttachLauncher &launcher, unsigned index);
+    public:
+      virtual void trigger_commit(void);
+    protected:
+      IndexAttachOp *owner;
+    };
+
+    /**
      * \class DetachOp
      * Operation for detaching a file from a physical instance
      */

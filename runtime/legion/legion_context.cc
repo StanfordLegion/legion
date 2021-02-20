@@ -6078,38 +6078,112 @@ namespace Legion {
       int index = has_conflicting_regions(attach_op, 
                                           parent_conflict, inline_conflict);
       if (parent_conflict)
-        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_ATTACH_HDF5,
-          "Attempted an attach hdf5 file operation on region "
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                      "Attempted an external attach operation on region "
                       "(%x,%x,%x) that conflicts with mapped region " 
                       "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
                       "that would ultimately result in deadlock. Instead you "
                       "receive this error message. Try unmapping the region "
-                      "before invoking attach_hdf5 on file %s",
+                      "before invoking 'attach_external_resource'.",
                       launcher.handle.index_space.id, 
                       launcher.handle.field_space.id, 
                       launcher.handle.tree_id, 
                       regions[index].region.index_space.id,
                       regions[index].region.field_space.id,
                       regions[index].region.tree_id, index, 
-                      get_task_name(), get_unique_id(), launcher.file_name)
+                      get_task_name(), get_unique_id())
       if (inline_conflict)
-        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_ATTACH_HDF5,
-          "Attempted an attach hdf5 file operation on region "
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                      "Attempted an external attach operation on region "
                       "(%x,%x,%x) that conflicts with previous inline "
                       "mapping in task %s (ID %lld) "
                       "that would ultimately result in deadlock. Instead you "
                       "receive this error message. Try unmapping the region "
-                      "before invoking attach_hdf5 on file %s",
+                      "before invoking 'attach_external_resource'.",
                       launcher.handle.index_space.id, 
-                      launcher.handle.field_space.id, 
-                      launcher.handle.tree_id, get_task_name(), 
-                      get_unique_id(), launcher.file_name)
+                      launcher.handle.field_space.id, launcher.handle.tree_id,
+                      get_task_name(), get_unique_id())
       // Add this region to the list of inline mapped regions if it is mapped
       if (result.is_mapped())
         register_inline_mapped_region(result);
       add_to_dependence_queue(attach_op);
       return result;
     }
+
+#if 0
+    //--------------------------------------------------------------------------
+    ExternalResources InnerContext::attach_resources(
+            const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexAttachOp *attach_op = runtime->get_available_index_attach_op();
+      ExternalResources result = attach_op->initialize(this, launcher);
+      const RegionRequirement &req = attach_op->get_requirement();
+      bool parent_conflict = false, inline_conflict = false;
+      int index = has_conflicting_internal(req,parent_conflict,inline_conflict);
+      if (parent_conflict)
+      {
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                        "Attempted an index attach operation with upper bound "
+                        "partition (%x,%x,%x) that conflicts with mapped region"
+                        " (%x,%x,%x) at index %d of parent task %s (ID %lld) "
+                        "that would ultimately result in deadlock. Instead you "
+                        "receive this error message. Try unmapping the region "
+                        "before invoking 'attach_external_resources'.",
+                        req.partition.index_partition.id, 
+                        req.partition.field_space.id, 
+                        req.partition.tree_id, 
+                        regions[index].region.index_space.id,
+                        regions[index].region.field_space.id,
+                        regions[index].region.tree_id, index, 
+                        get_task_name(), get_unique_id())
+        else
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                        "Attempted an index attach operation with upper bound "
+                        "region (%x,%x,%x) that conflicts with mapped region "
+                        "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
+                        "that would ultimately result in deadlock. Instead you "
+                        "receive this error message. Try unmapping the region "
+                        "before invoking 'attach_external_resources'.",
+                        req.region.index_space.id, 
+                        req.region.field_space.id, 
+                        req.region.tree_id, 
+                        regions[index].region.index_space.id,
+                        regions[index].region.field_space.id,
+                        regions[index].region.tree_id, index, 
+                        get_task_name(), get_unique_id())
+      }
+      if (inline_conflict)
+      {
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                        "Attempted an index attach operation with upper bound "
+                        "partition (%x,%x,%x) that conflicts with previous "
+                        "inline mapping in task %s (ID %lld) "
+                        "that would ultimately result in deadlock. Instead you "
+                        "receive this error message. Try unmapping the region "
+                        "before invoking 'attach_external_resources'.",
+                        req.partition.index_partition.id, 
+                        req.partition.field_space.id, req.partition.tree_id,
+                        get_task_name(), get_unique_id())
+        else
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                        "Attempted an index attach operation with upper bound "
+                        "region (%x,%x,%x) that conflicts with previous inline "
+                        "mapping in task %s (ID %lld) "
+                        "that would ultimately result in deadlock. Instead you "
+                        "receive this error message. Try unmapping the region "
+                        "before invoking 'attach_external_resources'.",
+                        req.region.index_space.id, 
+                        req.region.field_space.id, req.region.tree_id,
+                        get_task_name(), get_unique_id())
+      }
+      add_to_dependence_queue(attach_op);
+      return result;
+    }
+#endif
 
     //--------------------------------------------------------------------------
     Future InnerContext::detach_resource(PhysicalRegion region,
@@ -11324,6 +11398,17 @@ namespace Legion {
         "Illegal attach resource operation performed in leaf "
                      "task %s (ID %lld)", get_task_name(), get_unique_id())
       return PhysicalRegion();
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResources LeafContext::attach_resources(
+            const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_ATTACH_RESOURCE_OPERATION,
+        "Illegal attach resources operation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return ExternalResources();
     }
     
     //--------------------------------------------------------------------------

@@ -17211,8 +17211,8 @@ namespace Legion {
         et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
       switch (et)
       {
-          // Not there is no such things as bad privileges for
-          // acquires and releases because they are controlled by the runtime
+        // Note there is no such things as bad privileges for
+        // acquires and releases because they are controlled by the runtime
         case NO_ERROR:
         case ERROR_BAD_REGION_PRIVILEGES:
           break;
@@ -17328,7 +17328,7 @@ namespace Legion {
                              unique_op_id, bad_field)
             break;
           }
-          // this should never happen with an inline mapping
+        // this should never happen with an attach operation
         case ERROR_NON_DISJOINT_PARTITION:
         default:
           assert(false); // Should never happen
@@ -17353,6 +17353,397 @@ namespace Legion {
                                requirement.region.tree_id)
       else
         parent_req_index = unsigned(parent_index);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Index Attach Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexAttachOp::IndexAttachOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachOp::IndexAttachOp(const IndexAttachOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachOp::~IndexAttachOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachOp& IndexAttachOp::operator=(const IndexAttachOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    const char* IndexAttachOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[ATTACH_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind IndexAttachOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ATTACH_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t IndexAttachOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResources IndexAttachOp::initialize(InnerContext *ctx,
+                                      ProjectionID pid, RegionTreeNode *upper,
+                                      const IndexAttachLauncher &launcher,
+                                      const std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/, 1/*regions*/,
+                           launcher.static_dependences);
+      // Construct the region requirement
+      if (upper->is_region())
+        requirement = RegionRequirement(upper->as_region_node()->handle,
+            pid, LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
+      else
+        requirement = RegionRequirement(upper->as_partition_node()->handle,
+            pid, LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
+      requirement.privilege_fields = launcher.privilege_fields;
+      // Do some error checking
+      switch (launcher.resource)
+      {
+        case LEGION_EXTERNAL_POSIX_FILE:
+          {
+            if (launcher.file_fields.empty()) 
+              REPORT_LEGION_WARNING(LEGION_WARNING_FILE_ATTACH_OPERATION,
+                              "FILE INDEX ATTACH OPERATION ISSUED WITH NO "
+                              "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                              "FORGET THEM?!?", parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id())
+            break;
+          }
+        case LEGION_EXTERNAL_HDF5_FILE:
+          {
+#ifndef LEGION_USE_HDF5
+            REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
+                "Invalid index attach HDF5 file in parent task %s (UID %lld). "
+                "Legion must be built with HDF5 support to attach regions "
+                "to HDF5 files", parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id())
+#endif
+            if (launcher.field_files.empty()) 
+              REPORT_LEGION_WARNING(LEGION_WARNING_HDF5_ATTACH_OPERATION,
+                            "HDF5 INDEX ATTACH OPERATION ISSUED WITH NO "
+                            "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                            "FORGET THEM?!?", parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id())
+            const OrderingConstraint &input_constraint = 
+              launcher.constraints.ordering_constraint;
+            OrderingConstraint output_constraint;
+            const int dims = launcher.parent.index_space.get_dim();
+            if (!input_constraint.ordering.empty())
+            {
+              bool has_dimf = false;
+              for (std::vector<DimensionKind>::const_iterator it = 
+                    input_constraint.ordering.begin(); it !=
+                    input_constraint.ordering.end(); it++)
+              {
+                // dimf should always be the last dimension for HDF5
+                if (has_dimf)
+                  REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
+                      "Invalid position of the field dimension for index attach"
+                      " operation %lld in task %s (UID %lld). The field "
+                      "dimension must always be the last dimension for layout "
+                      "constraints for HDF5 files.", unique_op_id,
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+                else if (*it == LEGION_DIM_F)
+                  has_dimf = true;
+                else if (int(*it) > dims)
+                  REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
+                      "Invalid dimension %d for ordering constraint of HDF5 "
+                      "index attach operation %lld in task %s (UID %lld). The "
+                      "index space %x only has %d dimensions and split "
+                      "dimensions are not permitted.", *it, unique_op_id,
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id(), 
+                      launcher.parent.index_space.get_id(), dims)
+                output_constraint.ordering.push_back(*it);
+              }
+              if (int(output_constraint.ordering.size()) != dims)
+                REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
+                    "Ordering constraint for index attach %lld in task %s "
+                    "(UID %lld) does not contain all the dimensions required "
+                    "for index space %x which has %d dimensions.", unique_op_id,
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                    launcher.parent.index_space.get_id(), dims)
+              if (!input_constraint.contiguous)
+                REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
+                    "Ordering constraint for index attach %lld in task %s "
+                    "(UID %lld) was not marked contiguous. All ordering "
+                    "constraints for HDF5 attach operations must be contiguous",
+                    unique_op_id, parent_ctx->get_task_name(), 
+                    parent_ctx->get_unique_id())
+            }
+            break;
+          }
+        case LEGION_EXTERNAL_INSTANCE:
+          {
+            if (launcher.privilege_fields.empty())
+              REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_ATTACH_OPERATION,
+                            "EXTERNAL ARRAY INDEX ATTACH OPERATION ISSUED WITH "
+                            "NO PRIVILEGE FIELDS IN TASK %s (ID %lld)! DID YOU "
+                            "FORGET THEM?!?", parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id())
+            break;
+          }
+        default:
+          assert(false); // should never get here
+      }
+      // Create the result and the point attach operations
+      ExternalResourcesImpl *result =
+        new ExternalResourcesImpl(ctx, indexes.size());
+      points.resize(indexes.size());
+      for (unsigned idx = 0; idx < indexes.size(); idx++)
+      {
+        points[idx] = runtime->get_available_point_attach_op();
+        PhysicalRegionImpl *region = 
+          points[idx]->initialize(this, launcher, indexes[idx]);
+        result->set_region(idx, region);
+      }
+      return ExternalResources(result);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::check_privilege(void)
+    //--------------------------------------------------------------------------
+    {
+      FieldID bad_field = LEGION_AUTO_GENERATE_ID;
+      int bad_index = -1;
+      LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
+      // If that worked, then check the privileges with the parent context
+      if (et == NO_ERROR)
+        et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
+      switch (et)
+      {
+        // Note there is no such things as bad privileges for
+        // acquires and releases because they are controlled by the runtime
+        case NO_ERROR:
+        case ERROR_BAD_REGION_PRIVILEGES:
+          break;
+        case ERROR_INVALID_REGION_HANDLE:
+          {
+            REPORT_LEGION_ERROR(ERROR_REQUIREMENTS_INVALID_REGION,
+                               "Requirements for invalid region handle (%x,%d,"
+                               "%d) for index attach operation (ID %lld)",
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id,
+                               unique_op_id)
+            break;
+          }
+        case ERROR_INVALID_PARTITION_HANDLE:
+          {
+            REPORT_LEGION_ERROR(ERROR_REQUIREMENTS_INVALID_REGION,
+                               "Requirements for invalid partition handle (%x,"
+                               "%d,%d) for index attach operation (ID %lld)",
+                               requirement.partition.index_partition.id,
+                               requirement.partition.field_space.id,
+                               requirement.partition.tree_id,
+                               unique_op_id)
+            break;
+          }
+        case ERROR_FIELD_SPACE_FIELD_MISMATCH:
+          {
+            FieldSpace sp = 
+              (requirement.handle_type == LEGION_SINGULAR_PROJECTION) ||
+              (requirement.handle_type == LEGION_REGION_PROJECTION) ? 
+                requirement.region.field_space :
+                requirement.partition.field_space;
+            REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID,
+                             "Field %d is not a valid field of field "
+                             "space %d for index attach operation (ID %lld)",
+                             bad_field, sp.id, unique_op_id)
+            break;
+          }
+        case ERROR_INVALID_INSTANCE_FIELD:
+          {
+            REPORT_LEGION_ERROR(ERROR_INSTANCE_FIELD_PRIVILEGE,
+                             "Instance field %d is not one of the privilege "
+                             "fields for index attach operation (ID %lld)",
+                             bad_field, unique_op_id)
+            break;
+          }
+        case ERROR_DUPLICATE_INSTANCE_FIELD:
+          {
+            REPORT_LEGION_ERROR(ERROR_INSTANCE_FIELD_DUPLICATE,
+                             "Instance field %d is a duplicate for "
+                             "index attach operation (ID %lld)",
+                             bad_field, unique_op_id)
+            break;
+          }
+        case ERROR_BAD_PARENT_REGION:
+          {
+            if (bad_index > 0) 
+            {
+              if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
+                REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                                 "Parent task %s (ID %lld) of index attach "
+                                 "operation (ID %lld) does not have a region "
+                                 "requirement for partition (%x,%x,%x) "
+                                 "as a parent of region requirement because "
+                                 "no 'parent' region had that name.",
+                                 parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
+                                 unique_op_id,
+                                 requirement.partition.index_partition.id,
+                                 requirement.partition.field_space.id,
+                                 requirement.partition.tree_id)
+              else
+                REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                                 "Parent task %s (ID %lld) of index attach "
+                                 "operation (ID %lld) does not have a region "
+                                 "requirement for region (%x,%x,%x) "
+                                 "as a parent of region requirement because "
+                                 "no 'parent' region had that name.",
+                                 parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
+                                 unique_op_id,
+                                 requirement.region.index_space.id,
+                                 requirement.region.field_space.id,
+                                 requirement.region.tree_id)
+            }
+            else if (bad_field == LEGION_AUTO_GENERATE_ID) 
+            {
+              if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
+                REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                                 "Parent task %s (ID %lld) of index attach "
+                                 "operation (ID %lld) does not have a region "
+                                 "requirement for partition (%x,%x,%x) "
+                                 "as a parent of region requirement because "
+                                 "parent requirement %d did not have "
+                                 "sufficient privileges.",
+                                 parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
+                                 unique_op_id,
+                                 requirement.partition.index_partition.id,
+                                 requirement.partition.field_space.id,
+                                 requirement.partition.tree_id, bad_index)
+              else
+                REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                                 "Parent task %s (ID %lld) of index attach "
+                                 "operation (ID %lld) does not have a region "
+                                 "requirement for region (%x,%x,%x) "
+                                 "as a parent of region requirement because "
+                                 "parent requirement %d did not have "
+                                 "sufficient privileges.",
+                                 parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
+                                 unique_op_id,
+                                 requirement.region.index_space.id,
+                                 requirement.region.field_space.id,
+                                 requirement.region.tree_id, bad_index)
+            }
+            else 
+            {
+              if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
+                REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                                 "Parent task %s (ID %lld) of index attach "
+                                 "operation (ID %lld) does not have a region "
+                                 "requirement for partition (%x,%x,%x) "
+                                 "as a parent of region requirement because "
+                                 "region requirement %d was missing field %d.",
+                                 parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
+                                 unique_op_id,
+                                 requirement.partition.index_partition.id,
+                                 requirement.partition.field_space.id,
+                                 requirement.partition.tree_id,
+                                 bad_index, bad_field)
+              else
+                REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                                 "Parent task %s (ID %lld) of index attach "
+                                 "operation (ID %lld) does not have a region "
+                                 "requirement for region (%x,%x,%x) "
+                                 "as a parent of region requirement because "
+                                 "region requirement %d was missing field %d.",
+                                 parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
+                                 unique_op_id,
+                                 requirement.region.index_space.id,
+                                 requirement.region.field_space.id,
+                                 requirement.region.tree_id,
+                                 bad_index, bad_field)
+            }
+            break;
+          }
+        case ERROR_BAD_REGION_TYPE:
+          {
+            REPORT_LEGION_ERROR(ERROR_REGION_REQUIREMENT_ATTACH,
+                             "Region requirement of index attach operation "
+                             "(ID %lld) cannot find privileges for field "
+                             "%d in parent task",
+                             unique_op_id, bad_field)
+            break;
+          }
+        // this should never happen with an index attach operation
+        case ERROR_BAD_REGION_PATH:
+        case ERROR_NON_DISJOINT_PARTITION:
+        default:
+          assert(false); // Should never happen
+      }
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Point Attach Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PointAttachOp::PointAttachOp(Runtime *rt)
+      : AttachOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointAttachOp::PointAttachOp(const PointAttachOp &rhs)
+      : AttachOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PointAttachOp::~PointAttachOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointAttachOp& PointAttachOp::operator=(const PointAttachOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
     }
 
     ///////////////////////////////////////////////////////////// 

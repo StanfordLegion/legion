@@ -511,13 +511,14 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = EXTERNAL_RESOURCES_ALLOC;
     public:
-      ExternalResourcesImpl(void);
+      ExternalResourcesImpl(InnerContext *context, size_t num_regions);
       ExternalResourcesImpl(const ExternalResourcesImpl &rhs);
       ~ExternalResourcesImpl(void);
     public:
       ExternalResourcesImpl& operator=(const ExternalResourcesImpl &rhs);
     public:
       size_t size(void) const;
+      void set_region(unsigned index, PhysicalRegionImpl *region);
       PhysicalRegion get_region(unsigned index) const;
     };
 
@@ -2932,6 +2933,8 @@ namespace Legion {
       IndexFillOp*          get_available_index_fill_op(void);
       PointFillOp*          get_available_point_fill_op(void);
       AttachOp*             get_available_attach_op(void);
+      IndexAttachOp*        get_available_index_attach_op(void);
+      PointAttachOp*        get_available_point_attach_op(void);
       DetachOp*             get_available_detach_op(void);
       TimingOp*             get_available_timing_op(void);
       AllReduceOp*          get_available_all_reduce_op(void);
@@ -2971,6 +2974,8 @@ namespace Legion {
       void free_index_fill_op(IndexFillOp *op);
       void free_point_fill_op(PointFillOp *op);
       void free_attach_op(AttachOp *op);
+      void free_index_attach_op(IndexAttachOp *op);
+      void free_point_attach_op(PointAttachOp *op);
       void free_detach_op(DetachOp *op);
       void free_timing_op(TimingOp *op);
       void free_all_reduce_op(AllReduceOp *op);
@@ -3354,6 +3359,8 @@ namespace Legion {
       std::deque<IndexFillOp*>          available_index_fill_ops;
       std::deque<PointFillOp*>          available_point_fill_ops;
       std::deque<AttachOp*>             available_attach_ops;
+      std::deque<IndexAttachOp*>        available_index_attach_ops;
+      std::deque<PointAttachOp*>        available_point_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
       std::deque<AllReduceOp*>          available_all_reduce_ops;

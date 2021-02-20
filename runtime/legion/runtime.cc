@@ -11782,6 +11782,20 @@ namespace Legion {
         delete (*it);
       }
       available_attach_ops.clear();
+      for (std::deque<IndexAttachOp*>::const_iterator it = 
+            available_index_attach_ops.begin(); it !=
+            available_index_attach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_index_attach_ops.clear();
+      for (std::deque<PointAttachOp*>::const_iterator it = 
+            available_point_attach_ops.begin(); it !=
+            available_point_attach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_point_attach_ops.clear();
       for (std::deque<DetachOp*>::const_iterator it = 
             available_detach_ops.begin(); it !=
             available_detach_ops.end(); it++)
@@ -20832,6 +20846,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexAttachOp* Runtime::get_available_index_attach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(attach_op_lock, available_index_attach_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    PointAttachOp* Runtime::get_available_point_attach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(attach_op_lock, available_point_attach_ops);
+    }
+
+    //--------------------------------------------------------------------------
     DetachOp* Runtime::get_available_detach_op(void)
     //--------------------------------------------------------------------------
     {
@@ -21150,6 +21178,22 @@ namespace Legion {
     {
       AutoLock a_lock(attach_op_lock);
       release_operation<false>(available_attach_ops, op);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::free_index_attach_op(IndexAttachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(attach_op_lock);
+      release_operation<false>(available_index_attach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_point_attach_op(PointAttachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(attach_op_lock);
+      release_operation<true>(available_point_attach_ops, op);
     }
 
     //--------------------------------------------------------------------------

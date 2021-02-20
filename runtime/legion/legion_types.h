@@ -1442,6 +1442,8 @@ namespace Legion {
     class IndexFillOp;
     class PointFillOp;
     class AttachOp;
+    class IndexAttachOp;
+    class PointAttachOp;
     class DetachOp;
     class TimingOp;
     class AllReduceOp;
@@ -1669,6 +1671,8 @@ namespace Legion {
     friend class Internal::IndexFillOp;                     \
     friend class Internal::PointFillOp;                     \
     friend class Internal::AttachOp;                        \
+    friend class Internal::IndexAttachOp;                   \
+    friend class Internal::PointAttachOp;                   \
     friend class Internal::DetachOp;                        \
     friend class Internal::TimingOp;                        \
     friend class Internal::AllReduceOp;                     \
