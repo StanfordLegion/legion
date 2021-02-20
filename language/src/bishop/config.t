@@ -24,10 +24,19 @@ local default_options = {
   ["dump-dfa"] = "",
 }
 
+local function make_default_options(prefix, options)
+  local result = terralib.newlist()
+  for k, v in pairs(options) do
+    result:insert(
+      common_config.make_default_option(prefix .. k, k, type(v), v))
+  end
+  return result
+end
+
 function config.args()
-  local options = terralib.newlist()
-  common_config.add_default_options("-bishop:", default_options, options)
-  return common_config.args(options, "-bishop:")
+  return common_config.args(
+    make_default_options("-bishop:", default_options),
+    "-bishop:")
 end
 
 return config

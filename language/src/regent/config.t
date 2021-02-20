@@ -43,12 +43,7 @@ end
 
 config.UNSPECIFIED = -1
 
-local unprefixed_options = {
-  -- Output flags:
-  ["o"] = "",
-}
-
-local prefixed_options = {
+local default_options = {
   -- Main user-facing correctness flags:
   ["bounds-checks"] = false,
   ["bounds-checks-targets"] = ".*",
@@ -119,11 +114,19 @@ local prefixed_options = {
   ["log"] = "",
 }
 
+local function make_default_options(prefix, options)
+  local result = terralib.newlist()
+  for k, v in pairs(options) do
+    result:insert(
+      common_config.make_default_option(prefix .. k, k, type(v), v))
+  end
+  return result
+end
+
 function config.args()
-  local options = terralib.newlist()
-  common_config.add_default_options("-", unprefixed_options, options)
-  common_config.add_default_options("-f", prefixed_options, options)
-  return common_config.args(options, "-f")
+  return common_config.args(
+    make_default_options("-f", default_options),
+    "-f")
 end
 
 return config

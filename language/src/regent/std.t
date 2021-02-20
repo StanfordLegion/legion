@@ -4523,12 +4523,6 @@ local function compile_tasks_in_parallel()
 end
 
 function std.start(main_task, extra_setup_thunk)
-  if std.config["o"] then
-    local filename = std.config["o"]
-    std.saveobj(main_task, filename, false --[[ infer ]], extra_setup_thunk)
-    return
-  end
-
   if not data.is_luajit() then
     error("Error: inline execution is supported only with LuaJIT. " ..
           "Please use Terra built with LuaJIT or compile your code into an executable first.")
