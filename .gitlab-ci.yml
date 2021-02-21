@@ -194,6 +194,11 @@ variables:
 .incremental: &incremental
   REGENT_INCREMENTAL: "1"
 
+.external1: &external1
+  TEST_PY_ARGS: "--test=external1"
+.external2: &external2
+  TEST_PY_ARGS: "--test=external2 --test=private"
+
 .darwin_power9_scheduler: &darwin_power9_scheduler
   CI_DEBUG_TRACE: "false"
   SCHEDULER_PARAMETERS: "--nodes=1 --partition=power9"
@@ -485,7 +490,7 @@ before_script:
       if [[ -z "$TEST_PYTHON_EXE" ]]; then
         export TEST_PYTHON_EXE=`which python3 python | head -1`
       fi
-    - $TEST_PYTHON_EXE ./test.py --test=external --test=private
+    - $TEST_PYTHON_EXE ./test.py $TEST_PY_ARGS
   retry:
     max: 0
     when:
@@ -746,10 +751,14 @@ gcc49_cxx11_32bit_release_legion:
   variables:
     <<: [*gcc49, *terra38, *release, *cxx11_32bit_normal, *legion]
 # * External tests
-gcc49_cxx11_debug_maxdim4_external:
+gcc49_cxx11_debug_external1:
   <<: [*linux_compute, *image, *external_tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5, *short]
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *short]
+gcc49_cxx11_debug_maxdim4_external2:
+  <<: [*linux_compute, *image, *external_tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5, *external2, *short]
 
 # Linux with Clang 3.8
 # * Basic configurations
@@ -901,10 +910,14 @@ clang38_cxx11_32bit_release_legion:
   variables:
     <<: [*clang38, *terra38, *release, *cxx11_32bit_normal, *legion]
 # * External tests
-clang38_cxx11_debug_maxdim4_external:
+clang38_cxx11_debug_external1:
   <<: [*linux_compute, *image_clang, *external_tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5]
+    <<: [*clang38, *terra38, *debug, *cxx11_normal, *openmp, *hdf5, *external1]
+clang38_cxx11_debug_maxdim4_external2:
+  <<: [*linux_compute, *image_clang, *external_tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5, *external2]
 
 # # macOS with Clang 3.5
 # macos_clang38_cxx11_debug:
