@@ -44,7 +44,8 @@ variables:
   CXX: "clang++-3.8"
   F90: "gfortran-5"
   # clang3.8 seems to generate bad code for some newer x86 cpus
-  MARCH: "haswell"
+  # we have some non-AVX systems in our CI runner pool, so back up to westmere
+  MARCH: "westmere"
 .clang7: &clang7
   CXX: "clang++-7"
   F90: "gfortran-5"
