@@ -2567,33 +2567,34 @@ namespace Legion {
         FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
           finder->second.find(total_expr);
         if (expr_finder != finder->second.end())
-          non_dominated -= expr_finder->second;
-      }
-      else
-      {
-        // There is at most one expression per field so just iterate and compare
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              finder->second.begin(); it != finder->second.end(); it++)
         {
-          const FieldMask overlap = non_dominated & it->second;
-          if (!overlap)
-            continue;
-          if ((it->first != total_expr) && (it->first != expr))
-          {
-            IndexSpaceExpression *intersection = 
-              forest->intersect_index_spaces(it->first, expr);
-            const size_t volume = intersection->get_volume();
-            if (volume == 0)
-              continue;
-            // Can only dominate if we have enough points
-            if (volume < expr->get_volume())
-              continue;
-          }
-          // If we get here we were dominated
-          non_dominated -= overlap;
+          non_dominated -= expr_finder->second;
           if (!non_dominated)
-            break;
+            return true;
         }
+      }
+      // There is at most one expression per field so just iterate and compare
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+        const FieldMask overlap = non_dominated & it->second;
+        if (!overlap)
+          continue;
+        if ((it->first != total_expr) && (it->first != expr))
+        {
+          IndexSpaceExpression *intersection = 
+            forest->intersect_index_spaces(it->first, expr);
+          const size_t volume = intersection->get_volume();
+          if (volume == 0)
+            continue;
+          // Can only dominate if we have enough points
+          if (volume < expr->get_volume())
+            continue;
+        }
+        // If we get here we were dominated
+        non_dominated -= overlap;
+        if (!non_dominated)
+          break;
       }
       // If there are no fields left then we dominated
       return !non_dominated;
