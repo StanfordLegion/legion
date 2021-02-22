@@ -58,7 +58,7 @@
 #endif
 #endif
 #ifndef BITMASK_MAX_ALIGNMENT
-#define BITMASK_MAX_ALIGNMENT   16
+#define BITMASK_MAX_ALIGNMENT   (2*sizeof(void *))
 #endif
 // This statically computes an integer log base 2 for a number
 // which is guaranteed to be a power of 2. Adapted from
