@@ -3521,7 +3521,7 @@ namespace Legion {
      * \class TimingOp
      * Operation for performing timing measurements
      */
-    class TimingOp : public Operation {
+    class TimingOp : public Operation, public LegionHeapify<TimingOp> {
     public:
       TimingOp(Runtime *rt);
       TimingOp(const TimingOp &rhs);
@@ -3551,7 +3551,7 @@ namespace Legion {
      * \class AllReduceOp 
      * Operation for reducing future maps down to futures
      */
-    class AllReduceOp : public Operation {
+    class AllReduceOp : public Operation, public LegionHeapify<AllReduceOp> {
     public:
       AllReduceOp(Runtime *rt);
       AllReduceOp(const AllReduceOp &rhs);
@@ -3662,7 +3662,8 @@ namespace Legion {
      * This is a remote copy of a MapOp to be used
      * for mapper calls and other operations
      */
-    class RemoteMapOp : public ExternalMapping, public RemoteOp {
+    class RemoteMapOp : public ExternalMapping, public RemoteOp,
+                        public LegionHeapify<RemoteMapOp> {
     public:
       RemoteMapOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteMapOp(const RemoteMapOp &rhs);
@@ -3692,7 +3693,8 @@ namespace Legion {
      * This is a remote copy of a CopyOp to be used
      * for mapper calls and other operations
      */
-    class RemoteCopyOp : public ExternalCopy, public RemoteOp {
+    class RemoteCopyOp : public ExternalCopy, public RemoteOp,
+                         public LegionHeapify<RemoteCopyOp> {
     public:
       RemoteCopyOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteCopyOp(const RemoteCopyOp &rhs);
@@ -3722,7 +3724,8 @@ namespace Legion {
      * This is a remote copy of a CloseOp to be used
      * for mapper calls and other operations
      */
-    class RemoteCloseOp : public ExternalClose, public RemoteOp {
+    class RemoteCloseOp : public ExternalClose, public RemoteOp,
+                          public LegionHeapify<RemoteCloseOp> {
     public:
       RemoteCloseOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteCloseOp(const RemoteCloseOp &rhs);
@@ -3752,7 +3755,8 @@ namespace Legion {
      * This is a remote copy of a AcquireOp to be used
      * for mapper calls and other operations
      */
-    class RemoteAcquireOp : public ExternalAcquire, public RemoteOp {
+    class RemoteAcquireOp : public ExternalAcquire, public RemoteOp,
+                            public LegionHeapify<RemoteAcquireOp> {
     public:
       RemoteAcquireOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteAcquireOp(const RemoteAcquireOp &rhs);
@@ -3782,7 +3786,8 @@ namespace Legion {
      * This is a remote copy of a ReleaseOp to be used
      * for mapper calls and other operations
      */
-    class RemoteReleaseOp : public ExternalRelease, public RemoteOp {
+    class RemoteReleaseOp : public ExternalRelease, public RemoteOp,
+                            public LegionHeapify<RemoteReleaseOp> {
     public:
       RemoteReleaseOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteReleaseOp(const RemoteReleaseOp &rhs);
@@ -3812,7 +3817,8 @@ namespace Legion {
      * This is a remote copy of a FillOp to be used
      * for mapper calls and other operations
      */
-    class RemoteFillOp : public ExternalFill, public RemoteOp {
+    class RemoteFillOp : public ExternalFill, public RemoteOp,
+                         public LegionHeapify<RemoteFillOp> {
     public:
       RemoteFillOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteFillOp(const RemoteFillOp &rhs);
@@ -3842,7 +3848,8 @@ namespace Legion {
      * This is a remote copy of a DependentPartitionOp to be
      * used for mapper calls and other operations
      */
-    class RemotePartitionOp : public ExternalPartition, public RemoteOp {
+    class RemotePartitionOp : public ExternalPartition, public RemoteOp,
+                              public LegionHeapify<RemotePartitionOp> {
     public:
       RemotePartitionOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemotePartitionOp(const RemotePartitionOp &rhs);
@@ -3875,7 +3882,8 @@ namespace Legion {
      * This is a remote copy of a DetachOp to be used for 
      * mapper calls and other operations
      */
-    class RemoteAttachOp : public RemoteOp {
+    class RemoteAttachOp : public RemoteOp,
+                           public LegionHeapify<RemoteAttachOp> {
     public:
       RemoteAttachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteAttachOp(const RemoteAttachOp &rhs);
@@ -3904,7 +3912,8 @@ namespace Legion {
      * This is a remote copy of a DetachOp to be used for 
      * mapper calls and other operations
      */
-    class RemoteDetachOp : public RemoteOp {
+    class RemoteDetachOp : public RemoteOp,
+                           public LegionHeapify<RemoteDetachOp> {
     public:
       RemoteDetachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteDetachOp(const RemoteDetachOp &rhs);
@@ -3933,7 +3942,8 @@ namespace Legion {
      * This is a remote copy of a DeletionOp to be used for 
      * mapper calls and other operations
      */
-    class RemoteDeletionOp : public RemoteOp {
+    class RemoteDeletionOp : public RemoteOp,
+                             public LegionHeapify<RemoteDeletionOp> {
     public:
       RemoteDeletionOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteDeletionOp(const RemoteDeletionOp &rhs);
@@ -3964,7 +3974,8 @@ namespace Legion {
      * for remote ops as it will only be used for checking equivalence
      * sets for valid physical template replay conditions
      */
-    class RemoteReplayOp : public RemoteOp {
+    class RemoteReplayOp : public RemoteOp,
+                           public LegionHeapify<RemoteReplayOp> {
     public:
       RemoteReplayOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteReplayOp(const RemoteReplayOp &rhs);
@@ -3995,7 +4006,8 @@ namespace Legion {
      * for remote ops as it will only be used for updating state for
      * physical template replays
      */
-    class RemoteSummaryOp : public RemoteOp {
+    class RemoteSummaryOp : public RemoteOp,
+                            public LegionHeapify<RemoteSummaryOp> {
     public:
       RemoteSummaryOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteSummaryOp(const RemoteSummaryOp &rhs);
