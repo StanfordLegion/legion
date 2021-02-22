@@ -413,9 +413,9 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image: &image
-  image: stanfordlegion/gitlab-ci:ubuntu16.04 # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04
 .image_clang: &image_clang
-  image: stanfordlegion/gitlab-ci:ubuntu16.04-clang # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04-clang
 .image_2004: &image_2004
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04
 
