@@ -19,7 +19,24 @@ from __future__ import print_function
 import argparse, os, platform, subprocess, sys
 
 def test(root_dir, install_only, debug, max_dim, short, spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env):
-    threads = ['-j', '2'] if 'TRAVIS' in env else []
+    if 'TRAVIS' in env:
+        install_threads = ['-j', '2']
+        test_threads = ['-j', '2']
+    else:
+        # the multiprocessing pool in test.py will use os.cpu_count() which
+        # assumes we only need one core/test (it's really 2+) and that there's
+        # no cpu core restrictions (which can happen if multiple test runners share
+        # a single physical node), so do the math ourselves
+        num_cores = len(os.sched_getaffinity(0))
+        install_threads = ['-j', str(num_cores)]
+        # assume a non-empty LAUNCHER means we're running 2 processes/test
+        if env.get('LAUNCHER'):
+            cores_per_test = 4
+        else:
+            cores_per_test = 2
+        num_tests = 1 + ((num_cores - 1) // cores_per_test)
+        test_threads = ['-j', str(num_tests)]
+        
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
     build = (['--with-cmake-build', env['CMAKE_BUILD_DIR']]
              if env.get('USE_CMAKE') == '1' and 'CMAKE_BUILD_DIR' in env
@@ -39,7 +56,7 @@ def test(root_dir, install_only, debug, max_dim, short, spy, prof, gcov, hdf5, c
         rdir = 'auto'
 
     subprocess.check_call(
-        [sys.executable, './install.py', '--rdir=%s' % rdir] + threads + terra + build + debug_flag,
+        [sys.executable, './install.py', '--rdir=%s' % rdir] + install_threads + terra + build + debug_flag,
         env = env,
         cwd = root_dir)
     if not install_only:
@@ -50,14 +67,14 @@ def test(root_dir, install_only, debug, max_dim, short, spy, prof, gcov, hdf5, c
         if hdf5: extra_flags.append('--hdf5')
         if cuda:
             extra_flags.append('--cuda')
-            threads = ['-j', '1']  # do not oversubscribe GPU
+            test_threads = ['-j', '1']  # do not oversubscribe GPU
         if openmp: extra_flags.append('--openmp')
         if python: extra_flags.append('--python')
         extra_flags.extend(['--extra=-fjobs', '--extra=%s' % jobs])
         if not spy and not prof and not gcov and not hdf5 and not openmp: extra_flags.append('--debug')
 
         subprocess.check_call(
-            [sys.executable, './test.py', '-q'] + threads + max_dim_flag + short_flag + extra_flags + inner_flag,
+            [sys.executable, './test.py', '-q'] + test_threads + max_dim_flag + short_flag + extra_flags + inner_flag,
             env = env,
             cwd = root_dir)
 

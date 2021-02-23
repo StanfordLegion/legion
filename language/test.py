@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, codecs, glob, itertools, json, multiprocessing, os, optparse, re, resource, shutil, signal, subprocess, sys, tempfile, traceback, time
+import argparse, codecs, glob, itertools, json, multiprocessing, os, optparse, queue, re, resource, shutil, signal, subprocess, sys, tempfile, traceback, time
 from collections import OrderedDict
 import regent
 
@@ -387,9 +387,14 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
     return result
 
 def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp, cuda, python, extra_flags, verbose, quiet,
-                  only_patterns, skip_patterns, timelimit, short):
+                  only_patterns, skip_patterns, timelimit, poll_interval, short):
+    # run only one test at a time if '-j' isn't set
+    if not thread_count:
+        thread_count = 1
     thread_pool = multiprocessing.Pool(thread_count)
-    results = []
+
+    result_queue = queue.Queue()
+    num_queued = 0
 
     legion_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
@@ -412,7 +417,17 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp
                 continue
             if skip_patterns and any(re.search(p,test_path) for p in skip_patterns):
                 continue
-            results.append((test_name, test_path, thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path, timelimit, short, py_exe_path))))
+            num_queued += 1
+            def callback(r):
+                result_queue.put((test_name, test_path, r))
+            def error_callback(e):
+                print('ERROR CALLBACK', e)
+                raise e
+            thread_pool.apply_async(test_runner,
+                                    (test_name, test_fn, debug, verbose,
+                                     test_path, timelimit, short, py_exe_path),
+                                    callback=callback,
+                                    error_callback=error_callback)
 
     thread_pool.close()
 
@@ -422,54 +437,58 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp
         test_counters[test_name] = test_counter
 
     all_saved_temps = []
+    num_passed = 0
+    num_failed = 0
+    num_remaining = num_queued
+    t_start = time.time()
+    t_last = t_start
     try:
-        result_set = set(results)
-        while True:
-            completed = set()
-            for test_result in result_set:
-                test_name, filename, result = test_result
-                if result.ready():
-                    _test_name, _filename, saved_temps, outcome, retcode, output = result.get()
-                    if len(saved_temps) > 0:
-                        all_saved_temps.append((test_name, filename, saved_temps))
-                    if outcome == PASS:
-                        if quiet:
-                            print('.', end='')
-                            sys.stdout.flush()
-                        else:
-                            print('[%sPASS%s] (%s) %s' % (green, clear, test_name, filename))
-                        if output is not None: print(output)
-                        test_counters[test_name].passed += 1
-                    elif outcome == FAIL:
-                        if quiet: print()
-                        if retcode < 0:
-                            try:
-                                errmsg = 'signal ' + signal.Signals(-retcode).name
-                            except ValueError:
-                                errmsg = 'signal %d' % (-retcode)
-                        else:
-                            errmsg = 'return code %d' % retcode
-                        print('[%sFAIL%s] (%s) (%s) %s' % (red, clear, test_name, errmsg, filename))
-                        if output is not None: print(output)
-                        test_counters[test_name].failed += 1
+        while num_remaining:
+            # wait for up to 'interval' seconds for something to finish
+            try:
+                test_name, filename, result = result_queue.get(timeout=poll_interval)
+                # unpack result from subprocess
+                _test_name, _filename, saved_temps, outcome, retcode, output = result
+                num_remaining -= 1
+                if len(saved_temps) > 0:
+                    all_saved_temps.append((test_name, filename, saved_temps))
+                if outcome == PASS:
+                    if not quiet:
+                        print('[%sPASS%s] (%s) %s' % (green, clear, test_name, filename))
+                    if output is not None: print(output)
+                    test_counters[test_name].passed += 1
+                    num_passed += 1
+                elif outcome == FAIL:
+                    if retcode < 0:
+                        try:
+                            errmsg = 'signal ' + signal.Signals(-retcode).name
+                        except ValueError:
+                            errmsg = 'signal %d' % (-retcode)
                     else:
-                        raise Exception('Unexpected test outcome %s' % outcome)
-                    completed.add(test_result)
-            result_set -= completed
-            if len(result_set) > 0:
-                time.sleep(0.1)
-            else:
-                break
+                        errmsg = 'return code %d' % retcode
+                    print('[%sFAIL%s] (%s) (%s) %s' % (red, clear, test_name, errmsg, filename))
+                    if output is not None: print(output)
+                    test_counters[test_name].failed += 1
+                    num_failed += 1
+                else:
+                    raise Exception('Unexpected test outcome %s' % outcome)
+            except queue.Empty:
+                pass
+
+            # if requested, print out updates periodically
+            if poll_interval:
+                t_now = time.time()
+                if (t_now >= t_last + poll_interval) or (num_remaining == 0):
+                    print('Time elapsed: %4d s, tests passed: %4d, failed: %4d, remaining: %4d' % (int(t_now - t_start), num_passed, num_failed, num_remaining))
+                    t_last = t_now
+
+        thread_pool.join()
     except KeyboardInterrupt:
+        # try to terminate all child tests before propagating interrupt
+        print('Keyboard interrupt received - terminating %d tests' % num_remaining)
+        thread_pool.terminate()
+        num_failed += num_remaining
         raise
-
-    thread_pool.join()
-
-    global_counter = Counter()
-    for test_counter in test_counters.values():
-        global_counter.passed += test_counter.passed
-        global_counter.failed += test_counter.failed
-    global_total = global_counter.passed + global_counter.failed
 
     if len(all_saved_temps) > 0:
         print()
@@ -480,7 +499,7 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp
             for saved_temp in saved_temps:
                 print('  %s' % saved_temp)
 
-    if global_total > 0:
+    if num_queued > 0:
         print()
         print('Summary of test results by category:')
         for test_name, test_counter in test_counters.items():
@@ -491,13 +510,14 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp
                     float(100*test_counter.passed)/test_total))
         print('    ' + '~'*54)
         print('%24s: Passed %4d of %4d tests (%5.1f%%)' % (
-            'total', global_counter.passed, global_total,
-            (float(100*global_counter.passed)/global_total)))
+            'total', num_passed, num_queued,
+            (float(100*num_passed)/num_queued)))
 
-    if not verbose and global_counter.failed > 0:
-        print()
-        print('For detailed information on test failures, run:')
-        print('    ./test.py -j1 -v')
+    if num_failed > 0:
+        if not verbose:
+            print()
+            print('For detailed information on test failures, run:')
+            print('    ./test.py -j1 -v')
         sys.exit(1)
 
 def test_driver(argv):
@@ -567,6 +587,11 @@ def test_driver(argv):
                         type=int,
                         help='max run time for each test (in seconds)',
                         dest='timelimit')
+    parser.add_argument('--poll',
+                        default=60, # 1 minute
+                        type=int,
+                        help='test completion polling interval (in seconds)',
+                        dest='poll_interval')
     parser.add_argument('--short',
                         action='store_true',
                         help='truncate runs-with list of each test to one item',
@@ -591,6 +616,7 @@ def test_driver(argv):
         args.only_patterns,
         args.skip_patterns,
         args.timelimit,
+        args.poll_interval,
         args.short)
 
 if __name__ == '__main__':
