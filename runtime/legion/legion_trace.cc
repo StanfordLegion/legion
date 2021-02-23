@@ -2648,40 +2648,37 @@ namespace Legion {
           }
         }
       }
-      else
+      // There is at most one expression per field so just iterate and compare
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+            finder->second.begin(); it != finder->second.end(); it++)
       {
-        // There is at most one expression per field so just iterate and compare
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              finder->second.begin(); it != finder->second.end(); it++)
+        const FieldMask overlap = mask & it->second;
+        if (!overlap)
+          continue;
+        if ((it->first != total_expr) && (it->first != expr))
         {
-          const FieldMask overlap = mask & it->second;
-          if (!overlap)
+          IndexSpaceExpression *intersection = 
+            forest->intersect_index_spaces(it->first, expr);
+          const size_t volume = intersection->get_volume();
+          if (volume == 0)
             continue;
-          if ((it->first != total_expr) && (it->first != expr))
+          // Can only dominate if we have enough points
+          if (volume < expr->get_volume())
           {
-            IndexSpaceExpression *intersection = 
-              forest->intersect_index_spaces(it->first, expr);
-            const size_t volume = intersection->get_volume();
-            if (volume == 0)
-              continue;
-            // Can only dominate if we have enough points
-            if (volume < expr->get_volume())
-            {
-              if (dominated != NULL)
-                dominated->insert(intersection, overlap);
-              IndexSpaceExpression *diff = 
-                forest->subtract_index_spaces(expr, intersection);
-              non_dominated.insert(diff, overlap);
-            }
-            else if (dominated != NULL)
-              dominated->insert(expr, overlap);
-          } // total expr dominates everything
+            if (dominated != NULL)
+              dominated->insert(intersection, overlap);
+            IndexSpaceExpression *diff = 
+              forest->subtract_index_spaces(expr, intersection);
+            non_dominated.insert(diff, overlap);
+          }
           else if (dominated != NULL)
             dominated->insert(expr, overlap);
-          mask -= overlap;
-          if (!mask)
-            return;
-        }
+        } // total expr dominates everything
+        else if (dominated != NULL)
+          dominated->insert(expr, overlap);
+        mask -= overlap;
+        if (!mask)
+          return;
       }
       // If we get here then these fields are definitely not dominated
 #ifdef DEBUG_LEGION
