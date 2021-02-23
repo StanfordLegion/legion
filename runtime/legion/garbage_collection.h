@@ -84,9 +84,10 @@ namespace Legion {
       TRACE_REF = 26,
       AGGREGATORE_REF = 27,
       FIELD_STATE_REF = 28,
-      DISJOINT_COMPLETE_REF = 29,
-      REPLICATION_REF = 30,
-      LAST_SOURCE_REF = 31,
+      CANONICAL_REF = 29,
+      DISJOINT_COMPLETE_REF = 30,
+      REPLICATION_REF = 31,
+      LAST_SOURCE_REF = 32,
     };
 
     enum ReferenceKind {
@@ -126,6 +127,7 @@ namespace Legion {
       "Index Space Expression Reference",           \
       "Aggregator Reference",                       \
       "Field State Reference",                      \
+      "Canonical Index Space Expression Reference", \
       "Disjoint Complete Reference",                \
       "Replication Reference",                      \
     }
@@ -324,6 +326,7 @@ namespace Legion {
     public:
       // Atomic check and increment operations 
       inline bool check_valid_and_increment(ReferenceSource source,int cnt = 1);
+      bool check_resource_and_increment(ReferenceSource source ,int cnt = 1);
     private:
       void add_gc_reference(ReferenceMutator *mutator);
       bool remove_gc_reference(ReferenceMutator *mutator);

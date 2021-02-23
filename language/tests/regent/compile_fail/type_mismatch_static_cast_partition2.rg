@@ -13,15 +13,13 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_static_cast_partition2.rg:25: aliased partitions cannot be casted to disjoint partitions
+-- type_mismatch_static_cast_partition2.rg:23: aliased partitions cannot be casted to disjoint partitions
 --   var y = static_cast(partition(disjoint, r, ispace(int1d)), p)
 --                     ^
 
 import "regent"
 
-task f()
-  var r : region(ispace(int1d), int)
-  var p : partition(aliased, r, ispace(int1d))
+task f(r : region(ispace(int1d), int), p : partition(aliased, r, ispace(int1d)))
   var y = static_cast(partition(disjoint, r, ispace(int1d)), p)
 end
 f:compile()

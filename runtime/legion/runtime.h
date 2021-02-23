@@ -3412,7 +3412,7 @@ namespace Legion {
       void deactivate_context(InnerContext *context);
     public:
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
-                              RtEvent wait_on = RtEvent::NO_RT_EVENT);
+          RtEvent wait_on = RtEvent::NO_RT_EVENT, bool select_options = false);
       void add_to_local_queue(Processor p, Operation *op, LgPriority priority,
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
     public:

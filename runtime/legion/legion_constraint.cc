@@ -629,10 +629,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SpecializedConstraint::SpecializedConstraint(SpecializedKind k,
-      ReductionOpID r, bool no, bool ext, bool col, size_t pieces, int overhead)
-      : kind(k), redop(r), max_pieces(pieces), max_overhead(overhead), 
-        collective(col), no_access(no), exact(ext)
-    //--------------------------------------------------------------------------
+      ReductionOpID r, bool no, bool ext, Domain c, size_t pieces, int overhead)
+      : kind(k), redop(r), collective(c), max_pieces(pieces),
+        max_overhead(overhead), no_access(no), exact(ext)
+    //-------------------------------------------------------------------------
     {
       if (redop != 0)
       {
@@ -671,11 +671,11 @@ namespace Legion {
       // Make sure we also handle the unspecialized case of redop 0
       if ((redop != other.redop) && (other.redop != 0))
         return false;
+      if (collective != other.collective)
+        return false;
       if (max_pieces > other.max_pieces)
         return false;
       if (max_overhead > other.max_overhead)
-        return false;
-      if (collective && !other.collective)
         return false;
       if (no_access && !other.no_access)
         return false;
@@ -697,9 +697,9 @@ namespace Legion {
       // Only conflicts if we both have non-zero redops that don't equal
       if ((redop != other.redop) && (redop != 0) && (other.redop != 0))
         return true;
-      if (max_pieces != other.max_pieces)
-        return true;
       if (collective != other.collective)
+        return true;
+      if (max_pieces != other.max_pieces)
         return true;
       if (max_overhead != other.max_overhead)
         return true;
@@ -714,9 +714,9 @@ namespace Legion {
     {
       SWAP_HELPER(SpecializedKind, kind)
       SWAP_HELPER(ReductionOpID, redop)
+      SWAP_HELPER(Domain, collective)
       SWAP_HELPER(size_t, max_pieces)
       SWAP_HELPER(int, max_overhead)
-      SWAP_HELPER(bool, collective)
       SWAP_HELPER(bool, no_access)
       SWAP_HELPER(bool, exact)
     }
@@ -735,7 +735,7 @@ namespace Legion {
         rez.serialize(max_pieces);
         rez.serialize(max_overhead);
       }
-      rez.serialize<bool>(collective);
+      rez.serialize(collective);
       rez.serialize<bool>(no_access);
       rez.serialize<bool>(exact);
     }
@@ -754,7 +754,7 @@ namespace Legion {
         derez.deserialize(max_pieces);
         derez.deserialize(max_overhead);
       }
-      derez.deserialize<bool>(collective);
+      derez.deserialize(collective);
       derez.deserialize<bool>(no_access);
       derez.deserialize<bool>(exact);
     }
