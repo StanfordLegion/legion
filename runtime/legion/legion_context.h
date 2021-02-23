@@ -1087,6 +1087,11 @@ namespace Legion {
       virtual ExternalResources attach_resources(
                                         const IndexAttachLauncher &launcher,
                                         bool deduplicate_across_shards);
+      virtual RegionTreeNode* compute_index_attach_upper_bound(
+                                        const IndexAttachLauncher &launcher,
+                                        const std::vector<unsigned> &indexes);
+      virtual ProjectionID compute_index_attach_projection(IndexTreeNode *node,
+                                        std::vector<IndexSpace> &spaces);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
       virtual Future detach_resources(ExternalResources resources,
@@ -1365,6 +1370,21 @@ namespace Legion {
       mutable LocalLock     fill_view_lock;            
       std::list<FillView*>  fill_view_cache;
       static const size_t MAX_FILL_VIEW_CACHE_SIZE = 64;
+    protected:
+      // This is used to create implicit projection functions for index
+      // space attach operations thereby allowing us to do the normal
+      // logical analysis and recognize when functions are the same
+      struct AttachProjection {
+      public:
+        AttachProjection(void) : pid(0) { }
+        AttachProjection(ProjectionID p) : pid(p) { }
+      public:
+        std::vector<IndexSpace> handles;
+        ProjectionID pid;
+      };
+      // This data structure should only be accessed during the logical
+      // analysis stage of the pipeline and therefore no lock is needed
+      std::map<IndexTreeNode*,std::vector<AttachProjection> > attach_functions;
     };
 
     /**

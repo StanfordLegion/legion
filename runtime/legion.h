@@ -2053,7 +2053,7 @@ namespace Legion {
       ExternalResource                              resource;
       std::vector<LogicalRegion>                    handles;
       LogicalRegion                                 parent;
-      // Whether this instance will be restricted when attached
+      // Whether these instances will be restricted when attached
       bool                                          restricted /*= true*/;
     public:
       // Data for files

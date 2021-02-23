@@ -6110,15 +6110,25 @@ namespace Legion {
       return result;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     ExternalResources InnerContext::attach_resources(
             const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (launcher.handles.empty())
+        return ExternalResources();
+      // This is not control replicated so no need to deduplicate anything
+      std::vector<unsigned> indexes(launcher.handles.size());
+      for (unsigned idx = 0; idx < indexes.size(); idx++)
+        indexes[idx] = idx;
+      // Compute the upper bound partition node from this launcher
+      RegionTreeNode *node = compute_index_attach_upper_bound(launcher,indexes);
+      IndexSpaceNode *launch_space = runtime->forest->get_node(
+       find_index_launch_space(Domain(Point<1>(0),Point<1>(indexes.size()-1))));
       IndexAttachOp *attach_op = runtime->get_available_index_attach_op();
-      ExternalResources result = attach_op->initialize(this, launcher);
+      ExternalResources result = 
+        attach_op->initialize(this, node, launch_space, launcher, indexes);
       const RegionRequirement &req = attach_op->get_requirement();
       bool parent_conflict = false, inline_conflict = false;
       int index = has_conflicting_internal(req,parent_conflict,inline_conflict);
@@ -6183,7 +6193,115 @@ namespace Legion {
       add_to_dependence_queue(attach_op);
       return result;
     }
+
+    //--------------------------------------------------------------------------
+    RegionTreeNode* InnerContext::compute_index_attach_upper_bound(
+      const IndexAttachLauncher &launcher, const std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+      unsigned ancestor_depth = 0;
+      RegionTreeNode *common_ancestor = NULL;
+      for (unsigned idx = 0; idx < indexes.size(); idx++)
+      {
+        const unsigned index = indexes[idx];
+        LogicalRegion handle = launcher.handles[index];
+        if (handle.get_tree_id() != launcher.parent.get_tree_id())
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+              "Handle (%d,%d,%d) of index attach operation in parent task %s "
+              "(UID %lld) does not come from the same region tree as the "
+              "parent region (%d,%d,%d). All regions for an index space "
+              "attach must be from the same tree.", handle.index_space.id,
+              handle.field_space.id, handle.tree_id, get_task_name(),
+              get_unique_id(), launcher.parent.index_space.id,
+              launcher.parent.field_space.id, launcher.parent.tree_id)
+        RegionTreeNode *node = runtime->forest->get_node(handle);
+        if (common_ancestor != NULL)
+        {
+          if (common_ancestor == node)
+            REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+               "Handle (%d,%d,%d) of index attach operation in parent task %s "
+              "(UID %lld) is overlaps with previous regions. All regions "
+              "in index space attach operations must be disjoint.",
+              handle.index_space.id, handle.field_space.id, handle.tree_id,
+              get_task_name(), get_unique_id())
+          // Bring them to the same depth
+          unsigned node_depth = node->get_depth();
+          while (ancestor_depth < node_depth)
+          {
+#ifdef DEBUG_LEGION
+            assert(node_depth > 0);
 #endif
+            node = node->get_parent();
+            node_depth--;
+          }
+          while (node_depth < ancestor_depth)
+          {
+#ifdef DEBUG_LEGION
+            assert(ancestor_depth > 0);
+#endif
+            common_ancestor = common_ancestor->get_parent();
+            ancestor_depth--;
+          }
+          while (node != common_ancestor)
+          {
+            // Same depth but different nodes
+#ifdef DEBUG_LEGION
+            assert(ancestor_depth > 0);
+#endif
+            node = node->get_parent();
+            common_ancestor = common_ancestor->get_parent();
+            ancestor_depth--;
+          }
+        }
+        else
+        {
+          common_ancestor = node;
+          ancestor_depth = common_ancestor->get_depth();
+        }
+      }
+      return common_ancestor;
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionID InnerContext::compute_index_attach_projection(
+                    IndexTreeNode *upper_bound, std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      std::map<IndexTreeNode*,std::vector<AttachProjection> >::iterator
+        finder = attach_functions.find(upper_bound);
+      if (finder != attach_functions.end())
+      {
+        for (std::vector<AttachProjection>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          if (it->handles.size() != spaces.size())
+            continue;
+          bool equal = true;
+          for (unsigned idx = 0; idx < spaces.size(); idx++)
+          {
+            if (it->handles[idx] == spaces[idx])
+              continue;
+            equal = false;
+            break;
+          }
+          if (equal)
+            return it->pid;
+        }
+      }
+      else // instantiate the entry in the map
+        finder = attach_functions.insert(std::make_pair(upper_bound,
+              std::vector<AttachProjection>())).first;
+      // If we get here then we need to make it
+      // Generate a fresh dynamic ID and store it
+      const ProjectionID result =
+        runtime->generate_dynamic_projection_id(false/*check context*/);
+      finder->second.push_back(AttachProjection(result));
+      finder->second.back().handles.swap(spaces);
+      if (runtime->legion_spy_enabled)
+        // We'll say it has depth 1 so legion spy can't analyze it
+        LegionSpy::log_projection_function(result, 1/*depth*/, false/*invert*/);
+      return result;
+    }
 
     //--------------------------------------------------------------------------
     Future InnerContext::detach_resource(PhysicalRegion region,

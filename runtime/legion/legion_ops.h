@@ -3444,8 +3444,11 @@ namespace Legion {
                                              ApEvent &ready_event,
                                              size_t &instance_footprint);
     protected:
+      void activate_attach(void);
+      void deactivate_attach(void);
       void check_privilege(void);
       void compute_parent_index(void);
+      void log_requirement(void);
     public:
       ExternalResource resource;
       RegionRequirement requirement;
@@ -3481,8 +3484,9 @@ namespace Legion {
     public:
       IndexAttachOp& operator=(const IndexAttachOp &rhs);
     public:
-      ExternalResources initialize(InnerContext *ctx, ProjectionID pid,
+      ExternalResources initialize(InnerContext *ctx,
                                    RegionTreeNode *upper_bound,
+                                   IndexSpaceNode *launch_bounds,
                                    const IndexAttachLauncher &launcher,
                                    const std::vector<unsigned> &indexes);
       inline const RegionRequirement& get_requirement(void) const
@@ -3498,16 +3502,24 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    public:
+      void handle_point_commit(void);
     protected:
+      void activate_index_attach(void);
+      void deactivate_index_attach(void);
+      void compute_parent_index(void);
       void check_privilege(void);
+      void check_point_requirements(void);
+      void log_requirement(void);
     protected:
       RegionRequirement                             requirement;
       RegionTreePath                                privilege_path;
       IndexSpaceNode*                               launch_space;
       std::vector<PointAttachOp*>                   points;
-      std::set<RtEvent>                             commit_preconditions;
+      std::set<RtEvent>                             map_applied_conditions;
+      unsigned                                      parent_req_index;
       unsigned                                      points_committed;
       bool                                          commit_request;
     };
@@ -3524,12 +3536,18 @@ namespace Legion {
     public:
       PointAttachOp& operator=(const PointAttachOp &rhs);
     public:
-      PhysicalRegionImpl* initialize(IndexAttachOp *owner,
-          const IndexAttachLauncher &launcher, unsigned index);
+      virtual void activate(void);
+      virtual void deactivate(void);
     public:
+      PhysicalRegionImpl* initialize(IndexAttachOp *owner, InnerContext *ctx,
+        const IndexAttachLauncher &launcher, const OrderingConstraint &ordering,
+        const DomainPoint &point, unsigned index);
+    public:
+      virtual void trigger_ready(void);
       virtual void trigger_commit(void);
     protected:
       IndexAttachOp *owner;
+      DomainPoint index_point;
     };
 
     /**
