@@ -276,7 +276,7 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use_openmp, use_cuda, use_python, max_dim, short, extra_flags):
+def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use_openmp, use_cuda, use_python, max_dim, no_pretty, extra_flags):
     base_env = {
     }
     run_env = {
@@ -363,7 +363,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
     result = []
     if not (use_run or use_spy or use_gc or use_prof or use_hdf5 or use_cuda):
         result.extend(base)
-        if not short:
+        if not no_pretty:
             result.extend(pretty)
         result.extend(run)
     if use_run:
@@ -386,8 +386,10 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
         result.extend(max_dim_tests(dim))
     return result
 
-def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp, cuda, python, extra_flags, verbose, quiet,
-                  only_patterns, skip_patterns, timelimit, poll_interval, short):
+def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
+                  openmp, cuda, python, extra_flags, verbose, quiet,
+                  only_patterns, skip_patterns, timelimit, poll_interval,
+                  short, no_pretty):
     # run only one test at a time if '-j' isn't set
     if not thread_count:
         thread_count = 1
@@ -401,7 +403,7 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp
     py_exe_path = detect_python_interpreter()
 
     # Run tests asynchronously.
-    tests = get_test_specs(legion_dir, run, spy, gc, prof, hdf5, openmp, cuda, python, max_dim, short, extra_flags)
+    tests = get_test_specs(legion_dir, run, spy, gc, prof, hdf5, openmp, cuda, python, max_dim, no_pretty, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -596,6 +598,10 @@ def test_driver(argv):
                         action='store_true',
                         help='truncate runs-with list of each test to one item',
                         dest='short')
+    parser.add_argument('--no-pretty',
+                        action='store_true',
+                        help='disable pretty-printing tests',
+                        dest='no_pretty')
     args = parser.parse_args(argv[1:])
 
     run_all_tests(
@@ -617,7 +623,8 @@ def test_driver(argv):
         args.skip_patterns,
         args.timelimit,
         args.poll_interval,
-        args.short)
+        args.short,
+        args.no_pretty)
 
 if __name__ == '__main__':
     test_driver(sys.argv)

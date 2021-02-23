@@ -18,7 +18,8 @@
 from __future__ import print_function
 import argparse, os, platform, subprocess, sys
 
-def test(root_dir, install_only, debug, max_dim, short, spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env):
+def test(root_dir, install_only, debug, max_dim, short, no_pretty,
+         spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env):
     if 'TRAVIS' in env:
         install_threads = ['-j', '2']
         test_threads = ['-j', '2']
@@ -44,6 +45,7 @@ def test(root_dir, install_only, debug, max_dim, short, spy, prof, gcov, hdf5, c
     debug_flag = ['--debug'] if debug else []
     max_dim_flag = ['--max-dim=%s' % max_dim]
     short_flag = ['--short'] if short else []
+    no_pretty_flag = ['--no-pretty'] if no_pretty else []
     inner_flag = ['--extra=-flegion-inner', '--extra=0'] if 'DISABLE_INNER' in env else []
     if 'USE_RDIR' in env:
         regent_dir = os.path.dirname(os.path.realpath(__file__))
@@ -74,7 +76,7 @@ def test(root_dir, install_only, debug, max_dim, short, spy, prof, gcov, hdf5, c
         if not spy and not prof and not gcov and not hdf5 and not openmp: extra_flags.append('--debug')
 
         subprocess.check_call(
-            [sys.executable, './test.py', '-q'] + test_threads + max_dim_flag + short_flag + extra_flags + inner_flag,
+            [sys.executable, './test.py', '-q'] + test_threads + max_dim_flag + short_flag + no_pretty_flag + extra_flags + inner_flag,
             env = env,
             cwd = root_dir)
 
@@ -99,6 +101,7 @@ if __name__ == '__main__':
     debug = env['DEBUG'] == '1'
     max_dim = int(env.get('MAX_DIM', 3))
     short = env.get('SHORT') == '1'
+    no_pretty = env.get('NO_PRETTY') == '1'
     spy = env.get('TEST_SPY') == '1'
     prof = env.get('TEST_PROF') == '1'
     gcov = env.get('TEST_GCOV') == '1'
@@ -107,4 +110,5 @@ if __name__ == '__main__':
     openmp = env.get('TEST_OPENMP') == '1'
     python = env.get('TEST_PYTHON') == '1'
     jobs = int(env['REGENT_JOBS']) if 'REGENT_JOBS' in env else 1
-    test(root_dir, args.install_only, debug, max_dim, short, spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env)
+    test(root_dir, args.install_only, debug, max_dim, short, no_pretty,
+         spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env)

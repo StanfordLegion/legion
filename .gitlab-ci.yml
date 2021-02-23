@@ -189,6 +189,11 @@ variables:
   TEST_LEGION_CXX: "0"
   TEST_REALM: "0"
   TEST_FUZZER: "0"
+  NO_PRETTY: "1"
+.regent_pretty: &regent_pretty
+  TEST_LEGION_CXX: "0"
+  TEST_REALM: "0"
+  TEST_FUZZER: "0"
 .parallel: &parallel
   REGENT_JOBS: "2"
 .incremental: &incremental
@@ -536,10 +541,10 @@ gcc49_cxx11_release_legion_fortran:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *release, *cxx11_normal, *legion, *fortran]
-gcc49_cxx11_release_llvm_cmake_regent:
+gcc49_cxx11_release_llvm_cmake_regent_pretty:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *release, *cxx11_normal, *llvm, *cmake, *regent, *incremental, *short]
+    <<: [*gcc49, *terra38, *release, *cxx11_normal, *llvm, *cmake, *regent_pretty, *incremental, *short]
 #   * Debug (Privilege and Bounds Checks)
 gcc49_cxx11_debug_checks_legion:
   <<: [*linux, *image, *tests]
@@ -569,10 +574,10 @@ gcc49_cxx11_release_maxdim5_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *release, *cxx11_normal, *maxdim5, *regent, *parallel]
-clang38_cxx11_release_maxdim5_regent:
+clang38_cxx11_release_maxdim5_regent_pretty:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*clang38, *terra38, *release, *cxx11_normal, *maxdim5, *regent, *parallel]
+    <<: [*clang38, *terra38, *release, *cxx11_normal, *maxdim5, *regent_pretty, *parallel]
 # * Features: one test per feature
 #   * OpenMP
 gcc49_cxx11_debug_openmp_legion:
@@ -606,10 +611,10 @@ gcc49_cxx11_debug_hdf5_cmake_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *cmake, *legion, *ctest]
-gcc49_cxx11_debug_hdf5_regent:
+gcc49_cxx11_debug_hdf5_regent_pretty:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *regent_pretty]
 #   * GASNet-1 (legacy API)
 gcc49_cxx11_release_gasnet1_mpi_legion:
   <<: [*linux_compute, *image, *tests]
@@ -1008,10 +1013,10 @@ gcc9_cxx17_debug_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra9, *debug, *cxx17_normal, *regent]
-gcc9_cxx17_release_regent:
+gcc9_cxx17_release_regent_pretty:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra9, *release, *cxx17_normal, *regent]
+    <<: [*gcc9, *terra9, *release, *cxx17_normal, *regent_pretty]
 
 # GCC 10
 gcc10_cxx17_debug_legion:
