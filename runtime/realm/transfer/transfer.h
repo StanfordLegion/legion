@@ -219,55 +219,6 @@ namespace Realm {
     std::vector<IBInfo> ib_edges;
   };
 
-#if 0
-  // MOVE HERE
-  class IndirectionInfo {
-  public:
-    virtual ~IndirectionInfo(void) {}
-    virtual Event request_metadata(void) = 0;
-    virtual Memory generate_gather_paths(Memory dst_mem, int dst_edge_id,
-					 size_t bytes_per_element,
-					 CustomSerdezID serdez_id,
-					 std::vector<CopyRequest::XDTemplate>& xd_nodes,
-					 std::vector<IBInfo>& ib_edges) = 0;
-
-    virtual void generate_gather_paths(Memory dst_mem,
-				       unsigned addr_field_idx,
-				       TransferGraph::XDTemplate::IO dst_edge,
-				       size_t bytes_per_element,
-				       CustomSerdezID serdez_id,
-				       std::vector<TransferGraph::XDTemplate>& xd_nodes,
-				       std::vector<TransferGraph::IBInfo>& ib_edges) = 0;
-
-    virtual Memory generate_scatter_paths(Memory src_mem, int src_edge_id,
-					  size_t bytes_per_element,
-					  CustomSerdezID serdez_id,
-					  std::vector<CopyRequest::XDTemplate>& xd_nodes,
-					  std::vector<IBInfo>& ib_edges) = 0;
-
-    virtual void generate_scatter_paths(Memory src_mem,
-					TransferGraph::XDTemplate::IO src_edge,
-					size_t bytes_per_element,
-					CustomSerdezID serdez_id,
-					std::vector<TransferGraph::XDTemplate>& xd_nodes,
-					std::vector<TransferGraph::IBInfo>& ib_edges) = 0;
-
-    virtual RegionInstance get_pointer_instance(void) const = 0;
-      
-    virtual TransferIterator *create_address_iterator(RegionInstance peer) const = 0;
-
-    virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
-						       RegionInstance inst,
-						       const std::vector<FieldID>& fields,
-						       const std::vector<size_t>& fld_offsets,
-						       const std::vector<size_t>& fld_sizes) const = 0;
-
-    virtual void print(std::ostream& os) const = 0;
-  };
-
-  std::ostream& operator<<(std::ostream& os, const IndirectionInfo& ii);
-#endif
-
   class TransferDesc {
   public:
     template <int N, typename T>
@@ -333,6 +284,48 @@ namespace Realm {
     ProfilingMeasurements::OperationCopyInfo prof_cpinfo;
   };
                
+  class IndirectionInfo {
+  public:
+    virtual ~IndirectionInfo(void) {}
+    virtual Event request_metadata(void) = 0;
+
+    virtual void generate_gather_paths(Memory dst_mem,
+				       TransferGraph::XDTemplate::IO dst_edge,
+				       unsigned indirect_idx,
+				       unsigned src_fld_start,
+				       unsigned src_fld_count,
+				       size_t bytes_per_element,
+				       CustomSerdezID serdez_id,
+				       std::vector<TransferGraph::XDTemplate>& xd_nodes,
+				       std::vector<TransferGraph::IBInfo>& ib_edges,
+				       std::vector<TransferDesc::FieldInfo>& src_fields) = 0;
+
+    virtual void generate_scatter_paths(Memory src_mem,
+					TransferGraph::XDTemplate::IO src_edge,
+					unsigned indirect_idx,
+					unsigned dst_fld_start,
+					unsigned dst_fld_count,
+					size_t bytes_per_element,
+					CustomSerdezID serdez_id,
+					std::vector<TransferGraph::XDTemplate>& xd_nodes,
+					std::vector<TransferGraph::IBInfo>& ib_edges,
+					std::vector<TransferDesc::FieldInfo>& src_fields) = 0;
+
+    virtual RegionInstance get_pointer_instance(void) const = 0;
+
+    virtual TransferIterator *create_address_iterator(RegionInstance peer) const = 0;
+
+    virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
+						       RegionInstance inst,
+						       const std::vector<FieldID>& fields,
+						       const std::vector<size_t>& fld_offsets,
+						       const std::vector<size_t>& fld_sizes) const = 0;
+
+    virtual void print(std::ostream& os) const = 0;
+  };
+
+  std::ostream& operator<<(std::ostream& os, const IndirectionInfo& ii);
+
 
   // a TransferOperation is an application-requested copy/fill/reduce
   class TransferOperation : public Operation {
