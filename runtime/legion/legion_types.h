@@ -1445,6 +1445,8 @@ namespace Legion {
     class IndexAttachOp;
     class PointAttachOp;
     class DetachOp;
+    class IndexDetachOp;
+    class PointDetachOp;
     class TimingOp;
     class AllReduceOp;
     class ExternalMappable;
@@ -1639,6 +1641,7 @@ namespace Legion {
     friend class Legion::Runtime;                           \
     friend class Internal::Runtime;                         \
     friend class Internal::PhysicalRegionImpl;              \
+    friend class Internal::ExternalResourcesImpl;           \
     friend class Internal::TaskImpl;                        \
     friend class Internal::ProcessorManager;                \
     friend class Internal::MemoryManager;                   \
@@ -1674,6 +1677,8 @@ namespace Legion {
     friend class Internal::IndexAttachOp;                   \
     friend class Internal::PointAttachOp;                   \
     friend class Internal::DetachOp;                        \
+    friend class Internal::IndexDetachOp;                   \
+    friend class Internal::PointDetachOp;                   \
     friend class Internal::TimingOp;                        \
     friend class Internal::AllReduceOp;                     \
     friend class Internal::TraceSummaryOp;                  \

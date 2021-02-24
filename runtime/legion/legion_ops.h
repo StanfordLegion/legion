@@ -3515,6 +3515,7 @@ namespace Legion {
       void log_requirement(void);
     protected:
       RegionRequirement                             requirement;
+      ExternalResources                             resources;
       RegionTreePath                                privilege_path;
       IndexSpaceNode*                               launch_space;
       std::vector<PointAttachOp*>                   points;
@@ -3590,7 +3591,10 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
     protected:
+      void activate_detach(void);
+      void deactivate_detach(void);
       void compute_parent_index(void);
+      void log_requirement(void);
     public:
       PhysicalRegion region;
       RegionRequirement requirement;
@@ -3600,6 +3604,91 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       Future result;
       bool flush;
+    };
+
+    /**
+     * \class IndexDetachOp
+     * This is an index space detach operation for performing many detaches
+     */
+    class IndexDetachOp : public Operation,public LegionHeapify<IndexDetachOp> {
+    public:
+      static const AllocationType alloc_type = DETACH_OP_ALLOC;
+    public:
+      IndexDetachOp(Runtime *rt);
+      IndexDetachOp(const IndexDetachOp &rhs);
+      virtual ~IndexDetachOp(void);
+    public:
+      IndexDetachOp& operator=(const IndexDetachOp &rhs);
+    public:
+      Future initialize_detach(InnerContext *ctx, LogicalRegion parent,
+                               RegionTreeNode *upper_bound,
+                               IndexSpaceNode *launch_bounds,
+                               ExternalResourcesImpl *external,
+                               const std::vector<FieldID> &privilege_fields,
+                               const std::vector<PhysicalRegion> &regions,
+                               bool flush, bool unordered);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual size_t get_region_count(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_complete(void);
+      virtual void trigger_commit(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    public:
+      void complete_detach(void);
+      void handle_point_complete(void);
+      void handle_point_commit(void);
+    protected:
+      void activate_index_detach(void);
+      void deactivate_index_detach(void);
+      void compute_parent_index(void);
+      void log_requirement(void);
+    protected:
+      RegionRequirement                             requirement;
+      ExternalResources                             resources;
+      RegionTreePath                                privilege_path;
+      IndexSpaceNode*                               launch_space;
+      std::vector<PointDetachOp*>                   points;
+      std::set<RtEvent>                             map_applied_conditions;
+      Future                                        result;
+      unsigned                                      parent_req_index;
+      unsigned                                      points_completed;
+      unsigned                                      points_committed;
+      bool                                          complete_request;
+      bool                                          commit_request;
+    };
+
+    /**
+     * \class PointDetachOp
+     * Indvidiual detach operations for an index space detach
+     */
+    class PointDetachOp : public DetachOp {
+    public:
+      PointDetachOp(Runtime *rt);
+      PointDetachOp(const PointDetachOp &rhs);
+      virtual ~PointDetachOp(void);
+    public:
+      PointDetachOp& operator=(const PointDetachOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      void initialize_detach(IndexDetachOp *owner, InnerContext *ctx,
+            const PhysicalRegion &region, const DomainPoint &point, bool flush);
+    public:
+      virtual void trigger_ready(void);
+      virtual void trigger_complete(void);
+      virtual void trigger_commit(void);
+    protected:
+      IndexDetachOp *owner;
+      DomainPoint index_point;
     };
 
     /**

@@ -2643,6 +2643,126 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // ExternalResourcesImpl
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExternalResourcesImpl::ExternalResourcesImpl(InnerContext *ctx,
+        size_t num_regions, RegionTreeNode *upper, IndexSpaceNode *launch,
+        LogicalRegion par, const std::set<FieldID> &fields)
+      : context(ctx), upper_bound(upper), launch_bounds(launch),
+        privilege_fields(fields.begin(), fields.end()), parent(par),
+        pid(0), detached(false)
+    //--------------------------------------------------------------------------
+    {
+      regions.resize(num_regions);
+      upper_bound->add_base_resource_ref(PHYSICAL_REGION_REF);
+      launch_bounds->add_base_resource_ref(PHYSICAL_REGION_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResourcesImpl::ExternalResourcesImpl(
+                                               const ExternalResourcesImpl &rhs)
+      : context(rhs.context), upper_bound(rhs.upper_bound),
+        launch_bounds(rhs.launch_bounds), 
+        privilege_fields(rhs.privilege_fields), parent(rhs.parent)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResourcesImpl::~ExternalResourcesImpl(void)
+    //--------------------------------------------------------------------------
+    {
+      if (upper_bound->remove_base_resource_ref(PHYSICAL_REGION_REF))
+        delete upper_bound;
+      if (launch_bounds->remove_base_resource_ref(PHYSICAL_REGION_REF))
+        delete launch_bounds;
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResourcesImpl& ExternalResourcesImpl::operator=(
+                                               const ExternalResourcesImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ExternalResourcesImpl::size(void) const
+    //--------------------------------------------------------------------------
+    {
+      return regions.size();
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalResourcesImpl::set_region(unsigned index, 
+                                           PhysicalRegionImpl *region)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < regions.size());
+      assert(regions[index].impl == NULL);
+#endif
+      regions[index] = PhysicalRegion(region);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion ExternalResourcesImpl::get_region(unsigned index) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < regions.size());
+#endif
+      return regions[index];
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalResourcesImpl::set_projection(ProjectionID id)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(pid == 0);
+#endif
+      pid = id;
+    }
+
+    //--------------------------------------------------------------------------
+    Future ExternalResourcesImpl::detach(InnerContext *ctx, IndexDetachOp *op,
+                                         const bool flush, const bool unordered)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx != context)
+        REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_DETACH,
+            "Attempted detach of external resources in context of task %s "
+            "(UID %lld). Detach of external resources must always be performed "
+            "in the the context of the task in which they are attached.",
+            ctx->get_task_name(), ctx->get_unique_id())
+      if (detached)
+        REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_DETACH,
+            "Duplicate detach of external resources performed in task %s "
+            "(UID %lld). External resources should only be detached once.",
+            ctx->get_task_name(), ctx->get_unique_id())
+      detached = true;
+      // Unmap any mapped regions
+      for (std::vector<PhysicalRegion>::iterator it =
+            regions.begin(); it != regions.end(); it++)
+      {
+        if (!it->impl->is_mapped())
+          continue;
+        it->impl->unmap_region();
+        ctx->unregister_inline_mapped_region(*it);
+      }
+      // Now initialize the detach operation
+      return op->initialize_detach(ctx, parent, upper_bound, launch_bounds,
+                        this, privilege_fields, regions, flush, unordered);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Grant Impl 
     /////////////////////////////////////////////////////////////
 
@@ -11803,6 +11923,20 @@ namespace Legion {
         delete (*it);
       }
       available_detach_ops.clear();
+      for (std::deque<IndexDetachOp*>::const_iterator it = 
+            available_index_detach_ops.begin(); it !=
+            available_index_detach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_index_detach_ops.clear();
+      for (std::deque<PointDetachOp*>::const_iterator it = 
+            available_point_detach_ops.begin(); it !=
+            available_point_detach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_point_detach_ops.clear();
       for (std::deque<TimingOp*>::const_iterator it = 
             available_timing_ops.begin(); it != 
             available_timing_ops.end(); it++)
@@ -20867,6 +21001,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexDetachOp* Runtime::get_available_index_detach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(detach_op_lock, available_index_detach_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    PointDetachOp* Runtime::get_available_point_detach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(detach_op_lock, available_point_detach_ops);
+    }
+
+    //--------------------------------------------------------------------------
     TimingOp* Runtime::get_available_timing_op(void)
     //--------------------------------------------------------------------------
     {
@@ -21202,6 +21350,22 @@ namespace Legion {
     {
       AutoLock d_lock(detach_op_lock);
       release_operation<false>(available_detach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_index_detach_op(IndexDetachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(detach_op_lock);
+      release_operation<false>(available_index_detach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_point_detach_op(PointDetachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(detach_op_lock);
+      release_operation<true>(available_point_detach_ops, op);
     }
 
     //--------------------------------------------------------------------------

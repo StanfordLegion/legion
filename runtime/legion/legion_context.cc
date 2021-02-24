@@ -6267,6 +6267,7 @@ namespace Legion {
                     IndexTreeNode *upper_bound, std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
+      
       std::map<IndexTreeNode*,std::vector<AttachProjection> >::iterator
         finder = attach_functions.find(upper_bound);
       if (finder != attach_functions.end())
@@ -6291,6 +6292,30 @@ namespace Legion {
       else // instantiate the entry in the map
         finder = attach_functions.insert(std::make_pair(upper_bound,
               std::vector<AttachProjection>())).first;
+      // If the upper bound is a partition, do a quick check to see if
+      // all the spaces are immediate children of the upper bound, if
+      // so then we can use projection function 0
+      if (!upper_bound->is_index_space_node())
+      {
+        bool all_children = true;
+        IndexPartNode *parent = upper_bound->as_index_part_node();
+        for (std::vector<IndexSpace>::const_iterator it =
+              spaces.begin(); it != spaces.end(); it++)
+        {
+          IndexSpaceNode *child = runtime->forest->get_node(*it);
+          if (child->parent == parent)
+            continue;
+          all_children = false;
+          break;
+        }
+        if (all_children)
+        {
+          // We can use the identity projection in this case
+          finder->second.push_back(AttachProjection(0/*identity*/));
+          finder->second.back().handles.swap(spaces);
+          return 0;
+        }
+      }
       // If we get here then we need to make it
       // Generate a fresh dynamic ID and store it
       const ProjectionID result =
@@ -6318,6 +6343,20 @@ namespace Legion {
       }
       DetachOp *op = runtime->get_available_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
+      add_to_dependence_queue(op, unordered);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future InnerContext::detach_resources(ExternalResources resources,
+                                         const bool flush, const bool unordered)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (resources.impl == NULL)
+        return Future();
+      IndexDetachOp *op = runtime->get_available_index_detach_op();
+      Future result = resources.impl->detach(this, op, flush, unordered);
       add_to_dependence_queue(op, unordered);
       return result;
     }
@@ -11536,6 +11575,17 @@ namespace Legion {
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
         "Illegal detach resource operation performed in leaf "
+                      "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
+    Future LeafContext::detach_resources(ExternalResources resources,
+                                         const bool flush, const bool unordered)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
+        "Illegal index detach resource operation performed in leaf "
                       "task %s (ID %lld)", get_task_name(), get_unique_id())
       return Future();
     }

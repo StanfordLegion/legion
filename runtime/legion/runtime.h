@@ -511,7 +511,10 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = EXTERNAL_RESOURCES_ALLOC;
     public:
-      ExternalResourcesImpl(InnerContext *context, size_t num_regions);
+      ExternalResourcesImpl(InnerContext *context, size_t num_regions,
+                            RegionTreeNode *upper, IndexSpaceNode *launch,
+                            LogicalRegion parent,
+                            const std::set<FieldID> &privilege_fields);
       ExternalResourcesImpl(const ExternalResourcesImpl &rhs);
       ~ExternalResourcesImpl(void);
     public:
@@ -520,6 +523,21 @@ namespace Legion {
       size_t size(void) const;
       void set_region(unsigned index, PhysicalRegionImpl *region);
       PhysicalRegion get_region(unsigned index) const;
+      void set_projection(ProjectionID pid);
+      inline ProjectionID get_projection(void) const { return pid; }
+      Future detach(InnerContext *context, IndexDetachOp *op, 
+                    const bool flush, const bool unordered);
+    public:
+      InnerContext *const context;
+      // Save these for when we go to do the detach
+      RegionTreeNode *const upper_bound;
+      IndexSpaceNode *const launch_bounds;
+      const std::vector<FieldID> privilege_fields;
+      const LogicalRegion parent;
+    protected:
+      std::vector<PhysicalRegion> regions;
+      ProjectionID pid;
+      bool detached;
     };
 
     /**
@@ -2936,6 +2954,8 @@ namespace Legion {
       IndexAttachOp*        get_available_index_attach_op(void);
       PointAttachOp*        get_available_point_attach_op(void);
       DetachOp*             get_available_detach_op(void);
+      IndexDetachOp*        get_available_index_detach_op(void);
+      PointDetachOp*        get_available_point_detach_op(void);
       TimingOp*             get_available_timing_op(void);
       AllReduceOp*          get_available_all_reduce_op(void);
     public:
@@ -2977,6 +2997,8 @@ namespace Legion {
       void free_index_attach_op(IndexAttachOp *op);
       void free_point_attach_op(PointAttachOp *op);
       void free_detach_op(DetachOp *op);
+      void free_index_detach_op(IndexDetachOp *op);
+      void free_point_detach_op(PointDetachOp *op);
       void free_timing_op(TimingOp *op);
       void free_all_reduce_op(AllReduceOp *op);
     public:
@@ -3362,6 +3384,8 @@ namespace Legion {
       std::deque<IndexAttachOp*>        available_index_attach_ops;
       std::deque<PointAttachOp*>        available_point_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
+      std::deque<IndexDetachOp*>        available_index_detach_ops;
+      std::deque<PointDetachOp*>        available_point_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
       std::deque<AllReduceOp*>          available_all_reduce_ops;
 #ifdef DEBUG_LEGION
