@@ -739,7 +739,8 @@ namespace Legion {
      * on every node in the machine. The virtual manager class will
      * represent all the virtual virtual/composite instances.
      */
-    class VirtualManager : public InstanceManager {
+    class VirtualManager : public InstanceManager,
+                           public LegionHeapify<VirtualManager> {
     public:
       VirtualManager(Runtime *runtime, DistributedID did, 
                      LayoutDescription *layout);

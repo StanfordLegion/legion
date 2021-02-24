@@ -43,6 +43,7 @@ list(APPEND REALM_TESTS
   memspeed
   coverings
   alltoall
+  simple_reduce
   )
 
 if(Legion_USE_CUDA)

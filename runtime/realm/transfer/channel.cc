@@ -23,6 +23,7 @@
 #include "realm/transfer/channel.h"
 #include "realm/transfer/channel_disk.h"
 #include "realm/transfer/transfer.h"
+#include "realm/transfer/lowlevel_dma.h"
 #include "realm/utils.h"
 
 #include <algorithm>
@@ -35,16 +36,7 @@ namespace Realm {
     Logger log_request("request");
     Logger log_xd("xd");
 
-      // TODO: currently we use dma_all_gpus to track the set of GPU* created
-#ifdef REALM_USE_CUDA
-      std::vector<Cuda::GPU*> dma_all_gpus;
-#endif
-      // we use a single queue for all xferDes
-      XferDesQueue *xferDes_queue = 0;
-
-      // we use a single manager to organize all channels
-      static ChannelManager *channel_manager = 0;
-
+  
   // fast memcpy stuff - uses std::copy instead of memcpy to communicate
   //  alignment guarantees to the compiler
   template <typename T>
@@ -675,18 +667,23 @@ namespace Realm {
   }
 
 
-      XferDes::XferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+      XferDes::XferDes(uintptr_t _dma_op, Channel *_channel,
+		       NodeID _launch_node, XferDesID _guid,
 		       const std::vector<XferDesPortInfo>& inputs_info,
 		       const std::vector<XferDesPortInfo>& outputs_info,
-		       bool _mark_start,
-		       uint64_t _max_req_size, int _priority,
-		       XferDesFence* _complete_fence)
-        : dma_request(_dma_request), mark_start(_mark_start), launch_node(_launch_node),
+		       int _priority,
+                       const void *_fill_data, size_t _fill_size)
+        : dma_op(_dma_op),
+	  xferDes_queue(XferDesQueue::get_singleton()),
+	  launch_node(_launch_node),
 	  iteration_completed(false),
 	  transfer_completed(false),
-          max_req_size(_max_req_size), priority(_priority),
+          max_req_size(16 << 20 /*TO REMOVE*/), priority(_priority),
           guid(_guid),
-          channel(NULL), complete_fence(_complete_fence),
+          channel(_channel),
+          fill_data(&inline_fill_storage),
+          fill_size(_fill_size),
+          orig_fill_size(_fill_size),
 	  progress_counter(0), reference_count(1)
       {
 	input_ports.resize(inputs_info.size());
@@ -793,6 +790,14 @@ namespace Realm {
 	  output_control.remaining_count = size_t(-1);
 	  output_control.eos_received = false;
 	}
+
+        // allocate a larger buffer if needed for fill data
+        if(fill_size > ALIGNED_FILL_STORAGE_SIZE) {
+          fill_data = malloc(fill_size);
+          assert(fill_data);
+        }
+        if(fill_size > 0)
+          memcpy(fill_data, _fill_data, fill_size);
       }
 
       XferDes::~XferDes() {
@@ -808,6 +813,9 @@ namespace Realm {
 	    it != output_ports.end();
 	    ++it)
 	  delete it->iter;
+
+        if(fill_data != &inline_fill_storage)
+          free(fill_data);
       };
 
       Event XferDes::request_metadata()
@@ -835,17 +843,18 @@ namespace Realm {
 	    it != input_ports.end();
 	    ++it)
 	  if(it->ib_size > 0)
-	    free_intermediate_buffer(dma_request,
-				     it->mem->me,
+	    free_intermediate_buffer(it->mem->me,
 				     it->ib_offset,
 				     it->ib_size);
 
         // notify owning DmaRequest upon completion of this XferDes
         //printf("complete XD = %lu\n", guid);
         if (launch_node == Network::my_node_id) {
-          complete_fence->mark_finished(true/*successful*/);
+	  TransferOperation *op = reinterpret_cast<TransferOperation *>(dma_op);
+	  op->notify_xd_completion(guid);
         } else {
-          NotifyXferDesCompleteMessage::send_request(launch_node, complete_fence);
+	  TransferOperation *op = reinterpret_cast<TransferOperation *>(dma_op);
+	  NotifyXferDesCompleteMessage::send_request(launch_node, op, guid);
         }
       }
 
@@ -1054,14 +1063,15 @@ namespace Realm {
     return max_bytes;
   }
 
-  bool XferDes::record_address_consumption(size_t total_bytes)
+  bool XferDes::record_address_consumption(size_t total_read_bytes,
+                                           size_t total_write_bytes)
   {
     bool in_done = false;
     if(input_control.current_io_port >= 0) {
       XferPort *in_port = &input_ports[input_control.current_io_port];
 
-      in_port->local_bytes_total += total_bytes;
-      in_port->local_bytes_cons.fetch_add(total_bytes);
+      in_port->local_bytes_total += total_read_bytes;
+      in_port->local_bytes_cons.fetch_add(total_read_bytes);
 
       if(in_port->peer_guid == XFERDES_NO_GUID)
 	in_done = ((in_port->addrlist.bytes_pending() == 0) &&
@@ -1075,16 +1085,16 @@ namespace Realm {
     if(output_control.current_io_port >= 0) {
       XferPort *out_port = &output_ports[output_control.current_io_port];
 
-      out_port->local_bytes_total += total_bytes;
-      out_port->local_bytes_cons.fetch_add(total_bytes);
+      out_port->local_bytes_total += total_write_bytes;
+      out_port->local_bytes_cons.fetch_add(total_write_bytes);
 
       if(out_port->peer_guid == XFERDES_NO_GUID)
 	out_done = ((out_port->addrlist.bytes_pending() == 0) &&
 		    out_port->iter->done());
     }
 	  
-    input_control.remaining_count -= total_bytes;
-    output_control.remaining_count -= total_bytes;
+    input_control.remaining_count -= total_read_bytes;
+    output_control.remaining_count -= total_write_bytes;
 
     // input or output controls override our notion of done-ness
     if(input_control.control_port_idx >= 0)
@@ -1102,6 +1112,35 @@ namespace Realm {
       return false;
   }
 
+  void XferDes::replicate_fill_data(size_t new_size)
+  {
+    if(new_size > fill_size) {
+#ifdef DEBUG_REALM
+      assert((fill_size > 0) && ((new_size % orig_fill_size) == 0));
+#endif
+      char *new_fill_data;
+      if(new_size > ALIGNED_FILL_STORAGE_SIZE) {
+        new_fill_data = (char *)malloc(new_size);
+        assert(new_fill_data);
+        memcpy(new_fill_data, fill_data, fill_size /*old size*/);
+      } else {
+        // can still fit in the inline storage, so no bootstrap copy needed
+        new_fill_data = (char *)&inline_fill_storage;
+      }
+      do {
+        // can't increase by more than 2x per copy
+        size_t to_copy = std::min(new_size - fill_size, fill_size);
+        memcpy(new_fill_data + fill_size, new_fill_data, to_copy);
+        fill_size += to_copy;
+      } while(fill_size < new_size);
+
+      // delete old buffer, if it was allocated
+      if(fill_data != &inline_fill_storage)
+        free(fill_data);
+
+      fill_data = new_fill_data;
+    }
+  }
 
     long XferDes::default_get_requests(Request** reqs, long nr,
 				       unsigned flags)
@@ -2253,6 +2292,20 @@ namespace Realm {
 	if(inc_amt > 0) update_progress();
       }
 
+      void XferDes::notify_request_read_done(Request* req)
+      {
+        default_notify_request_read_done(req);
+      }
+
+      void XferDes::notify_request_write_done(Request* req)
+      {
+        default_notify_request_write_done(req);
+      }
+
+      void XferDes::flush()
+      {
+      }
+
       void XferDes::default_notify_request_read_done(Request* req)
       {  
         req->is_read_done = true;
@@ -2285,20 +2338,22 @@ namespace Realm {
         enqueue_request(req);
       }
 
-      MemcpyXferDes::MemcpyXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemcpyXferDes
+  //
+
+      MemcpyXferDes::MemcpyXferDes(uintptr_t _dma_op, Channel *_channel,
+				   NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
-				   bool _mark_start,
-				   uint64_t _max_req_size, long max_nr, int _priority,
-				   XferDesFence* _complete_fence)
-	: XferDes(_dma_request, _launch_node, _guid,
+				   int _priority)
+	: XferDes(_dma_op, _channel, _launch_node, _guid,
 		  inputs_info, outputs_info,
-		  _mark_start,
-		  _max_req_size, _priority,
-		  _complete_fence)
+		  _priority, 0, 0)
 	, memcpy_req_in_use(false)
       {
-        channel = channel_manager->get_memcpy_channel();
 	kind = XFER_MEM_CPY;
 
 	// scan input and output ports to see if any use serdez ops
@@ -2658,7 +2713,7 @@ namespace Realm {
 			     out_span_start, total_bytes);
 	  out_span_start += total_bytes;
 
-	  bool done = record_address_consumption(total_bytes);
+	  bool done = record_address_consumption(total_bytes, total_bytes);
 
 	  did_work = true;
 
@@ -2673,29 +2728,397 @@ namespace Realm {
       }
 
 
-      GASNetXferDes::GASNetXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemfillXferDes
+  //
+
+  MemfillXferDes::MemfillXferDes(uintptr_t _dma_op, Channel *_channel,
+				 NodeID _launch_node, XferDesID _guid,
+				 const std::vector<XferDesPortInfo>& inputs_info,
+				 const std::vector<XferDesPortInfo>& outputs_info,
+				 int _priority,
+				 const void *_fill_data, size_t _fill_size)
+	: XferDes(_dma_op, _channel, _launch_node, _guid,
+		  inputs_info, outputs_info,
+		  _priority, _fill_data, _fill_size)
+      {
+	kind = XFER_MEM_FILL;
+
+	// no direct input data for us
+	assert(input_control.control_port_idx == -1);
+	input_control.current_io_port = -1;
+      }
+
+      long MemfillXferDes::get_requests(Request** requests, long nr)
+      {
+	// unused
+	assert(0);
+	return 0;
+      }
+
+      bool MemfillXferDes::request_available()
+      {
+	// unused
+	assert(0);
+	return false;
+      }
+
+      Request* MemfillXferDes::dequeue_request()
+      {
+	// unused
+	assert(0);
+	return 0;
+      }
+
+      void MemfillXferDes::enqueue_request(Request* req)
+      {
+	// unused
+	assert(0);
+      }
+
+      bool MemfillXferDes::progress_xd(MemfillChannel *channel,
+				      TimeLimit work_until)
+      {
+	bool did_work = false;
+	ReadSequenceCache rseqcache(this, 2 << 20);
+	WriteSequenceCache wseqcache(this, 2 << 20);
+
+	while(true) {
+	  size_t min_xfer_size = 4096;  // TODO: make controllable
+	  size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
+	  if(max_bytes == 0)
+	    break;
+
+	  XferPort *out_port = 0;
+	  size_t out_span_start = 0;
+	  if(output_control.current_io_port >= 0) {
+	    out_port = &output_ports[output_control.current_io_port];
+	    out_span_start = out_port->local_bytes_total;
+	  }
+
+	  size_t total_bytes = 0;
+	  if(out_port != 0) {
+	    // input and output both exist - transfer what we can
+	    log_xd.info() << "memfill chunk: min=" << min_xfer_size
+			  << " max=" << max_bytes;
+
+	    uintptr_t out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+
+	    while(total_bytes < max_bytes) {
+	      AddressListCursor& out_alc = out_port->addrcursor;
+
+	      uintptr_t out_offset = out_alc.get_offset();
+
+	      // the reported dim is reduced for partially consumed address
+	      //  ranges - whatever we get can be assumed to be regular
+	      int out_dim = out_alc.get_dim();
+
+	      size_t bytes = 0;
+	      size_t bytes_left = max_bytes - total_bytes;
+	      // memfills don't need to be particularly big to achieve
+	      //  peak efficiency, so trim to something that takes
+	      //  10's of us to be responsive to the time limit
+              // NOTE: have to be a little careful and make sure the limit
+              //  is a multiple of the fill size - we'll make it a power-of-2
+              const size_t TARGET_CHUNK_SIZE = 256 << 10; // 256KB
+              if(bytes_left > TARGET_CHUNK_SIZE) {
+                size_t max_chunk = fill_size;
+                while(max_chunk < TARGET_CHUNK_SIZE) max_chunk <<= 1;
+                bytes_left = std::min(bytes_left, max_chunk);
+              }
+
+	      if(out_dim > 0) {
+		size_t ocount = out_alc.remaining(0);
+
+		// contig bytes is always the first dimension
+		size_t contig_bytes = std::min(ocount, bytes_left);
+
+		// catch simple 1D case first
+		if((contig_bytes == bytes_left) ||
+		   ((contig_bytes == ocount) && (out_dim == 1))) {
+		  bytes = contig_bytes;
+		  // we only have one element worth of data, so fill
+		  //  multiple elements by using a "2d" copy with a
+		  //  source stride of 0
+		  size_t repeat_count = contig_bytes / fill_size;
+#ifdef DEBUG_REALM
+		  assert((contig_bytes % fill_size) == 0);
+#endif
+		  memcpy_2d(out_base + out_offset, fill_size,
+			    reinterpret_cast<uintptr_t>(fill_data), 0,
+			    fill_size, repeat_count);
+		  out_alc.advance(0, bytes);
+		} else {
+		  // grow to a 2D fill
+		  ocount = out_alc.remaining(1);
+		  uintptr_t out_lstride = out_alc.get_stride(1);
+
+		  size_t lines = std::min(ocount,
+					  bytes_left / contig_bytes);
+
+		  bytes = contig_bytes * lines;
+		  // we only have one element worth of data, so 2d fill
+		  //  multiple elements by using a "3d" copy with a
+		  //  source stride of 0
+		  size_t repeat_count = contig_bytes / fill_size;
+#ifdef DEBUG_REALM
+		  assert((contig_bytes % fill_size) == 0);
+#endif
+		  memcpy_3d(out_base + out_offset, fill_size, out_lstride,
+			    reinterpret_cast<uintptr_t>(fill_data), 0, 0,
+			    fill_size, repeat_count, lines);
+		  out_alc.advance(1, lines);
+		}
+	      } else {
+		// scatter adddress list
+		assert(0);
+	      }
+
+#ifdef DEBUG_REALM
+	      assert(bytes <= bytes_left);
+#endif
+	      total_bytes += bytes;
+
+	      // stop if it's been too long, but make sure we do at least the
+	      //  minimum number of bytes
+	      if((total_bytes >= min_xfer_size) && work_until.is_expired()) break;
+	    }
+	  } else {
+	    // fill with no output, so just count the bytes
+	    total_bytes = max_bytes;
+	  }
+
+	  // mem fill is always immediate, so handle both skip and copy with
+	  //  the same code
+	  wseqcache.add_span(output_control.current_io_port,
+			     out_span_start, total_bytes);
+	  out_span_start += total_bytes;
+
+	  bool done = record_address_consumption(total_bytes, total_bytes);
+
+	  did_work = true;
+
+	  if(done || work_until.is_expired())
+	    break;
+	}
+
+	rseqcache.flush();
+	wseqcache.flush();
+
+	return did_work;
+      }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemfillXferDes
+  //
+
+      MemreduceXferDes::MemreduceXferDes(uintptr_t _dma_op, Channel *_channel,
+                                         NodeID _launch_node, XferDesID _guid,
+                                         const std::vector<XferDesPortInfo>& inputs_info,
+                                         const std::vector<XferDesPortInfo>& outputs_info,
+                                         int _priority,
+                                         XferDesRedopInfo _redop_info)
+	: XferDes(_dma_op, _channel, _launch_node, _guid,
+		  inputs_info, outputs_info,
+		  _priority, 0, 0)
+        , redop_info(_redop_info)
+      {
+	kind = XFER_MEM_CPY;
+        redop = get_runtime()->reduce_op_table.get(redop_info.id, 0);
+        assert(redop);
+      }
+
+      long MemreduceXferDes::get_requests(Request** requests, long nr)
+      {
+	// unused
+	assert(0);
+	return 0;
+      }
+
+      bool MemreduceXferDes::progress_xd(MemreduceChannel *channel,
+				      TimeLimit work_until)
+      {
+	bool did_work = false;
+	ReadSequenceCache rseqcache(this, 2 << 20);  // flush after 2MB
+	WriteSequenceCache wseqcache(this, 2 << 20);
+
+        const size_t in_elem_size = redop->sizeof_rhs;
+        const size_t out_elem_size = (redop_info.is_fold ? redop->sizeof_rhs : redop->sizeof_lhs);
+        assert(redop_info.in_place);  // TODO: support for out-of-place reduces
+
+	while(true) {
+	  size_t min_xfer_size = 4096;  // TODO: make controllable
+	  size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
+	  if(max_bytes == 0)
+	    break;
+
+	  XferPort *in_port = 0, *out_port = 0;
+	  size_t in_span_start = 0, out_span_start = 0;
+	  if(input_control.current_io_port >= 0) {
+	    in_port = &input_ports[input_control.current_io_port];
+	    in_span_start = in_port->local_bytes_total;
+	  }
+	  if(output_control.current_io_port >= 0) {
+	    out_port = &output_ports[output_control.current_io_port];
+	    out_span_start = out_port->local_bytes_total;
+	  }
+
+          // have to count in terms of elements, which requires redoing some math
+          //  if in/out sizes do not match
+          size_t max_elems;
+          if(in_elem_size == out_elem_size) {
+            max_elems = max_bytes / in_elem_size;
+          } else {
+            max_elems = std::min(input_control.remaining_count / in_elem_size,
+                                 output_control.remaining_count / out_elem_size);
+            if(in_port != 0)
+              max_elems = std::min(max_elems,
+                                   in_port->addrlist.bytes_pending() / in_elem_size);
+            if(out_port != 0)
+              max_elems = std::min(max_elems,
+                                   out_port->addrlist.bytes_pending() / out_elem_size);
+          }
+
+	  size_t total_elems = 0;
+	  if(in_port != 0) {
+	    if(out_port != 0) {
+	      // input and output both exist - transfer what we can
+	      log_xd.info() << "memreduce chunk: min=" << min_xfer_size
+			    << " max_elems=" << max_elems;
+
+	      uintptr_t in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
+	      uintptr_t out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+
+	      while(total_elems < max_elems) {
+		AddressListCursor& in_alc = in_port->addrcursor;
+		AddressListCursor& out_alc = out_port->addrcursor;
+
+		uintptr_t in_offset = in_alc.get_offset();
+		uintptr_t out_offset = out_alc.get_offset();
+
+		// the reported dim is reduced for partially consumed address
+		//  ranges - whatever we get can be assumed to be regular
+		int in_dim = in_alc.get_dim();
+		int out_dim = out_alc.get_dim();
+
+                // the current reduction op interface can reduce multiple elements
+                //  with a fixed address stride, which looks to us like either
+                //  1D (stride = elem_size), or 2D with 1 elem/line
+
+                size_t icount = in_alc.remaining(0) / in_elem_size;
+                size_t ocount = out_alc.remaining(0) / out_elem_size;
+                size_t istride, ostride;
+                if((in_dim > 1) && (icount == 1)) {
+                  in_dim = 2;
+                  icount = in_alc.remaining(1);
+                  istride = in_alc.get_stride(1);
+                } else {
+                  in_dim = 1;
+                  istride = in_elem_size;
+                }
+                if((out_dim > 1) && (ocount == 1)) {
+                  out_dim = 2;
+                  ocount = out_alc.remaining(1);
+                  ostride = out_alc.get_stride(1);
+                } else {
+                  out_dim = 1;
+                  ostride = out_elem_size;
+                }
+
+		size_t elems_left = max_elems - total_elems;
+                size_t elems = std::min(std::min(icount, ocount), elems_left);
+                assert(elems > 0);
+
+                void *out_ptr = reinterpret_cast<void *>(out_base + out_offset);
+                const void *in_ptr = reinterpret_cast<const void *>(in_base + in_offset);
+                if(redop_info.is_fold)
+                  redop->fold_strided(out_ptr, in_ptr,
+                                      ostride, istride,
+                                      elems, false /*!exclusive*/);
+                else
+                  redop->apply_strided(out_ptr, in_ptr,
+                                       ostride, istride,
+                                       elems, false /*!exclusive*/);
+
+                in_alc.advance(in_dim-1,
+                               elems * ((in_dim == 1) ? in_elem_size : 1));
+                out_alc.advance(out_dim-1,
+                                elems * ((out_dim == 1) ? out_elem_size : 1));
+
+#ifdef DEBUG_REALM
+		assert(elems <= elems_left);
+#endif
+		total_elems += elems;
+
+		// stop if it's been too long, but make sure we do at least the
+		//  minimum number of bytes
+		if(((total_elems * in_elem_size) >= min_xfer_size) &&
+                   work_until.is_expired()) break;
+	      }
+	    } else {
+	      // input but no output, so skip input bytes
+              total_elems = max_elems;
+	      in_port->addrcursor.skip_bytes(total_elems * in_elem_size);
+	    }
+	  } else {
+	    if(out_port != 0) {
+	      // output but no input, so skip output bytes
+              total_elems = max_elems;
+	      out_port->addrcursor.skip_bytes(total_elems * out_elem_size);
+	    } else {
+	      // skipping both input and output is possible for simultaneous
+	      //  gather+scatter
+              total_elems = max_elems;
+	    }
+	  }
+
+	  // memcpy is always immediate, so handle both skip and copy with the
+	  //  same code
+	  rseqcache.add_span(input_control.current_io_port,
+			     in_span_start, total_elems * in_elem_size);
+	  in_span_start += total_elems * in_elem_size;
+	  wseqcache.add_span(output_control.current_io_port,
+			     out_span_start, total_elems * out_elem_size);
+	  out_span_start += total_elems * out_elem_size;
+
+	  bool done = record_address_consumption(total_elems * in_elem_size,
+                                                 total_elems * out_elem_size);
+
+	  did_work = true;
+
+	  if(done || work_until.is_expired())
+	    break;
+	}
+
+	rseqcache.flush();
+	wseqcache.flush();
+
+	return did_work;
+      }
+
+
+      GASNetXferDes::GASNetXferDes(uintptr_t _dma_op, Channel *_channel,
+				   NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
-				   bool _mark_start,
-				   uint64_t _max_req_size, long max_nr, int _priority,
-				   XferDesFence* _complete_fence)
-	: XferDes(_dma_request, _launch_node, _guid,
+				   int _priority)
+	: XferDes(_dma_op, _channel, _launch_node, _guid,
 		  inputs_info, outputs_info,
-		  _mark_start,
-		  _max_req_size, _priority,
-		  _complete_fence)
+		  _priority, 0, 0)
       {
 	if((inputs_info.size() >= 1) &&
 	   (input_ports[0].mem->kind == MemoryImpl::MKIND_GLOBAL)) {
 	  kind = XFER_GASNET_READ;
-	  channel = get_channel_manager()->get_gasnet_read_channel();
 	} else if((outputs_info.size() >= 1) &&
 		  (output_ports[0].mem->kind == MemoryImpl::MKIND_GLOBAL)) {
 	  kind = XFER_GASNET_WRITE;
-	  channel = get_channel_manager()->get_gasnet_write_channel();
 	} else {
 	  assert(0 && "neither source nor dest of GASNetXferDes is gasnet!?");
 	}
+	const int max_nr = 10; // FIXME
         gasnet_reqs = (GASNetRequest*) calloc(max_nr, sizeof(GASNetRequest));
         for (int i = 0; i < max_nr; i++) {
           gasnet_reqs[i].xd = this;
@@ -2767,26 +3190,25 @@ namespace Realm {
       {
       }
 
-      RemoteWriteXferDes::RemoteWriteXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+      RemoteWriteXferDes::RemoteWriteXferDes(uintptr_t _dma_op, Channel *_channel,
+					     NodeID _launch_node, XferDesID _guid,
 					     const std::vector<XferDesPortInfo>& inputs_info,
 					     const std::vector<XferDesPortInfo>& outputs_info,
-					     bool _mark_start,
-					     uint64_t _max_req_size, long max_nr, int _priority,
-					     XferDesFence* _complete_fence)
-      : XferDes(_dma_request, _launch_node, _guid,
-		inputs_info, outputs_info,
-		_mark_start,
-		_max_req_size, _priority,
-                _complete_fence)
+					     int _priority)
+	: XferDes(_dma_op, _channel, _launch_node, _guid,
+		  inputs_info, outputs_info,
+		  _priority, 0, 0)
       {
-        channel = channel_manager->get_remote_write_channel();
 	kind = XFER_REMOTE_WRITE;
+	requests = 0;
+#if 0
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
           //requests[i].dst_node = dst_node;
           available_reqs.push(&requests[i]);
         }
+#endif
       }
 
       long RemoteWriteXferDes::get_requests(Request** requests, long nr)
@@ -3173,7 +3595,7 @@ namespace Realm {
 	    }
 	  }
 
-	  bool done = record_address_consumption(total_bytes);
+	  bool done = record_address_consumption(total_bytes, total_bytes);
 
 	  did_work = true;
 
@@ -3238,10 +3660,10 @@ namespace Realm {
 
 	// if requested, notify (probably-local) next XD
 	if(args.next_xd_guid != XferDes::XFERDES_NO_GUID)
-	  xferDes_queue->update_pre_bytes_write(args.next_xd_guid,
-						args.next_port_idx,
-						args.span_start,
-						datalen);
+	  XferDesQueue::get_singleton()->update_pre_bytes_write(args.next_xd_guid,
+								args.next_port_idx,
+								args.span_start,
+								datalen);
       }
 
       /*static*/ bool RemoteWriteXferDes::Write1DMessage::handle_inline(NodeID sender,
@@ -3253,450 +3675,6 @@ namespace Realm {
 	handle_message(sender, args, data, datalen);
 	return true;
       }
-
-#ifdef REALM_USE_CUDA
-      GPUXferDes::GPUXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
-				   const std::vector<XferDesPortInfo>& inputs_info,
-				   const std::vector<XferDesPortInfo>& outputs_info,
-				   bool _mark_start,
-				   uint64_t _max_req_size, long max_nr, int _priority,
-				   XferDesFence* _complete_fence)
-	: XferDes(_dma_request, _launch_node, _guid,
-		  inputs_info, outputs_info,
-		  _mark_start,
-		  _max_req_size, _priority,
-		  _complete_fence)
-      {
-	if((inputs_info.size() >= 1) &&
-	   (input_ports[0].mem->kind == MemoryImpl::MKIND_GPUFB)) {
-	  // all input ports should agree on which gpu they target
-	  src_gpu = ((Cuda::GPUFBMemory*)(input_ports[0].mem))->gpu;
-	  for(size_t i = 1; i < input_ports.size(); i++) {
-	    // exception: control and indirect ports should be readable from cpu
-	    if((int(i) == input_control.control_port_idx) ||
-	       (int(i) == output_control.control_port_idx) ||
-	       input_ports[i].is_indirect_port) {
-	      assert((input_ports[i].mem->kind == MemoryImpl::MKIND_SYSMEM) ||
-		     (input_ports[i].mem->kind == MemoryImpl::MKIND_ZEROCOPY));
-	      continue;
-	    }
-	    assert(input_ports[i].mem == input_ports[0].mem);
-	  }
-	} else
-	  src_gpu = 0;
-
-	if((outputs_info.size() >= 1) &&
-	   (output_ports[0].mem->kind == MemoryImpl::MKIND_GPUFB)) {
-	  // all output ports should agree on which gpu they target
-	  dst_gpu = ((Cuda::GPUFBMemory*)(output_ports[0].mem))->gpu;
-	  for(size_t i = 1; i < output_ports.size(); i++)
-	    assert(output_ports[i].mem == output_ports[0].mem);
-	} else
-	  dst_gpu = 0;
-
-	// if we're doing a multi-hop copy, we'll dial down the request
-	//  sizes to improve pipelining
-	bool multihop_copy = false;
-	for(size_t i = 1; i < input_ports.size(); i++)
-	  if(input_ports[i].peer_guid != XFERDES_NO_GUID)
-	    multihop_copy = true;
-	for(size_t i = 1; i < output_ports.size(); i++)
-	  if(output_ports[i].peer_guid != XFERDES_NO_GUID)
-	    multihop_copy = true;
-
-	if(src_gpu != 0) {
-	  if(dst_gpu != 0) {
-	    if(src_gpu == dst_gpu) {
-	      kind = XFER_GPU_IN_FB;
-	      channel = channel_manager->get_gpu_in_fb_channel(src_gpu);
-	      // ignore max_req_size value passed in - it's probably too small
-	      max_req_size = 1 << 30;
-	    } else {
-	      kind = XFER_GPU_PEER_FB;
-	      channel = channel_manager->get_gpu_peer_fb_channel(src_gpu);
-	      // ignore max_req_size value passed in - it's probably too small
-	      max_req_size = 256 << 20;
-	    }
-	  } else {
-	    kind = XFER_GPU_FROM_FB;
-	    channel = channel_manager->get_gpu_from_fb_channel(src_gpu);
-	    if(multihop_copy)
-	      max_req_size = 4 << 20;
-	  }
-	} else {
-	  if(dst_gpu != 0) {
-	    kind = XFER_GPU_TO_FB;
-	    channel = channel_manager->get_gpu_to_fb_channel(dst_gpu);
-	    if(multihop_copy)
-	      max_req_size = 4 << 20;
-	  } else {
-	    assert(0);
-	  }
-	}
-
-        for (int i = 0; i < max_nr; i++) {
-          GPURequest* gpu_req = new GPURequest;
-          gpu_req->xd = this;
-	  gpu_req->event.req = gpu_req;
-          available_reqs.push(gpu_req);
-        }
-      }
-	
-      long GPUXferDes::get_requests(Request** requests, long nr)
-      {
-        GPURequest** reqs = (GPURequest**) requests;
-	// TODO: add support for 3D CUDA copies (just 1D and 2D for now)
-	unsigned flags = (TransferIterator::LINES_OK |
-			  TransferIterator::PLANES_OK);
-        long new_nr = default_get_requests(requests, nr, flags);
-        for (long i = 0; i < new_nr; i++) {
-          switch (kind) {
-            case XFER_GPU_TO_FB:
-            {
-              //reqs[i]->src_base = src_buf_base + reqs[i]->src_off;
-	      reqs[i]->src_base = input_ports[reqs[i]->src_port_idx].mem->get_direct_ptr(reqs[i]->src_off,
-											 reqs[i]->nbytes);
-	      assert(reqs[i]->src_base != 0);
-              //reqs[i]->dst_gpu_off = /*dst_buf.alloc_offset +*/ reqs[i]->dst_off;
-              break;
-            }
-            case XFER_GPU_FROM_FB:
-            {
-              //reqs[i]->src_gpu_off = /*src_buf.alloc_offset +*/ reqs[i]->src_off;
-              //reqs[i]->dst_base = dst_buf_base + reqs[i]->dst_off;
-	      reqs[i]->dst_base = output_ports[reqs[i]->dst_port_idx].mem->get_direct_ptr(reqs[i]->dst_off,
-											  reqs[i]->nbytes);
-	      assert(reqs[i]->dst_base != 0);
-              break;
-            }
-            case XFER_GPU_IN_FB:
-            {
-              //reqs[i]->src_gpu_off = /*src_buf.alloc_offset*/ + reqs[i]->src_off;
-              //reqs[i]->dst_gpu_off = /*dst_buf.alloc_offset*/ + reqs[i]->dst_off;
-              break;
-            }
-            case XFER_GPU_PEER_FB:
-            {
-              //reqs[i]->src_gpu_off = /*src_buf.alloc_offset +*/ reqs[i]->src_off;
-              //reqs[i]->dst_gpu_off = /*dst_buf.alloc_offset +*/ reqs[i]->dst_off;
-              // also need to set dst_gpu for peer xfer
-              reqs[i]->dst_gpu = dst_gpu;
-              break;
-            }
-            default:
-              assert(0);
-          }
-        }
-        return new_nr;
-      }
-
-      bool GPUXferDes::progress_xd(GPUChannel *channel,
-				   TimeLimit work_until)
-      {
-	Request *rq;
-	bool did_work = false;
-	do {
-	  long count = get_requests(&rq, 1);
-	  if(count > 0) {
-	    channel->submit(&rq, count);
-	    did_work = true;
-	  } else
-	    break;
-	} while(!work_until.is_expired());
-
-	return did_work;
-      }
-
-      void GPUXferDes::notify_request_read_done(Request* req)
-      {
-        default_notify_request_read_done(req);
-      }
-
-      void GPUXferDes::notify_request_write_done(Request* req)
-      {
-        default_notify_request_write_done(req);
-      }
-
-      void GPUXferDes::flush()
-      {
-      }
-#endif
-
-#ifdef REALM_USE_HDF5
-      HDF5XferDes::HDF5XferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
-			       const std::vector<XferDesPortInfo>& inputs_info,
-			       const std::vector<XferDesPortInfo>& outputs_info,
-			       bool _mark_start,
-			       uint64_t _max_req_size, long max_nr, int _priority,
-			       XferDesFence* _complete_fence)
-	: XferDes(_dma_request, _launch_node, _guid,
-		  inputs_info, outputs_info,
-		  _mark_start,
-		  _max_req_size, _priority,
-		  _complete_fence)
-	, req_in_use(false)
-      {
-	channel = get_channel_manager()->get_hdf5_channel();
-	if((inputs_info.size() >= 1) &&
-	   (input_ports[0].mem->kind == MemoryImpl::MKIND_HDF)) {
-	  kind = XFER_HDF5_READ;
-	} else if((outputs_info.size() >= 1) &&
-		  (output_ports[0].mem->kind == MemoryImpl::MKIND_HDF)) {
-	  kind = XFER_HDF5_WRITE;
-	} else {
-	  assert(0 && "neither source nor dest of HDFXferDes is hdf5!?");
-	}
-
-	hdf5_req.xd = this;
-      }
-
-      bool HDF5XferDes::request_available()
-      {
-	return !req_in_use;
-      }
-
-      Request* HDF5XferDes::dequeue_request()
-      {
-	assert(!req_in_use);
-	req_in_use = true;
-	hdf5_req.is_read_done = false;
-	hdf5_req.is_write_done = false;
-	// HDF5Request is handled by another thread, so must hold a reference
-	add_reference();
-        return &hdf5_req;
-      }
-
-      void HDF5XferDes::enqueue_request(Request* req)
-      {
-	assert(req_in_use);
-	assert(req == &hdf5_req);
-	req_in_use = false;
-	remove_reference();
-      }
-
-     extern Logger log_hdf5;
-
-      long HDF5XferDes::get_requests(Request** requests, long nr)
-      {
-        long idx = 0;
-	
-	while((idx < nr) && request_available()) {	  
-	  // TODO: use control stream to determine which input/output ports
-	  //  to use
-	  int in_port_idx = 0;
-	  int out_port_idx = 0;
-
-	  XferPort *in_port = &input_ports[in_port_idx];
-	  XferPort *out_port = &output_ports[out_port_idx];
-
-	  // is our iterator done?
-	  if(in_port->iter->done() || out_port->iter->done()) {
-	    // non-ib iterators should end at the same time
-	    assert((in_port->peer_guid != XFERDES_NO_GUID) || in_port->iter->done());
-	    assert((out_port->peer_guid != XFERDES_NO_GUID) || out_port->iter->done());
-	    iteration_completed.store_release(true);
-	    break;
-	  }
-
-	  // no support for serdez ops
-	  assert(in_port->serdez_op == 0);
-	  assert(out_port->serdez_op == 0);
-
-	  size_t max_bytes = max_req_size;
-
-	  // if we're not the first in the chain, and we know the total bytes
-	  //  written by the predecessor, don't exceed that
-	  if(in_port->peer_guid != XFERDES_NO_GUID) {
-	    size_t pre_max = in_port->remote_bytes_total.load() - in_port->local_bytes_total;
-	    if(pre_max == 0) {
-	      // due to unsynchronized updates to pre_bytes_total, this path
-	      //  can happen for an empty transfer reading from an intermediate
-	      //  buffer - handle it by looping around and letting the check
-	      //  at the top of the loop notice it the second time around
-	      if(in_port->local_bytes_total == 0)
-		continue;
-	      // otherwise, this shouldn't happen - we should detect this case
-	      //  on the the transfer of those last bytes
-	      assert(0);
-	      iteration_completed.store_release(true);
-	      break;
-	    }
-	    if(pre_max < max_bytes) {
-	      log_request.info() << "pred limits xfer: " << max_bytes << " -> " << pre_max;
-	      max_bytes = pre_max;
-	    }
-
-	    // further limit based on data that has actually shown up
-	    max_bytes = in_port->seq_remote.span_exists(in_port->local_bytes_total, max_bytes);
-	    if(max_bytes == 0)
-	      break;
-	  }
-
-	  // similarly, limit our max transfer size based on the amount the
-	  //  destination IB buffer can take (assuming there is an IB)
-	  if(out_port->peer_guid != XFERDES_NO_GUID) {
-	    max_bytes = out_port->seq_remote.span_exists(out_port->local_bytes_total, max_bytes);
-	    if(max_bytes == 0)
-	      break;
-	  }
-
-	  // HDF5 uses its own address info, instead of src/dst, we
-	  //  distinguish between hdf5 and mem
-	  TransferIterator *hdf5_iter = ((kind == XFER_HDF5_READ) ?
-					   in_port->iter :
-					   out_port->iter);
-	  TransferIterator *mem_iter = ((kind == XFER_HDF5_READ) ?
-					  out_port->iter :
-					  in_port->iter);
-
-	  TransferIterator::AddressInfo mem_info;
-	  TransferIterator::AddressInfoHDF5 hdf5_info;
-
-	  // always ask the HDF5 size for a step first
-	  size_t hdf5_bytes = hdf5_iter->step_hdf5(max_bytes, hdf5_info,
-						   true /*tentative*/);
-          if(hdf5_bytes == 0) {
-            // not enough space for even a single element - try again later
-            break;
-          }
-	  // TODO: support 2D/3D for memory side of an HDF transfer?
-	  size_t mem_bytes = mem_iter->step(hdf5_bytes, mem_info, 0,
-					    true /*tentative*/);
-	  if(mem_bytes == hdf5_bytes) {
-	    // looks good - confirm the steps
-	    hdf5_iter->confirm_step();
-	    mem_iter->confirm_step();
-	  } else {
-	    // cancel the hdf5 step and try to just step by mem_bytes
-	    assert(mem_bytes < hdf5_bytes);  // should never be larger
-	    hdf5_iter->cancel_step();
-	    hdf5_bytes = hdf5_iter->step_hdf5(mem_bytes, hdf5_info);
-	    // multi-dimensional hdf5 iterators may round down the size,
-	    //  so re-check the mem bytes
-	    if(hdf5_bytes == mem_bytes) {
-	      mem_iter->confirm_step();
-	    } else {
-	      mem_iter->cancel_step();
-	      mem_bytes = mem_iter->step(hdf5_bytes, mem_info, 0);
-	      // now must match
-	      assert(hdf5_bytes == mem_bytes);
-	    }
-	  }
-
-	  HDF5Request* new_req = (HDF5Request *)(dequeue_request());
-	  new_req->src_port_idx = in_port_idx;
-	  new_req->dst_port_idx = out_port_idx;
-	  new_req->dim = Request::DIM_1D;
-	  new_req->mem_base = ((kind == XFER_HDF5_READ) ?
-			         out_port->mem :
-			         in_port->mem)->get_direct_ptr(mem_info.base_offset,
-							       mem_info.bytes_per_chunk);
-	  // we'll open datasets on the first touch in this transfer
-	  // (TODO: pre-open at instance attach time, but in thread-safe way)
-	  HDF5::HDF5Dataset *dset;
-	  {
-	    std::map<FieldID, HDF5::HDF5Dataset *>::const_iterator it = datasets.find(hdf5_info.field_id);
-	    if(it != datasets.end()) {
-	      dset = it->second;
-	    } else {
-	      dset = HDF5::HDF5Dataset::open(hdf5_info.filename->c_str(),
-					     hdf5_info.dsetname->c_str(),
-					     (kind == XFER_HDF5_READ));
-	      assert(dset != 0);
-	      assert(hdf5_info.extent.size() == size_t(dset->ndims));
-	      datasets[hdf5_info.field_id] = dset;
-	    }
-	  }
-
-	  new_req->dataset_id = dset->dset_id;
-	  new_req->datatype_id = dset->dtype_id;
-
-	  std::vector<hsize_t> mem_dims = hdf5_info.extent;
-	  CHECK_HDF5( new_req->mem_space_id = H5Screate_simple(mem_dims.size(), mem_dims.data(), NULL) );
-	  //std::vector<hsize_t> mem_start(DIM, 0);
-	  //CHECK_HDF5( H5Sselect_hyperslab(new_req->mem_space_id, H5S_SELECT_SET, ms_start, NULL, count, NULL) );
-
-	  CHECK_HDF5( new_req->file_space_id = H5Screate_simple(hdf5_info.dset_bounds.size(), hdf5_info.dset_bounds.data(), 0) );
-	  CHECK_HDF5( H5Sselect_hyperslab(new_req->file_space_id, H5S_SELECT_SET, hdf5_info.offset.data(), 0, hdf5_info.extent.data(), 0) );
-
-	  new_req->nbytes = hdf5_bytes;
-
-	  new_req->read_seq_pos = in_port->local_bytes_total;
-	  new_req->read_seq_count = hdf5_bytes;
-
-	  // update bytes read unless we're using indirection
-	  if(in_port->indirect_port_idx < 0) 
-	    in_port->local_bytes_total += hdf5_bytes;
-
-	  new_req->write_seq_pos = out_port->local_bytes_total;
-	  new_req->write_seq_count = hdf5_bytes;
-	  out_port->local_bytes_total += hdf5_bytes;
-
-	  requests[idx++] = new_req;
-
-	  // make sure iteration_completed is set appropriately before we
-	  //  process the request (so that multi-hop successors are notified
-	  //  properly)
-	  if(hdf5_iter->done())
-	    iteration_completed.store_release(true);
-	}
-
-	return idx;
-      }
-
-      bool HDF5XferDes::progress_xd(HDF5Channel *channel, TimeLimit work_until)
-      {
-	Request *rq;
-	bool did_work = false;
-	do {
-	  long count = get_requests(&rq, 1);
-	  if(count > 0) {
-	    channel->submit(&rq, count);
-	    did_work = true;
-	  } else
-	    break;
-	} while(!work_until.is_expired());
-
-	return did_work;
-      }
-
-      void HDF5XferDes::notify_request_read_done(Request* req)
-      {
-	default_notify_request_read_done(req);
-      }
-
-      void HDF5XferDes::notify_request_write_done(Request* req)
-      {
-        HDF5Request* hdf_req = (HDF5Request*) req;
-        //pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
-        CHECK_HDF5( H5Sclose(hdf_req->mem_space_id) );
-        CHECK_HDF5( H5Sclose(hdf_req->file_space_id) );
-        //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-
-	default_notify_request_write_done(req);
-      }
-
-      void HDF5XferDes::flush()
-      {
-        if (kind == XFER_HDF5_READ) {
-        } else {
-          assert(kind == XFER_HDF5_WRITE);
-	  //CHECK_HDF5( H5Fflush(hdf_metadata->file_id, H5F_SCOPE_LOCAL) );
-          // for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {
-          //   off_t hdf_idx = fit->dst_offset;
-          //   hid_t dataset_id = hdf_metadata->dataset_ids[hdf_idx];
-          //   //TODO: I am not sure if we need a lock here to protect HDFflush
-          //   H5Fflush(dataset_id, H5F_SCOPE_LOCAL);
-          // }
-        }
-
-	for(std::map<FieldID, HDF5::HDF5Dataset *>::const_iterator it = datasets.begin();
-	    it != datasets.end();
-	    ++it)
-	  it->second->close();
-	datasets.clear();
-      }
-#endif
 
       std::ostream& operator<<(std::ostream& os, const Channel::SupportedPath& p)
       {
@@ -3778,16 +3756,19 @@ namespace Realm {
 	      break;
 	    }
 	    case SupportedPath::LOCAL_KIND: {
-	      src_ok = ((src_mem.kind() == it->src_kind) &&
+	      src_ok = (src_mem.exists() &&
+			(src_mem.kind() == it->src_kind) &&
 			(NodeID(ID(src_mem).memory_owner_node()) == node));
 	      break;
 	    }
 	    case SupportedPath::GLOBAL_KIND: {
-	      src_ok = (src_mem.kind() == it->src_kind) ;
+	      src_ok = (src_mem.exists() &&
+			(src_mem.kind() == it->src_kind));
 	      break;
 	    }
 	    case SupportedPath::LOCAL_RDMA: {
-	      if(NodeID(ID(src_mem).memory_owner_node()) == node) {
+	      if(src_mem.exists() &&
+		 (NodeID(ID(src_mem).memory_owner_node()) == node)) {
 		MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
 		// detection of rdma-ness depends on whether memory is
 		//  local/remote to us, not the channel
@@ -3801,7 +3782,8 @@ namespace Realm {
 	      break;
 	    }
 	    case SupportedPath::REMOTE_RDMA: {
-	      if(NodeID(ID(src_mem).memory_owner_node()) != node) {
+	      if(src_mem.exists() &&
+		 (NodeID(ID(src_mem).memory_owner_node()) != node)) {
 		MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
 		// detection of rdma-ness depends on whether memory is
 		//  local/remote to us, not the channel
@@ -3830,7 +3812,7 @@ namespace Realm {
 	      break;
 	    }
 	    case SupportedPath::GLOBAL_KIND: {
-	      dst_ok = (dst_mem.kind() == it->dst_kind) ;
+	      dst_ok = (dst_mem.kind() == it->dst_kind);
 	      break;
 	    }
 	    case SupportedPath::LOCAL_RDMA: {
@@ -3966,12 +3948,187 @@ namespace Realm {
 	return nr_submitted;
       }
 
-      RemoteChannel::RemoteChannel(void)
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SimpleXferDesFactory
+  //
+
+  SimpleXferDesFactory::SimpleXferDesFactory(uintptr_t _channel)
+    : channel(_channel)
+  {}
+
+  void SimpleXferDesFactory::release()
+  {
+    // do nothing since we are a singleton
+  }
+
+  void SimpleXferDesFactory::create_xfer_des(uintptr_t dma_op,
+					     NodeID launch_node,
+					     NodeID target_node,
+					     XferDesID guid,
+					     const std::vector<XferDesPortInfo>& inputs_info,
+					     const std::vector<XferDesPortInfo>& outputs_info,
+					     int priority,
+					     XferDesRedopInfo redop_info,
+					     const void *fill_data,
+					     size_t fill_size)
+  {
+    if(target_node == Network::my_node_id) {
+      // local creation
+      //assert(!inst.exists());
+      LocalChannel *c = reinterpret_cast<LocalChannel *>(channel);
+      XferDes *xd = c->create_xfer_des(dma_op, launch_node, guid,
+				       inputs_info, outputs_info,
+				       priority, redop_info,
+				       fill_data, fill_size);
+
+      c->enqueue_ready_xd(xd);
+    } else {
+      // remote creation
+      Serialization::ByteCountSerializer bcs;
+      {
+	bool ok = ((bcs << inputs_info) &&
+		   (bcs << outputs_info) &&
+		   (bcs << priority) &&
+		   (bcs << redop_info));
+	if(ok && (fill_size > 0))
+	  ok = bcs.append_bytes(fill_data, fill_size);
+	assert(ok);
+      }
+      size_t req_size = bcs.bytes_used();
+      ActiveMessage<SimpleXferDesCreateMessage> amsg(target_node, req_size);
+      //amsg->inst = inst;
+      amsg->launch_node = launch_node;
+      amsg->guid = guid;
+      amsg->dma_op = dma_op;
+      amsg->channel = channel;
+      {
+	bool ok = ((amsg << inputs_info) &&
+		   (amsg << outputs_info) &&
+		   (amsg << priority) &&
+		   (amsg << redop_info));
+	if(ok && (fill_size > 0))
+	  amsg.add_payload(fill_data, fill_size);
+	assert(ok);
+      }
+      amsg.commit();
+
+      // normally ownership of input and output iterators would be taken
+      //  by the local XferDes we create, but here we sent a copy, so delete
+      //  the originals
+      for(std::vector<XferDesPortInfo>::const_iterator it = inputs_info.begin();
+	  it != inputs_info.end();
+	  ++it)
+	delete it->iter;
+
+      for(std::vector<XferDesPortInfo>::const_iterator it = outputs_info.begin();
+	  it != outputs_info.end();
+	  ++it)
+	delete it->iter;
+    }
+  }
+  
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SimpleXferDesCreateMessage
+  //
+
+  /*static*/ void SimpleXferDesCreateMessage::handle_message(NodeID sender,
+							     const SimpleXferDesCreateMessage &args,
+							     const void *msgdata,
+							     size_t msglen)
+  {
+    std::vector<XferDesPortInfo> inputs_info, outputs_info;
+    int priority = 0;
+    XferDesRedopInfo redop_info;
+
+    Realm::Serialization::FixedBufferDeserializer fbd(msgdata, msglen);
+
+    bool ok = ((fbd >> inputs_info) &&
+	       (fbd >> outputs_info) &&
+	       (fbd >> priority) &&
+	       (fbd >> redop_info));
+    assert(ok);
+    const void *fill_data;
+    size_t fill_size;
+    if(fbd.bytes_left() == 0) {
+      fill_data = 0;
+      fill_size = 0;
+    } else {
+      fill_size = fbd.bytes_left();
+      fill_data = fbd.peek_bytes(fill_size);
+    }
+  
+    //assert(!args.inst.exists());
+    LocalChannel *c = reinterpret_cast<LocalChannel *>(args.channel);
+    XferDes *xd = c->create_xfer_des(args.dma_op, args.launch_node,
+				     args.guid,
+				     inputs_info,
+				     outputs_info,
+				     priority,
+				     redop_info,
+				     fill_data, fill_size);
+
+    c->enqueue_ready_xd(xd);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class NotifyXferDesCompleteMessage
+  //
+
+  /*static*/ void NotifyXferDesCompleteMessage::handle_message(NodeID sender,
+							       const NotifyXferDesCompleteMessage &args,
+							       const void *data,
+							       size_t datalen)
+  {
+    args.op->notify_xd_completion(args.xd_id);
+  }
+
+  /*static*/ void NotifyXferDesCompleteMessage::send_request(NodeID target, TransferOperation *op, XferDesID xd_id)
+  {
+    ActiveMessage<NotifyXferDesCompleteMessage> amsg(target);
+    amsg->op = op;
+    amsg->xd_id = xd_id;
+    amsg.commit();
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class LocalChannel
+  //
+
+  LocalChannel::LocalChannel(XferDesKind _kind)
+    : Channel(_kind)
+    , factory_singleton(reinterpret_cast<uintptr_t>(this))
+  {}
+
+  XferDesFactory *LocalChannel::get_factory()
+  {
+    return &factory_singleton;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RemoteChannel
+  //
+
+      RemoteChannel::RemoteChannel(uintptr_t _remote_ptr)
 	: Channel(XFER_NONE)
+	, factory_singleton(_remote_ptr)
       {}
 
       void RemoteChannel::shutdown()
       {}
+
+      XferDesFactory *RemoteChannel::get_factory()
+      {
+	return &factory_singleton;
+      }
 
       long RemoteChannel::submit(Request** requests, long nr)
       {
@@ -4016,6 +4173,12 @@ namespace Realm {
                                                     Memory::SOCKET_MEM };
       static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemcpyChannel
+  //
+
       MemcpyChannel::MemcpyChannel(BackgroundWorkManager *bgwork)
 	: SingleXDQChannel<MemcpyChannel,MemcpyXferDes>(bgwork,
 							XFER_MEM_CPY,
@@ -4029,7 +4192,7 @@ namespace Realm {
 	  for(size_t j = 0; j < num_cpu_mem_kinds; j++)
 	    add_path(cpu_mem_kinds[i], false,
 		     cpu_mem_kinds[j], false,
-		     bw, latency, true, true, XFER_MEM_CPY);
+		     bw, latency, false, true, XFER_MEM_CPY);
 
 	xdq.add_to_manager(bgwork);
       }
@@ -4057,6 +4220,22 @@ namespace Realm {
 				      src_serdez_id, dst_serdez_id,
 				      redop_id,
 				      kind_ret, bw_ret, lat_ret);
+      }
+
+      XferDes *MemcpyChannel::create_xfer_des(uintptr_t dma_op,
+					      NodeID launch_node,
+					      XferDesID guid,
+					      const std::vector<XferDesPortInfo>& inputs_info,
+					      const std::vector<XferDesPortInfo>& outputs_info,
+					      int priority,
+					      XferDesRedopInfo redop_info,
+					      const void *fill_data, size_t fill_size)
+      {
+        assert(redop_info.id == 0);
+	assert(fill_size == 0);
+	return new MemcpyXferDes(dma_op, this, launch_node, guid,
+				 inputs_info, outputs_info,
+				 priority);
       }
 
       long MemcpyChannel::submit(Request** requests, long nr)
@@ -4518,6 +4697,106 @@ namespace Realm {
       }
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemfillChannel
+  //
+
+  MemfillChannel::MemfillChannel(BackgroundWorkManager *bgwork)
+    : SingleXDQChannel<MemfillChannel,MemfillXferDes>(bgwork,
+						      XFER_MEM_FILL,
+						      "memfill channel")
+  {
+    unsigned bw = 0; // TODO
+    unsigned latency = 0;
+    // any of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM is a valid destination
+    for(size_t i = 0; i < num_cpu_mem_kinds; i++)
+      add_path(Memory::NO_MEMORY,
+	       cpu_mem_kinds[i], false,
+	       bw, latency, false, false, XFER_MEM_FILL);
+
+    xdq.add_to_manager(bgwork);
+  }
+
+  MemfillChannel::~MemfillChannel()
+  {}
+
+  XferDes *MemfillChannel::create_xfer_des(uintptr_t dma_op,
+					   NodeID launch_node,
+					   XferDesID guid,
+					   const std::vector<XferDesPortInfo>& inputs_info,
+					   const std::vector<XferDesPortInfo>& outputs_info,
+					   int priority,
+					   XferDesRedopInfo redop_info,
+					   const void *fill_data, size_t fill_size)
+  {
+    assert(redop_info.id == 0); // TODO: add support
+    assert(fill_size > 0);
+    return new MemfillXferDes(dma_op, this, launch_node, guid,
+			      inputs_info, outputs_info,
+			      priority,
+			      fill_data, fill_size);
+  }
+
+  long MemfillChannel::submit(Request** requests, long nr)
+  {
+    // unused
+    assert(0);
+    return 0;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemreduceChannel
+  //
+
+  MemreduceChannel::MemreduceChannel(BackgroundWorkManager *bgwork)
+    : SingleXDQChannel<MemreduceChannel,MemreduceXferDes>(bgwork,
+                                                          XFER_MEM_CPY,
+                                                          "memreduce channel")
+  {
+    unsigned bw = 0; // TODO
+    unsigned latency = 0;
+    // any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
+    for(size_t i = 0; i < num_cpu_mem_kinds; i++)
+      for(size_t j = 0; j < num_cpu_mem_kinds; j++)
+        add_path(cpu_mem_kinds[i], false,
+                 cpu_mem_kinds[j], false,
+                 bw, latency, true, false, XFER_MEM_CPY);
+
+    xdq.add_to_manager(bgwork);
+  }
+
+  XferDes *MemreduceChannel::create_xfer_des(uintptr_t dma_op,
+                                             NodeID launch_node,
+                                             XferDesID guid,
+                                             const std::vector<XferDesPortInfo>& inputs_info,
+                                             const std::vector<XferDesPortInfo>& outputs_info,
+                                             int priority,
+                                             XferDesRedopInfo redop_info,
+                                             const void *fill_data, size_t fill_size)
+  {
+    assert(redop_info.id != 0); // redop is required
+    assert(fill_size == 0);
+    return new MemreduceXferDes(dma_op, this, launch_node, guid,
+                                inputs_info, outputs_info,
+                                priority, redop_info);
+  }
+
+  long MemreduceChannel::submit(Request** requests, long nr)
+  {
+    // unused
+    assert(0);
+    return 0;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class GASNetChannel
+  //
+
       GASNetChannel::GASNetChannel(BackgroundWorkManager *bgwork,
 				   XferDesKind _kind)
 	: SingleXDQChannel<GASNetChannel, GASNetXferDes>(bgwork,
@@ -4540,6 +4819,22 @@ namespace Realm {
 
       GASNetChannel::~GASNetChannel()
       {
+      }
+
+      XferDes *GASNetChannel::create_xfer_des(uintptr_t dma_op,
+					      NodeID launch_node,
+					      XferDesID guid,
+					      const std::vector<XferDesPortInfo>& inputs_info,
+					      const std::vector<XferDesPortInfo>& outputs_info,
+					      int priority,
+					      XferDesRedopInfo redop_info,
+					      const void *fill_data, size_t fill_size)
+      {
+	assert(redop_info.id == 0);
+	assert(fill_size == 0);
+	return new GASNetXferDes(dma_op, this, launch_node, guid,
+				 inputs_info, outputs_info,
+				 priority);
       }
 
       long GASNetChannel::submit(Request** requests, long nr)
@@ -4592,6 +4887,22 @@ namespace Realm {
       }
 
       RemoteWriteChannel::~RemoteWriteChannel() {}
+
+      XferDes *RemoteWriteChannel::create_xfer_des(uintptr_t dma_op,
+						   NodeID launch_node,
+						   XferDesID guid,
+						   const std::vector<XferDesPortInfo>& inputs_info,
+						   const std::vector<XferDesPortInfo>& outputs_info,
+						   int priority,
+						   XferDesRedopInfo redop_info,
+						   const void *fill_data, size_t fill_size)
+      {
+	assert(redop_info.id == 0);
+	assert(fill_size == 0);
+	return new RemoteWriteXferDes(dma_op, this, launch_node, guid,
+				      inputs_info, outputs_info,
+				      priority);
+      }
 
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
@@ -4657,250 +4968,6 @@ namespace Realm {
         return nr;
       }
 
-#ifdef REALM_USE_CUDA
-      GPUChannel::GPUChannel(Cuda::GPU* _src_gpu, XferDesKind _kind,
-			     BackgroundWorkManager *bgwork)
-	: SingleXDQChannel<GPUChannel,GPUXferDes>(bgwork,
-						  _kind,
-						  stringbuilder() << "cuda channel (gpu=" << _src_gpu->info->index << " kind=" << (int)_kind << ")")
-      {
-        src_gpu = _src_gpu;
-
-	Memory fbm = src_gpu->fbmem->me;
-
-	switch(_kind) {
-	case XFER_GPU_TO_FB:
-	  {
-	    unsigned bw = 0; // TODO
-	    unsigned latency = 0;
-	    for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
-		it != src_gpu->pinned_sysmems.end();
-		++it)
-	      add_path(*it, fbm, bw, latency, false, false,
-		       XFER_GPU_TO_FB);
-
-	    break;
-	  }
-
-	case XFER_GPU_FROM_FB:
-	  {
-	    unsigned bw = 0; // TODO
-	    unsigned latency = 0;
-	    for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
-		it != src_gpu->pinned_sysmems.end();
-		++it)
-	      add_path(fbm, *it, bw, latency, false, false,
-		       XFER_GPU_FROM_FB);
-
-	    break;
-	  }
-
-	case XFER_GPU_IN_FB:
-	  {
-	    // self-path
-	    unsigned bw = 0; // TODO
-	    unsigned latency = 0;
-	    add_path(fbm, fbm, bw, latency, false, false,
-		     XFER_GPU_IN_FB);
-
-	    break;
-	  }
-
-	case XFER_GPU_PEER_FB:
-	  {
-	    // just do paths to peers - they'll do the other side
-	    unsigned bw = 0; // TODO
-	    unsigned latency = 0;
-	    for(std::set<Memory>::const_iterator it = src_gpu->peer_fbs.begin();
-		it != src_gpu->peer_fbs.end();
-		++it)
-	      add_path(fbm, *it, bw, latency, false, false,
-		       XFER_GPU_PEER_FB);
-
-	    break;
-	  }
-
-	default:
-	  assert(0);
-	}
-      }
-
-      GPUChannel::~GPUChannel()
-      {
-      }
-
-      long GPUChannel::submit(Request** requests, long nr)
-      {
-        for (long i = 0; i < nr; i++) {
-          GPURequest* req = (GPURequest*) requests[i];
-	  // no serdez support
-	  assert(req->xd->input_ports[req->src_port_idx].serdez_op == 0);
-	  assert(req->xd->output_ports[req->dst_port_idx].serdez_op == 0);
-
-	  // empty transfers don't need to bounce off the GPU
-	  if(req->nbytes == 0) {
-	    req->xd->notify_request_read_done(req);
-	    req->xd->notify_request_write_done(req);
-	    continue;
-	  }
-
-	  switch(req->dim) {
-	    case Request::DIM_1D: {
-	      switch (kind) {
-                case XFER_GPU_TO_FB:
-		  src_gpu->copy_to_fb(req->dst_off, req->src_base,
-				      req->nbytes, &req->event);
-		  break;
-                case XFER_GPU_FROM_FB:
-		  src_gpu->copy_from_fb(req->dst_base, req->src_off,
-					req->nbytes, &req->event);
-		  break;
-                case XFER_GPU_IN_FB:
-		  src_gpu->copy_within_fb(req->dst_off, req->src_off,
-					  req->nbytes, &req->event);
-		  break;
-                case XFER_GPU_PEER_FB:
-		  src_gpu->copy_to_peer(req->dst_gpu, req->dst_off,
-					req->src_off, req->nbytes,
-					&req->event);
-		  break;
-                default:
-		  assert(0);
-	      }
-	      break;
-	    }
-
-	    case Request::DIM_2D: {
-              switch (kind) {
-	        case XFER_GPU_TO_FB:
-		  src_gpu->copy_to_fb_2d(req->dst_off, req->src_base,
-					 req->dst_str, req->src_str,
-					 req->nbytes, req->nlines, &req->event);
-		  break;
-	        case XFER_GPU_FROM_FB:
-		  src_gpu->copy_from_fb_2d(req->dst_base, req->src_off,
-					   req->dst_str, req->src_str,
-					   req->nbytes, req->nlines,
-					   &req->event);
-		  break;
-                case XFER_GPU_IN_FB:
-		  src_gpu->copy_within_fb_2d(req->dst_off, req->src_off,
-					     req->dst_str, req->src_str,
-					     req->nbytes, req->nlines,
-					     &req->event);
-		  break;
-                case XFER_GPU_PEER_FB:
-		  src_gpu->copy_to_peer_2d(req->dst_gpu, req->dst_off,
-					   req->src_off, req->dst_str,
-					   req->src_str, req->nbytes,
-					   req->nlines, &req->event);
-		  break;
-                default:
-		  assert(0);
-	      }
-	      break;
-	    }
-
-	    case Request::DIM_3D: {
-              switch (kind) {
-	        case XFER_GPU_TO_FB:
-		  src_gpu->copy_to_fb_3d(req->dst_off, req->src_base,
-					 req->dst_str, req->src_str,
-					 req->dst_pstr, req->src_pstr,
-					 req->nbytes, req->nlines, req->nplanes,
-					 &req->event);
-		  break;
-	        case XFER_GPU_FROM_FB:
-		  src_gpu->copy_from_fb_3d(req->dst_base, req->src_off,
-					   req->dst_str, req->src_str,
-					   req->dst_pstr, req->src_pstr,
-					   req->nbytes, req->nlines, req->nplanes,
-					   &req->event);
-		  break;
-                case XFER_GPU_IN_FB:
-		  src_gpu->copy_within_fb_3d(req->dst_off, req->src_off,
-					     req->dst_str, req->src_str,
-					     req->dst_pstr, req->src_pstr,
-					     req->nbytes, req->nlines, req->nplanes,
-					     &req->event);
-		  break;
-                case XFER_GPU_PEER_FB:
-		  src_gpu->copy_to_peer_3d(req->dst_gpu,
-					   req->dst_off, req->src_off,
-					   req->dst_str, req->src_str,
-					   req->dst_pstr, req->src_pstr,
-					   req->nbytes, req->nlines, req->nplanes,
-					   &req->event);
-		  break;
-                default:
-		  assert(0);
-	      }
-	      break;
-	    }
-
-	    default:
-	      assert(0);
-	  }
-
-          //pending_copies.push_back(req);
-        }
-        return nr;
-      }
-
-      void GPUCompletionEvent::request_completed(void)
-      {
-	req->xd->notify_request_read_done(req);
-	req->xd->notify_request_write_done(req);
-      }
-#endif
-
-#ifdef REALM_USE_HDF5
-      HDF5Channel::HDF5Channel(BackgroundWorkManager *bgwork)
-	: SingleXDQChannel<HDF5Channel, HDF5XferDes>(bgwork,
-						     XFER_NONE /*FIXME*/,
-						     "hdf5 channel")
-      {
-	unsigned bw = 0; // TODO
-	unsigned latency = 0;
-	// any combination of SYSTEM/REGDMA/Z_COPY_MEM
-	for(size_t i = 0; i < num_cpu_mem_kinds; i++) {
-	  add_path(Memory::HDF_MEM, false,
-		   cpu_mem_kinds[i], false,
-		   bw, latency, false, false, XFER_HDF5_READ);
-
-	  add_path(cpu_mem_kinds[i], false,
-		   Memory::HDF_MEM, false,
-		   bw, latency, false, false, XFER_HDF5_WRITE);
-	}
-      }
-
-      HDF5Channel::~HDF5Channel() {}
-
-      long HDF5Channel::submit(Request** requests, long nr)
-      {
-        HDF5Request** hdf_reqs = (HDF5Request**) requests;
-        for (long i = 0; i < nr; i++) {
-          HDF5Request* req = hdf_reqs[i];
-	  // no serdez support
-	  assert(req->xd->input_ports[req->src_port_idx].serdez_op == 0);
-	  assert(req->xd->output_ports[req->dst_port_idx].serdez_op == 0);
-          //pthread_rwlock_rdlock(req->rwlock);
-          if (req->xd->kind == XFER_HDF5_READ)
-            CHECK_HDF5( H5Dread(req->dataset_id, req->datatype_id,
-				req->mem_space_id, req->file_space_id,
-				H5P_DEFAULT, req->mem_base) );
-	  else
-            CHECK_HDF5( H5Dwrite(req->dataset_id, req->datatype_id,
-				 req->mem_space_id, req->file_space_id,
-				 H5P_DEFAULT, req->mem_base) );
-          //pthread_rwlock_unlock(req->rwlock);
-          req->xd->notify_request_read_done(req);
-          req->xd->notify_request_write_done(req);
-        }
-        return nr;
-      }
-#endif
-
       /*static*/
       void XferDesRemoteWriteMessage::handle_message(NodeID sender,
 						     const XferDesRemoteWriteMessage &args,
@@ -4918,14 +4985,15 @@ namespace Realm {
 
 	// if requested, notify (probably-local) next XD
 	if(args.next_xd_guid != XferDes::XFERDES_NO_GUID) {
+	  XferDesQueue *xdq = XferDesQueue::get_singleton();
 	  if(args.pre_bytes_total != size_t(-1))
-	    xferDes_queue->update_pre_bytes_total(args.next_xd_guid,
-						  args.next_port_idx,
-						  args.pre_bytes_total);
-	  xferDes_queue->update_pre_bytes_write(args.next_xd_guid,
-						args.next_port_idx,
-						args.span_start,
-						args.span_size);
+	    xdq->update_pre_bytes_total(args.next_xd_guid,
+					args.next_port_idx,
+					args.pre_bytes_total);
+	  xdq->update_pre_bytes_write(args.next_xd_guid,
+				      args.next_port_idx,
+				      args.span_start,
+				      args.span_size);
 	}
 
 	// don't ack empty requests
@@ -4949,7 +5017,7 @@ namespace Realm {
 							    const void *msgdata,
 							    size_t msglen)
       {
-        xferDes_queue->destroy_xferDes(args.guid);
+	XferDesQueue::get_singleton()->destroy_xferDes(args.guid);
       }
 
       /*static*/ void UpdateBytesTotalMessage::handle_message(NodeID sender,
@@ -4957,9 +5025,9 @@ namespace Realm {
 							      const void *msgdata,
 							      size_t msglen)
       {
-        xferDes_queue->update_pre_bytes_total(args.guid,
-					      args.port_idx,
-					      args.pre_bytes_total);
+        XferDesQueue::get_singleton()->update_pre_bytes_total(args.guid,
+							      args.port_idx,
+							      args.pre_bytes_total);
       }
 
       /*static*/ void UpdateBytesWriteMessage::handle_message(NodeID sender,
@@ -4967,10 +5035,10 @@ namespace Realm {
 							      const void *msgdata,
 							      size_t msglen)
       {
-        xferDes_queue->update_pre_bytes_write(args.guid,
-					      args.port_idx,
-					      args.span_start,
-					      args.span_size);
+        XferDesQueue::get_singleton()->update_pre_bytes_write(args.guid,
+							      args.port_idx,
+							      args.span_start,
+							      args.span_size);
       }
 
       /*static*/ void UpdateBytesReadMessage::handle_message(NodeID sender,
@@ -4978,110 +5046,17 @@ namespace Realm {
 							    const void *msgdata,
 							    size_t msglen)
       {
-        xferDes_queue->update_next_bytes_read(args.guid,
-					      args.port_idx,
-					      args.span_start,
-					      args.span_size);
+        XferDesQueue::get_singleton()->update_next_bytes_read(args.guid,
+							      args.port_idx,
+							      args.span_start,
+							      args.span_size);
       }
 
-      XferDesQueue* get_xdq_singleton()
+      /*static*/ XferDesQueue* XferDesQueue::get_singleton()
       {
-        return xferDes_queue;
-      }
-
-      ChannelManager* get_channel_manager()
-      {
-        return channel_manager;
-      }
-
-      ChannelManager::~ChannelManager(void) {
-      }
-
-      MemcpyChannel* ChannelManager::create_memcpy_channel(BackgroundWorkManager *bgwork)
-      {
-        assert(memcpy_channel == NULL);
-        memcpy_channel = new MemcpyChannel(bgwork);
-        return memcpy_channel;
-      }
-      GASNetChannel* ChannelManager::create_gasnet_read_channel(BackgroundWorkManager *bgwork) {
-        assert(gasnet_read_channel == NULL);
-        gasnet_read_channel = new GASNetChannel(bgwork, XFER_GASNET_READ);
-        return gasnet_read_channel;
-      }
-      GASNetChannel* ChannelManager::create_gasnet_write_channel(BackgroundWorkManager *bgwork) {
-        assert(gasnet_write_channel == NULL);
-        gasnet_write_channel = new GASNetChannel(bgwork, XFER_GASNET_WRITE);
-        return gasnet_write_channel;
-      }
-      RemoteWriteChannel* ChannelManager::create_remote_write_channel(BackgroundWorkManager *bgwork) {
-        assert(remote_write_channel == NULL);
-        remote_write_channel = new RemoteWriteChannel(bgwork);
-        return remote_write_channel;
-      }
-#ifdef REALM_USE_CUDA
-      GPUChannel* ChannelManager::create_gpu_to_fb_channel(Cuda::GPU* src_gpu,
-							   BackgroundWorkManager *bgwork) {
-        gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu,
-						     XFER_GPU_TO_FB,
-						     bgwork);
-        return gpu_to_fb_channels[src_gpu];
-      }
-      GPUChannel* ChannelManager::create_gpu_from_fb_channel(Cuda::GPU* src_gpu,
-							     BackgroundWorkManager *bgwork) {
-        gpu_from_fb_channels[src_gpu] = new GPUChannel(src_gpu,
-						       XFER_GPU_FROM_FB,
-						       bgwork);
-        return gpu_from_fb_channels[src_gpu];
-      }
-      GPUChannel* ChannelManager::create_gpu_in_fb_channel(Cuda::GPU* src_gpu,
-							   BackgroundWorkManager *bgwork) {
-        gpu_in_fb_channels[src_gpu] = new GPUChannel(src_gpu,
-						     XFER_GPU_IN_FB,
-						     bgwork);
-        return gpu_in_fb_channels[src_gpu];
-      }
-      GPUChannel* ChannelManager::create_gpu_peer_fb_channel(Cuda::GPU* src_gpu,
-							     BackgroundWorkManager *bgwork) {
-        gpu_peer_fb_channels[src_gpu] = new GPUChannel(src_gpu,
-						       XFER_GPU_PEER_FB,
-						       bgwork);
-        return gpu_peer_fb_channels[src_gpu];
-      }
-#endif
-#ifdef REALM_USE_HDF5
-      HDF5Channel* ChannelManager::create_hdf5_channel(BackgroundWorkManager *bgwork) {
-        assert(hdf5_channel == NULL);
-        hdf5_channel = new HDF5Channel(bgwork);
-        return hdf5_channel;
-      }
-#endif
-      AddressSplitChannel *ChannelManager::create_addr_split_channel(BackgroundWorkManager *bgwork) {
-	assert(addr_split_channel == 0);
-	addr_split_channel = new AddressSplitChannel(bgwork);
-	return addr_split_channel;
-      }
-
-#ifdef REALM_USE_CUDA
-      void register_gpu_in_dma_systems(Cuda::GPU* gpu)
-      {
-        dma_all_gpus.push_back(gpu);
-      }
-#endif
-      void start_channel_manager(BackgroundWorkManager *bgwork)
-      {
-        xferDes_queue = new XferDesQueue;
-        channel_manager = new ChannelManager;
-        xferDes_queue->start_worker(channel_manager, bgwork);
-      }
-      FileChannel* ChannelManager::create_file_channel(BackgroundWorkManager *bgwork) {
-        assert(file_channel == NULL);
-        file_channel = new FileChannel(bgwork);
-        return file_channel;
-      }
-      DiskChannel* ChannelManager::create_disk_channel(BackgroundWorkManager *bgwork) {
-        assert(disk_channel == NULL);
-        disk_channel = new DiskChannel(bgwork);
-        return disk_channel;
+	// we use a single queue for all xferDes
+	static XferDesQueue xferDes_queue;
+        return &xferDes_queue;
       }
 
       void XferDesQueue::update_pre_bytes_write(XferDesID xd_guid, int port_idx,
@@ -5175,7 +5150,7 @@ namespace Realm {
 	Event wait_on = xd->request_metadata();
 	if(!wait_on.has_triggered()) {
 	  log_new_dma.info() << "xd metadata wait: xd=" << xd->guid << " ready=" << wait_on;
-	  xd->deferred_enqueue.defer(xferDes_queue, xd, wait_on);
+	  xd->deferred_enqueue.defer(this, xd, wait_on);
 	  return false;
 	}
 
@@ -5205,58 +5180,6 @@ namespace Realm {
 	assert(0);
 
 	return true;
-      }
-
-      void XferDesQueue::start_worker(ChannelManager* channel_manager,
-				      BackgroundWorkManager *bgwork)
-      {
-	RuntimeImpl *r = get_runtime();
-
-	// TODO: numa-specific channels
-        MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(bgwork);
-	GASNetChannel* gasnet_read_channel = channel_manager->create_gasnet_read_channel(bgwork);
-	GASNetChannel* gasnet_write_channel = channel_manager->create_gasnet_write_channel(bgwork);
-	AddressSplitChannel *addr_split_channel = channel_manager->create_addr_split_channel(bgwork);
-	r->add_dma_channel(memcpy_channel);
-	r->add_dma_channel(gasnet_read_channel);
-	r->add_dma_channel(gasnet_write_channel);
-	r->add_dma_channel(addr_split_channel);
-
-	RemoteWriteChannel *remote_channel = channel_manager->create_remote_write_channel(bgwork);
-	DiskChannel *disk_channel = channel_manager->create_disk_channel(bgwork);
-	FileChannel *file_channel = channel_manager->create_file_channel(bgwork);
-        r->add_dma_channel(remote_channel);
-	r->add_dma_channel(disk_channel);
-	r->add_dma_channel(file_channel);
-#ifdef REALM_USE_HDF5
-	HDF5Channel *hdf5_channel = channel_manager->create_hdf5_channel(bgwork);
-	r->add_dma_channel(hdf5_channel);
-#endif
-
-#ifdef REALM_USE_CUDA
-        std::vector<Cuda::GPU*>::iterator it;
-        for (it = dma_all_gpus.begin(); it != dma_all_gpus.end(); it ++) {
-	  GPUChannel *gpu_to_fb_channel = channel_manager->create_gpu_to_fb_channel(*it, bgwork);
-	  GPUChannel *gpu_from_fb_channel = channel_manager->create_gpu_from_fb_channel(*it, bgwork);
-	  GPUChannel *gpu_in_fb_channel = channel_manager->create_gpu_in_fb_channel(*it, bgwork);
-	  GPUChannel *gpu_peer_fb_channel = channel_manager->create_gpu_peer_fb_channel(*it, bgwork);
-          r->add_dma_channel(gpu_to_fb_channel);
-          r->add_dma_channel(gpu_from_fb_channel);
-          r->add_dma_channel(gpu_in_fb_channel);
-          r->add_dma_channel(gpu_peer_fb_channel);
-        }
-#endif
-
-      }
-
-      void stop_channel_manager()
-      {
-        xferDes_queue->stop_worker();
-        delete xferDes_queue;
-        delete channel_manager;
-      }
-
-      void XferDesQueue::stop_worker() {
       }
 
       void XferDes::DeferredXDEnqueue::defer(XferDesQueue *_xferDes_queue,
@@ -5293,27 +5216,14 @@ namespace Realm {
       log_new_dma.info("Destroy XferDes: id(" IDFMT ")", _guid);
       NodeID execution_node = _guid >> (XferDesQueue::NODE_BITS + XferDesQueue::INDEX_BITS);
       if (execution_node == Network::my_node_id) {
-        xferDes_queue->destroy_xferDes(_guid);
+	XferDesQueue::get_singleton()->destroy_xferDes(_guid);
       }
       else {
         XferDesDestroyMessage::send_request(execution_node, _guid);
       }
     }
 
-#define CREATE_MESSAGE_HANDLER(type) \
-ActiveMessageHandlerReg<XferDesCreateMessage<type> > xfer_des_create_ ## type ## _message_handler
-CREATE_MESSAGE_HANDLER(MemcpyXferDes);
-CREATE_MESSAGE_HANDLER(GASNetXferDes);
-CREATE_MESSAGE_HANDLER(RemoteWriteXferDes);
-CREATE_MESSAGE_HANDLER(DiskXferDes);
-CREATE_MESSAGE_HANDLER(FileXferDes);
-#ifdef REALM_USE_CUDA
-CREATE_MESSAGE_HANDLER(GPUXferDes);
-#endif
-#ifdef REALM_USE_HDF5
-CREATE_MESSAGE_HANDLER(HDF5XferDes);
-#endif
-
+ActiveMessageHandlerReg<SimpleXferDesCreateMessage> simple_xfer_des_create_message_handler;
 ActiveMessageHandlerReg<NotifyXferDesCompleteMessage> notify_xfer_des_complete_handler;
 ActiveMessageHandlerReg<XferDesRemoteWriteMessage> xfer_des_remote_write_handler;
 ActiveMessageHandlerReg<XferDesRemoteWriteAckMessage> xfer_des_remote_write_ack_handler;

@@ -21,10 +21,11 @@
 #include "realm/event.h"
 #include "realm/memory.h"
 #include "realm/indexspace.h"
-
-#ifdef REALM_USE_HDF5
-#include "realm/hdf5/hdf5_internal.h"
-#endif
+#include "realm/atomics.h"
+#include "realm/network.h"
+#include "realm/operation.h"
+#include "realm/transfer/channel.h"
+#include "realm/profiling.h"
 
 namespace Realm {
 
@@ -78,44 +79,38 @@ namespace Realm {
       size_t plane_stride;
     };
 
-#ifdef REALM_USE_HDF5
-    struct AddressInfoHDF5 {
-      //hid_t dset_id;
-      //hid_t dtype_id;
-      FieldID field_id;  // used to cache open datasets
-      const std::string *filename;
-      const std::string *dsetname;
-      std::vector<hsize_t> dset_bounds;
-      std::vector<hsize_t> offset; // start location in dataset
-      std::vector<hsize_t> extent; // xfer dimensions in memory and dataset
+    // a custom address info interface for cases where linearized
+    //  addresses are not suitable
+    class AddressInfoCustom {
+    protected:
+      virtual ~AddressInfoCustom() {}
+
+    public:
+      // offers an N-D rectangle from a given piece of a given instance,
+      //  along with a specified dimension order
+      // return value is how many dimensions are accepted (0 = single
+      //  point), which can be less than the input if the target has
+      //  strict ordering rules
+      virtual int set_rect(const RegionInstanceImpl *inst,
+                           const InstanceLayoutPieceBase *piece,
+                           int ndims,
+                           const int64_t lo[/*ndims*/],
+                           const int64_t hi[/*ndims*/],
+                           const int order[/*ndims*/]) = 0;
     };
-#endif
 
     // if a step is tentative, it must either be confirmed or cancelled before
     //  another one is possible
     virtual size_t step(size_t max_bytes, AddressInfo& info, unsigned flags,
 			bool tentative = false) = 0;
-#ifdef REALM_USE_HDF5
-    virtual size_t step_hdf5(size_t max_bytes, AddressInfoHDF5& info,
-			     bool tentative = false);
-#endif
+    virtual size_t step_custom(size_t max_bytes, AddressInfoCustom& info,
+                               bool tentative = false) = 0;
+
     virtual void confirm_step(void) = 0;
     virtual void cancel_step(void) = 0;
 
     virtual bool get_addresses(AddressList &addrlist) = 0;
   };
-
-  template <typename S>
-  inline bool serialize(S& serializer, const TransferIterator& ti)
-  {
-    return Serialization::PolymorphicSerdezHelper<TransferIterator>::serialize(serializer, ti);
-  }
-
-  template <typename S>
-  /*static*/ inline TransferIterator *TransferIterator::deserialize_new(S& deserializer)
-  {
-    return Serialization::PolymorphicSerdezHelper<TransferIterator>::deserialize_new(deserializer);
-  }
 
   class TransferDomain {
   protected:
@@ -134,7 +129,21 @@ namespace Realm {
 
     virtual Event request_metadata(void) = 0;
 
+    virtual bool empty(void) const = 0;
     virtual size_t volume(void) const = 0;
+
+    virtual void choose_dim_order(std::vector<int>& dim_order,
+				  const std::vector<CopySrcDstField>& srcs,
+				  const std::vector<CopySrcDstField>& dsts,
+				  const std::vector<IndirectionInfo *>& indirects,
+				  bool force_fortran_order,
+				  size_t max_stride) const = 0;
+
+    virtual TransferIterator *create_iterator(RegionInstance inst,
+					      const std::vector<int>& dim_order,
+					      const std::vector<FieldID>& fields,
+					      const std::vector<size_t>& fld_offsets,
+					      const std::vector<size_t>& fld_sizes) const = 0;
 
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      RegionInstance peer,
@@ -145,22 +154,239 @@ namespace Realm {
     virtual void print(std::ostream& os) const = 0;
   };
 
-  inline std::ostream& operator<<(std::ostream& os, const TransferDomain& td)
-  {
-    td.print(os); return os;
-  }
+  class TransferOperation;
 
-  template <typename S>
-  inline bool serialize(S& serializer, const TransferDomain& ci)
-  {
-    return Serialization::PolymorphicSerdezHelper<TransferDomain>::serialize(serializer, ci);
-  }
+  // copies with generalized scatter and gather have a DAG that describes
+  //  the overall transfer: nodes are transfer descriptors and edges are
+  //  intermediate buffers
+  struct TransferGraph {
+    struct XDTemplate {
+      NodeID target_node;
+      //XferDesKind kind;
+      XferDesFactory *factory;
+      int gather_control_input;
+      int scatter_control_input;
+      XferDesRedopInfo redop;
 
-  template <typename S>
-  /*static*/ inline TransferDomain *TransferDomain::deserialize_new(S& deserializer)
-  {
-    return Serialization::PolymorphicSerdezHelper<TransferDomain>::deserialize_new(deserializer);
-  }
+      enum IOType {
+	IO_INST,
+	IO_INDIRECT_INST,
+	IO_EDGE,
+	IO_FILL_DATA
+      };
+      struct IO {
+	IOType iotype;
+	union {
+	  struct {
+	    RegionInstance inst;
+	    unsigned fld_start;
+	    unsigned fld_count;
+	  } inst;
+	  struct {
+	    unsigned ind_idx;
+	    unsigned port;
+	    RegionInstance inst;
+	    unsigned fld_start;
+	    unsigned fld_count;
+	  } indirect;
+	  unsigned edge;
+	  struct {
+	    unsigned fill_start;
+	    unsigned fill_size;
+	  } fill;
+	};
+      };
+      static IO mk_inst(RegionInstance _inst,
+			unsigned _fld_start, unsigned _fld_count);
+      static IO mk_indirect(unsigned _ind_idx, unsigned _port,
+			    RegionInstance _inst,
+			    unsigned _fld_start, unsigned _fld_count);
+      static IO mk_edge(unsigned _edge);
+      static IO mk_fill(unsigned _fill_start, unsigned _fill_size);
+
+      std::vector<IO> inputs;  // TODO: short vectors
+      std::vector<IO> outputs;
+
+      // helper functions for initializing these things
+      void set_simple(Channel *channel,
+		      int in_edge, int out_edge);
+    };
+    struct IBInfo {
+      Memory memory;
+      size_t size;
+    };
+    std::vector<XDTemplate> xd_nodes;
+    std::vector<IBInfo> ib_edges;
+  };
+
+  class TransferDesc {
+  public:
+    template <int N, typename T>
+    TransferDesc(IndexSpace<N,T> _is,
+		 const std::vector<CopySrcDstField> &_srcs,
+		 const std::vector<CopySrcDstField> &_dsts,
+		 const std::vector<const typename CopyIndirection<N,T>::Base *> &_indirects,
+		 const ProfilingRequestSet &requests);
+
+  protected:
+    // reference-counted - do not delete directly
+    ~TransferDesc();
+
+  public:
+    void add_reference();
+    void remove_reference();
+
+    // returns true if the analysis is complete, and ib allocation can proceed
+    // if the analysis isn't, returns false and op->allocate_ibs() will be
+    //   called once it is
+    bool request_analysis(TransferOperation *op);
+
+    struct FieldInfo {
+      FieldID id;
+      size_t offset, size;
+      CustomSerdezID serdez_id;
+    };
+
+  protected:
+    atomic<int> refcount;
+
+    void check_analysis_preconditions();
+    void perform_analysis();
+
+    class DeferredAnalysis : public EventWaiter {
+    public:
+      DeferredAnalysis(TransferDesc *_desc);
+      virtual void event_triggered(bool poisoned, TimeLimit work_until);
+      virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
+
+    protected:
+      TransferDesc *desc;
+    };
+    DeferredAnalysis deferred_analysis;
+
+    friend class TransferOperation;
+
+    TransferDomain *domain;
+    std::vector<CopySrcDstField> srcs, dsts;
+    std::vector<IndirectionInfo *> indirects;
+    ProfilingRequestSet prs;
+
+    Mutex mutex;
+    atomic<bool> analysis_complete;
+    std::vector<TransferOperation *> pending_ops;
+    TransferGraph graph;
+    std::vector<int> dim_order;
+    std::vector<FieldInfo> src_fields, dst_fields;
+    void *fill_data;
+    size_t fill_size;
+    ProfilingMeasurements::OperationMemoryUsage prof_usage;
+    ProfilingMeasurements::OperationCopyInfo prof_cpinfo;
+  };
+               
+  class IndirectionInfo {
+  public:
+    virtual ~IndirectionInfo(void) {}
+    virtual Event request_metadata(void) = 0;
+
+    virtual void generate_gather_paths(Memory dst_mem,
+				       TransferGraph::XDTemplate::IO dst_edge,
+				       unsigned indirect_idx,
+				       unsigned src_fld_start,
+				       unsigned src_fld_count,
+				       size_t bytes_per_element,
+				       CustomSerdezID serdez_id,
+				       std::vector<TransferGraph::XDTemplate>& xd_nodes,
+				       std::vector<TransferGraph::IBInfo>& ib_edges,
+				       std::vector<TransferDesc::FieldInfo>& src_fields) = 0;
+
+    virtual void generate_scatter_paths(Memory src_mem,
+					TransferGraph::XDTemplate::IO src_edge,
+					unsigned indirect_idx,
+					unsigned dst_fld_start,
+					unsigned dst_fld_count,
+					size_t bytes_per_element,
+					CustomSerdezID serdez_id,
+					std::vector<TransferGraph::XDTemplate>& xd_nodes,
+					std::vector<TransferGraph::IBInfo>& ib_edges,
+					std::vector<TransferDesc::FieldInfo>& src_fields) = 0;
+
+    virtual RegionInstance get_pointer_instance(void) const = 0;
+
+    virtual TransferIterator *create_address_iterator(RegionInstance peer) const = 0;
+
+    virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
+						       RegionInstance inst,
+						       const std::vector<FieldID>& fields,
+						       const std::vector<size_t>& fld_offsets,
+						       const std::vector<size_t>& fld_sizes) const = 0;
+
+    virtual void print(std::ostream& os) const = 0;
+  };
+
+  std::ostream& operator<<(std::ostream& os, const IndirectionInfo& ii);
+
+
+  // a TransferOperation is an application-requested copy/fill/reduce
+  class TransferOperation : public Operation {
+  public:
+    TransferOperation(TransferDesc& _desc,
+		      Event _precondition,
+		      GenEventImpl *_finish_event,
+		      EventImpl::gen_t _finish_gen);
+
+    ~TransferOperation();
+
+    virtual void print(std::ostream& os) const;
+
+    void start_or_defer(void);
+
+    virtual bool mark_ready(void);
+    virtual bool mark_started(void);
+
+    void allocate_ibs();
+    void create_xds();
+
+    void notify_ib_allocation(unsigned ib_index, off_t ib_offset);
+    void notify_xd_completion(XferDesID xd_id);
+
+    class XDLifetimeTracker : public Operation::AsyncWorkItem {
+    public:
+      XDLifetimeTracker(TransferOperation *_op,
+			XferDesID _xd_id);
+      virtual void request_cancellation(void);
+      virtual void print(std::ostream& os) const;
+
+    protected:
+      XferDesID xd_id;
+    };
+
+  protected:
+    virtual void mark_completed(void);
+
+    class DeferredStart : public EventWaiter {
+    public:
+      DeferredStart(TransferOperation *_op);
+      virtual void event_triggered(bool poisoned, TimeLimit work_until);
+      virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
+
+    protected:
+      TransferOperation *op;
+    };
+    DeferredStart deferred_start;
+
+    TransferDesc& desc;
+    Event precondition;
+    std::vector<XferDesID> xd_ids;
+    std::vector<XDLifetimeTracker *> xd_trackers;
+    std::vector<off_t> ib_offsets;
+    atomic<int> ib_responses_needed;
+    int priority;
+  };
+
 }; // namespace Realm
+
+#include "realm/transfer/transfer.inl"
 
 #endif // ifndef REALM_TRANSFER_H

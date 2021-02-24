@@ -714,7 +714,8 @@ namespace Legion {
 #endif
     }; 
 
-    class InnerContext : public TaskContext {
+    class InnerContext : public TaskContext,
+                         public LegionHeapify<InnerContext> {
     public:
       // Prepipeline stages need to hold a reference since the
       // logical analysis could clean the context up before it runs
@@ -2574,7 +2575,8 @@ namespace Legion {
      * \class LeafContext
      * A context for the execution of a leaf task
      */
-    class LeafContext : public TaskContext {
+    class LeafContext : public TaskContext,
+                        public LegionHeapify<LeafContext> {
     public:
       LeafContext(Runtime *runtime, SingleTask *owner,bool inline_task = false);
       LeafContext(const LeafContext &rhs);

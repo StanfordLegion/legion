@@ -33,14 +33,15 @@ namespace Realm {
       off_t disk_off;
     };
 
+    class FileChannel;
+
     class FileXferDes : public XferDes {
     public:
-      FileXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+      FileXferDes(uintptr_t _dma_op, Channel *_channel,
+		  NodeID _launch_node, XferDesID _guid,
 		  const std::vector<XferDesPortInfo>& inputs_info,
 		  const std::vector<XferDesPortInfo>& outputs_info,
-		  bool _mark_start,
-		  uint64_t _max_req_size, long max_nr, int _priority,
-		  XferDesFence* _complete_fence);
+		  int _priority);
 
       ~FileXferDes()
       {
@@ -59,14 +60,15 @@ namespace Realm {
       FileMemory::OpenFileInfo *file_info;
     };
 
+    class DiskChannel;
+
     class DiskXferDes : public XferDes {
     public:
-      DiskXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+      DiskXferDes(uintptr_t _dma_op, Channel *_channel,
+		  NodeID _launch_node, XferDesID _guid,
 		  const std::vector<XferDesPortInfo>& inputs_info,
 		  const std::vector<XferDesPortInfo>& outputs_info,
-		  bool _mark_start,
-		  uint64_t _max_req_size, long max_nr, int _priority,
-		  XferDesFence* _complete_fence);
+		  int _priority);
 
       ~DiskXferDes() {
         free(disk_reqs);
@@ -93,6 +95,15 @@ namespace Realm {
       // TODO: farm I/O work off to dedicated threads if needed
       static const bool is_ordered = true;
 
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
+				       NodeID launch_node,
+				       XferDesID guid,
+				       const std::vector<XferDesPortInfo>& inputs_info,
+				       const std::vector<XferDesPortInfo>& outputs_info,
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size);
+
       long submit(Request** requests, long nr);
     };
 
@@ -103,6 +114,15 @@ namespace Realm {
 
       // TODO: farm I/O work off to dedicated threads if needed
       static const bool is_ordered = true;
+
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
+				       NodeID launch_node,
+				       XferDesID guid,
+				       const std::vector<XferDesPortInfo>& inputs_info,
+				       const std::vector<XferDesPortInfo>& outputs_info,
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size);
 
       long submit(Request** requests, long nr);
     };

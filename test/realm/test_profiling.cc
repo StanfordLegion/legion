@@ -304,8 +304,10 @@ void top_level_task(const void *args, size_t arglen,
   response_counter = Barrier::create_barrier(expected_responses_remaining);
 
 #ifndef _MSC_VER
-  // give ourselves 15 seconds for the tasks, and their profiling responses, to finish
-  alarm(15);
+  // give ourselves 60 seconds for the tasks, and their profiling responses, to
+  //  finish - (this is excessive for an unloaded machine but can happen
+  //  with heavy load)
+  alarm(60);
 #endif
 
   ChildTaskArgs cargs;
