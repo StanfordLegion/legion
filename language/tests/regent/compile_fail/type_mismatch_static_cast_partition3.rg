@@ -13,15 +13,13 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_static_cast_partition3.rg:25: type mismatch in argument 2: expected ispace(int2d) for color space but got ispace(int1d)
+-- type_mismatch_static_cast_partition3.rg:23: type mismatch in argument 2: expected ispace(int2d) for color space but got ispace(int1d)
 --   var y = static_cast(partition(disjoint, r, ispace(int2d)), p)
 --                     ^
 
 import "regent"
 
-task f()
-  var r : region(ispace(int1d), int)
-  var p : partition(disjoint, r, ispace(int1d))
+task f(r : region(ispace(int1d), int), p : partition(disjoint, r, ispace(int1d)))
   var y = static_cast(partition(disjoint, r, ispace(int2d)), p)
 end
 f:compile()

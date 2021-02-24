@@ -255,6 +255,25 @@ def iterkeys(obj):
 def itervalues(obj):
     return obj.values() if sys.version_info > (3,) else obj.viewvalues()
 
+# Helper function for size
+def size_pretty(size):
+    if size is not None:
+        if size >= (1024*1024*1024):
+            # GBs
+            size_pretty = '%.3f GiB' % (size / (1024.0*1024.0*1024.0))
+        elif size >= (1024*1024):
+            # MBs
+            size_pretty = '%.3f MiB' % (size / (1024.0*1024.0))
+        elif size >= 1024:
+            # KBs
+            size_pretty = '%.3f KiB' % (size / 1024.0)
+        else:
+            # Bytes
+            size_pretty = str(size) + ' B'
+    else:
+        size_pretty = 'Unknown'
+    return size_pretty
+
 class PathRange(object):
     __slots__ = ['start', 'stop', 'path']
     def __init__(self, start, stop, path):
@@ -1691,7 +1710,7 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
         return self.initiation_op.get_color()
 
     def __repr__(self):
-        val =  'copy size='+str(self.size) + ', num requests=' + str(len(self.copy_info))
+        val =  'size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_info))
         cnt = 0
         for node in self.copy_info:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
@@ -1884,21 +1903,7 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
 
     def __repr__(self):
         # Check to see if we got a profiling callback
-        if self.size is not None:
-            if self.size >= (1024*1024*1024):
-                # GBs
-                size_pretty = '%.3f GiB' % (self.size / (1024.0*1024.0*1024.0))
-            elif self.size >= (1024*1024):
-                # MBs
-                size_pretty = '%.3f MiB' % (self.size / (1024.0*1024.0))
-            elif self.size >= 1024:
-                # KBs
-                size_pretty = '%.3f KiB' % (self.size / 1024.0)
-            else:
-                # Bytes
-                size_pretty = str(self.size) + ' B'
-        else:
-            size_pretty = 'Unknown'
+        size_pr = size_pretty(self.size)
         output_str = ""
         for pos in range(0, len(self.ispace)):
             output_str = output_str + "Region: " + self.ispace[pos].get_short_text()
@@ -1989,7 +1994,7 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
                         output_str = output_str + "[Struct-of-arrays (SOA)]"
 
         output_str = output_str + " $Inst: {} $Size: {}"
-        return output_str.format(str(hex(self.inst_id)),size_pretty)
+        return output_str.format(str(hex(self.inst_id)),size_pr)
 
 
 class MapperCallKind(StatObject):
