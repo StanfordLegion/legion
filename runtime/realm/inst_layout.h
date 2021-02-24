@@ -205,22 +205,11 @@ namespace Realm {
     static const LayoutType AffineLayoutType = 1;
   };
 
-  template <int N, typename T = int>
-  class REALM_PUBLIC_API InstanceLayoutPiece {
+  class REALM_PUBLIC_API InstanceLayoutPieceBase {
   public:
-    InstanceLayoutPiece(void);
-    InstanceLayoutPiece(PieceLayoutTypes::LayoutType _layout_type);
-    InstanceLayoutPiece(PieceLayoutTypes::LayoutType _layout_type,
-			const Rect<N,T>& _bounds);
+    InstanceLayoutPieceBase(PieceLayoutTypes::LayoutType _layout_type);
 
-    template <typename S>
-    static InstanceLayoutPiece<N,T> *deserialize_new(S& deserializer);
-
-    virtual ~InstanceLayoutPiece(void);
-
-    virtual InstanceLayoutPiece<N,T> *clone(void) const = 0;
-
-    virtual size_t calculate_offset(const Point<N,T>& p) const = 0;
+    virtual ~InstanceLayoutPieceBase(void);
 
     virtual void relocate(size_t base_offset) = 0;
 
@@ -232,6 +221,23 @@ namespace Realm {
 							 unsigned next_delta) const = 0;
 
     PieceLayoutTypes::LayoutType layout_type;
+  };
+
+  template <int N, typename T = int>
+  class REALM_PUBLIC_API InstanceLayoutPiece : public InstanceLayoutPieceBase {
+  public:
+    InstanceLayoutPiece(void);
+    InstanceLayoutPiece(PieceLayoutTypes::LayoutType _layout_type);
+    InstanceLayoutPiece(PieceLayoutTypes::LayoutType _layout_type,
+			const Rect<N,T>& _bounds);
+
+    template <typename S>
+    static InstanceLayoutPiece<N,T> *deserialize_new(S& deserializer);
+
+    virtual InstanceLayoutPiece<N,T> *clone(void) const = 0;
+
+    virtual size_t calculate_offset(const Point<N,T>& p) const = 0;
+
     Rect<N,T> bounds;
   };
 

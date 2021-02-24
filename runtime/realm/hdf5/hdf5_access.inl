@@ -27,7 +27,10 @@ namespace Realm {
   template <int N, typename T>
   inline HDF5LayoutPiece<N,T>::HDF5LayoutPiece(void)
     : InstanceLayoutPiece<N,T>(PieceLayoutTypes::HDF5LayoutType)
-  {}
+  {
+    offset.resize(N);
+    dim_order.resize(N);
+  }
 
   template <int N, typename T>
   template <typename S>
@@ -74,7 +77,9 @@ namespace Realm {
   template <int N, typename T>
   void HDF5LayoutPiece<N,T>::print(std::ostream& os) const
   {
-    os << this->bounds << "->hdf5(" << dsetname << "+" << offset << ")";
+    Point<N,T> o;
+    for(int i = 0; i < N; i++) o[i] = offset[i];
+    os << this->bounds << "->hdf5(" << dsetname << "+" << o << ")";
   }
 
   template <int N, typename T>
@@ -89,7 +94,8 @@ namespace Realm {
   {
     PieceLookup::HDF5Piece<N,T> *hp = new(ptr) PieceLookup::HDF5Piece<N,T>(next_delta);
     hp->bounds = this->bounds;
-    hp->offset = offset;
+    for(int i = 0; i < N; i++)
+      hp->offset[i] = offset[i];
     for(int i = 0; i < N; i++)
       hp->dim_order[i] = dim_order[i];
     hp->read_only = read_only;

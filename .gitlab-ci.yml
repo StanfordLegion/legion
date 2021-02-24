@@ -43,6 +43,9 @@ variables:
 .clang38: &clang38
   CXX: "clang++-3.8"
   F90: "gfortran-5"
+  # clang3.8 seems to generate bad code for some newer x86 cpus
+  # we have some non-AVX systems in our CI runner pool, so back up to westmere
+  MARCH: "westmere"
 .clang7: &clang7
   CXX: "clang++-7"
   F90: "gfortran-5"
@@ -186,10 +189,20 @@ variables:
   TEST_LEGION_CXX: "0"
   TEST_REALM: "0"
   TEST_FUZZER: "0"
+  NO_PRETTY: "1"
+.regent_pretty: &regent_pretty
+  TEST_LEGION_CXX: "0"
+  TEST_REALM: "0"
+  TEST_FUZZER: "0"
 .parallel: &parallel
   REGENT_JOBS: "2"
 .incremental: &incremental
   REGENT_INCREMENTAL: "1"
+
+.external1: &external1
+  TEST_PY_ARGS: "--test=external1"
+.external2: &external2
+  TEST_PY_ARGS: "--test=external2 --test=private"
 
 .darwin_power9_scheduler: &darwin_power9_scheduler
   CI_DEBUG_TRACE: "false"
@@ -405,9 +418,9 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image: &image
-  image: stanfordlegion/gitlab-ci:ubuntu16.04 # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04
 .image_clang: &image_clang
-  image: stanfordlegion/gitlab-ci:ubuntu16.04-clang # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04-clang
 .image_2004: &image_2004
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04
 
@@ -482,7 +495,7 @@ before_script:
       if [[ -z "$TEST_PYTHON_EXE" ]]; then
         export TEST_PYTHON_EXE=`which python3 python | head -1`
       fi
-    - $TEST_PYTHON_EXE ./test.py --test=external --test=private
+    - $TEST_PYTHON_EXE ./test.py $TEST_PY_ARGS
   retry:
     max: 0
     when:
@@ -528,10 +541,10 @@ gcc49_cxx11_release_legion_fortran:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *release, *cxx11_normal, *legion, *fortran]
-gcc49_cxx11_release_llvm_cmake_regent:
+gcc49_cxx11_release_llvm_cmake_regent_pretty:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *release, *cxx11_normal, *llvm, *cmake, *regent, *incremental, *short]
+    <<: [*gcc49, *terra38, *release, *cxx11_normal, *llvm, *cmake, *regent_pretty, *incremental, *short]
 #   * Debug (Privilege and Bounds Checks)
 gcc49_cxx11_debug_checks_legion:
   <<: [*linux, *image, *tests]
@@ -561,10 +574,10 @@ gcc49_cxx11_release_maxdim5_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *release, *cxx11_normal, *maxdim5, *regent, *parallel]
-clang38_cxx11_release_maxdim5_regent:
+clang38_cxx11_release_maxdim5_regent_pretty:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*clang38, *terra38, *release, *cxx11_normal, *maxdim5, *regent, *parallel]
+    <<: [*clang38, *terra38, *release, *cxx11_normal, *maxdim5, *regent_pretty, *parallel]
 # * Features: one test per feature
 #   * OpenMP
 gcc49_cxx11_debug_openmp_legion:
@@ -598,10 +611,10 @@ gcc49_cxx11_debug_hdf5_cmake_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *cmake, *legion, *ctest]
-gcc49_cxx11_debug_hdf5_regent:
+gcc49_cxx11_debug_hdf5_regent_pretty:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *hdf5, *regent_pretty]
 #   * GASNet-1 (legacy API)
 gcc49_cxx11_release_gasnet1_mpi_legion:
   <<: [*linux_compute, *image, *tests]
@@ -743,10 +756,14 @@ gcc49_cxx11_32bit_release_legion:
   variables:
     <<: [*gcc49, *terra38, *release, *cxx11_32bit_normal, *legion]
 # * External tests
-gcc49_cxx11_debug_maxdim4_external:
+gcc49_cxx11_debug_external1:
   <<: [*linux_compute, *image, *external_tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5, *short]
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *openmp, *hdf5, *external1, *short]
+gcc49_cxx11_debug_maxdim4_external2:
+  <<: [*linux_compute, *image, *external_tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5, *external2, *short]
 
 # Linux with Clang 3.8
 # * Basic configurations
@@ -898,10 +915,14 @@ clang38_cxx11_32bit_release_legion:
   variables:
     <<: [*clang38, *terra38, *release, *cxx11_32bit_normal, *legion]
 # * External tests
-clang38_cxx11_debug_maxdim4_external:
+clang38_cxx11_debug_external1:
   <<: [*linux_compute, *image_clang, *external_tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5]
+    <<: [*clang38, *terra38, *debug, *cxx11_normal, *openmp, *hdf5, *external1]
+clang38_cxx11_debug_maxdim4_external2:
+  <<: [*linux_compute, *image_clang, *external_tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5, *external2]
 
 # # macOS with Clang 3.5
 # macos_clang38_cxx11_debug:
@@ -992,10 +1013,10 @@ gcc9_cxx17_debug_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra9, *debug, *cxx17_normal, *regent]
-gcc9_cxx17_release_regent:
+gcc9_cxx17_release_regent_pretty:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra9, *release, *cxx17_normal, *regent]
+    <<: [*gcc9, *terra9, *release, *cxx17_normal, *regent_pretty]
 
 # GCC 10
 gcc10_cxx17_debug_legion:

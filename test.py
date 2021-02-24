@@ -67,6 +67,7 @@ legion_cxx_tests = [
     ['examples/predication/predication', []],
     ['examples/layout_constraints/transpose', []],
     ['examples/inline_tasks/inline_tasks', []],
+    ['examples/local_function_tasks/local_function_tasks', []],
     # Comment this test out until it works everywhere
     #['examples/implicit_top_task/implicit_top_task', []],
 
@@ -344,7 +345,7 @@ def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, time
     cmd([make_exe, '-C', test_dir, 'DEBUG=0', '-j', str(thread_count), 'build'], env=env)
     cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'run_all'], env=env, timelimit=timelimit)
 
-def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
 
     # Realm perf test (move back to perf test when integrated with perf.py)
@@ -403,6 +404,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, t
     cmd([make_exe, '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
     # FIXME: Actually run it
 
+def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     # HTR
     # Contact: Mario Di Renzo <direnzo.mario1@gmail.com>
     htr_dir = os.path.join(tmp_dir, 'htr')
@@ -436,6 +438,10 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, t
         cwd=barnes_hut_dir,
         env=env,
         timelimit=timelimit)
+    # work around search path that doesn't include bindings/regent
+    for hdr in ('legion_defines.h', 'realm_defines.h'):
+        os.symlink(os.path.join(root_dir, 'bindings', 'regent', hdr),
+                   os.path.join(root_dir, 'runtime', hdr))
     cmd([sys.executable, regent_path, 'barnes_hut.rg',
          '-i', 'bodies-16384-blitz.h5',
          '-n', '16384'],
@@ -674,7 +680,7 @@ def check_test_legion_cxx(root_dir):
 
 def build_cmake(root_dir, tmp_dir, env, thread_count,
                 test_regent, test_legion_cxx,
-                test_external, test_perf, test_ctest):
+                test_external1, test_external2, test_perf, test_ctest):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
     os.mkdir(build_dir)
@@ -720,10 +726,13 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
                         '-DLegion_BUILD_TESTS=ON',
                         ])
     # several different conditions force the use of shared libraries
-    if test_regent or test_external or (env['USE_PYTHON'] == '1') or (env['SHARED_OBJECTS'] == '1'):
+    if test_regent or test_external1 or test_external2 or (env['USE_PYTHON'] == '1') or (env['SHARED_OBJECTS'] == '1'):
         cmdline.append('-DBUILD_SHARED_LIBS=ON')
     else:
         cmdline.append('-DBUILD_SHARED_LIBS=OFF')
+    # if MARCH is set in the environment, give that to cmake as BUILD_MARCH
+    if 'MARCH' in env:
+        cmdline.append('-DBUILD_MARCH=' + env['MARCH'])
     # last argument to cmake is the root of the tree
     cmdline.append(root_dir)
 
@@ -744,10 +753,10 @@ def clean_cxx(tests, root_dir, env, thread_count):
         cmd([make_exe, '-C', test_dir, 'clean'], env=env)
 
 def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf,
-                     test_external, test_private):
+                     test_external1, test_external2, test_private):
     # External and private also require cleaning, even though they get
     # built separately.
-    if test_legion_cxx or test_perf or test_external or test_private:
+    if test_legion_cxx or test_perf or test_external1 or test_external2 or test_private:
         clean_cxx(legion_cxx_tests, root_dir, env, thread_count)
     if test_legion_cxx and env['LEGION_USE_FORTRAN'] == '1':
         clean_cxx(legion_fortran_tests, root_dir, env, thread_count)
@@ -786,7 +795,8 @@ class Stage(object):
 
 def report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
-                test_external, test_private, test_perf, test_ctest, networks,
+                test_external1, test_external2, test_private,
+                test_perf, test_ctest, networks,
                 use_cuda, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
@@ -807,7 +817,8 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Legion C++: %s' % test_legion_cxx)
     print('###   * Fuzzer:     %s' % test_fuzzer)
     print('###   * Realm:      %s' % test_realm)
-    print('###   * External:   %s' % test_external)
+    print('###   * External1:  %s' % test_external1)
+    print('###   * External2:  %s' % test_external2)
     print('###   * Private:    %s' % test_private)
     print('###   * Perf:       %s' % test_perf)
     print('###   * CTest:      %s' % test_ctest)
@@ -865,7 +876,8 @@ def run_tests(test_modules=None,
     test_legion_cxx = module_enabled('legion_cxx')
     test_fuzzer = module_enabled('fuzzer', False)
     test_realm = module_enabled('realm', not debug)
-    test_external = module_enabled('external', False)
+    test_external1 = module_enabled('external1', False)
+    test_external2 = module_enabled('external2', False)
     test_private = module_enabled('private', False)
     test_perf = module_enabled('perf', False)
     test_ctest = module_enabled('ctest', False)
@@ -924,7 +936,8 @@ def run_tests(test_modules=None,
 
     report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
-                test_external, test_private, test_perf, test_ctest,
+                test_external1, test_external2, test_private,
+                test_perf, test_ctest,
                 networks,
                 use_cuda, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
@@ -984,14 +997,15 @@ def run_tests(test_modules=None,
             if use_cmake:
                 bin_dir = build_cmake(
                     root_dir, tmp_dir, env, thread_count,
-                    test_regent, test_legion_cxx, test_external,
+                    test_regent, test_legion_cxx, test_external1,
+                    test_external2,
                     test_perf, test_ctest)
             else:
                 # With GNU Make, builds happen inline. But clean here.
                 build_make_clean(
                     root_dir, env, thread_count, test_legion_cxx, test_perf,
                     # These configurations also need to be cleaned first.
-                    test_external, test_private)
+                    test_external1, test_external2, test_private)
                 bin_dir = None
 
         # Run tests.
@@ -1019,11 +1033,16 @@ def run_tests(test_modules=None,
         if test_realm and not test_ctest:
             with Stage('realm'):
                 run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
-        if test_external:
-            with Stage('external'):
+        if test_external1:
+            with Stage('external1'):
                 if not test_regent:
                     build_regent(root_dir, env)
-                run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+        if test_external2:
+            with Stage('external2'):
+                if not test_regent:
+                    build_regent(root_dir, env)
+                run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_private:
             with Stage('private'):
                 run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
@@ -1083,7 +1102,7 @@ def driver():
     parser.add_argument(
         '--test', dest='test_modules', action=ExtendAction,
         choices=MultipleChoiceList('regent', 'legion_cxx', 'fuzzer',
-                                   'realm', 'external',
+                                   'realm', 'external1', 'external2',
                                    'private', 'perf', 'ctest'),
         type=lambda s: s.split(','),
         default=None,

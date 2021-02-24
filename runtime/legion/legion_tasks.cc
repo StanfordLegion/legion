@@ -407,6 +407,7 @@ namespace Legion {
       rez.serialize(steal_count);
       // No need to pack remote, it will get set
       rez.serialize(speculated);
+      // No need to pack local function, it's not if we're sending this remote
       rez.serialize<size_t>(get_context_index());
     }
 
@@ -639,6 +640,7 @@ namespace Legion {
       mapper = NULL;
       must_epoch = NULL;
       must_epoch_task = false;
+      local_function = false;
       orig_proc = Processor::NO_PROC; // for is_remote
     }
 
@@ -912,6 +914,7 @@ namespace Legion {
       current_proc = orig_proc;
       steal_count = 0;
       speculated = false;
+      local_function = false;
     }
 
     //--------------------------------------------------------------------------
@@ -986,6 +989,14 @@ namespace Legion {
             "permitted to be the target processor for tasks.",
             mapper->get_mapper_name(), get_task_name(), get_unique_id())
       target_proc = options.initial_proc;
+      if (local_function && !runtime->is_local(target_proc))
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+            "Invalid mapper output. Mapper %s requested that local function "
+            "task %s (UID %lld) be assigned to processor " IDFMT " which is "
+            "not local to address space %d. Local function tasks must be "
+            "assigned to local processors.", mapper->get_mapper_name(),
+            get_task_name(), get_unique_id(),
+            target_proc.id, runtime->address_space)
       stealable = options.stealable;
       map_origin = options.map_locally;
       request_valid_instances = options.valid_instances;
@@ -5076,7 +5087,6 @@ namespace Legion {
       sent_remotely = false;
       top_level_task = false;
       implicit_top_level_task = false;
-      local_function_task = false;
       need_intra_task_alias_analysis = true;
     }
 
@@ -5212,7 +5222,7 @@ namespace Legion {
               "are not permitted to have any region requirements.", 
               get_task_name(), parent_ctx->get_task_name(), 
               parent_ctx->get_unique_id(), regions.size())
-        local_function_task = true;
+        local_function = true;
       }
       // Get a future from the parent context to use as the result
       result = Future(new FutureImpl(runtime, true/*register*/,
@@ -5266,15 +5276,6 @@ namespace Legion {
     void IndividualTask::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
-      // local function tasks have no region requirements so nothing to do here
-      if (local_function_task)
-        return;
-      // First compute the parent indexes
-      compute_parent_indexes();
-      privilege_paths.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        initialize_privilege_path(privilege_paths[idx], regions[idx]);
-      update_no_access_regions();
       if (!options_selected)
       {
         const bool inline_task = select_task_options(false/*prioritize*/);
@@ -5288,6 +5289,15 @@ namespace Legion {
                           get_task_name(), get_unique_id());
         }
       }
+      // local function tasks have no region requirements so nothing below
+      if (local_function)
+        return;
+      // First compute the parent indexes
+      compute_parent_indexes();
+      privilege_paths.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        initialize_privilege_path(privilege_paths[idx], regions[idx]);
+      update_no_access_regions();
       // If we have a trace, it is unsound to do this until the dependence
       // analysis stage when all the operations are serialized in order
       if (need_intra_task_alias_analysis)
@@ -5313,10 +5323,10 @@ namespace Legion {
       assert(privilege_paths.size() == regions.size());
 #endif
       if (runtime->check_privileges && 
-          !is_top_level_task() && !local_function_task)
+          !is_top_level_task() && !local_function)
         perform_privilege_checks();
       // If we have a trace we do our alias analysis now
-      if (need_intra_task_alias_analysis && !local_function_task)
+      if (need_intra_task_alias_analysis && !local_function)
       {
         LegionTrace *local_trace = get_trace();
         if (local_trace != NULL)
@@ -5356,7 +5366,7 @@ namespace Legion {
       }
       // If we're replaying this for for a trace then don't even
       // bother asking the mapper about when to map this
-      else if (is_replaying() || local_function_task)
+      else if (is_replaying() || local_function)
         enqueue_ready_operation();
       // Figure out whether this task is local or remote
       else if (!runtime->is_local(target_proc))
@@ -5475,9 +5485,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PERFORM_MAPPING_CALL);
-      // Now try to do the mapping, we can just use our completion
-      // event since we know this task will object will be active
-      // throughout the duration of the computation
       const RtEvent deferred = map_all_regions(must_epoch_owner, args);
       if (deferred.exists())
         return deferred; 

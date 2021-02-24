@@ -2351,8 +2351,8 @@ namespace Legion {
       MapperManager *child_mapper = 
         runtime->find_mapper(executing_processor, child->map_id);
       child_mapper->invoke_select_task_variant(child, &input, &output);
-      VariantImpl *variant_impl= runtime->find_variant_impl(child->task_id,
-                                  output.chosen_variant, true/*can fail*/);
+      VariantImpl *variant_impl = runtime->find_variant_impl(child->task_id,
+                                   output.chosen_variant, true/*can fail*/);
       if (variant_impl == NULL)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invoction of "

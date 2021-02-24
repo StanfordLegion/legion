@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, codecs, glob, itertools, json, multiprocessing, os, optparse, re, resource, shutil, subprocess, sys, tempfile, traceback, time
+import argparse, codecs, glob, itertools, json, multiprocessing, os, optparse, queue, re, resource, shutil, signal, subprocess, sys, tempfile, traceback, time
 from collections import OrderedDict
 import regent
 
@@ -39,9 +39,10 @@ else:
     raise Exception('Incompatible Python version')
 
 class TestFailure(Exception):
-    def __init__(self, command, output):
+    def __init__(self, command, retcode, output):
         Exception.__init__(self, command, output)
         self.command = command
+        self.retcode = retcode
         self.output = output
 
 def detect_python_interpreter():
@@ -61,7 +62,8 @@ def run(filename, debug, verbose, timelimit, flags, env):
     if verbose: print('Running', ' '.join(args))
 
     def set_timeout():
-        resource.setrlimit(resource.RLIMIT_CPU, (timelimit, timelimit))
+        # set hard limit above soft limit so we might get SIGXCPU return code
+        resource.setrlimit(resource.RLIMIT_CPU, (timelimit, timelimit+1))
 
     proc = regent.regent(
         args,
@@ -90,7 +92,7 @@ def run(filename, debug, verbose, timelimit, flags, env):
                 break
         raise
     if retcode != 0:
-        raise TestFailure(' '.join(args), output.decode('utf-8') if output is not None else None)
+        raise TestFailure(' '.join(args), retcode, output.decode('utf-8') if output is not None else None)
     return ' '.join(args)
 
 def run_spy(logfiles, verbose, py_exe_path):
@@ -111,7 +113,7 @@ def run_spy(logfiles, verbose, py_exe_path):
     output, _ = proc.communicate()
     retcode = proc.wait()
     if retcode != 0:
-        raise TestFailure(' '.join(cmd), output.decode('utf-8') if output is not None else None)
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
 
 def run_gc(logfiles, verbose, py_exe_path):
     cmd = [py_exe_path, os.path.join(regent.root_dir(), 'tools', 'legion_gc.py'),
@@ -126,7 +128,7 @@ def run_gc(logfiles, verbose, py_exe_path):
     output, _ = proc.communicate()
     retcode = proc.wait()
     if retcode != 0:
-        raise TestFailure(' '.join(cmd), output.decode('utf-8') if output is not None else None)
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
 
 def run_prof(out_dir, logfiles, verbose, py_exe_path):
     cmd = [
@@ -142,7 +144,7 @@ def run_prof(out_dir, logfiles, verbose, py_exe_path):
     output, _ = proc.communicate()
     retcode = proc.wait()
     if retcode != 0:
-        raise TestFailure(' '.join(cmd), output.decode('utf-8') if output is not None else None)
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
 
 _re_label = r'^[ \t\r]*--[ \t]+{label}:[ \t\r]*$\n((^[ \t\r]*--.*$\n)+)'
 def find_labeled_text(filename, label):
@@ -176,25 +178,25 @@ def test_compile_fail(filename, debug, verbose, short, timelimit, py_exe_path, f
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     try:
         for params in runs_with:
-            run(filename, debug, False, timelimit, params + flags, env)
+            last_cmd = run(filename, debug, False, timelimit, params + flags, env)
     except TestFailure as e:
+        # if it died due to a signal, re-raise
+        if e.retcode < 0:
+            raise
         failure = e.output
         lines = set(line.strip() for line in failure.strip().split('\n')
                     if len(line.strip()) > 0)
         expected_lines = expected_failure.split('\n')
         for expected_line in expected_lines:
             if expected_line not in lines:
-                raise Exception('Command failed:\n%s\n\nExpected failure:\n%s\n\nInstead got:\n%s' % (e.command, expected_failure, failure))
+                raise TestFailure(e.command, 1, 'Output mismatch - expected failure:\n%s\n\nInstead got:\n%s' % (expected_failure, failure))
     else:
-        raise Exception('Expected failure, but test passed')
+        raise TestFailure(last_cmd, 1, 'Expected failure, but test ran successfully!')
 
 def test_run_pass(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with', short)
-    try:
-        for params in runs_with:
-            run(filename, debug, verbose, timelimit, params + flags, env)
-    except TestFailure as e:
-        raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
+    for params in runs_with:
+        run(filename, debug, verbose, timelimit, params + flags, env)
 
 def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
     spy_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
@@ -204,17 +206,11 @@ def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, flags, env
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     try:
         for params in runs_with:
-            try:
-                cmd = run(filename, debug, verbose, timelimit, params + flags + spy_flags, env)
-            except TestFailure as e:
-                raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
+            run(filename, debug, verbose, timelimit, params + flags + spy_flags, env)
 
-            try:
-                spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
-                assert len(spy_logs) > 0
-                run_spy(spy_logs, verbose, py_exe_path)
-            except TestFailure as e:
-                raise Exception('Command failed:\n%s\n%s\n\nOutput:\n%s' % (cmd, e.command, e.output))
+            spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
+            assert len(spy_logs) > 0
+            run_spy(spy_logs, verbose, py_exe_path)
     finally:
         shutil.rmtree(spy_dir)
 
@@ -226,17 +222,11 @@ def test_gc(filename, debug, verbose, short, timelimit, py_exe_path, flags, env)
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     try:
         for params in runs_with:
-            try:
-                cmd = run(filename, debug, verbose, timelimit, params + flags + gc_flags, env)
-            except TestFailure as e:
-                raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
+            run(filename, debug, verbose, timelimit, params + flags + gc_flags, env)
 
-            try:
-                gc_logs = glob.glob(os.path.join(gc_dir, 'gc_*.log'))
-                assert len(gc_logs) > 0
-                run_gc(gc_logs, verbose, py_exe_path)
-            except TestFailure as e:
-                raise Exception('Command failed:\n%s\n%s\n\nOutput:\n%s' % (cmd, e.command, e.output))
+            gc_logs = glob.glob(os.path.join(gc_dir, 'gc_*.log'))
+            assert len(gc_logs) > 0
+            run_gc(gc_logs, verbose, py_exe_path)
     finally:
         shutil.rmtree(gc_dir)
 
@@ -248,17 +238,11 @@ def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, flags, en
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     try:
         for params in runs_with:
-            try:
-                cmd = run(filename, debug, verbose, timelimit, params + flags + prof_flags, env)
-            except TestFailure as e:
-                raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
+            run(filename, debug, verbose, timelimit, params + flags + prof_flags, env)
 
-            try:
-                prof_logs = glob.glob(os.path.join(prof_dir, 'prof_*.gz'))
-                assert len(prof_logs) > 0
-                run_prof(prof_dir, prof_logs, verbose, py_exe_path)
-            except TestFailure as e:
-                raise Exception('Command failed:\n%s\n%s\n\nOutput:\n%s' % (cmd, e.command, e.output))
+            prof_logs = glob.glob(os.path.join(prof_dir, 'prof_*.gz'))
+            assert len(prof_logs) > 0
+            run_prof(prof_dir, prof_logs, verbose, py_exe_path)
     finally:
         shutil.rmtree(prof_dir)
 
@@ -269,6 +253,7 @@ clear = "\033[0m"
 PASS = 'pass'
 FAIL = 'fail'
 INTERRUPT = 'interrupt'
+INTERNALERROR = 'internalerror'
 
 def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, short, py_exe_path):
     test_fn, test_args = test_closure
@@ -276,20 +261,22 @@ def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, sh
     try:
         test_fn(filename, debug, verbose, short, timelimit, py_exe_path, *test_args)
     except KeyboardInterrupt:
-        return test_name, filename, [], INTERRUPT, None
+        return test_name, filename, [], INTERRUPT, 0, None
+    except TestFailure as e:
+        return test_name, e.command, [], FAIL, e.retcode, e.output
     except Exception as e:
         if verbose:
-            return test_name, filename, [], FAIL, ''.join(traceback.format_exception(*sys.exc_info()))
-        return test_name, filename, [], FAIL, ''.join(traceback.format_exception_only(*sys.exc_info()[:2]))
+            return test_name, filename, [], INTERNALERROR, 0, ''.join(traceback.format_exception(*sys.exc_info()))
+        return test_name, filename, [], INTERNALERROR, 0, ''.join(traceback.format_exception_only(*sys.exc_info()[:2]))
     else:
-        return test_name, filename, [], PASS, None
+        return test_name, filename, [], PASS, 0, None
 
 class Counter:
     def __init__(self):
         self.passed = 0
         self.failed = 0
 
-def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use_openmp, use_cuda, use_python, max_dim, short, extra_flags):
+def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use_openmp, use_cuda, use_python, max_dim, no_pretty, extra_flags):
     base_env = {
     }
     run_env = {
@@ -376,7 +363,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
     result = []
     if not (use_run or use_spy or use_gc or use_prof or use_hdf5 or use_cuda):
         result.extend(base)
-        if not short:
+        if not no_pretty:
             result.extend(pretty)
         result.extend(run)
     if use_run:
@@ -399,17 +386,24 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
         result.extend(max_dim_tests(dim))
     return result
 
-def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp, cuda, python, extra_flags, verbose, quiet,
-                  only_patterns, skip_patterns, timelimit, short):
+def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
+                  openmp, cuda, python, extra_flags, verbose, quiet,
+                  only_patterns, skip_patterns, timelimit, poll_interval,
+                  short, no_pretty):
+    # run only one test at a time if '-j' isn't set
+    if not thread_count:
+        thread_count = 1
     thread_pool = multiprocessing.Pool(thread_count)
-    results = []
+
+    result_queue = queue.Queue()
+    num_queued = 0
 
     legion_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
     py_exe_path = detect_python_interpreter()
 
     # Run tests asynchronously.
-    tests = get_test_specs(legion_dir, run, spy, gc, prof, hdf5, openmp, cuda, python, max_dim, short, extra_flags)
+    tests = get_test_specs(legion_dir, run, spy, gc, prof, hdf5, openmp, cuda, python, max_dim, no_pretty, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -425,7 +419,17 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp
                 continue
             if skip_patterns and any(re.search(p,test_path) for p in skip_patterns):
                 continue
-            results.append((test_name, test_path, thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path, timelimit, short, py_exe_path))))
+            num_queued += 1
+            def callback(r):
+                result_queue.put((test_name, test_path, r))
+            def error_callback(e):
+                print('ERROR CALLBACK', e)
+                raise e
+            thread_pool.apply_async(test_runner,
+                                    (test_name, test_fn, debug, verbose,
+                                     test_path, timelimit, short, py_exe_path),
+                                    callback=callback,
+                                    error_callback=error_callback)
 
     thread_pool.close()
 
@@ -435,47 +439,58 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp
         test_counters[test_name] = test_counter
 
     all_saved_temps = []
+    num_passed = 0
+    num_failed = 0
+    num_remaining = num_queued
+    t_start = time.time()
+    t_last = t_start
     try:
-        result_set = set(results)
-        while True:
-            completed = set()
-            for test_result in result_set:
-                test_name, filename, result = test_result
-                if result.ready():
-                    _test_name, _filename, saved_temps, outcome, output = result.get()
-                    if len(saved_temps) > 0:
-                        all_saved_temps.append((test_name, filename, saved_temps))
-                    if outcome == PASS:
-                        if quiet:
-                            print('.', end='')
-                            sys.stdout.flush()
-                        else:
-                            print('[%sPASS%s] (%s) %s' % (green, clear, test_name, filename))
-                        if output is not None: print(output)
-                        test_counters[test_name].passed += 1
-                    elif outcome == FAIL:
-                        if quiet: print()
-                        print('[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename))
-                        if output is not None: print(output)
-                        test_counters[test_name].failed += 1
+        while num_remaining:
+            # wait for up to 'interval' seconds for something to finish
+            try:
+                test_name, filename, result = result_queue.get(timeout=poll_interval)
+                # unpack result from subprocess
+                _test_name, _filename, saved_temps, outcome, retcode, output = result
+                num_remaining -= 1
+                if len(saved_temps) > 0:
+                    all_saved_temps.append((test_name, filename, saved_temps))
+                if outcome == PASS:
+                    if not quiet:
+                        print('[%sPASS%s] (%s) %s' % (green, clear, test_name, filename))
+                    if output is not None: print(output)
+                    test_counters[test_name].passed += 1
+                    num_passed += 1
+                elif outcome == FAIL:
+                    if retcode < 0:
+                        try:
+                            errmsg = 'signal ' + signal.Signals(-retcode).name
+                        except ValueError:
+                            errmsg = 'signal %d' % (-retcode)
                     else:
-                        raise Exception('Unexpected test outcome %s' % outcome)
-                    completed.add(test_result)
-            result_set -= completed
-            if len(result_set) > 0:
-                time.sleep(0.1)
-            else:
-                break
+                        errmsg = 'return code %d' % retcode
+                    print('[%sFAIL%s] (%s) (%s) %s' % (red, clear, test_name, errmsg, filename))
+                    if output is not None: print(output)
+                    test_counters[test_name].failed += 1
+                    num_failed += 1
+                else:
+                    raise Exception('Unexpected test outcome %s' % outcome)
+            except queue.Empty:
+                pass
+
+            # if requested, print out updates periodically
+            if poll_interval:
+                t_now = time.time()
+                if (t_now >= t_last + poll_interval) or (num_remaining == 0):
+                    print('Time elapsed: %4d s, tests passed: %4d, failed: %4d, remaining: %4d' % (int(t_now - t_start), num_passed, num_failed, num_remaining))
+                    t_last = t_now
+
+        thread_pool.join()
     except KeyboardInterrupt:
+        # try to terminate all child tests before propagating interrupt
+        print('Keyboard interrupt received - terminating %d tests' % num_remaining)
+        thread_pool.terminate()
+        num_failed += num_remaining
         raise
-
-    thread_pool.join()
-
-    global_counter = Counter()
-    for test_counter in test_counters.values():
-        global_counter.passed += test_counter.passed
-        global_counter.failed += test_counter.failed
-    global_total = global_counter.passed + global_counter.failed
 
     if len(all_saved_temps) > 0:
         print()
@@ -486,7 +501,7 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp
             for saved_temp in saved_temps:
                 print('  %s' % saved_temp)
 
-    if global_total > 0:
+    if num_queued > 0:
         print()
         print('Summary of test results by category:')
         for test_name, test_counter in test_counters.items():
@@ -497,13 +512,14 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp
                     float(100*test_counter.passed)/test_total))
         print('    ' + '~'*54)
         print('%24s: Passed %4d of %4d tests (%5.1f%%)' % (
-            'total', global_counter.passed, global_total,
-            (float(100*global_counter.passed)/global_total)))
+            'total', num_passed, num_queued,
+            (float(100*num_passed)/num_queued)))
 
-    if not verbose and global_counter.failed > 0:
-        print()
-        print('For detailed information on test failures, run:')
-        print('    ./test.py -j1 -v')
+    if num_failed > 0:
+        if not verbose:
+            print()
+            print('For detailed information on test failures, run:')
+            print('    ./test.py -j1 -v')
         sys.exit(1)
 
 def test_driver(argv):
@@ -573,10 +589,19 @@ def test_driver(argv):
                         type=int,
                         help='max run time for each test (in seconds)',
                         dest='timelimit')
+    parser.add_argument('--poll',
+                        default=60, # 1 minute
+                        type=int,
+                        help='test completion polling interval (in seconds)',
+                        dest='poll_interval')
     parser.add_argument('--short',
                         action='store_true',
                         help='truncate runs-with list of each test to one item',
                         dest='short')
+    parser.add_argument('--no-pretty',
+                        action='store_true',
+                        help='disable pretty-printing tests',
+                        dest='no_pretty')
     args = parser.parse_args(argv[1:])
 
     run_all_tests(
@@ -597,7 +622,9 @@ def test_driver(argv):
         args.only_patterns,
         args.skip_patterns,
         args.timelimit,
-        args.short)
+        args.poll_interval,
+        args.short,
+        args.no_pretty)
 
 if __name__ == '__main__':
     test_driver(sys.argv)
