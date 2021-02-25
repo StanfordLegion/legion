@@ -760,6 +760,26 @@ namespace Legion {
         unsigned index;
         bool ancestor;
       };
+      class AttachProjectionFunctor : public ProjectionFunctor {
+      public:
+        AttachProjectionFunctor(ProjectionID pid,
+                                std::vector<IndexSpace> &&spaces);
+        virtual ~AttachProjectionFunctor(void) { }
+      public:
+        virtual LogicalRegion project(LogicalRegion upper_bound,
+                                      const DomainPoint &point,
+                                      const Domain &launch_domain);
+        virtual LogicalRegion project(LogicalPartition upper_bound,
+                                      const DomainPoint &point,
+                                      const Domain &launch_domain);
+      public:
+        virtual bool is_functional(void) const { return true; }
+        // Some depth >0 means the runtime can't analyze it
+        virtual unsigned get_depth(void) const { return 1; }
+      public:
+        const std::vector<IndexSpace> handles;
+        const ProjectionID pid;
+      };
     public:
       InnerContext(Runtime *runtime, SingleTask *owner, int depth, 
                    bool full_inner, const std::vector<RegionRequirement> &reqs,
@@ -1372,20 +1392,10 @@ namespace Legion {
       std::list<FillView*>  fill_view_cache;
       static const size_t MAX_FILL_VIEW_CACHE_SIZE = 64;
     protected:
-      // This is used to create implicit projection functions for index
-      // space attach operations thereby allowing us to do the normal
-      // logical analysis and recognize when functions are the same
-      struct AttachProjection {
-      public:
-        AttachProjection(void) : pid(0) { }
-        AttachProjection(ProjectionID p) : pid(p) { }
-      public:
-        std::vector<IndexSpace> handles;
-        ProjectionID pid;
-      };
       // This data structure should only be accessed during the logical
       // analysis stage of the pipeline and therefore no lock is needed
-      std::map<IndexTreeNode*,std::vector<AttachProjection> > attach_functions;
+      std::map<IndexTreeNode*,
+        std::vector<AttachProjectionFunctor*> > attach_functions;
     };
 
     /**

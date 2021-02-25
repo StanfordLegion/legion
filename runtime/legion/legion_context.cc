@@ -2509,6 +2509,25 @@ namespace Legion {
             delete (*it);
         fill_view_cache.clear();
       }
+      if (!attach_functions.empty())
+      {
+        for (std::map<IndexTreeNode*,
+                std::vector<AttachProjectionFunctor*> >::const_iterator fit =
+              attach_functions.begin(); fit != attach_functions.end(); fit++)
+        {
+          for (std::vector<AttachProjectionFunctor*>::const_iterator it =
+                fit->second.begin(); it != fit->second.end(); it++)
+          {
+            // Unregister it with the runtime if it is not the identity
+            // The runtime will delete the functor for us
+            if ((*it)->pid > 0)
+              runtime->unregister_projection_functor((*it)->pid);
+            else // This is the identity so we can just delete it ourself
+              delete (*it);
+          }
+        }
+        attach_functions.clear();
+      }
 #ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
       assert(outstanding_subtasks == 0);
@@ -6268,30 +6287,30 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       
-      std::map<IndexTreeNode*,std::vector<AttachProjection> >::iterator
+      std::map<IndexTreeNode*,std::vector<AttachProjectionFunctor*> >::iterator
         finder = attach_functions.find(upper_bound);
       if (finder != attach_functions.end())
       {
-        for (std::vector<AttachProjection>::const_iterator it =
+        for (std::vector<AttachProjectionFunctor*>::const_iterator it =
               finder->second.begin(); it != finder->second.end(); it++)
         {
-          if (it->handles.size() != spaces.size())
+          if ((*it)->handles.size() != spaces.size())
             continue;
           bool equal = true;
           for (unsigned idx = 0; idx < spaces.size(); idx++)
           {
-            if (it->handles[idx] == spaces[idx])
+            if ((*it)->handles[idx] == spaces[idx])
               continue;
             equal = false;
             break;
           }
           if (equal)
-            return it->pid;
+            return (*it)->pid;
         }
       }
       else // instantiate the entry in the map
         finder = attach_functions.insert(std::make_pair(upper_bound,
-              std::vector<AttachProjection>())).first;
+              std::vector<AttachProjectionFunctor*>())).first;
       // If the upper bound is a partition, do a quick check to see if
       // all the spaces are immediate children of the upper bound, if
       // so then we can use projection function 0
@@ -6311,8 +6330,9 @@ namespace Legion {
         if (all_children)
         {
           // We can use the identity projection in this case
-          finder->second.push_back(AttachProjection(0/*identity*/));
-          finder->second.back().handles.swap(spaces);
+          // so just make it, but no need to register it with the runtime
+          finder->second.push_back(
+              new AttachProjectionFunctor(0/*identity*/, std::move(spaces)));
           return 0;
         }
       }
@@ -6320,12 +6340,43 @@ namespace Legion {
       // Generate a fresh dynamic ID and store it
       const ProjectionID result =
         runtime->generate_dynamic_projection_id(false/*check context*/);
-      finder->second.push_back(AttachProjection(result));
-      finder->second.back().handles.swap(spaces);
+      AttachProjectionFunctor *functor =
+        new AttachProjectionFunctor(result, std::move(spaces));
+      runtime->register_projection_functor(result, functor, false/*check*/,
+                                           true/*silence warnings*/);
+      finder->second.push_back(functor);
       if (runtime->legion_spy_enabled)
-        // We'll say it has depth 1 so legion spy can't analyze it
-        LegionSpy::log_projection_function(result, 1/*depth*/, false/*invert*/);
+        LegionSpy::log_projection_function(result, functor->get_depth(),
+                                           functor->is_invertible());
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext::AttachProjectionFunctor::AttachProjectionFunctor(
+                               ProjectionID p, std::vector<IndexSpace> &&spaces)
+      : handles(spaces), pid(p)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion InnerContext::AttachProjectionFunctor::project(
+      LogicalRegion upper_bound, const DomainPoint &point, const Domain &launch)
+    //--------------------------------------------------------------------------
+    {
+      const Point<1> p = point;
+      return runtime->get_logical_subregion_by_tree(handles[p[0]],
+          upper_bound.get_field_space(), upper_bound.get_tree_id());
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion InnerContext::AttachProjectionFunctor::project(
+         LogicalPartition upper, const DomainPoint &point, const Domain &launch)
+    //--------------------------------------------------------------------------
+    {
+      const Point<1> p = point;
+      return runtime->get_logical_subregion_by_tree(handles[p[0]],
+                    upper.get_field_space(), upper.get_tree_id());
     }
 
     //--------------------------------------------------------------------------

@@ -2145,6 +2145,7 @@ namespace Legion {
       ProjectionFunction* find_projection_function(ProjectionID pid,
                                                    bool can_fail = false);
       static ProjectionFunctor* get_projection_functor(ProjectionID pid);
+      void unregister_projection_functor(ProjectionID pid);
     public:
       void register_reduction(ReductionOpID redop_id,
                               ReductionOp *redop,

@@ -14969,6 +14969,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::unregister_projection_functor(ProjectionID pid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(runtime_started);
+#endif
+      AutoLock p_lock(projection_lock);
+      std::map<ProjectionID,ProjectionFunction*>::iterator finder =
+        projection_functions.find(pid);
+      if (finder != projection_functions.end())
+      {
+        delete finder->second;
+        projection_functions.erase(finder);
+        return;
+      }
+#ifdef DEBUG_LEGION
+      assert(separate_runtime_instances);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(TaskID task_id, SemanticTag tag,
            const void *buffer, size_t size, bool is_mutable, bool send_to_owner)
     //--------------------------------------------------------------------------
