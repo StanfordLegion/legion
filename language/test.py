@@ -421,7 +421,7 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
                 continue
             num_queued += 1
             def callback(r):
-                result_queue.put((test_name, test_path, r))
+                result_queue.put(r)
             def error_callback(e):
                 print('ERROR CALLBACK', e)
                 raise e
@@ -448,9 +448,7 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
         while num_remaining:
             # wait for up to 'interval' seconds for something to finish
             try:
-                test_name, filename, result = result_queue.get(timeout=poll_interval)
-                # unpack result from subprocess
-                _test_name, _filename, saved_temps, outcome, retcode, output = result
+                test_name, filename, saved_temps, outcome, retcode, output = result_queue.get(timeout=poll_interval)
                 num_remaining -= 1
                 if len(saved_temps) > 0:
                     all_saved_temps.append((test_name, filename, saved_temps))
