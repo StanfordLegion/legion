@@ -132,9 +132,9 @@ void top_level_task(const Task *task,
       int *xy_ptr = (int*)malloc(2*sizeof(int)*(child_elements));
       int *z_ptr = (int*)malloc(sizeof(int)*(child_elements));
       for (int j = 0; j < child_elements; j++ ) {
-          xy_ptr[j]                 = offset+j;   // x
-          xy_ptr[child_elements+j]  = 3*offset+j; // y
-          z_ptr[j]                  = 0;          // z
+          xy_ptr[j]                 = offset+j;     // x
+          xy_ptr[child_elements+j]  = 3*(offset+j); // y
+          z_ptr[j]                  = 0;            // z
       }
       {
         std::vector<FieldID> attach_fields(2);
@@ -156,9 +156,9 @@ void top_level_task(const Task *task,
     { // AOS
       int *xyz_ptr = (int*)malloc(3*sizeof(int)*child_elements);
       for (int j = 0; j < child_elements; j++) {
-        xyz_ptr[3*j]   = offset+j;  // x
-        xyz_ptr[3*j+1] = 3*offset+j;  // y
-        xyz_ptr[3*j+2] = 0;           // z
+        xyz_ptr[3*j]   = offset+j;      // x
+        xyz_ptr[3*j+1] = 3*(offset+j);  // y
+        xyz_ptr[3*j+2] = 0;             // z
       }
       std::vector<FieldID> layout_constraint_fields(3);
       layout_constraint_fields[0] = FID_X;
@@ -220,12 +220,14 @@ void top_level_task(const Task *task,
   check_launcher.region_requirements[0].add_field(FID_Z);
   runtime->execute_task(ctx, check_launcher);
 
-  runtime->detach_external_resources(ctx, xy_resources);
-  runtime->detach_external_resources(ctx, z_resources);
+  Future f1 = runtime->detach_external_resources(ctx, xy_resources);
+  Future f2 = runtime->detach_external_resources(ctx, z_resources);
   runtime->destroy_logical_region(ctx, input_lr);
   runtime->destroy_logical_region(ctx, output_lr);
   runtime->destroy_field_space(ctx, fs);
   runtime->destroy_index_space(ctx, is);
+  f1.wait();
+  f2.wait();
   for (unsigned idx = 0; idx < xyz_ptrs.size(); idx++)
     free(xyz_ptrs[idx]);
   for (unsigned idx = 0; idx < xy_ptrs.size(); idx++)
@@ -261,20 +263,15 @@ void check_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
                 Context ctx, Runtime *runtime)
 {
-  assert(regions.size() == 2);
-  assert(task->regions.size() == 2);
   assert(task->arglen == sizeof(int));
   const int alpha = *((const int*)task->args);
 
-  const AccessorRO acc_x(regions[0], FID_X);
-  const AccessorRO acc_y(regions[0], FID_Y);
-  const AccessorRO acc_z(regions[1], FID_Z);
+  const AccessorRO acc_z(regions[0], FID_Z);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
   const void *ptr = acc_z.ptr(rect.lo);
-  printf("Checking results... xptr %p, y_ptr %p, z_ptr %p...\n", 
-          acc_x.ptr(rect.lo), acc_y.ptr(rect.lo), ptr);
+  printf("Checking results... z_ptr %p...\n", ptr);
   bool all_passed = true;
   for (PointInRectIterator<1> pir(rect); pir(); pir++)
   {
