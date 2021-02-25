@@ -131,7 +131,7 @@ void top_level_task(const Task *task,
     { // SOA
       int *xy_ptr = (int*)malloc(2*sizeof(int)*(child_elements));
       int *z_ptr = (int*)malloc(sizeof(int)*(child_elements));
-      for (int j = 0; j < child_elements; j++ ) {
+      for (unsigned j = 0; j < child_elements; j++ ) {
           xy_ptr[j]                 = offset+j;     // x
           xy_ptr[child_elements+j]  = 3*(offset+j); // y
           z_ptr[j]                  = 0;            // z
@@ -155,7 +155,7 @@ void top_level_task(const Task *task,
     else 
     { // AOS
       int *xyz_ptr = (int*)malloc(3*sizeof(int)*child_elements);
-      for (int j = 0; j < child_elements; j++) {
+      for (unsigned j = 0; j < child_elements; j++) {
         xyz_ptr[3*j]   = offset+j;      // x
         xyz_ptr[3*j+1] = 3*(offset+j);  // y
         xyz_ptr[3*j+2] = 0;             // z
