@@ -3721,9 +3721,6 @@ namespace Legion {
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
-      void activate_attach_op(void);
-      void deactivate_attach_op(void);
-    public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
@@ -3748,8 +3745,8 @@ namespace Legion {
                                              ApEvent &ready_event,
                                              size_t &instance_footprint);
     protected:
-      void activate_attach(void);
-      void deactivate_attach(void);
+      void activate_attach_op(void);
+      void deactivate_attach_op(void);
       void check_privilege(void);
       void compute_parent_index(void);
       void log_requirement(void);

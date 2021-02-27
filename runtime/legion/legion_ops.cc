@@ -18868,13 +18868,6 @@ namespace Legion {
     void AttachOp::activate_attach_op(void)
     //--------------------------------------------------------------------------
     {
-      activate_attach();
-    }
-
-    //--------------------------------------------------------------------------
-    void AttachOp::activate_attach(void)
-    //--------------------------------------------------------------------------
-    {
       activate_operation();
       file_name = NULL;
       footprint = 0;
@@ -18885,14 +18878,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void AttachOp::deactivate_attach_op(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_attach();
-      runtime->free_attach_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void AttachOp::deactivate_attach(void)
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
@@ -20026,7 +20011,7 @@ namespace Legion {
     void PointAttachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_attach();
+      activate_attach_op();
       owner = NULL;
     }
 
@@ -20034,7 +20019,7 @@ namespace Legion {
     void PointAttachOp::deactivate(void) 
     //--------------------------------------------------------------------------
     {
-      deactivate_attach();
+      deactivate_attach_op();
       runtime->free_point_attach_op(this);
     }
 
