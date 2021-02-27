@@ -139,6 +139,7 @@ namespace Legion {
   class FutureMap;
   class Predicate;
   class PhysicalRegion;
+  class ExternalResources;
   template<PrivilegeMode,typename,int,typename,typename,bool> 
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
@@ -1377,6 +1378,7 @@ namespace Legion {
     class FutureImpl;
     class FutureMapImpl;
     class PhysicalRegionImpl;
+    class ExternalResourcesImpl;
     class PieceIteratorImpl;
     class GrantImpl;
     class PredicateImpl;
@@ -1440,7 +1442,11 @@ namespace Legion {
     class IndexFillOp;
     class PointFillOp;
     class AttachOp;
+    class IndexAttachOp;
+    class PointAttachOp;
     class DetachOp;
+    class IndexDetachOp;
+    class PointDetachOp;
     class TimingOp;
     class AllReduceOp;
     class ExternalMappable;
@@ -1635,6 +1641,7 @@ namespace Legion {
     friend class Legion::Runtime;                           \
     friend class Internal::Runtime;                         \
     friend class Internal::PhysicalRegionImpl;              \
+    friend class Internal::ExternalResourcesImpl;           \
     friend class Internal::TaskImpl;                        \
     friend class Internal::ProcessorManager;                \
     friend class Internal::MemoryManager;                   \
@@ -1667,7 +1674,11 @@ namespace Legion {
     friend class Internal::IndexFillOp;                     \
     friend class Internal::PointFillOp;                     \
     friend class Internal::AttachOp;                        \
+    friend class Internal::IndexAttachOp;                   \
+    friend class Internal::PointAttachOp;                   \
     friend class Internal::DetachOp;                        \
+    friend class Internal::IndexDetachOp;                   \
+    friend class Internal::PointDetachOp;                   \
     friend class Internal::TimingOp;                        \
     friend class Internal::AllReduceOp;                     \
     friend class Internal::TraceSummaryOp;                  \

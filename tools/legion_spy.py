@@ -5534,6 +5534,8 @@ class Operation(object):
 
     def set_name(self, name):
         self.name = name
+        if self.kind != SINGLE_TASK_KIND and self.kind != INDEX_TASK_KIND:
+            self.name += " "+str(self.uid)
         if self.points is not None:
             for point in itervalues(self.points):
                 point.set_name(name)
@@ -5554,8 +5556,12 @@ class Operation(object):
                 close.set_context(context, False)
         # Also recurse for any points we have
         if self.points is not None:
-            for point in itervalues(self.points):
-                point.op.set_context(context, False)
+            if self.kind == INDEX_TASK_KIND:
+                for point in itervalues(self.points):
+                    point.op.set_context(context, False)
+            else:
+                for point in itervalues(self.points):
+                    point.set_context(context, False)
         # Finaly recurse for any summary operations
         if self.summary_op is not None and self.summary_op != self:
             self.summary_op.set_context(context, False)
@@ -5571,6 +5577,9 @@ class Operation(object):
             self.kind = kind
         else:
             assert self.kind is kind
+        if self.points:
+            for point in itervalues(self.points):
+                point.set_op_kind(kind)
 
     def set_events(self, start, finish):
         if start.exists():
@@ -10759,7 +10768,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(MAP_OP_KIND)
-        op.set_name("Mapping Op "+m.group('uid'))
+        op.set_name("Mapping Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10769,10 +10778,10 @@ def parse_legion_spy_line(line, state):
         inter = True if int(m.group('is_inter')) == 1 else False
         if inter:
             op.set_op_kind(INTER_CLOSE_OP_KIND)
-            op.set_name("Inter Close Op "+m.group('uid'))
+            op.set_name("Inter Close Op")
         else:
             op.set_op_kind(POST_CLOSE_OP_KIND)
-            op.set_name("Post Close Op "+m.group('uid'))
+            op.set_name("Post Close Op")
         
         context = state.get_task(int(m.group('ctx')))
         # Only add this to the context if it not an intermediate
@@ -10790,20 +10799,20 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(FENCE_OP_KIND)
-        op.set_name("Fence Op "+m.group('uid'))
+        op.set_name("Fence Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
     m = trace_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
-        op.set_name("Trace Op "+m.group('uid'))
+        op.set_name("Trace Op")
         return True
     m = copy_op_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(COPY_OP_KIND)
-        op.set_name("Copy Op "+m.group('uid'))
+        op.set_name("Copy Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         op.copy_kind = int(m.group('kind'))
@@ -10818,7 +10827,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(FILL_OP_KIND)
-        op.set_name("Fill Op "+m.group('uid'))
+        op.set_name("Fill Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10826,7 +10835,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(ACQUIRE_OP_KIND)
-        op.set_name("Acquire Op "+m.group('uid'))
+        op.set_name("Acquire Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10834,7 +10843,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(RELEASE_OP_KIND)
-        op.set_name("Release Op "+m.group('uid'))
+        op.set_name("Release Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10842,7 +10851,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(CREATION_OP_KIND)
-        op.set_name("Creation Op "+m.group('uid'))
+        op.set_name("Creation Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10850,7 +10859,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DELETION_OP_KIND)
-        op.set_name("Deletion Op "+m.group('uid'))
+        op.set_name("Deletion Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10858,7 +10867,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(ATTACH_OP_KIND)
-        op.set_name("Attach Op "+m.group('uid'))
+        op.set_name("Attach Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10866,7 +10875,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DETACH_OP_KIND)
-        op.set_name("Detach Op "+m.group('uid'))
+        op.set_name("Detach Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10874,7 +10883,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DYNAMIC_COLLECTIVE_OP_KIND)
-        op.set_name("Dynamic Collective Op "+m.group('uid'))
+        op.set_name("Dynamic Collective Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10882,7 +10891,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(TIMING_OP_KIND)
-        op.set_name("Timing Op "+m.group('uid'))
+        op.set_name("Timing Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10890,7 +10899,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(ALL_REDUCE_OP_KIND)
-        op.set_name("Reduce Op "+m.group('uid'))
+        op.set_name("Reduce Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10898,7 +10907,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(PREDICATE_OP_KIND)
-        op.set_name("Predicate Op "+m.group('uid'))
+        op.set_name("Predicate Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10919,7 +10928,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DEP_PART_OP_KIND)
-        op.set_name("Dependent Partition Op "+m.group('uid'))
+        op.set_name("Dependent Partition Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10927,7 +10936,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(PENDING_PART_OP_KIND)
-        op.set_name("Pending Partition Op "+m.group('uid'))
+        op.set_name("Pending Partition Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
