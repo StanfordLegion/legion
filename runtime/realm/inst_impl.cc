@@ -20,9 +20,6 @@
 #include "realm/logging.h"
 #include "realm/runtime_impl.h"
 #include "realm/deppart/inst_helper.h"
-#ifdef REALM_USE_HDF5
-#include "realm/hdf5/hdf5_access.h"
-#endif
 
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
 
@@ -1477,15 +1474,5 @@ namespace Realm {
   template const PieceLookup::Instruction *RegionInstance::get_lookup_program<N,T>(FieldID, const Rect<N,T>&, unsigned, uintptr_t&);
   FOREACH_NT(DOIT)
 #undef DOIT
-
-#ifdef REALM_USE_HDF5
-  template <int N, typename T>
-  /*static*/ Serialization::PolymorphicSerdezSubclass<InstanceLayoutPiece<N,T>, HDF5LayoutPiece<N,T> > HDF5LayoutPiece<N,T>::serdez_subclass;
-
-#define DOIT(N,T) \
-  template class HDF5LayoutPiece<N,T>;
-  FOREACH_NT(DOIT)
-#undef DOIT
-#endif
 
 }; // namespace Realm

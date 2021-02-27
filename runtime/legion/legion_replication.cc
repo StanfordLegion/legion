@@ -7083,6 +7083,10 @@ namespace Legion {
         // Get our fence barriers
         initialize_fence_barriers();
         parent_ctx->update_current_fence(this, true, true);
+        // This is where we make sure that replays are done in order
+        // We need to do this because we're not registering this as
+        // a fence with the context
+        physical_trace->chain_replays(this);
         physical_trace->record_previous_template_completion(completion_event);
         local_trace->initialize_tracing_state();
         replayed = true;
@@ -7454,6 +7458,12 @@ namespace Legion {
       {
         // If we're recurrent, then check to see if we had any intermeidate
         // ops for which we still need to perform the fence analysis
+        // If there were no intermediate dependences then we can just
+        // record a dependence on the previous fence
+        const ApEvent fence_completion = (recurrent &&
+          !local_trace->has_intermediate_operations()) ?
+            physical_trace->get_previous_template_completion()
+                    : get_completion_event();
         if (recurrent && local_trace->has_intermediate_operations())
         {
           parent_ctx->perform_fence_analysis(this, execution_preconditions,
@@ -7463,9 +7473,6 @@ namespace Legion {
         if (!fence_registered)
           execution_preconditions.insert(
               parent_ctx->get_current_execution_fence_event());
-        ApEvent fence_completion = recurrent ?
-          physical_trace->get_previous_template_completion() : 
-          get_completion_event();
         physical_trace->initialize_template(fence_completion, recurrent);
         local_trace->set_state_replay();
 #ifdef LEGION_SPY

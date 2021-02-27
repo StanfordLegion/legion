@@ -16,7 +16,7 @@
 namespace Legion {
   namespace Internal {
 
-    LEGION_EXTERN_LOGGER_DECLARATIONS
+    LEGION_EXTERN_LOGGER_DECLARATIONS 
 
 #ifdef DEFINE_NT_TEMPLATES
     /////////////////////////////////////////////////////////////
@@ -1087,6 +1087,190 @@ namespace Legion {
       return layout;
     }
 
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceExpression*
+              IndexSpaceExpression::find_congruent_expression_internal(
+                                   std::set<IndexSpaceExpression*> &expressions)
+    //--------------------------------------------------------------------------
+    {
+      if (expressions.empty())
+      {
+        expressions.insert(this);
+        return this;
+      }
+      Realm::IndexSpace<DIM,T> local_space;
+      // No need to wait for the event, we know it is already triggered
+      // because we called get_volume on this before we got here
+      get_expr_index_space(&local_space, type_tag, true/*need tight result*/);
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+            expressions.begin(); it != expressions.end(); it++)
+      {
+        // We can get duplicates here
+        if ((*it) == this)
+          return this;
+        Realm::IndexSpace<DIM,T> other_space;
+        // No need to wait for the event here either, we know that if it is
+        // in the 'expressions' data structure then wait has already been
+        // called on it as well.
+        (*it)->get_expr_index_space(&other_space, type_tag, true/*need tight*/);
+        // See if the rectangles are the same
+        if (local_space.bounds != other_space.bounds)
+          continue;
+        // See if the sparsity maps are the same
+        if (local_space.sparsity == other_space.sparsity)
+        {
+          // We know that things are the same here
+          // Try to add the expression reference, we can race with deletions
+          // here though so handle the case we're we can't add a reference
+          if ((*it)->try_add_canonical_reference())
+            return (*it);
+          else
+            continue;
+        }
+        // If the sparsity maps are different, then we still need to test them
+        // for equivalence since we know they have the same number of points
+        if (!local_space.sparsity.exists())
+        {
+#ifdef DEBUG_LEGION
+          assert(other_space.sparsity.exists());
+#endif
+          Realm::IndexSpaceIterator<DIM,T> itr(other_space);
+          while (itr.valid)
+          {
+            if (!local_space.bounds.contains(itr.rect))
+              break;
+            itr.step();
+          }
+          // If we broke out early, that means we're not congruent
+          if (itr.valid)
+            continue;
+        }
+        else if (!other_space.sparsity.exists())
+        {
+          Realm::IndexSpaceIterator<DIM,T> itr(local_space);
+          while (itr.valid)
+          {
+            if (!other_space.bounds.contains(itr.rect))
+              break;
+            itr.step();
+          }
+          // If we broke out early, that means we're not congruent
+          if (itr.valid)
+            continue;
+        }
+        else
+        {
+          // Both have sparsity maps
+          // We know something important though here: we know that both
+          // these sparsity maps contain the same number of points
+          // Build lists of both sets of rectangles
+          std::vector<Rect<DIM,T> > local_rects, other_rects;
+          for (Realm::IndexSpaceIterator<DIM,T> itr(local_space);
+                itr.valid; itr.step())
+            local_rects.push_back(itr.rect);
+          for (Realm::IndexSpaceIterator<DIM,T> itr(other_space);
+                itr.valid; itr.step())
+            other_rects.push_back(itr.rect);
+          // We'll assume that the vector with more rectangles has
+          // smaller ones and will therefore test the small ones
+          // against the bigger ones, we might consider putting in
+          // an acceleration data strucutre here if these vectors
+          // are big enough
+          if (local_rects.size() <= other_rects.size())
+          {
+            std::vector<size_t> remaining_local(local_rects.size());
+            for (unsigned idx = 0; idx < local_rects.size(); idx++)
+              remaining_local[idx] = local_rects[idx].volume();
+            bool congruent = true;
+            for (typename std::vector<Rect<DIM,T> >::const_iterator it =
+                  other_rects.begin(); it != other_rects.end(); it++)
+            {
+              size_t remaining = it->volume();
+              for (unsigned idx = 0; idx < local_rects.size(); idx++)
+              {
+                // Can skip local rects that are fully covered
+                if (remaining_local[idx] == 0)
+                  continue;
+                const Rect<DIM,T> overlap = it->intersection(local_rects[idx]);
+                const size_t volume = overlap.volume();
+                if (volume == 0)
+                  continue;
+#ifdef DEBUG_LEGION
+                assert(volume <= remaining);
+                assert(volume <= remaining_local[idx]);
+#endif
+                remaining_local[idx] -= volume;
+                remaining -= volume;
+                if (remaining == 0)
+                  break;
+              }
+              if (remaining != 0)
+              {
+                congruent = false;
+                break;
+              }
+            }
+            if (!congruent)
+              continue;
+#ifdef DEBUG_LEGION
+            for (unsigned idx = 0; idx < local_rects.size(); idx++)
+              assert(remaining_local[idx] == 0);
+#endif
+          }
+          else
+          {
+            std::vector<size_t> remaining_other(other_rects.size());
+            for (unsigned idx = 0; idx < other_rects.size(); idx++)
+              remaining_other[idx] = other_rects[idx].volume();
+            bool congruent = true;
+            for (typename std::vector<Rect<DIM,T> >::const_iterator it =
+                  local_rects.begin(); it != local_rects.end(); it++)
+            {
+              size_t remaining = it->volume();
+              for (unsigned idx = 0; idx < other_rects.size(); idx++)
+              {
+                // Can skip local rects that are fully covered
+                if (remaining_other[idx] == 0)
+                  continue;
+                const Rect<DIM,T> overlap = it->intersection(other_rects[idx]);
+                const size_t volume = overlap.volume();
+                if (volume == 0)
+                  continue;
+#ifdef DEBUG_LEGION
+                assert(volume <= remaining);
+                assert(volume <= remaining_other[idx]);
+#endif
+                remaining_other[idx] -= volume;
+                remaining -= volume;
+                if (remaining == 0)
+                  break;
+              }
+              if (remaining != 0)
+              {
+                congruent = false;
+                break;
+              }
+            }
+            if (!congruent)
+              continue;
+#ifdef DEBUG_LEGION
+            for (unsigned idx = 0; idx < other_rects.size(); idx++)
+              assert(remaining_other[idx] == 0);
+#endif
+          }
+        }
+        // If we get here that means we are congruent
+        // Try to add the expression reference, we can race with deletions
+        // here though so handle the case we're we can't add a reference
+        if ((*it)->try_add_canonical_reference())
+          return (*it);
+      }
+      // Did not find any congruences so add ourself
+      expressions.insert(this);
+      return this;
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Space Operations 
     /////////////////////////////////////////////////////////////
@@ -1113,7 +1297,9 @@ namespace Legion {
       derez.deserialize(this->realm_index_space);
       this->tight_index_space = this->realm_index_space;
       derez.deserialize(this->realm_index_space_ready);
-      // We'll do the make_valid request in activate_remote if needed
+      // Request that we make the valid index space valid
+      this->tight_index_space_ready = 
+        RtEvent(this->realm_index_space.make_valid());
     }
 
     //--------------------------------------------------------------------------
@@ -1223,16 +1409,6 @@ namespace Legion {
       __sync_synchronize();
       has_volume = true;
       return volume;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexSpaceOperationT<DIM,T>::activate_remote(void)
-    //--------------------------------------------------------------------------
-    {
-      // Request that we make the valid index space valid
-      this->tight_index_space_ready = 
-        RtEvent(this->realm_index_space.make_valid());
     }
 
     //--------------------------------------------------------------------------
@@ -1511,6 +1687,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    IndexSpaceExpression* 
+      IndexSpaceOperationT<DIM,T>::find_congruent_expression(
+                                   std::set<IndexSpaceExpression*> &expressions)
+    //--------------------------------------------------------------------------
+    {
+      return find_congruent_expression_internal<DIM,T>(expressions); 
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     IndexSpaceUnion<DIM,T>::IndexSpaceUnion(
                             const std::vector<IndexSpaceExpression*> &to_union,
                             RegionTreeForest *ctx)
@@ -1523,6 +1709,9 @@ namespace Legion {
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
       {
         IndexSpaceExpression *sub = sub_expressions[idx];
+#ifdef DEBUG_LEGION
+        assert(sub->get_canonical_expression(this->context) == sub);
+#endif
         // Add the parent and the reference
         sub->add_parent_operation(this);
         sub->add_expression_reference(true/*expr tree*/);
@@ -1631,16 +1820,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceUnion<DIM,T>::pack_expression_structure(Serializer &rez,
-                                                          AddressSpaceID target,
-                                                          const bool top)
+    void IndexSpaceUnion<DIM,T>::pack_expression_value(Serializer &rez,
+                                                       AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(target != this->context->runtime->address_space);
 #endif
-      if (top)
-        this->record_remote_expression(target);
+      this->record_remote_expression(target);
       rez.serialize<bool>(false); // not an index space
       if (target == this->origin_space)
       {
@@ -1650,35 +1837,14 @@ namespace Legion {
       else
       {
         rez.serialize<bool>(false); // not local
-        const bool local_empty = this->is_empty();
-        if (!local_empty)
-        {
-          rez.serialize<size_t>(sub_expressions.size());
-          for (std::vector<IndexSpaceExpression*>::const_iterator it = 
-                sub_expressions.begin(); it != sub_expressions.end(); it++)
-            (*it)->pack_expression_structure(rez, target, false/*top*/);
-        }
-        else
-          rez.serialize<size_t>(0);
-        rez.serialize(this->op_kind); 
         rez.serialize(this->type_tag); // unpacked by creator
         rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
         rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
         // unpacked by IndexSpaceOperationT
-        if (!local_empty)
-        {
-          Realm::IndexSpace<DIM,T> temp;
-          ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
-          rez.serialize(temp);
-          rez.serialize(ready);
-        }
-        else
-        {
-          const Realm::IndexSpace<DIM,T> temp = 
-            Realm::IndexSpace<DIM,T>::make_empty();
-          rez.serialize(temp);
-          rez.serialize(ApEvent::NO_AP_EVENT);
-        }
+        Realm::IndexSpace<DIM,T> temp;
+        ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
+        rez.serialize(temp);
+        rez.serialize(ready);
       }
     }
 
@@ -1700,21 +1866,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexSpaceExpression* IndexSpaceUnion<DIM,T>::find_congruence(void) 
-    //--------------------------------------------------------------------------
-    {
-      const size_t local_volume = this->get_volume();
-      if (local_volume == 0)
-        return NULL;
-      for (typename std::vector<IndexSpaceExpression*>::const_iterator it = 
-            sub_expressions.begin(); it != sub_expressions.end(); it++)
-        if ((*it)->get_volume() == local_volume)
-          return (*it);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     IndexSpaceIntersection<DIM,T>::IndexSpaceIntersection(
                             const std::vector<IndexSpaceExpression*> &to_inter,
                             RegionTreeForest *ctx)
@@ -1727,6 +1878,9 @@ namespace Legion {
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
       {
         IndexSpaceExpression *sub = sub_expressions[idx];
+#ifdef DEBUG_LEGION
+        assert(sub->get_canonical_expression(this->context) == sub);
+#endif
         // Add the parent and the reference
         sub->add_parent_operation(this);
         sub->add_expression_reference(true/*expr tree*/);
@@ -1835,15 +1989,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceIntersection<DIM,T>::pack_expression_structure(
-                         Serializer &rez, AddressSpaceID target, const bool top)
+    void IndexSpaceIntersection<DIM,T>::pack_expression_value(Serializer &rez, 
+                                                          AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(target != this->context->runtime->address_space);
 #endif
-      if (top)
-        this->record_remote_expression(target);
+      this->record_remote_expression(target);
       rez.serialize<bool>(false); // not an index space
       if (target == this->origin_space)
       {
@@ -1853,35 +2006,14 @@ namespace Legion {
       else
       {
         rez.serialize<bool>(false); // not local
-        const bool local_empty = this->is_empty();
-        if (!local_empty)
-        {
-          rez.serialize<size_t>(sub_expressions.size());
-          for (std::vector<IndexSpaceExpression*>::const_iterator it = 
-                sub_expressions.begin(); it != sub_expressions.end(); it++)
-            (*it)->pack_expression_structure(rez, target, false/*top*/);
-        }
-        else
-          rez.serialize<size_t>(0);
-        rez.serialize(this->op_kind); 
         rez.serialize(this->type_tag); // unpacked by creator
         rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
         rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
         // unpacked by IndexSpaceOperationT
-        if (!local_empty)
-        {
-          Realm::IndexSpace<DIM,T> temp;
-          ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
-          rez.serialize(temp);
-          rez.serialize(ready);
-        }
-        else
-        {
-          const Realm::IndexSpace<DIM,T> temp = 
-            Realm::IndexSpace<DIM,T>::make_empty();
-          rez.serialize(temp);
-          rez.serialize(ApEvent::NO_AP_EVENT);
-        }
+        Realm::IndexSpace<DIM,T> temp;
+        ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
+        rez.serialize(temp);
+        rez.serialize(ready);
       }
     }
 
@@ -1904,27 +2036,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexSpaceExpression* IndexSpaceIntersection<DIM,T>::find_congruence(void)
-    //--------------------------------------------------------------------------
-    {
-      const size_t local_volume = this->get_volume();
-      if (local_volume == 0)
-        return NULL;
-      for (typename std::vector<IndexSpaceExpression*>::const_iterator it = 
-            sub_expressions.begin(); it != sub_expressions.end(); it++)
-        if ((*it)->get_volume() == local_volume)
-          return (*it);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     IndexSpaceDifference<DIM,T>::IndexSpaceDifference(IndexSpaceExpression *l,
                 IndexSpaceExpression *r, RegionTreeForest *ctx) 
       : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::DIFFERENCE_OP_KIND,ctx)
         , lhs(l), rhs(r)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(lhs->get_canonical_expression(this->context) == lhs);
+      assert(rhs->get_canonical_expression(this->context) == rhs);
+#endif
       if (lhs == rhs)
       {
         // Special case for when the expressions are the same
@@ -2047,15 +2168,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceDifference<DIM,T>::pack_expression_structure(Serializer &rez,
-                                          AddressSpaceID target, const bool top)
+    void IndexSpaceDifference<DIM,T>::pack_expression_value(Serializer &rez,
+                                                          AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(target != this->context->runtime->address_space);
 #endif
-      if (top)
-        this->record_remote_expression(target);
+      this->record_remote_expression(target);
       rez.serialize<bool>(false); // not an index space
       if (target == this->origin_space)
       {
@@ -2065,34 +2185,14 @@ namespace Legion {
       else
       {
         rez.serialize<bool>(false); // not local
-        const bool local_empty = this->is_empty();
-        if (!local_empty)
-        {
-          rez.serialize<size_t>(2);
-          lhs->pack_expression_structure(rez, target, false/*top*/);
-          rhs->pack_expression_structure(rez, target, false/*top*/);
-        }
-        else
-          rez.serialize<size_t>(0);
-        rez.serialize(this->op_kind); 
         rez.serialize(this->type_tag); // unpacked by creator
         rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
         rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
         // unpacked by IndexSpaceOperationT
-        if (!local_empty)
-        {
-          Realm::IndexSpace<DIM,T> temp;
-          ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
-          rez.serialize(temp);
-          rez.serialize(ready);
-        }
-        else
-        {
-          const Realm::IndexSpace<DIM,T> temp = 
-            Realm::IndexSpace<DIM,T>::make_empty();
-          rez.serialize(temp);
-          rez.serialize(ApEvent::NO_AP_EVENT);
-        }
+        Realm::IndexSpace<DIM,T> temp;
+        ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
+        rez.serialize(temp);
+        rez.serialize(ready);
       }
     }
 
@@ -2114,17 +2214,67 @@ namespace Legion {
       return this->remove_expression_reference(true/*expr tree*/);
     }
 
+    /////////////////////////////////////////////////////////////
+    // Remote Expression
+    /////////////////////////////////////////////////////////////
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexSpaceExpression* IndexSpaceDifference<DIM,T>::find_congruence(void)
+    RemoteExpression<DIM,T>::RemoteExpression(Deserializer &derez,
+                                              RegionTreeForest *forest)
+      : IndexSpaceOperationT<DIM,T>(
+          IndexSpaceOperation::REMOTE_EXPRESSION_KIND, forest, derez)
     //--------------------------------------------------------------------------
     {
-      const size_t local_volume = this->get_volume();
-      if (local_volume == 0)
-        return NULL;
-      if (local_volume == lhs->get_volume())
-        return lhs;
-      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    RemoteExpression<DIM,T>::RemoteExpression(const RemoteExpression<DIM,T> &rs)
+      : IndexSpaceOperationT<DIM,T>(
+          IndexSpaceOperation::REMOTE_EXPRESSION_KIND, rs.context)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    RemoteExpression<DIM,T>::~RemoteExpression(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    RemoteExpression<DIM,T>& RemoteExpression<DIM,T>::operator=(
+                                             const RemoteExpression<DIM,T> &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void RemoteExpression<DIM,T>::pack_expression_value(Serializer &rez,
+                                                        AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool RemoteExpression<DIM,T>::remove_operation(RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return false;
     }
 
     /////////////////////////////////////////////////////////////
@@ -2420,25 +2570,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::pack_expression(Serializer &rez, 
-                                                 AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      if (target != context->runtime->address_space)
-      {
-        rez.serialize<bool>(false/*local*/);
-        rez.serialize<bool>(true/*index space*/);
-        rez.serialize(handle);
-      }
-      else
-      {
-        rez.serialize<bool>(true/*local*/);
-        rez.serialize<IndexSpaceExpression*>(this);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::create_sharded_alias(IndexSpace alias,
                                                       DistributedID alias_did)
     //--------------------------------------------------------------------------
@@ -2449,23 +2580,6 @@ namespace Legion {
       context->create_node(alias, &realm_index_space_set, false/*is domain*/,
                      NULL/*parent*/, 0/*color*/, alias_did, initialized,
                      index_space_ready, expr_id/*alis*/,false/*notify remote*/);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::pack_expression_structure(Serializer &rez,
-                                                          AddressSpaceID target,
-                                                          const bool top) 
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize<bool>(true/*index space*/);
-      rez.serialize(handle);
-      // Make sure this doesn't get collected until we're unpacked
-      // This could be a performance bug since it will block if we
-      // have to send a reference to a remote node, but that should
-      // never actually happen
-      LocalReferenceMutator mutator;
-      add_base_gc_ref(REMOTE_DID_REF, &mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -5826,6 +5940,16 @@ namespace Legion {
         space_ready.wait();
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
                  compact, unsat_kind, unsat_index, piece_list, piece_list_size);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* 
+            IndexSpaceNodeT<DIM,T>::find_congruent_expression(
+                                   std::set<IndexSpaceExpression*> &expressions)
+    //--------------------------------------------------------------------------
+    {
+      return find_congruent_expression_internal<DIM,T>(expressions); 
     }
     
     //--------------------------------------------------------------------------

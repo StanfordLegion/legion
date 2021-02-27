@@ -1699,7 +1699,7 @@ namespace Legion {
       // If this is a NO_ACCESS, then we'll have no dependences so we're done
       if (IS_NO_ACCESS(req))
         return;
-      TaskContext *context = op->get_context();
+      InnerContext *context = op->get_context();
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1726,13 +1726,19 @@ namespace Legion {
         FieldMask already_closed_mask;
         FieldMask written_disjoint_complete;
         FieldMaskSet<RefinementOp> refinements;
+        const bool check_for_unversioned = 
+          !op->is_parent_nonexclusive_virtual_mapping(idx);
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
                      projection_info, unopened_mask, already_closed_mask, 
                      written_disjoint_complete, refinements, refinement_tracker,
                      applied_events, true/*track disjoint complete below*/, 
-                     true/*check unversioned*/);
+                     check_for_unversioned);
 #ifdef DEBUG_LEGION
-        assert(!written_disjoint_complete); // should never flow out here
+        // should never flow out here unless we're not checking for versioning
+        // we aren't checking when we've got an non-read-write virtual mapping
+        // because in that case we are sharing equivalence sets with the
+        // parent context and therefore are never permitted to do refinements
+        assert(!written_disjoint_complete || !check_for_unversioned);
 #endif
       }
 #ifdef DEBUG_LEGION
@@ -5893,11 +5899,23 @@ namespace Legion {
         return lhs;
       if (lhs->is_empty())
         return rhs;
+      lhs = lhs->get_canonical_expression(this);
       if (rhs->is_empty())
         return lhs;
+      rhs = rhs->get_canonical_expression(this);
+      if (lhs == rhs)
+        return lhs;
       std::vector<IndexSpaceExpression*> exprs(2);
-      exprs[0] = lhs;
-      exprs[1] = rhs;
+      if (compare_expressions(lhs, rhs))
+      {
+        exprs[0] = lhs;
+        exprs[1] = rhs;
+      }
+      else
+      {
+        exprs[0] = rhs;
+        exprs[1] = lhs;
+      }
       return union_index_spaces(exprs);
     }
 
@@ -5918,12 +5936,26 @@ namespace Legion {
       {
         // Remove any empty expressions on the way in
         if (!(*it)->is_empty())
-          expressions.push_back(*it);
+          expressions.push_back((*it)->get_canonical_expression(this));
       }
       if (expressions.empty())
         return *(exprs.begin());
       if (expressions.size() == 1)
         return expressions[0];
+      // sort them in order by their IDs
+      std::sort(expressions.begin(), expressions.end(), compare_expressions);
+      // remove duplicates
+      std::vector<IndexSpaceExpression*>::iterator last =
+        std::unique(expressions.begin(), expressions.end());
+      if (last != expressions.end())
+      {
+        expressions.erase(last, expressions.end());
+#ifdef DEBUG_LEGION
+        assert(!expressions.empty());
+#endif
+        if (expressions.size() == 1)
+          return expressions.back();
+      }
       // this helps make sure we don't overflow our stack
       while (expressions.size() > MAX_EXPRESSION_FANOUT)
       {
@@ -5951,6 +5983,23 @@ namespace Legion {
           }
         }
         expressions.swap(next_expressions);
+        // canonicalize and uniquify them all again
+        for (unsigned idx = 0; idx < expressions.size(); idx++)
+        {
+          IndexSpaceExpression *&expr = expressions[idx];
+          expr = expr->get_canonical_expression(this);
+        }
+        std::sort(expressions.begin(), expressions.end(), compare_expressions);
+        last = std::unique(expressions.begin(), expressions.end());
+        if (last != expressions.end())
+        {
+          expressions.erase(last, expressions.end());
+#ifdef DEBUG_LEGION
+          assert(!expressions.empty());
+#endif
+          if (expressions.size() == 1)
+            return expressions.back();
+        }
       }
       return union_index_spaces(expressions);
     }
@@ -6043,11 +6092,23 @@ namespace Legion {
         return lhs;
       if (lhs->is_empty())
         return lhs;
+      lhs = lhs->get_canonical_expression(this);
       if (rhs->is_empty())
         return rhs;
+      rhs = rhs->get_canonical_expression(this);
+      if (lhs == rhs)
+        return lhs;
       std::vector<IndexSpaceExpression*> exprs(2);
-      exprs[0] = lhs;
-      exprs[1] = rhs;
+      if (compare_expressions(lhs, rhs))
+      {
+        exprs[0] = lhs;
+        exprs[1] = rhs;
+      }
+      else
+      {
+        exprs[0] = rhs;
+        exprs[1] = lhs;
+      }
       return intersect_index_spaces(exprs);
     }
 
@@ -6064,10 +6125,27 @@ namespace Legion {
       std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
       // Do a quick pass to see if any of them are empty in which case we 
       // know that the result of the whole intersection is empty
-      for (std::vector<IndexSpaceExpression*>::const_iterator it = 
-            expressions.begin(); it != expressions.end(); it++)
-        if ((*it)->is_empty())
-          return (*it);
+      for (unsigned idx = 0; idx < expressions.size(); idx++)
+      {
+        IndexSpaceExpression *&expr = expressions[idx];
+        if (expr->is_empty())
+          return expr;
+        expr = expr->get_canonical_expression(this);
+      }
+      // sort them in order by their IDs
+      std::sort(expressions.begin(), expressions.end(), compare_expressions);
+      // remove duplicates
+      std::vector<IndexSpaceExpression*>::iterator last =
+        std::unique(expressions.begin(), expressions.end());
+      if (last != expressions.end())
+      {
+        expressions.erase(last, expressions.end());
+#ifdef DEBUG_LEGION
+        assert(!expressions.empty());
+#endif
+        if (expressions.size() == 1)
+          return expressions.back();
+      }
       // this helps make sure we don't overflow our stack
       while (expressions.size() > MAX_EXPRESSION_FANOUT)
       {
@@ -6096,6 +6174,25 @@ namespace Legion {
           }
         }
         expressions.swap(next_expressions);
+        // canonicalize and uniquify them all again
+        for (unsigned idx = 0; idx < expressions.size(); idx++)
+        {
+          IndexSpaceExpression *&expr = expressions[idx];
+          if (expr->is_empty())
+            return expr;
+          expr = expr->get_canonical_expression(this);
+        }
+        std::sort(expressions.begin(), expressions.end(), compare_expressions);
+        last = std::unique(expressions.begin(), expressions.end());
+        if (last != expressions.end())
+        {
+          expressions.erase(last, expressions.end());
+#ifdef DEBUG_LEGION
+          assert(!expressions.empty());
+#endif
+          if (expressions.size() == 1)
+            return expressions.back();
+        }
       }
       return intersect_index_spaces(expressions);
     }
@@ -6188,7 +6285,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(lhs->type_tag == rhs->type_tag);
 #endif
-      const IndexSpaceExprID key = lhs->expr_id;
       // Handle a few easy cases
       if (creator == NULL)
       {
@@ -6198,8 +6294,9 @@ namespace Legion {
           return lhs;
       }
       std::vector<IndexSpaceExpression*> expressions(2);
-      expressions[0] = lhs;
-      expressions[1] = rhs;
+      expressions[0] = lhs->get_canonical_expression(this);
+      expressions[1] = rhs->get_canonical_expression(this);
+      const IndexSpaceExprID key = expressions[0]->expr_id;
       // See if we can find it in read-only mode
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
@@ -6213,7 +6310,8 @@ namespace Legion {
             return result;
           if (creator == NULL)
           {
-            DifferenceOpCreator diff_creator(this, lhs->type_tag, lhs, rhs);
+            DifferenceOpCreator diff_creator(this, lhs->type_tag, 
+                                  expressions[0], expressions[1]);
             return next->find_or_create_operation(expressions, diff_creator);
           }
           else
@@ -6223,7 +6321,8 @@ namespace Legion {
       ExpressionTrieNode *node = NULL;
       if (creator == NULL)
       {
-        DifferenceOpCreator diff_creator(this, lhs->type_tag, lhs, rhs);
+        DifferenceOpCreator diff_creator(this, lhs->type_tag,
+                              expressions[0], expressions[1]);
         // Didn't find it, retake the lock, see if we lost the race
         // and if not make the actual trie node
         AutoLock l_lock(lookup_is_op_lock);
@@ -6233,7 +6332,7 @@ namespace Legion {
         if (finder == difference_ops.end())
         {
           // Didn't lose the race so make the node
-          node = new ExpressionTrieNode(0/*depth*/, lhs->expr_id);
+          node = new ExpressionTrieNode(0/*depth*/, expressions[0]->expr_id);
           difference_ops[key] = node;
         }
         else
@@ -6254,7 +6353,7 @@ namespace Legion {
         if (finder == difference_ops.end())
         {
           // Didn't lose the race so make the node
-          node = new ExpressionTrieNode(0/*depth*/, lhs->expr_id);
+          node = new ExpressionTrieNode(0/*depth*/, expressions[0]->expr_id);
           difference_ops[key] = node;
         }
         else
@@ -6264,6 +6363,41 @@ namespace Legion {
 #endif
         return node->find_or_create_operation(expressions, *creator);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::find_canonical_expression(
+                                                     IndexSpaceExpression *expr)
+    //--------------------------------------------------------------------------
+    {
+      // we'll hash expressions based on the number of dimensions and points
+      // to try to get an early separation for them for testing congruence
+      const size_t volume = expr->get_volume();
+      if (volume == 0)
+        return expr;
+      const std::pair<size_t,TypeTag> key(volume, expr->type_tag);
+      AutoLock c_lock(congruence_lock);
+      return expr->find_congruent_expression(canonical_expressions[key]);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_canonical_expression(
+                                      IndexSpaceExpression *expr, size_t volume)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(volume > 0);
+#endif
+      const std::pair<size_t,TypeTag> key(volume, expr->type_tag);
+      AutoLock c_lock(congruence_lock);
+      std::set<IndexSpaceExpression*> &exprs = canonical_expressions[key];
+      std::set<IndexSpaceExpression*>::iterator finder = exprs.find(expr);
+#ifdef DEBUG_LEGION
+      assert(finder != exprs.end());
+#endif
+      exprs.erase(finder);
+      if (exprs.empty())
+        canonical_expressions.erase(key);
     }
 
     //--------------------------------------------------------------------------
@@ -6492,7 +6626,7 @@ namespace Legion {
       {
         RezCheck z2(rez);
         rez.serialize(remote_expr_id);
-        origin->pack_expression_structure(rez, source, true/*top*/);
+        origin->pack_expression_value(rez, source);
         rez.serialize(done_event);
       }
       runtime->send_index_space_remote_expression_response(source, rez);
@@ -6506,7 +6640,7 @@ namespace Legion {
       DerezCheck z(derez);
       IndexSpaceExprID remote_expr_id;
       derez.deserialize(remote_expr_id); 
-      IndexSpaceExpression *result = unpack_expression_structure(derez, source);
+      IndexSpaceExpression *result = unpack_expression_value(derez, source);
       result->add_expression_reference();
       {
         AutoLock l_lock(lookup_is_op_lock);
@@ -6536,7 +6670,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionTreeForest::unpack_expression_structure(
+    IndexSpaceExpression* RegionTreeForest::unpack_expression_value(
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -6552,82 +6686,16 @@ namespace Legion {
         result->send_remote_gc_decrement(source);
         return result;
       }
-      bool is_local;
-      derez.deserialize(is_local);
-      if (is_local)
+      bool local;
+      derez.deserialize<bool>(local);
+      if (local)
       {
-        IndexSpaceExpression *local_expr;
-        derez.deserialize(local_expr);
-        return local_expr;
+        IndexSpaceExpression *result;
+        derez.deserialize(result);
+        return result;
       }
-      // Not an index space, so it is an operation, unpack all the arguments
-      // to the operation and see if we can find equivalence ones on this node
-      size_t num_sub_expressions;
-      derez.deserialize(num_sub_expressions);
-#ifdef DEBUG_LEGION
-      assert(num_sub_expressions != 1); // should be 0 or >= 2
-      assert(num_sub_expressions <= MAX_EXPRESSION_FANOUT);
-#endif
-      std::vector<IndexSpaceExpression*> expressions(num_sub_expressions);
-      for (unsigned idx = 0; idx < num_sub_expressions; idx++)
-        expressions[idx] = unpack_expression_structure(derez, source);
-      // Now figure out which kind of operation we're making here
-      IndexSpaceOperation::OperationKind op_kind;
-      derez.deserialize(op_kind);
-      switch (op_kind)
-      {
-        case IndexSpaceOperation::UNION_OP_KIND:
-          {
-            // Sort the expressions so they're in the same order
-            // as if they had come from the local node
-            if (num_sub_expressions > 0)
-            {
-              std::sort(expressions.begin(), expressions.end(), 
-                        std::less<IndexSpaceExpression*>());
-              RemoteUnionOpCreator creator(this, derez, expressions);
-              return union_index_spaces(expressions, &creator);  
-            }
-            else
-            {
-              // This is an empty expression so just make it and return
-              RemoteUnionOpCreator creator(this, derez, expressions);
-              return creator.consume();
-            }
-          }
-        case IndexSpaceOperation::INTERSECT_OP_KIND:
-          {
-            // Sort the expressions so they're in the same order
-            // as if they had come from the local node
-            if (num_sub_expressions > 0)
-            {
-              std::sort(expressions.begin(), expressions.end(), 
-                        std::less<IndexSpaceExpression*>());
-              RemoteIntersectionOpCreator creator(this, derez, expressions);
-              return intersect_index_spaces(expressions, &creator);
-            }
-            else
-            {
-              // This is an empty expression so just make it and return
-              RemoteIntersectionOpCreator creator(this, derez, expressions);
-              return creator.consume();
-            }
-          }
-        case IndexSpaceOperation::DIFFERENCE_OP_KIND:
-          {
-#ifdef DEBUG_LEGION
-            assert(num_sub_expressions == 2);
-#endif
-            RemoteDifferenceOpCreator creator(this, derez, 
-                expressions[0], expressions[1]);
-            return subtract_index_spaces(expressions[0],
-                                expressions[1], &creator);
-          }
-        default:
-          assert(false);
-      }
-      // Should never get here
-      assert(false);
-      return NULL;
+      RemoteExpressionCreator creator(this, derez);
+      return creator.consume(); 
     }
 
     /////////////////////////////////////////////////////////////
@@ -6636,7 +6704,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression::IndexSpaceExpression(LocalLock &lock)
-      : type_tag(0), expr_id(0), expr_lock(lock), volume(0), 
+      : type_tag(0), expr_id(0), expr_lock(lock), canonical(NULL), volume(0), 
         has_volume(false), empty(false), has_empty(false)
     //--------------------------------------------------------------------------
     {
@@ -6646,7 +6714,7 @@ namespace Legion {
     IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, Runtime *rt,
                                                LocalLock &lock)
       : type_tag(tag), expr_id(rt->get_unique_index_space_expr_id()), 
-        expr_lock(lock), volume(0), has_volume(false), 
+        expr_lock(lock), canonical(NULL), volume(0), has_volume(false), 
         empty(false), has_empty(false)
     //--------------------------------------------------------------------------
     {
@@ -6655,7 +6723,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id,
                                                LocalLock &lock)
-      : type_tag(tag), expr_id(id), expr_lock(lock), volume(0),
+      : type_tag(tag), expr_id(id), expr_lock(lock), canonical(NULL), volume(0),
         has_volume(false), empty(false), has_empty(false)
     //--------------------------------------------------------------------------
     {
@@ -6733,6 +6801,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpaceExpression* IndexSpaceExpression::get_canonical_expression(
+                                                       RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      if (canonical != NULL)
+        return canonical;
+      IndexSpaceExpression *expr = forest->find_canonical_expression(this);
+      if (expr == this)
+      {
+        // If we're our own canonical expression then the forest didn't
+        // give us a reference to ourself, so just write it, everyone will
+        // write the same value so there's no risk here
+        canonical = expr;
+        return expr;
+      }
+      // If the canonical expression is not ourself, then the region tree
+      // forest has given us a reference back on it, see if we're the first
+      // ones to write it, if not we can remove the reference now
+      if (!__sync_bool_compare_and_swap(&canonical, NULL, expr))
+        expr->remove_expression_reference(true/*tree*/);
+      return expr;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ IndexSpaceExpression* IndexSpaceExpression::unpack_expression(
                              Deserializer &derez, RegionTreeForest *forest, 
                              AddressSpaceID source)
@@ -6793,32 +6885,63 @@ namespace Legion {
                                                        origin, &wait_for);
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceExpression::finalize_canonical(size_t volume,
+                                                RegionTreeForest *forest, 
+                                                IndexSpaceExpression *original,
+                                                IndexSpaceExpression *canonical) 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(canonical != NULL);
+#endif
+      if (canonical == original)
+        forest->remove_canonical_expression(canonical, volume);
+      else if (canonical->remove_canonical_reference())
+        delete canonical;
+    }
+
     /////////////////////////////////////////////////////////////
-    // Intermediate Expression
+    // Index Space Operation 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IntermediateExpression::IntermediateExpression(TypeTag tag,
-                                                   RegionTreeForest *ctx)
-      : IndexSpaceExpression(tag, ctx->runtime, inter_lock), 
-        context(ctx), remote_exprs(NULL)
+    IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
+                                             RegionTreeForest *ctx)
+      : IndexSpaceExpression(tag, ctx->runtime, inter_lock), context(ctx),
+        op_kind(kind), origin_expr(this), 
+        origin_space(ctx->runtime->address_space), remote_exprs(NULL),
+        invalidated(0)
     //--------------------------------------------------------------------------
     {
+      // We always keep a reference on ourself until we get invalidated
+      add_expression_reference(true/*expr tree*/);
     }
 
     //--------------------------------------------------------------------------
-    IntermediateExpression::IntermediateExpression(TypeTag tag,
-                                     RegionTreeForest *ctx, IndexSpaceExprID id)
-      : IndexSpaceExpression(tag, id, inter_lock), context(ctx),
-        remote_exprs(NULL)
+    IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
+                                     RegionTreeForest *ctx, Deserializer &derez)
+      : IndexSpaceExpression(tag, unpack_expr_id(derez), inter_lock),
+        context(ctx), op_kind(kind), origin_expr(unpack_origin_expr(derez)), 
+        origin_space(expr_id % ctx->runtime->total_address_spaces),
+        remote_exprs(NULL), invalidated(0)
     //--------------------------------------------------------------------------
     {
+      // We always keep a reference on ourself until we get invalidated
+      add_expression_reference(true/*expr tree*/);
     }
 
     //--------------------------------------------------------------------------
-    IntermediateExpression::~IntermediateExpression(void)
+    IndexSpaceOperation::~IndexSpaceOperation(void)
     //--------------------------------------------------------------------------
     {
+      if (canonical != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(has_volume);
+#endif
+        IndexSpaceExpression::finalize_canonical(volume,context,this,canonical);
+      }
       // Send messages to remove any remote expressions
       if (remote_exprs != NULL)
       {
@@ -6836,23 +6959,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IntermediateExpression::add_expression_reference(bool expr_tree,
-                                                          unsigned count)
+    bool IndexSpaceOperation::try_add_canonical_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      return (__sync_fetch_and_add(&references,1) > 0);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceOperation::remove_canonical_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      return remove_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceOperation::add_expression_reference(bool expr_tree,
+                                                       unsigned count)
     //--------------------------------------------------------------------------
     {
       add_reference(count);
     }
 
     //--------------------------------------------------------------------------
-    bool IntermediateExpression::remove_expression_reference(bool expr_tree,
-                                                             unsigned count)
+    bool IndexSpaceOperation::remove_expression_reference(bool expr_tree,
+                                                          unsigned count)
     //--------------------------------------------------------------------------
     {
       return remove_reference(count);
     } 
 
     //--------------------------------------------------------------------------
-    void IntermediateExpression::record_remote_expression(AddressSpaceID target)
+    void IndexSpaceOperation::record_remote_expression(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inter_lock);
@@ -6862,48 +6999,6 @@ namespace Legion {
       assert(remote_exprs->find(target) == remote_exprs->end());
 #endif
       remote_exprs->insert(target);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Index Space Operation 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
-                                             RegionTreeForest *ctx)
-      : IntermediateExpression(tag, ctx), op_kind(kind), origin_expr(this), 
-        origin_space(ctx->runtime->address_space), invalidated(0)
-    //--------------------------------------------------------------------------
-    {
-      // We always keep a reference on ourself until we get invalidated
-      add_expression_reference(true/*expr tree*/);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
-                                     RegionTreeForest *ctx, Deserializer &derez)
-      : IntermediateExpression(tag, ctx, unpack_expr_id(derez)), 
-        op_kind(kind), origin_expr(unpack_origin_expr(derez)), 
-        origin_space(expr_id % ctx->runtime->total_address_spaces),
-        invalidated(0)
-    //--------------------------------------------------------------------------
-    {
-      // We always keep a reference on ourself until we get invalidated
-      add_expression_reference(true/*expr tree*/);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceOperation::~IndexSpaceOperation(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexSpaceOperation::remove_expression_reference(bool expr_tree,
-                                                          unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      return remove_reference(count);
     }
 
     //--------------------------------------------------------------------------
@@ -6993,21 +7088,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      IndexSpaceExpression *temp = find_congruence();
-      if (temp == NULL)
-      {
-        // No congruence found
-        temp = result;
-        result = NULL;
-        return temp;
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(temp != result);
-#endif
-        return temp;
-      }
+      IndexSpaceExpression *temp = result;
+      result = NULL;
+      return temp;
     }
 
     /////////////////////////////////////////////////////////////
@@ -7614,6 +7697,13 @@ namespace Legion {
     IndexSpaceNode::~IndexSpaceNode(void)
     //--------------------------------------------------------------------------
     {
+      if (canonical != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(has_volume);
+#endif
+        IndexSpaceExpression::finalize_canonical(volume,context,this,canonical);
+      }
       // Remove ourselves from the context
       if (registered_with_runtime)
         context->remove_node(handle);
@@ -8734,6 +8824,52 @@ namespace Legion {
 
       IndexSpaceNode *node = forest->get_node(handle);
       node->release_color(color);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::pack_expression(Serializer &rez, AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      if (target != context->runtime->address_space)
+      {
+        rez.serialize<bool>(false/*local*/);
+        rez.serialize<bool>(true/*index space*/);
+        rez.serialize(handle);
+      }
+      else
+      {
+        rez.serialize<bool>(true/*local*/);
+        rez.serialize<IndexSpaceExpression*>(this);
+      }
+    }
+    
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::pack_expression_value(Serializer &rez,
+                                               AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<bool>(true/*index space*/);
+      rez.serialize(handle);
+      // Make sure this doesn't get collected until we're unpacked
+      // This could be a performance bug since it will block if we
+      // have to send a reference to a remote node, but that should
+      // never actually happen
+      LocalReferenceMutator mutator;
+      add_base_gc_ref(REMOTE_DID_REF, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::try_add_canonical_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      return check_resource_and_increment(CANONICAL_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::remove_canonical_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      return remove_base_resource_ref(CANONICAL_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -19483,6 +19619,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionNode::initialize_nonexclusive_virtual_analysis(ContextID ctx,
+                                    const FieldMask &mask,
+                                    const FieldMaskSet<EquivalenceSet> &eq_sets,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      manager.initialize_nonexclusive_virtual_analysis(mask, eq_sets,
+                                                       applied_events);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionNode::perform_versioning_analysis(ContextID ctx,
                                                  InnerContext *parent_ctx,
                                                  VersionInfo *version_info,
@@ -19594,14 +19742,15 @@ namespace Legion {
     void RegionNode::invalidate_refinement(ContextID ctx, const FieldMask &mask, 
                                    bool self, std::set<RtEvent> &applied_events, 
                                    std::vector<EquivalenceSet*> &to_release,
-                                   InnerContext *source_context)
+                                   InnerContext *source_context,
+                                   bool nonexclusive_virtual_mapping_root)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
-      manager.invalidate_refinement(source_context, mask, self, 
-                                    to_traverse, to_untrack, to_release);
+      manager.invalidate_refinement(source_context, mask, self, to_traverse,
+                  to_untrack, to_release, nonexclusive_virtual_mapping_root);
       if (!to_untrack.empty())
       {
         if (source_context == NULL)

@@ -1323,11 +1323,6 @@ namespace Legion {
                            LgPriority priority/*= LG_THROUGHPUT_WORK_PRIORITY*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      // Only index space tasks should come through this path
-      if (get_operation_kind() == TASK_OP_KIND)
-        assert(dynamic_cast<IndexTask*>(this) != NULL);
-#endif
       Processor p = parent_ctx->get_executing_processor();
       runtime->add_to_local_queue(p, this, priority, wait_on);
     }
@@ -1885,6 +1880,13 @@ namespace Legion {
       }
       if (need_trigger)
         trigger_commit();
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::is_parent_nonexclusive_virtual_mapping(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      return parent_ctx->nonexclusive_virtual_mapping(find_parent_index(index));
     }
 
     //--------------------------------------------------------------------------

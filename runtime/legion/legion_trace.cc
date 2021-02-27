@@ -1446,6 +1446,10 @@ namespace Legion {
         assert(current_template != NULL);
 #endif
         parent_ctx->update_current_fence(this, true, true);
+        // This is where we make sure that replays are done in order
+        // We need to do this because we're not registering this as
+        // a fence with the context
+        physical_trace->chain_replays(this);
         physical_trace->record_previous_template_completion(completion_event);
         local_trace->initialize_tracing_state();
         replayed = true;
@@ -1658,6 +1662,12 @@ namespace Legion {
       {
         // If we're recurrent, then check to see if we had any intermeidate
         // ops for which we still need to perform the fence analysis
+        // If there were no intermediate dependences then we can just
+        // record a dependence on the previous fence
+        const ApEvent fence_completion = (recurrent &&
+          !local_trace->has_intermediate_operations()) ?
+            physical_trace->get_previous_template_completion()
+                    : get_completion_event();
         if (recurrent && local_trace->has_intermediate_operations())
         {
           parent_ctx->perform_fence_analysis(this, execution_preconditions,
@@ -1667,9 +1677,6 @@ namespace Legion {
         if (!fence_registered)
           execution_preconditions.insert(
               parent_ctx->get_current_execution_fence_event());
-        ApEvent fence_completion =
-          recurrent ? physical_trace->get_previous_template_completion()
-                    : get_completion_event();
         physical_trace->initialize_template(fence_completion, recurrent);
         local_trace->set_state_replay();
 #ifdef LEGION_SPY
@@ -1897,9 +1904,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(Runtime *rt, LegionTrace *lt)
-      : runtime(rt), logical_trace(lt), 
+      : runtime(rt), logical_trace(lt),
         repl_ctx(dynamic_cast<ReplicateContext*>(lt->ctx)),
-        current_template(NULL), nonreplayable_count(0), new_template_count(0),
+        previous_replay(NULL), current_template(NULL), nonreplayable_count(0),
+        new_template_count(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
         execution_fence_event(ApEvent::NO_AP_EVENT),
         intermediate_execution_fence(false)
@@ -1921,7 +1929,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(const PhysicalTrace &rhs)
       : runtime(NULL), logical_trace(NULL), repl_ctx(NULL), 
-        current_template(NULL), nonreplayable_count(0), new_template_count(0),
+        previous_replay(NULL), current_template(NULL), nonreplayable_count(0),
+        new_template_count(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
         execution_fence_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
@@ -2112,6 +2121,24 @@ namespace Legion {
         fence->record_execution_precondition(previous_template_completion);
       previous_template_completion = fence->get_completion_event();
       intermediate_execution_fence = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::chain_replays(FenceOp *replay_op)
+    //--------------------------------------------------------------------------
+    {
+      if (previous_replay != NULL)
+      {
+#ifdef LEGION_SPY
+        // Can't prune when doing legion spy
+        replay_op->register_dependence(previous_replay, previous_replay_gen);
+#else
+        if (replay_op->register_dependence(previous_replay,previous_replay_gen))
+          previous_replay = NULL;
+#endif
+      }
+      previous_replay = replay_op;
+      previous_replay_gen = replay_op->get_generation();
     }
 
     //--------------------------------------------------------------------------
@@ -2540,33 +2567,34 @@ namespace Legion {
         FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
           finder->second.find(total_expr);
         if (expr_finder != finder->second.end())
-          non_dominated -= expr_finder->second;
-      }
-      else
-      {
-        // There is at most one expression per field so just iterate and compare
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              finder->second.begin(); it != finder->second.end(); it++)
         {
-          const FieldMask overlap = non_dominated & it->second;
-          if (!overlap)
-            continue;
-          if ((it->first != total_expr) && (it->first != expr))
-          {
-            IndexSpaceExpression *intersection = 
-              forest->intersect_index_spaces(it->first, expr);
-            const size_t volume = intersection->get_volume();
-            if (volume == 0)
-              continue;
-            // Can only dominate if we have enough points
-            if (volume < expr->get_volume())
-              continue;
-          }
-          // If we get here we were dominated
-          non_dominated -= overlap;
+          non_dominated -= expr_finder->second;
           if (!non_dominated)
-            break;
+            return true;
         }
+      }
+      // There is at most one expression per field so just iterate and compare
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+        const FieldMask overlap = non_dominated & it->second;
+        if (!overlap)
+          continue;
+        if ((it->first != total_expr) && (it->first != expr))
+        {
+          IndexSpaceExpression *intersection = 
+            forest->intersect_index_spaces(it->first, expr);
+          const size_t volume = intersection->get_volume();
+          if (volume == 0)
+            continue;
+          // Can only dominate if we have enough points
+          if (volume < expr->get_volume())
+            continue;
+        }
+        // If we get here we were dominated
+        non_dominated -= overlap;
+        if (!non_dominated)
+          break;
       }
       // If there are no fields left then we dominated
       return !non_dominated;
@@ -2620,40 +2648,37 @@ namespace Legion {
           }
         }
       }
-      else
+      // There is at most one expression per field so just iterate and compare
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+            finder->second.begin(); it != finder->second.end(); it++)
       {
-        // There is at most one expression per field so just iterate and compare
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              finder->second.begin(); it != finder->second.end(); it++)
+        const FieldMask overlap = mask & it->second;
+        if (!overlap)
+          continue;
+        if ((it->first != total_expr) && (it->first != expr))
         {
-          const FieldMask overlap = mask & it->second;
-          if (!overlap)
+          IndexSpaceExpression *intersection = 
+            forest->intersect_index_spaces(it->first, expr);
+          const size_t volume = intersection->get_volume();
+          if (volume == 0)
             continue;
-          if ((it->first != total_expr) && (it->first != expr))
+          // Can only dominate if we have enough points
+          if (volume < expr->get_volume())
           {
-            IndexSpaceExpression *intersection = 
-              forest->intersect_index_spaces(it->first, expr);
-            const size_t volume = intersection->get_volume();
-            if (volume == 0)
-              continue;
-            // Can only dominate if we have enough points
-            if (volume < expr->get_volume())
-            {
-              if (dominated != NULL)
-                dominated->insert(intersection, overlap);
-              IndexSpaceExpression *diff = 
-                forest->subtract_index_spaces(expr, intersection);
-              non_dominated.insert(diff, overlap);
-            }
-            else if (dominated != NULL)
-              dominated->insert(expr, overlap);
-          } // total expr dominates everything
+            if (dominated != NULL)
+              dominated->insert(intersection, overlap);
+            IndexSpaceExpression *diff = 
+              forest->subtract_index_spaces(expr, intersection);
+            non_dominated.insert(diff, overlap);
+          }
           else if (dominated != NULL)
             dominated->insert(expr, overlap);
-          mask -= overlap;
-          if (!mask)
-            return;
-        }
+        } // total expr dominates everything
+        else if (dominated != NULL)
+          dominated->insert(expr, overlap);
+        mask -= overlap;
+        if (!mask)
+          return;
       }
       // If we get here then these fields are definitely not dominated
 #ifdef DEBUG_LEGION
@@ -2663,8 +2688,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TraceViewSet::filter_independent_fields(IndexSpaceExpression *expr,
+                                                 FieldMask &mask) const
+    //--------------------------------------------------------------------------
+    {
+      FieldMask independent = mask;
+      for (ViewExprs::const_iterator vit =
+            conditions.begin(); vit != conditions.end(); vit++)
+      {
+        if (independent * vit->second.get_valid_mask())
+          continue;
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); it++)
+        {
+          const FieldMask overlap = it->second & independent;
+          if (!overlap)
+            continue;
+          IndexSpaceExpression *overlap_expr = 
+            forest->intersect_index_spaces(it->first, expr);
+          if (!overlap_expr->is_empty())
+          {
+            independent -= overlap;
+            if (!independent)
+              break;
+          }
+        }
+        if (!independent)
+          break;
+      }
+      if (!!independent)
+        mask -= independent;
+    }
+
+    //--------------------------------------------------------------------------
     bool TraceViewSet::subsumed_by(const TraceViewSet &set, 
-                                   FailedPrecondition *condition) const
+                    bool allow_independent, FailedPrecondition *condition) const
     //--------------------------------------------------------------------------
     {
       for (ViewExprs::const_iterator vit = 
@@ -2675,6 +2733,21 @@ namespace Legion {
           FieldMask mask = it->second;
           if (!set.dominates(vit->first, it->first, mask))
           {
+            if (allow_independent)
+            {
+              // If we're allowing independent views, that means the set
+              // does not need to dominate the view as long as there are no
+              // views in the set that overlap logically with the test view
+              // This allows us to handle the read-only precondition case
+              // where we have read-only views that show up in the preconditions
+              // but do not appear logically anywhere in the postconditions
+              set.filter_independent_fields(it->first, mask);
+              // If all the fields are independent from anything that was
+              // written in the postcondition then we know this is a
+              // read-only precondition that does not need to be subsumed
+              if (!mask)
+                continue;
+            }
             if (condition != NULL)
             {
               condition->view = vit->first;
@@ -3324,7 +3397,7 @@ namespace Legion {
     {
       bool replayable = true;
       if ((precondition_views != NULL) && ((postcondition_views == NULL) ||
-            !precondition_views->subsumed_by(*postcondition_views, failed)))
+          !precondition_views->subsumed_by(*postcondition_views, true, failed)))
       {
         replayable = false;
         not_subsumed = true;

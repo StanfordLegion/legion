@@ -36,6 +36,7 @@ add_subdirectory(attach_2darray_c_fortran_layout)
 add_subdirectory(attach_array_daxpy)
 add_subdirectory(predication)
 add_subdirectory(inline_tasks)
+add_subdirectory(local_function_tasks)
 add_subdirectory(layout_constraints)
 add_subdirectory(implicit_top_task)
 

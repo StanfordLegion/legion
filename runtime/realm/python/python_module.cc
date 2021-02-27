@@ -1129,7 +1129,8 @@ namespace Realm {
               it2 != local_mems.end();
               ++it2) {
             Memory::Kind kind = (*it2)->get_kind();
-            if((kind != Memory::SYSTEM_MEM) && (kind != Memory::REGDMA_MEM))
+            if((kind != Memory::SYSTEM_MEM) && 
+               (kind != Memory::REGDMA_MEM) && (kind != Memory::Z_COPY_MEM))
               continue;
 
             Machine::ProcessorMemoryAffinity pma;

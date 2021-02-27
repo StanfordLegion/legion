@@ -359,17 +359,18 @@ namespace Realm {
 
   BackgroundWorkItem::~BackgroundWorkItem(void)
   {
-    if(manager)
-      manager->release_slot(index);
 #ifdef DEBUG_REALM
     State old_state = state.load();
     if(old_state != STATE_SHUTDOWN) {
       log_bgwork.fatal() << "invalid destruction: item=" << ((void *)this)
-			 << " oldstate=" << old_state;
+			 << " name='" << name
+			 << "' oldstate=" << old_state;
       abort();
     }
 #endif
-  }
+    if(manager)
+      manager->release_slot(index);
+ }
 
   void BackgroundWorkItem::add_to_manager(BackgroundWorkManager *_manager,
 					  int _numa_domain /*= -1*/,
@@ -397,7 +398,8 @@ namespace Realm {
     State old_state = state.exchange(STATE_ACTIVE);
     if(old_state != STATE_IDLE) {
       log_bgwork.fatal() << "invalid make_active: item=" << ((void *)this)
-			 << " oldstate=" << old_state;
+			 << " name='" << name
+			 << "' oldstate=" << old_state;
       abort();
     }
 #endif
@@ -411,7 +413,8 @@ namespace Realm {
     State old_state = state.exchange(STATE_IDLE);
     if(old_state != STATE_ACTIVE) {
       log_bgwork.fatal() << "invalid make_inactive: item=" << ((void *)this)
-			 << " oldstate=" << old_state;
+			 << " name='" << name
+			 << "' oldstate=" << old_state;
       abort();
     }
   }
@@ -421,7 +424,8 @@ namespace Realm {
     State old_state = state.exchange(STATE_SHUTDOWN);
     if(old_state != STATE_IDLE) {
       log_bgwork.fatal() << "invalid shutdown: item=" << ((void *)this)
-			 << " oldstate=" << old_state;
+                         << " name='" << name
+			 << "' oldstate=" << old_state;
       abort();
     }
   }

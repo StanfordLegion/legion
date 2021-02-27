@@ -25,6 +25,7 @@
 
 #ifdef REALM_USE_CUDA
 #include "realm/cuda/cuda_module.h"
+#include "realm/cuda/cuda_internal.h"
 #endif
 
 #include <gasnet_coll.h>

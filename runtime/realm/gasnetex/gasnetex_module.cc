@@ -453,8 +453,21 @@ namespace Realm {
     assert(ok);
 
     if(deprecated_gsize > 0) {
-      log_gex.fatal() << "GASNetEX does not provide a 'global' memory - '-ll:gsize' not permitted";
+      log_gex.fatal() << "Realm GASNetEX implementation does not provide a 'global' memory - '-ll:gsize' not permitted";
       abort();
+    }
+
+    // enforce a minimum outbuf count for now - right now we need at least one
+    //  pktbuf and at least one databuf per rank (TODO: shrink this by stealing
+    //  outbufs from idle endpoints)
+    const size_t min_obufs = 2 * size_t(Network::max_node_id /* i.e. prim_size - 1 */);
+    if(cfg_outbuf_count < min_obufs) {
+      // issue a warning unless the user asked for 0 to mean "minimum"
+      if((cfg_outbuf_count > 0) && (Network::my_node_id == 0))
+        log_gex.warning() << "outbuf count raised from requested "
+                          << cfg_outbuf_count << " to required minimum "
+                          << min_obufs << " - if memory capacity issues result, reduce outbuf size using -gex:obsize";
+      cfg_outbuf_count = min_obufs;
     }
   }
 

@@ -19,7 +19,7 @@
 
 #include "realm/cuda/cudart_hijack.h"
 
-#include "realm/cuda/cuda_module.h"
+#include "realm/cuda/cuda_internal.h"
 #include "realm/logging.h"
 
 namespace Realm {

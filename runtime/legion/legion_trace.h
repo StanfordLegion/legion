@@ -500,6 +500,7 @@ namespace Legion {
                     std::set<RtEvent> &map_applied_conditions);
       void record_failed_capture(PhysicalTemplate *tpl);
       void record_intermediate_execution_fence(FenceOp *fence);
+      void chain_replays(FenceOp *replay_op);
     public:
       const std::vector<Processor> &get_replay_targets(void)
         { return replay_targets; }
@@ -511,6 +512,8 @@ namespace Legion {
       ReplicateContext *const repl_ctx;
     private:
       mutable LocalLock trace_lock;
+      FenceOp *previous_replay;
+      UniqueID previous_replay_gen;
       PhysicalTemplate* current_template;
       std::vector<PhysicalTemplate*> templates;
       unsigned nonreplayable_count;
@@ -566,7 +569,9 @@ namespace Legion {
                      IndexSpaceExpression *expr, FieldMask mask,
                      FieldMaskSet<IndexSpaceExpression> &non_dominated,
                      FieldMaskSet<IndexSpaceExpression> *dominate = NULL) const;
-      bool subsumed_by(const TraceViewSet &set,
+      void filter_independent_fields(IndexSpaceExpression *expr,
+                                     FieldMask &mask) const;
+      bool subsumed_by(const TraceViewSet &set, bool allow_independent,
                        FailedPrecondition *condition = NULL) const;
       bool independent_of(const TraceViewSet &set,
                        FailedPrecondition *condition = NULL) const;

@@ -412,11 +412,11 @@
 #endif
 #endif
 
-// The maximum alignment guaranteed on the 
-// target machine bytes.  For most 64-bit 
-// systems this should be 16 bytes.
+// The maximum alignment guaranteed on the target
+// machine in bytes.  On linux systems, this is
+// (at least) twice the size of a pointer.
 #ifndef LEGION_MAX_ALIGNMENT
-#define LEGION_MAX_ALIGNMENT            16
+#define LEGION_MAX_ALIGNMENT            (2*sizeof(void *))
 #endif
 
 // Give an ideal upper bound on the maximum

@@ -24847,7 +24847,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_to_ready_queue(Processor p, TaskOp *op, RtEvent wait_on)
+    void Runtime::add_to_ready_queue(Processor p, TaskOp *task,
+                                     RtEvent wait_on, bool select_options)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -24856,11 +24857,15 @@ namespace Legion {
 #endif
       if (wait_on.exists() && !wait_on.has_triggered())
       {
-        TaskOp::DeferredEnqueueArgs args(proc_managers[p], op);
+        TaskOp::DeferredEnqueueArgs args(proc_managers[p], task,select_options);
         issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY, wait_on);
       }
       else
-        proc_managers[p]->add_to_ready_queue(op);
+      {
+        if (select_options)
+          task->select_task_options(false/*prioritize*/); 
+        proc_managers[p]->add_to_ready_queue(task);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -28579,7 +28584,6 @@ namespace Legion {
                                 false/*track parent*/,true/*top level task*/);
       // Set this to be the current processor
       top_task->set_current_proc(target);
-      top_task->select_task_options(false/*prioritize*/);
       increment_outstanding_top_level_tasks();
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
@@ -28589,7 +28593,8 @@ namespace Legion {
                               Runtime::protect_event(pre));
       // Put the task in the ready queue, make sure that the runtime is all
       // set up across the machine before we launch it as well
-      add_to_ready_queue(target, top_task, runtime_started_event);
+      // Also indicate that we need to select task options when ready
+      add_to_ready_queue(target, top_task, runtime_started_event, true);
       return result;
     }
 
@@ -30369,6 +30374,8 @@ namespace Legion {
           {
             const TaskOp::DeferredEnqueueArgs *enqueue_args = 
               (const TaskOp::DeferredEnqueueArgs*)args;
+            if (enqueue_args->select_options)
+              enqueue_args->task->select_task_options(false/*prioritize*/);
             enqueue_args->manager->add_to_ready_queue(enqueue_args->task);
             break;
           }

@@ -14809,7 +14809,7 @@ namespace Legion {
           target_insts;
         for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
         {
-          const FieldMask &dst_mask = 
+          const FieldMask &dst_mask =
             analysis.target_instances[idx].get_valid_fields();
           // Compute a tmp mask based on the dst mask
           FieldMask source_mask;
@@ -14824,12 +14824,17 @@ namespace Legion {
             source_mask.set_bit(finder->second);
             fidx = dst_mask.find_next_set(fidx+1);
           }
-#ifdef DEBUG_LEGION
-          assert(!(source_mask - src_mask));
-#endif
+          // This might not be the right equivalence set for all the
+          // target instances, so filter down to the ones we apply to
+          const FieldMask overlap = src_mask & source_mask;
+          if (!overlap)
+            continue;
           target_insts[analysis.across_helpers[idx]].insert(
-              analysis.target_views[idx], source_mask);
+              analysis.target_views[idx], overlap);
         }
+#ifdef DEBUG_LEGION
+        assert(!target_insts.empty());
+#endif
         for (LegionMap<CopyAcrossHelper*,
               FieldMaskSet<InstanceView> >::aligned::const_iterator it = 
               target_insts.begin(); it != target_insts.end(); it++)
@@ -14859,13 +14864,17 @@ namespace Legion {
         FieldMaskSet<InstanceView> target_instances;
         for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
         {
-          const FieldMask &mask = 
+          // This might not be the right equivalence set for all the
+          // target instances, so filter down to the ones we apply to
+          const FieldMask mask = src_mask &
             analysis.target_instances[idx].get_valid_fields();
-#ifdef DEBUG_LEGION
-          assert(!(mask - src_mask));
-#endif
+          if (!mask)
+            continue;
           target_instances.insert(analysis.target_views[idx], mask);
         }
+#ifdef DEBUG_LEGION
+        assert(!target_instances.empty());
+#endif
         make_instances_valid(across_aggregator, NULL/*no guard*/,
             analysis.op, analysis.src_index, true/*track events*/, expr, 
             expr_covers, src_mask, target_instances, analysis.source_views,
@@ -15275,10 +15284,16 @@ namespace Legion {
             tracing_postconditions->invalidate(view, expr, user_mask);
           return;
         }
+        // Do not record read-only postconditions
+        if (IS_READ_ONLY(usage))
+          return;
       }
+#ifdef DEBUG_LEGION
+      assert(HAS_WRITE(usage));
+#endif
       if (tracing_postconditions != NULL)
       {
-        if (invalidates && HAS_WRITE(usage))
+        if (invalidates)
           tracing_postconditions->invalidate_all_but(view, expr, user_mask);
       }
       else
@@ -18115,6 +18130,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VersionManager::initialize_nonexclusive_virtual_analysis(
+                                       const FieldMask &mask,
+                                       const FieldMaskSet<EquivalenceSet> &sets,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock here since we know this is initialization
+#ifdef DEBUG_LEGION
+      assert(disjoint_complete * sets.get_valid_mask());
+#endif
+      // We'll pretend like we're the root of the equivalence set tree
+      // here even though we don't actually own these sets, we're just
+      // marking it so that any analyses stop here. The logical analysis
+      // will ensure that we are never refined
+      disjoint_complete |= mask;
+      WrapperReferenceMutator mutator(applied_events);
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            sets.begin(); it != sets.end(); it++)
+        if (equivalence_sets.insert(it->first, it->second))
+          it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
     void VersionManager::compute_equivalence_sets(const ContextID ctx,
                                           IndexSpaceExpression *expr,
                                           EqSetTracker *target,
@@ -18474,7 +18512,8 @@ namespace Legion {
                                       const FieldMask &mask, bool self,
                                       FieldMaskSet<RegionTreeNode> &to_traverse,
                                       FieldMaskSet<EquivalenceSet> &to_untrack,
-                                      std::vector<EquivalenceSet*> &to_release)
+                                      std::vector<EquivalenceSet*> &to_release,
+                                      bool nonexclusive_virtual_mapping_root)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);     
@@ -18538,7 +18577,10 @@ namespace Legion {
                 equivalence_sets.begin(); it != equivalence_sets.end(); it++)
           {
             // Skip any nodes that are not even part of a refinement 
-            if (it->first->region_node != node)
+            // Unless we are a non-exclusive virtual mapping root in
+            // which case we do still want to invalidate these
+            if ((it->first->region_node != node) && 
+                !nonexclusive_virtual_mapping_root)
               continue;
             const FieldMask overlap = it->second & mask;
             if (!overlap)

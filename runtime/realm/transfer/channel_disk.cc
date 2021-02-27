@@ -15,6 +15,7 @@
  */
 
 #include "realm/transfer/channel_disk.h"
+#include "realm/transfer/lowlevel_dma.h"
 
 #ifdef REALM_ON_WINDOWS
 #include <windows.h>
@@ -39,17 +40,14 @@ static int fsync(int fd)
 
 namespace Realm {
 
-    FileXferDes::FileXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+    FileXferDes::FileXferDes(uintptr_t _dma_op, Channel *_channel,
+			     NodeID _launch_node, XferDesID _guid,
 			     const std::vector<XferDesPortInfo>& inputs_info,
 			     const std::vector<XferDesPortInfo>& outputs_info,
-			     bool _mark_start,
-			     uint64_t _max_req_size, long max_nr, int _priority,
-			     XferDesFence* _complete_fence)
-      : XferDes(_dma_request, _launch_node, _guid,
+			     int _priority)
+      : XferDes(_dma_op, _channel, _launch_node, _guid,
 		inputs_info, outputs_info,
-		_mark_start,
-		_max_req_size, _priority,
-                _complete_fence)
+		_priority, 0, 0)
     {
       RegionInstance inst;
       if((inputs_info.size() == 1) &&
@@ -57,13 +55,11 @@ namespace Realm {
 	kind = XFER_FILE_READ;
 	inst = inputs_info[0].inst;
 	assert(inst.exists());
-	channel = get_channel_manager()->get_file_channel();
       } else if((outputs_info.size() == 1) &&
 		(output_ports[0].mem->kind == MemoryImpl::MKIND_FILE)) {
 	kind = XFER_FILE_WRITE;
 	inst = outputs_info[0].inst;
 	assert(inst.exists());
-	channel = get_channel_manager()->get_file_channel();
       } else {
 	assert(0 && "neither source nor dest of FileXferDes is file!?");
       }
@@ -71,6 +67,7 @@ namespace Realm {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
       file_info = static_cast<FileMemory::OpenFileInfo *>(impl->metadata.mem_specific);
 
+      const int max_nr = 10; // FIXME
       file_reqs = (FileRequest*) calloc(max_nr, sizeof(DiskRequest));
       for (int i = 0; i < max_nr; i++) {
         file_reqs[i].xd = this;
@@ -145,23 +142,19 @@ namespace Realm {
       fsync(file_info->fd);
     }
 
-    DiskXferDes::DiskXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+    DiskXferDes::DiskXferDes(uintptr_t _dma_op, Channel *_channel,
+			     NodeID _launch_node, XferDesID _guid,
 			     const std::vector<XferDesPortInfo>& inputs_info,
 			     const std::vector<XferDesPortInfo>& outputs_info,
-			     bool _mark_start,
-			     uint64_t _max_req_size, long max_nr, int _priority,
-			     XferDesFence* _complete_fence)
-      : XferDes(_dma_request, _launch_node, _guid,
+			     int _priority)
+      : XferDes(_dma_op, _channel, _launch_node, _guid,
 		inputs_info, outputs_info,
-		_mark_start,
-		_max_req_size, _priority,
-                _complete_fence)
+		_priority, 0, 0)
       , fd(-1) // defer file open
     {
       if((inputs_info.size() >= 1) &&
 	 (input_ports[0].mem->kind == MemoryImpl::MKIND_DISK)) {
 	kind = XFER_DISK_READ;
-	channel = get_channel_manager()->get_disk_channel();
 	// all input ports should agree on which fd they target
 	fd = ((Realm::DiskMemory*)(input_ports[0].mem))->fd;
 	for(size_t i = 1; i < input_ports.size(); i++)
@@ -169,7 +162,6 @@ namespace Realm {
       } else if((outputs_info.size() >= 1) &&
 		(output_ports[0].mem->kind == MemoryImpl::MKIND_DISK)) {
 	kind = XFER_DISK_WRITE;
-	channel = get_channel_manager()->get_disk_channel();
 	// all output ports should agree on which fd they target
 	fd = ((Realm::DiskMemory*)(output_ports[0].mem))->fd;
 	for(size_t i = 1; i < output_ports.size(); i++)
@@ -178,6 +170,7 @@ namespace Realm {
 	assert(0 && "neither source nor dest of DiskXferDes is disk!?");
       }
 
+      const int max_nr = 10; // FIXME
       disk_reqs = (DiskRequest*) calloc(max_nr, sizeof(DiskRequest));
       for (int i = 0; i < max_nr; i++) {
         disk_reqs[i].xd = this;
@@ -279,6 +272,22 @@ namespace Realm {
     {
     }
 
+    XferDes *FileChannel::create_xfer_des(uintptr_t dma_op,
+					  NodeID launch_node,
+					  XferDesID guid,
+					  const std::vector<XferDesPortInfo>& inputs_info,
+					  const std::vector<XferDesPortInfo>& outputs_info,
+					  int priority,
+					  XferDesRedopInfo redop_info,
+					  const void *fill_data, size_t fill_size)
+    {
+      assert(redop_info.id == 0);
+      assert(fill_size == 0);
+      return new FileXferDes(dma_op, this, launch_node, guid,
+			     inputs_info, outputs_info,
+			     priority);
+    }
+
     long FileChannel::submit(Request** requests, long nr)
     {
       AsyncFileIOContext* aio_ctx = AsyncFileIOContext::get_singleton();
@@ -324,6 +333,22 @@ namespace Realm {
 
     DiskChannel::~DiskChannel()
     {
+    }
+
+    XferDes *DiskChannel::create_xfer_des(uintptr_t dma_op,
+					  NodeID launch_node,
+					  XferDesID guid,
+					  const std::vector<XferDesPortInfo>& inputs_info,
+					  const std::vector<XferDesPortInfo>& outputs_info,
+					  int priority,
+					  XferDesRedopInfo redop_info,
+					  const void *fill_data, size_t fill_size)
+    {
+      assert(redop_info.id == 0);
+      assert(fill_size == 0);
+      return new DiskXferDes(dma_op, this, launch_node, guid,
+			     inputs_info, outputs_info,
+			     priority);
     }
 
     long DiskChannel::submit(Request** requests, long nr)

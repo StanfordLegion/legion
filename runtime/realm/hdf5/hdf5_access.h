@@ -20,6 +20,7 @@
 
 #include "realm/inst_layout.h"
 #include <string>
+#include <vector>
 
 namespace Realm {
 
@@ -31,8 +32,23 @@ namespace Realm {
     static const LayoutType HDF5LayoutType = 2;
   };
 
+  // dimension-agnostic form for piece info allows us to get to it without
+  //  having to know the template parameters of the HDF5LayoutPiece holding
+  //  it
+  struct HDF5PieceInfo {
+    std::string dsetname;
+    // TODO: small vectors
+    // this is the offset within the hdf5 dataset, uses its dimensionality
+    std::vector<hdf5_size_t> offset;
+    // this maps from realm dimensions to hdf5 dimensions - the
+    //  dimensionalities may differ - use '-1' for realm dimensions that
+    //  do not correspond to an hdf5 dimension
+    std::vector<int> dim_order;
+    bool read_only;
+  };
+
   template <int N, typename T>
-  class REALM_PUBLIC_API HDF5LayoutPiece : public InstanceLayoutPiece<N,T> {
+    class REALM_PUBLIC_API HDF5LayoutPiece : public InstanceLayoutPiece<N,T>, public HDF5PieceInfo {
   public:
     HDF5LayoutPiece(void);
 
@@ -55,11 +71,6 @@ namespace Realm {
 
     template <typename S>
     bool serialize(S& serializer) const;
-
-    std::string dsetname;
-    Point<N, hdf5_size_t> offset;
-    int dim_order[N];
-    bool read_only;
   };
 
 

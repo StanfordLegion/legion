@@ -269,22 +269,34 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class InstanceLayoutPieceBase
+
+  inline InstanceLayoutPieceBase::InstanceLayoutPieceBase(PieceLayoutTypes::LayoutType _layout_type)
+    : layout_type(_layout_type)
+  {}
+
+  inline InstanceLayoutPieceBase::~InstanceLayoutPieceBase(void)
+  {}
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class InstanceLayoutPiece<N,T>
 
   template <int N, typename T>
   inline InstanceLayoutPiece<N,T>::InstanceLayoutPiece(void)
-    : layout_type(PieceLayoutTypes::InvalidLayoutType)
+    : InstanceLayoutPieceBase(PieceLayoutTypes::InvalidLayoutType)
   {}
 
   template <int N, typename T>
   inline InstanceLayoutPiece<N,T>::InstanceLayoutPiece(PieceLayoutTypes::LayoutType _layout_type)
-    : layout_type(_layout_type)
+    : InstanceLayoutPieceBase(_layout_type)
   {}
 
   template <int N, typename T>
   inline InstanceLayoutPiece<N,T>::InstanceLayoutPiece(PieceLayoutTypes::LayoutType _layout_type,
 						       const Rect<N,T>& _bounds)
-    : layout_type(_layout_type)
+    : InstanceLayoutPieceBase(_layout_type)
     , bounds(_bounds)
   {}
 
@@ -294,10 +306,6 @@ namespace Realm {
   {
     return Serialization::PolymorphicSerdezHelper<InstanceLayoutPiece<N,T> >::deserialize_new(deserializer);
   }
-
-  template <int N, typename T>
-  inline InstanceLayoutPiece<N,T>::~InstanceLayoutPiece(void)
-  {}
 
   template <int N, typename T, typename S>
   inline bool serialize(S& serializer, const InstanceLayoutPiece<N,T>& ilp)
