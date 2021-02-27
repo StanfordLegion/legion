@@ -38,7 +38,7 @@ namespace Legion {
     const unsigned offset = ((unsigned long long)ptr) % 4;
     int *target = (int *)(ptr - offset);
     union { int as_int; bool as_bool[4]; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_bool[offset] = newval.as_bool[offset] || rhs;
@@ -70,7 +70,7 @@ namespace Legion {
     const unsigned offset = ((unsigned long long)ptr) % 4;
     int *target = (int *)(ptr - offset);
     union { int as_int; bool as_bool[4]; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_bool[offset] = newval.as_bool[offset] || rhs2;
@@ -101,7 +101,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F += rhs;                                         \
@@ -139,7 +139,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F += rhs2;                                        \
@@ -179,7 +179,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x += rhs;
@@ -189,7 +189,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y += rhs;
@@ -217,7 +217,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x += rhs2;
@@ -227,7 +227,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y += rhs2;
@@ -284,7 +284,7 @@ namespace Legion {
     // Apparently there is no signed 64bit int atomic yet
     unsigned long long *target = (unsigned long long *)&lhs;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed += rhs;
@@ -308,7 +308,7 @@ namespace Legion {
     // Apparently there is no signed 64bit int atomic yet
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed += rhs2;
@@ -333,7 +333,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F += rhs;                                         \
@@ -371,7 +371,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F += rhs2;                                        \
@@ -411,7 +411,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x += rhs;
@@ -421,7 +421,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y += rhs;
@@ -449,7 +449,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x += rhs2;
@@ -459,7 +459,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y += rhs2;
@@ -516,7 +516,7 @@ namespace Legion {
     // Apparently there is no signed 64 bit int atomic yet
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval += rhs;
@@ -540,7 +540,7 @@ namespace Legion {
     // Apparently there is no signed 64 bit int atomic yet
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval += rhs2;
@@ -567,7 +567,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(
@@ -602,7 +602,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(
@@ -682,7 +682,7 @@ namespace Legion {
 #else
     unsigned long long *target = (unsigned long long *)&lhs;
     union { unsigned long long as_int; double as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile unsigned long long*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float += rhs;
@@ -715,7 +715,7 @@ namespace Legion {
 #else
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { unsigned long long as_int; double as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile unsigned long long*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float += rhs2; 
@@ -747,7 +747,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int newval, oldval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) + rhs);
@@ -775,7 +775,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) + rhs2);
@@ -804,7 +804,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) + rhs);
@@ -832,7 +832,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) + rhs2);
@@ -866,7 +866,7 @@ namespace Legion {
 #else
       unsigned long long *target = (unsigned long long *)&l[i];
       union { unsigned long long as_int; double as_float; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile unsigned long long*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_float += r[i];
@@ -904,7 +904,7 @@ namespace Legion {
 #else
       unsigned long long *target = (unsigned long long *)&r1[i];
       union { unsigned long long as_int; double as_float; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile unsigned long long*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_float += r2[i];
@@ -939,7 +939,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F -= rhs;                                         \
@@ -977,7 +977,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F += rhs2;                                        \
@@ -1017,7 +1017,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x -= rhs;
@@ -1027,7 +1027,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y -= rhs;
@@ -1055,7 +1055,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x += rhs2;
@@ -1065,7 +1065,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y += rhs2;
@@ -1122,7 +1122,7 @@ namespace Legion {
     // Apparently there is no signed 64bit int atomic yet
     unsigned long long *target = (unsigned long long *)&lhs;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed -= rhs;
@@ -1146,7 +1146,7 @@ namespace Legion {
     // Apparently there is no signed 64bit int atomic yet
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed += rhs2;
@@ -1171,7 +1171,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F -= rhs;                                         \
@@ -1209,7 +1209,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F += rhs2;                                        \
@@ -1249,7 +1249,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x -= rhs;
@@ -1259,7 +1259,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y -= rhs;
@@ -1287,7 +1287,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x += rhs2;
@@ -1297,7 +1297,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y += rhs2;
@@ -1354,7 +1354,7 @@ namespace Legion {
     // Apparently there is no signed 64 bit int atomic yet
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval -= rhs;
@@ -1378,7 +1378,7 @@ namespace Legion {
     // Apparently there is no signed 64 bit int atomic yet
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval += rhs2;
@@ -1405,7 +1405,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(
@@ -1440,7 +1440,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(
@@ -1473,7 +1473,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int*)&lhs;
     union { int as_int; float as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float -= rhs;
@@ -1524,7 +1524,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     union { unsigned long long as_int; double as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile unsigned long long*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float -= rhs;
@@ -1556,7 +1556,7 @@ namespace Legion {
 #else
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { unsigned long long as_int; double as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile unsigned long long*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float += rhs2; 
@@ -1588,7 +1588,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) - rhs);
@@ -1616,7 +1616,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) - rhs2);
@@ -1645,7 +1645,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) - rhs);
@@ -1673,7 +1673,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) - rhs2);
@@ -1705,7 +1705,7 @@ namespace Legion {
     const unsigned offset = ((unsigned long long)ptr) % 4;
     int *target = (int *)(ptr - offset);
     union { int as_int; bool as_bool[4]; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_bool[offset] = newval.as_bool[offset] && rhs;
@@ -1737,7 +1737,7 @@ namespace Legion {
     const unsigned offset = ((unsigned long long)ptr) % 4;
     int *target = (int *)(ptr - offset);
     union { int as_int; bool as_bool[4]; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_bool[offset] = newval.as_bool[offset] && rhs2;
@@ -1768,7 +1768,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F *= rhs;                                         \
@@ -1811,7 +1811,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F *= rhs2;                                        \
@@ -1856,7 +1856,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x *= rhs;
@@ -1866,7 +1866,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y *= rhs;
@@ -1899,7 +1899,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x *= rhs2;
@@ -1909,7 +1909,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y *= rhs2;
@@ -1938,7 +1938,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval *= rhs;
@@ -1966,7 +1966,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval *= rhs2;
@@ -1994,7 +1994,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed *= rhs;
@@ -2022,7 +2022,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed *= rhs2;
@@ -2052,7 +2052,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F *= rhs;                                         \
@@ -2095,7 +2095,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F *= rhs2;                                        \
@@ -2140,7 +2140,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x *= rhs;
@@ -2150,7 +2150,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y *= rhs;
@@ -2183,7 +2183,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x *= rhs2;
@@ -2193,7 +2193,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y *= rhs2;
@@ -2222,7 +2222,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&lhs;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned*)target;
     do {
       oldval = newval;
       newval *= rhs;
@@ -2250,7 +2250,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&rhs1;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned*)target;
     do {
       oldval = newval;
       newval *= rhs2;
@@ -2278,7 +2278,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval *= rhs;
@@ -2306,7 +2306,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval *= rhs2;
@@ -2338,7 +2338,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(
@@ -2373,7 +2373,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(
@@ -2406,7 +2406,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     union { int as_int; float as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float *= rhs;
@@ -2435,7 +2435,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     union { int as_int; float as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float *= rhs2;
@@ -2464,7 +2464,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     union { unsigned long long as_int; double as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile unsigned long long*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float *= rhs;
@@ -2493,7 +2493,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { unsigned long long as_int; double as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile unsigned long long*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float *= rhs2;
@@ -2524,7 +2524,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) * rhs);
@@ -2552,7 +2552,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) * rhs2);
@@ -2581,7 +2581,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) * rhs);
@@ -2609,7 +2609,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) * rhs2);
@@ -2640,7 +2640,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F /= rhs;                                         \
@@ -2683,7 +2683,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F *= rhs2;                                        \
@@ -2728,7 +2728,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x /= rhs;
@@ -2738,7 +2738,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y /= rhs;
@@ -2771,7 +2771,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x *= rhs2;
@@ -2781,7 +2781,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y *= rhs2;
@@ -2810,7 +2810,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval /= rhs;
@@ -2838,7 +2838,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval *= rhs2;
@@ -2866,7 +2866,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed /= rhs;
@@ -2894,7 +2894,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed *= rhs2;
@@ -2924,7 +2924,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F /= rhs;                                         \
@@ -2967,7 +2967,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F *= rhs2;                                        \
@@ -3012,7 +3012,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x /= rhs;
@@ -3022,7 +3022,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y /= rhs;
@@ -3055,7 +3055,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x *= rhs2;
@@ -3065,7 +3065,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y *= rhs2;
@@ -3094,7 +3094,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&lhs;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned*)target;
     do {
       oldval = newval;
       newval /= rhs;
@@ -3122,7 +3122,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&rhs1;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned*)target;
     do {
       oldval = newval;
       newval *= rhs2;
@@ -3150,7 +3150,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval /= rhs;
@@ -3178,7 +3178,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval *= rhs2;
@@ -3210,7 +3210,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(
@@ -3245,7 +3245,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(
@@ -3278,7 +3278,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     union { int as_int; float as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float /= rhs;
@@ -3307,7 +3307,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     union { int as_int; float as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float *= rhs2;
@@ -3336,7 +3336,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     union { unsigned long long as_int; double as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile unsigned long long*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float /= rhs;
@@ -3365,7 +3365,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { unsigned long long as_int; double as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile unsigned long long*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float *= rhs2;
@@ -3396,7 +3396,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) / rhs);
@@ -3424,7 +3424,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = convert_complex<__half>::as_int(convert_complex<__half>::from_int(newval) / rhs2);
@@ -3453,7 +3453,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) / rhs);
@@ -3481,7 +3481,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval= convert_complex<float>::as_int(convert_complex<float>::from_int(newval) / rhs2);
@@ -3514,7 +3514,7 @@ namespace Legion {
     const unsigned offset = ((unsigned long long)ptr) % 4;
     int *target = (int *)(ptr - offset);
     union { int as_int; bool as_bool[4]; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_bool[offset] = newval.as_bool[offset] || rhs;
@@ -3544,7 +3544,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     union { int as_int; bool as_bool; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_bool = oldval.as_bool || rhs2;
@@ -3576,7 +3576,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F = __MAX__(oldval.as_char.F, rhs);               \
@@ -3622,7 +3622,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F = __MAX__(oldval.as_char.F, rhs2);              \
@@ -3671,7 +3671,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x = __MAX__(oldval.as_short.x, rhs);
@@ -3683,7 +3683,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y = __MAX__(oldval.as_short.y, rhs);
@@ -3721,7 +3721,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x = __MAX__(oldval.as_short.x, rhs2);
@@ -3733,7 +3733,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y = __MAX__(oldval.as_short.y, rhs2);
@@ -3767,7 +3767,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = __MAX__(oldval, rhs);
@@ -3800,7 +3800,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = __MAX__(oldval, rhs2);
@@ -3833,7 +3833,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed = __MAX__(oldval.as_signed, rhs);
@@ -3866,7 +3866,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed = __MAX__(oldval.as_signed, rhs2);
@@ -3901,7 +3901,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F = __MAX__(oldval.as_char.F, rhs);               \
@@ -3947,7 +3947,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F = __MAX__(oldval.as_char.F, rhs2);              \
@@ -3996,7 +3996,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x = __MAX__(oldval.as_short.x, rhs);
@@ -4008,7 +4008,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y = __MAX__(oldval.as_short.y, rhs);
@@ -4046,7 +4046,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x = __MAX__(oldval.as_short.x, rhs2);
@@ -4058,7 +4058,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y = __MAX__(oldval.as_short.y, rhs2);
@@ -4092,7 +4092,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&lhs;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned*)target;
     do {
       oldval = newval;
       newval = __MAX__(oldval, rhs);
@@ -4125,7 +4125,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&rhs1;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned*)target;
     do {
       oldval = newval;
       newval = __MAX__(oldval, rhs2);
@@ -4158,7 +4158,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval = __MAX__(oldval, rhs);
@@ -4191,7 +4191,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval = __MAX__(oldval, rhs2);
@@ -4233,7 +4233,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(__MAX__(
@@ -4277,7 +4277,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *target;
+    newval.as_int = *(volatile target*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(__MAX__(
@@ -4313,7 +4313,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     union { int as_int; float as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float = __MAX__(oldval.as_float, rhs);
@@ -4347,7 +4347,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     union { int as_int; float as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float = __MAX__(oldval.as_float, rhs2);
@@ -4381,7 +4381,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     union { unsigned long long as_int; double as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile unsigned long long*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float = __MAX__(oldval.as_float, rhs);
@@ -4415,7 +4415,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { unsigned long long as_int; double as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile unsigned long long*)target;
     do {
       oldval.as_int = newval.as_int; 
       newval.as_float = __MAX__(oldval.as_float, rhs2);
@@ -4451,7 +4451,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = convert_complex<__half>::as_int(__MAX__(convert_complex<__half>::from_int(newval), rhs));
@@ -4480,7 +4480,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = convert_complex<__half>::as_int(__MAX__(convert_complex<__half>::from_int(newval), rhs2));
@@ -4510,7 +4510,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval= convert_complex<float>::as_int(__MAX__(convert_complex<float>::from_int(newval), rhs));
@@ -4539,7 +4539,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&rhs1;
     unsigned long long  oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval = convert_complex<float>::as_int(__MAX__(convert_complex<float>::from_int(newval), rhs2));
@@ -4572,7 +4572,7 @@ namespace Legion {
     const unsigned offset = ((unsigned long long)ptr) % 4;
     int *target = (int *)(ptr - offset);
     union { int as_int; bool as_bool[4]; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_bool[offset] = newval.as_bool[offset] && rhs;
@@ -4607,7 +4607,7 @@ namespace Legion {
     const unsigned offset = ((unsigned long long)ptr) % 4;
     int *target = (int *)(ptr - offset);
     union { int as_int; bool as_bool[4]; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_bool[offset] = newval.as_bool[offset] && rhs2;
@@ -4641,7 +4641,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F = __MIN__(oldval.as_char.F, rhs);               \
@@ -4687,7 +4687,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F = __MIN__(oldval.as_char.F, rhs2);              \
@@ -4736,7 +4736,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x = __MIN__(oldval.as_short.x, rhs);
@@ -4748,7 +4748,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y = __MIN__(oldval.as_short.y, rhs);
@@ -4786,7 +4786,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x = __MIN__(oldval.as_short.x, rhs2);
@@ -4798,7 +4798,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y = __MIN__(oldval.as_short.y, rhs2);
@@ -4832,7 +4832,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = __MIN__(oldval, rhs);
@@ -4865,7 +4865,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = __MIN__(oldval, rhs2);
@@ -4898,7 +4898,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed = __MIN__(oldval.as_signed, rhs);
@@ -4931,7 +4931,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed = __MIN__(oldval.as_signed, rhs2);
@@ -4964,7 +4964,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F = __MIN__(oldval.as_char.F, rhs);               \
@@ -5010,7 +5010,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F = __MIN__(oldval.as_char.F, rhs2);              \
@@ -5059,7 +5059,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x = __MIN__(oldval.as_short.x, rhs);
@@ -5071,7 +5071,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y = __MIN__(oldval.as_short.y, rhs);
@@ -5109,7 +5109,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x = __MIN__(oldval.as_short.x, rhs2);
@@ -5121,7 +5121,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y = __MIN__(oldval.as_short.y, rhs2);
@@ -5155,7 +5155,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&lhs;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned*)target;
     do {
       oldval = newval;
       newval = __MIN__(oldval, rhs);
@@ -5188,7 +5188,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&rhs1;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned*)target;
     do {
       oldval = newval;
       newval = __MIN__(oldval, rhs2);
@@ -5221,7 +5221,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval = __MIN__(oldval, rhs);
@@ -5254,7 +5254,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval = __MIN__(oldval, rhs2);
@@ -5296,7 +5296,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(__MIN__(
@@ -5339,7 +5339,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(__MIN__(
@@ -5375,7 +5375,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     union { int as_int; float as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float = __MIN__(oldval.as_float, rhs);
@@ -5409,7 +5409,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     union { int as_int; float as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float = __MIN__(oldval.as_float, rhs2);
@@ -5443,7 +5443,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     union { unsigned long long as_int; double as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile unsigned long long*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float = __MIN__(oldval.as_float, rhs);
@@ -5477,7 +5477,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { unsigned long long as_int; double as_float; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile unsigned long long*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_float = __MIN__(oldval.as_float, rhs2);
@@ -5513,7 +5513,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = convert_complex<__half>::as_int(__MIN__(convert_complex<__half>::from_int(newval), rhs));
@@ -5542,7 +5542,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval = convert_complex<__half>::as_int(__MIN__(convert_complex<__half>::from_int(newval), rhs2));
@@ -5572,7 +5572,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval= convert_complex<float>::as_int(__MIN__(convert_complex<float>::from_int(newval), rhs));
@@ -5601,7 +5601,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long*)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval = convert_complex<float>::as_int(__MIN__(convert_complex<float>::from_int(newval), rhs2));
@@ -5632,7 +5632,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F |= rhs;                                         \
@@ -5675,7 +5675,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F |= rhs2;                                        \
@@ -5720,7 +5720,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x |= rhs;
@@ -5730,7 +5730,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y |= rhs;
@@ -5763,7 +5763,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x |= rhs2;
@@ -5773,7 +5773,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y |= rhs2;
@@ -5802,7 +5802,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval |= rhs;
@@ -5830,7 +5830,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval |= rhs2;
@@ -5858,7 +5858,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed |= rhs;
@@ -5886,7 +5886,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed |= rhs2;
@@ -5916,7 +5916,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F |= rhs;                                         \
@@ -5959,7 +5959,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F |= rhs2;                                        \
@@ -6004,7 +6004,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x |= rhs;
@@ -6014,7 +6014,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y |= rhs;
@@ -6047,7 +6047,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x |= rhs2;
@@ -6057,7 +6057,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y |= rhs2;
@@ -6086,7 +6086,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&lhs;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval |= rhs;
@@ -6114,7 +6114,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&rhs1;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval |= rhs2;
@@ -6142,7 +6142,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval |= rhs;
@@ -6170,7 +6170,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval |= rhs2;
@@ -6200,7 +6200,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F &= rhs;                                         \
@@ -6243,7 +6243,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F &= rhs2;                                        \
@@ -6288,7 +6288,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x &= rhs;
@@ -6298,7 +6298,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y &= rhs;
@@ -6331,7 +6331,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x &= rhs2;
@@ -6341,7 +6341,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y &= rhs2;
@@ -6370,7 +6370,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval &= rhs;
@@ -6398,7 +6398,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval &= rhs2;
@@ -6426,7 +6426,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed &= rhs;
@@ -6454,7 +6454,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed &= rhs2;
@@ -6484,7 +6484,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F &= rhs;                                         \
@@ -6527,7 +6527,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F &= rhs2;                                        \
@@ -6572,7 +6572,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x &= rhs;
@@ -6582,7 +6582,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y &= rhs;
@@ -6615,7 +6615,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x &= rhs2;
@@ -6625,7 +6625,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y &= rhs2;
@@ -6654,7 +6654,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&lhs;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned*)target;
     do {
       oldval = newval;
       newval &= rhs;
@@ -6682,7 +6682,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&rhs1;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned*)target;
     do {
       oldval = newval;
       newval &= rhs2;
@@ -6710,7 +6710,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval &= rhs;
@@ -6738,7 +6738,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval &= rhs2;
@@ -6769,7 +6769,7 @@ namespace Legion {
     const unsigned offset = ((unsigned long long)ptr) % 4;
     int *target = (int *)(ptr - offset);
     union { int as_int; bool as_bool[4]; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_bool[offset] = newval.as_bool[offset] ^ rhs;
@@ -6801,7 +6801,7 @@ namespace Legion {
     const unsigned offset = ((unsigned long long)ptr) % 4;
     int *target = (int *)(ptr - offset);
     union { int as_int; bool as_bool[4]; } oldval, newval;
-    newval.as_int = *target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_bool[offset] = newval.as_bool[offset] ^ rhs2;
@@ -6832,7 +6832,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F ^= rhs;                                         \
@@ -6875,7 +6875,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
         union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F ^= rhs2;                                        \
@@ -6920,7 +6920,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x ^= rhs;
@@ -6930,7 +6930,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y ^= rhs;
@@ -6963,7 +6963,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x ^= rhs2;
@@ -6973,7 +6973,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(short));
       union { int as_int; short2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y ^= rhs2;
@@ -7002,7 +7002,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval ^= rhs;
@@ -7030,7 +7030,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
     int oldval, newval;
-    newval = *target;
+    newval = *(volatile int*)target;
     do {
       oldval = newval;
       newval ^= rhs2;
@@ -7058,7 +7058,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed ^= rhs;
@@ -7086,7 +7086,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
-    newval.as_unsigned = *target;
+    newval.as_unsigned = *(volatile unsigned long long*)target;
     do {
       oldval.as_signed = newval.as_signed;
       newval.as_signed ^= rhs2;
@@ -7116,7 +7116,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F ^= rhs;                                         \
@@ -7159,7 +7159,7 @@ namespace Legion {
       case IDX : {                                                         \
         int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
         union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *target;                                           \
+        newval.as_int = *(volatile int*)target;                            \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
           newval.as_char.F ^= rhs2;                                        \
@@ -7204,7 +7204,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x ^= rhs;
@@ -7214,7 +7214,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y ^= rhs;
@@ -7247,7 +7247,7 @@ namespace Legion {
       // Aligned case
       int *target = (int *)ptr;
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.x ^= rhs2;
@@ -7257,7 +7257,7 @@ namespace Legion {
       // Unaligned case
       int *target = (int *)(ptr-sizeof(unsigned short));
       union { int as_int; ushort2 as_short; } oldval, newval;
-      newval.as_int = *target;
+      newval.as_int = *(volatile int*)target;
       do {
         oldval.as_int = newval.as_int;
         newval.as_short.y ^= rhs2;
@@ -7286,7 +7286,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&lhs;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned*)target;
     do {
       oldval = newval;
       newval ^= rhs;
@@ -7314,7 +7314,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned *target = (unsigned *)&rhs1;
     unsigned oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned*)target;
     do {
       oldval = newval;
       newval ^= rhs2;
@@ -7342,7 +7342,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval ^= rhs;
@@ -7370,7 +7370,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval;
-    newval = *target;
+    newval = *(volatile unsigned long long*)target;
     do {
       oldval = newval;
       newval ^= rhs2;

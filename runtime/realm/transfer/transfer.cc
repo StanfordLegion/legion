@@ -3086,12 +3086,16 @@ namespace Realm {
       if(e.exists()) preconditions.push_back(e);
     }
 
-    if(preconditions.empty()) {
-      perform_analysis();
-    } else {
+    if(!preconditions.empty()) {
       Event merged = Event::merge_events(preconditions);
-      EventImpl::add_waiter(merged, &deferred_analysis);
+      if(merged.exists()) {
+        EventImpl::add_waiter(merged, &deferred_analysis);
+        return;
+      }
     }
+
+    // no (untriggered) preconditions, so we fall through to immediate analysis
+    perform_analysis();
   }
 
   static size_t compute_ib_size(size_t combined_field_size,
