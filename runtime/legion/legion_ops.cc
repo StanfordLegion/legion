@@ -18868,6 +18868,13 @@ namespace Legion {
     void AttachOp::activate_attach_op(void)
     //--------------------------------------------------------------------------
     {
+      activate_attach();
+    }
+
+    //--------------------------------------------------------------------------
+    void AttachOp::activate_attach(void)
+    //--------------------------------------------------------------------------
+    {
       activate_operation();
       file_name = NULL;
       footprint = 0;
@@ -18878,6 +18885,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void AttachOp::deactivate_attach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_attach();
+      runtime->free_attach_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void AttachOp::deactivate_attach(void)
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
@@ -18944,19 +18959,24 @@ namespace Legion {
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
-      { 
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
+        log_requirement();
+    }
+
+    //--------------------------------------------------------------------------
+    void AttachOp::log_requirement(void)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                         true/*region*/,
+                                         requirement.region.index_space.id,
+                                         requirement.region.field_space.id,
+                                         requirement.region.tree_id,
+                                         requirement.privilege,
+                                         requirement.prop,
+                                         requirement.redop,
+                                         requirement.parent.index_space.id);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
     }
     
     //--------------------------------------------------------------------------
@@ -19208,8 +19228,8 @@ namespace Legion {
         et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
       switch (et)
       {
-          // Not there is no such things as bad privileges for
-          // acquires and releases because they are controlled by the runtime
+        // Note there is no such things as bad privileges for
+        // acquires and releases because they are controlled by the runtime
         case NO_ERROR:
         case ERROR_BAD_REGION_PRIVILEGES:
           break;
@@ -19325,7 +19345,7 @@ namespace Legion {
                              unique_op_id, bad_field)
             break;
           }
-          // this should never happen with an inline mapping
+        // this should never happen with an attach operation
         case ERROR_NON_DISJOINT_PARTITION:
         default:
           assert(false); // Should never happen
@@ -19350,6 +19370,800 @@ namespace Legion {
                                requirement.region.tree_id)
       else
         parent_req_index = unsigned(parent_index);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Index Attach Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexAttachOp::IndexAttachOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachOp::IndexAttachOp(const IndexAttachOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachOp::~IndexAttachOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachOp& IndexAttachOp::operator=(const IndexAttachOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_index_attach();
+    }
+    
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::activate_index_attach(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+      launch_space = NULL;
+      points_committed = 0;
+      commit_request = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_index_attach();
+      runtime->free_index_attach_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::deactivate_index_attach(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      resources = ExternalResources();
+      privilege_path.clear();
+      // We can deactivate all of our point operations
+      for (std::vector<PointAttachOp*>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+        (*it)->deactivate();
+      points.clear();
+      map_applied_conditions.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    const char* IndexAttachOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[ATTACH_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind IndexAttachOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ATTACH_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t IndexAttachOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResources IndexAttachOp::initialize(InnerContext *ctx,
+                                      RegionTreeNode *upper_bound,
+                                      IndexSpaceNode *launch_bounds,
+                                      const IndexAttachLauncher &launcher,
+                                      const std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/, 1/*regions*/,
+                           launcher.static_dependences);
+      // Construct the region requirement
+      // Use a fake projection ID for now, we'll fill it in later during the
+      // prepipeline stage before the logical dependence analysis
+      // so that our computation of it is off the critical path
+      if (upper_bound->is_region())
+        requirement = RegionRequirement(upper_bound->as_region_node()->handle,
+            0/*fake*/, LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
+      else
+        requirement = 
+          RegionRequirement(upper_bound->as_partition_node()->handle,
+            0/*fake*/, LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
+      requirement.privilege_fields = launcher.privilege_fields;
+      launch_space = launch_bounds;
+      // Do some error checking
+      OrderingConstraint output_constraint;
+      switch (launcher.resource)
+      {
+        case LEGION_EXTERNAL_POSIX_FILE:
+          {
+            if (launcher.file_fields.empty()) 
+              REPORT_LEGION_WARNING(LEGION_WARNING_FILE_ATTACH_OPERATION,
+                              "FILE INDEX ATTACH OPERATION ISSUED WITH NO "
+                              "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                              "FORGET THEM?!?", parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id())
+            break;
+          }
+        case LEGION_EXTERNAL_HDF5_FILE:
+          {
+#ifndef LEGION_USE_HDF5
+            REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
+                "Invalid index attach HDF5 file in parent task %s (UID %lld). "
+                "Legion must be built with HDF5 support to attach regions "
+                "to HDF5 files", parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id())
+#endif
+            if (launcher.field_files.empty()) 
+              REPORT_LEGION_WARNING(LEGION_WARNING_HDF5_ATTACH_OPERATION,
+                            "HDF5 INDEX ATTACH OPERATION ISSUED WITH NO "
+                            "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                            "FORGET THEM?!?", parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id())
+            const OrderingConstraint &input_constraint = 
+              launcher.constraints.ordering_constraint;
+            const int dims = launcher.parent.index_space.get_dim();
+            if (!input_constraint.ordering.empty())
+            {
+              bool has_dimf = false;
+              for (std::vector<DimensionKind>::const_iterator it = 
+                    input_constraint.ordering.begin(); it !=
+                    input_constraint.ordering.end(); it++)
+              {
+                // dimf should always be the last dimension for HDF5
+                if (has_dimf)
+                  REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
+                      "Invalid position of the field dimension for index attach"
+                      " operation %lld in task %s (UID %lld). The field "
+                      "dimension must always be the last dimension for layout "
+                      "constraints for HDF5 files.", unique_op_id,
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+                else if (*it == LEGION_DIM_F)
+                  has_dimf = true;
+                else if (int(*it) > dims)
+                  REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
+                      "Invalid dimension %d for ordering constraint of HDF5 "
+                      "index attach operation %lld in task %s (UID %lld). The "
+                      "index space %x only has %d dimensions and split "
+                      "dimensions are not permitted.", *it, unique_op_id,
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id(), 
+                      launcher.parent.index_space.get_id(), dims)
+                output_constraint.ordering.push_back(*it);
+              }
+              if (int(output_constraint.ordering.size()) != dims)
+                REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
+                    "Ordering constraint for index attach %lld in task %s "
+                    "(UID %lld) does not contain all the dimensions required "
+                    "for index space %x which has %d dimensions.", unique_op_id,
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                    launcher.parent.index_space.get_id(), dims)
+              if (!input_constraint.contiguous)
+                REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
+                    "Ordering constraint for index attach %lld in task %s "
+                    "(UID %lld) was not marked contiguous. All ordering "
+                    "constraints for HDF5 attach operations must be contiguous",
+                    unique_op_id, parent_ctx->get_task_name(), 
+                    parent_ctx->get_unique_id())
+              if (!has_dimf)
+                output_constraint.ordering.push_back(LEGION_DIM_F);
+            }
+            else
+            {
+              // Fill in the ordering constraints for dimensions based
+              // on the number of dimensions
+              for (int i = 0; i < dims; i++)
+                output_constraint.ordering.push_back(
+                    (DimensionKind)(LEGION_DIM_X + i)); 
+              output_constraint.ordering.push_back(LEGION_DIM_F);
+            }
+            output_constraint.contiguous = true;
+            break;
+          }
+        case LEGION_EXTERNAL_INSTANCE:
+          {
+            if (launcher.privilege_fields.empty())
+              REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_ATTACH_OPERATION,
+                            "EXTERNAL ARRAY INDEX ATTACH OPERATION ISSUED WITH "
+                            "NO PRIVILEGE FIELDS IN TASK %s (ID %lld)! DID YOU "
+                            "FORGET THEM?!?", parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id())
+            break;
+          }
+        default:
+          assert(false); // should never get here
+      }
+      // Create the result and the point attach operations
+      ExternalResourcesImpl *result = new ExternalResourcesImpl(ctx,
+          indexes.size(), upper_bound, launch_bounds, launcher.parent,
+          launcher.privilege_fields);
+      points.resize(indexes.size());
+      for (unsigned idx = 0; idx < indexes.size(); idx++)
+      {
+        points[idx] = runtime->get_available_point_attach_op();
+        const DomainPoint index_point = Point<1>(indexes[idx]);
+        PhysicalRegionImpl *region = points[idx]->initialize(this, ctx,
+            launcher, output_constraint, index_point, indexes[idx]);
+        result->set_region(idx, region);
+      }
+      if (runtime->legion_spy_enabled)
+      {
+        LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
+                                        unique_op_id);
+        runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
+      }
+      resources = ExternalResources(result);
+      return resources;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // First compute the parent index
+      compute_parent_index();
+      initialize_privilege_path(privilege_path, requirement);
+      if (runtime->check_privileges)
+        check_point_requirements();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Compute the projection function id for this requirement
+      std::vector<IndexSpace> spaces(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
+        spaces[idx] = points[idx]->get_requirement().region.get_index_space();
+      if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
+        requirement.projection = parent_ctx->compute_index_attach_projection(
+            runtime->forest->get_node(requirement.partition.index_partition),
+            spaces);
+      else
+        requirement.projection = parent_ctx->compute_index_attach_projection(
+            runtime->forest->get_node(requirement.region.index_space), spaces);
+      // Save this for later when we go to detach it
+      resources.impl->set_projection(requirement.projection);
+      if (runtime->check_privileges)
+        check_privilege();
+      if (runtime->legion_spy_enabled)
+        log_requirement();
+      RefinementTracker tracker(this, map_applied_conditions);
+      ProjectionInfo projection_info(runtime, requirement, launch_space);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
+                                                   requirement,
+                                                   projection_info,
+                                                   privilege_path, tracker,
+                                                   map_applied_conditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> mapped_preconditions;
+      std::set<ApEvent> executed_preconditions;
+      for (std::vector<PointAttachOp*>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+      {
+        mapped_preconditions.insert((*it)->get_mapped_event());
+        executed_preconditions.insert((*it)->get_completion_event());
+        (*it)->trigger_ready();
+      }
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      completion_event);
+#endif
+      // Record that we are mapped when all our points are mapped
+      // and we are executed when all our points are executed
+      complete_mapping(Runtime::merge_events(mapped_preconditions));
+      ApEvent done = Runtime::merge_events(NULL, executed_preconditions);
+      if (!request_early_complete(done))
+        complete_execution(Runtime::protect_event(done));
+      else
+        complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(!commit_request);
+#endif
+        commit_request = true;
+        commit_now = (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::handle_point_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      {
+        AutoLock o_lock(op_lock);
+        points_committed++;
+        commit_now = commit_request && (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned IndexAttachOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx == 0);
+#endif
+      return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::compute_parent_index(void)
+    //--------------------------------------------------------------------------
+    {
+      int parent_index = parent_ctx->find_parent_region_req(requirement);
+      if (parent_index < 0)
+        REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                               "Parent task %s (ID %lld) of index attach "
+                               "operation (ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) as a parent",
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
+                               unique_op_id, 
+                               requirement.parent.index_space.id,
+                               requirement.parent.field_space.id, 
+                               requirement.parent.tree_id)
+      else
+        parent_req_index = unsigned(parent_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::check_privilege(void)
+    //--------------------------------------------------------------------------
+    {
+      FieldID bad_field = LEGION_AUTO_GENERATE_ID;
+      int bad_index = -1;
+      LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
+      // If that worked, then check the privileges with the parent context
+      if (et == NO_ERROR)
+        et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
+      switch (et)
+      {
+        // Note there is no such things as bad privileges for
+        // acquires and releases because they are controlled by the runtime
+        case NO_ERROR:
+        case ERROR_BAD_REGION_PRIVILEGES:
+          break;
+        case ERROR_INVALID_REGION_HANDLE:
+          {
+            REPORT_LEGION_ERROR(ERROR_REQUIREMENTS_INVALID_REGION,
+                               "Requirements for invalid region handle (%x,%d,"
+                               "%d) for index attach operation (ID %lld)",
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id,
+                               unique_op_id)
+            break;
+          }
+        case ERROR_INVALID_PARTITION_HANDLE:
+          {
+            REPORT_LEGION_ERROR(ERROR_REQUIREMENTS_INVALID_REGION,
+                               "Requirements for invalid partition handle (%x,"
+                               "%d,%d) for index attach operation (ID %lld)",
+                               requirement.partition.index_partition.id,
+                               requirement.partition.field_space.id,
+                               requirement.partition.tree_id,
+                               unique_op_id)
+            break;
+          }
+        case ERROR_FIELD_SPACE_FIELD_MISMATCH:
+          {
+            FieldSpace sp = 
+              (requirement.handle_type == LEGION_SINGULAR_PROJECTION) ||
+              (requirement.handle_type == LEGION_REGION_PROJECTION) ? 
+                requirement.region.field_space :
+                requirement.partition.field_space;
+            REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID,
+                             "Field %d is not a valid field of field "
+                             "space %d for index attach operation (ID %lld)",
+                             bad_field, sp.id, unique_op_id)
+            break;
+          }
+        case ERROR_INVALID_INSTANCE_FIELD:
+          {
+            REPORT_LEGION_ERROR(ERROR_INSTANCE_FIELD_PRIVILEGE,
+                             "Instance field %d is not one of the privilege "
+                             "fields for index attach operation (ID %lld)",
+                             bad_field, unique_op_id)
+            break;
+          }
+        case ERROR_DUPLICATE_INSTANCE_FIELD:
+          {
+            REPORT_LEGION_ERROR(ERROR_INSTANCE_FIELD_DUPLICATE,
+                             "Instance field %d is a duplicate for "
+                             "index attach operation (ID %lld)",
+                             bad_field, unique_op_id)
+            break;
+          }
+        case ERROR_BAD_PARENT_REGION:
+          {
+            if (bad_index > 0) 
+            {
+              if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
+                REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                                 "Parent task %s (ID %lld) of index attach "
+                                 "operation (ID %lld) does not have a region "
+                                 "requirement for partition (%x,%x,%x) "
+                                 "as a parent of region requirement because "
+                                 "no 'parent' region had that name.",
+                                 parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
+                                 unique_op_id,
+                                 requirement.partition.index_partition.id,
+                                 requirement.partition.field_space.id,
+                                 requirement.partition.tree_id)
+              else
+                REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                                 "Parent task %s (ID %lld) of index attach "
+                                 "operation (ID %lld) does not have a region "
+                                 "requirement for region (%x,%x,%x) "
+                                 "as a parent of region requirement because "
+                                 "no 'parent' region had that name.",
+                                 parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
+                                 unique_op_id,
+                                 requirement.region.index_space.id,
+                                 requirement.region.field_space.id,
+                                 requirement.region.tree_id)
+            }
+            else if (bad_field == LEGION_AUTO_GENERATE_ID) 
+            {
+              if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
+                REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                                 "Parent task %s (ID %lld) of index attach "
+                                 "operation (ID %lld) does not have a region "
+                                 "requirement for partition (%x,%x,%x) "
+                                 "as a parent of region requirement because "
+                                 "parent requirement %d did not have "
+                                 "sufficient privileges.",
+                                 parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
+                                 unique_op_id,
+                                 requirement.partition.index_partition.id,
+                                 requirement.partition.field_space.id,
+                                 requirement.partition.tree_id, bad_index)
+              else
+                REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                                 "Parent task %s (ID %lld) of index attach "
+                                 "operation (ID %lld) does not have a region "
+                                 "requirement for region (%x,%x,%x) "
+                                 "as a parent of region requirement because "
+                                 "parent requirement %d did not have "
+                                 "sufficient privileges.",
+                                 parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
+                                 unique_op_id,
+                                 requirement.region.index_space.id,
+                                 requirement.region.field_space.id,
+                                 requirement.region.tree_id, bad_index)
+            }
+            else 
+            {
+              if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
+                REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                                 "Parent task %s (ID %lld) of index attach "
+                                 "operation (ID %lld) does not have a region "
+                                 "requirement for partition (%x,%x,%x) "
+                                 "as a parent of region requirement because "
+                                 "region requirement %d was missing field %d.",
+                                 parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
+                                 unique_op_id,
+                                 requirement.partition.index_partition.id,
+                                 requirement.partition.field_space.id,
+                                 requirement.partition.tree_id,
+                                 bad_index, bad_field)
+              else
+                REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                                 "Parent task %s (ID %lld) of index attach "
+                                 "operation (ID %lld) does not have a region "
+                                 "requirement for region (%x,%x,%x) "
+                                 "as a parent of region requirement because "
+                                 "region requirement %d was missing field %d.",
+                                 parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
+                                 unique_op_id,
+                                 requirement.region.index_space.id,
+                                 requirement.region.field_space.id,
+                                 requirement.region.tree_id,
+                                 bad_index, bad_field)
+            }
+            break;
+          }
+        case ERROR_BAD_REGION_TYPE:
+          {
+            REPORT_LEGION_ERROR(ERROR_REGION_REQUIREMENT_ATTACH,
+                             "Region requirement of index attach operation "
+                             "(ID %lld) cannot find privileges for field "
+                             "%d in parent task",
+                             unique_op_id, bad_field)
+            break;
+          }
+        // this should never happen with an index attach operation
+        case ERROR_BAD_REGION_PATH:
+        case ERROR_NON_DISJOINT_PARTITION:
+        default:
+          assert(false); // Should never happen
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::check_point_requirements(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx1 = 1; idx1 < points.size(); idx1++)
+      {
+        PointAttachOp *p1 = points[idx1];
+        const RegionRequirement &r1 = p1->get_requirement();
+#ifdef DEBUG_LEGION
+        assert(r1.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+        for (unsigned idx2 = 0; idx2 < idx1; idx2++)
+        {
+          PointAttachOp *p2 = points[idx2];
+          const RegionRequirement &r2 = p2->get_requirement();
+#ifdef DEBUG_LEGION
+          assert(r2.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif
+          if (!runtime->forest->are_disjoint(r1.region.get_index_space(),
+                                             r2.region.get_index_space()))
+            REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
+                "Index attach operation (UID %lld) in parent task %s "
+                "(UID %lld) has interfering attachments to regions (%d,%d,%d) "
+                "and (%d,%d,%d). All regions must be non-interfering",
+                unique_op_id, parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id(), r1.region.index_space.id,
+                r1.region.field_space.id, r1.region.tree_id,
+                r2.region.index_space.id, r2.region.field_space.id,
+                r2.region.tree_id)
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::log_requirement(void)
+    //--------------------------------------------------------------------------
+    {
+      if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
+        LegionSpy::log_logical_requirement(unique_op_id,
+                                       0/*index*/, false/*region*/,
+                                       requirement.partition.index_partition.id,
+                                       requirement.partition.field_space.id,
+                                       requirement.partition.tree_id,
+                                       requirement.privilege,
+                                       requirement.prop,
+                                       requirement.redop,
+                                       requirement.parent.index_space.id);
+      else
+        LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+      LegionSpy::log_requirement_projection(unique_op_id, 0/*index*/,
+                                            requirement.projection);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Point Attach Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PointAttachOp::PointAttachOp(Runtime *rt)
+      : AttachOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointAttachOp::PointAttachOp(const PointAttachOp &rhs)
+      : AttachOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PointAttachOp::~PointAttachOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointAttachOp& PointAttachOp::operator=(const PointAttachOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointAttachOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_attach();
+      owner = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointAttachOp::deactivate(void) 
+    //--------------------------------------------------------------------------
+    {
+      deactivate_attach();
+      runtime->free_point_attach_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegionImpl* PointAttachOp::initialize(IndexAttachOp *own,
+                         InnerContext *ctx, const IndexAttachLauncher &launcher,
+                         const OrderingConstraint &ordering_constraint,
+                         const DomainPoint &point, unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < launcher.handles.size());
+#endif
+      initialize_operation(ctx, false/*track*/, 1/*regions*/); 
+      owner = own;
+      index_point = point;
+      resource = launcher.resource;
+      if (index < launcher.footprint.size())
+        footprint = launcher.footprint[index];
+      restricted = launcher.restricted;
+      mapping = false;
+      switch (resource)
+      {
+        case LEGION_EXTERNAL_POSIX_FILE:
+          {
+            if (index >= launcher.file_names.size())
+              REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
+                  "Insufficient 'file_names' provided by index attach launch "
+                  "in parent task %s (UID %lld). Launcher has %zd logical "
+                  "regions but only %zd POSIX file names.", 
+                  parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                  launcher.handles.size(), launcher.file_names.size())
+            file_name = strdup(launcher.file_names[index]);
+            // Construct the region requirement for this task
+            requirement = RegionRequirement(launcher.handles[index], 
+                LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
+            for (std::vector<FieldID>::const_iterator it = 
+                  launcher.file_fields.begin(); it != 
+                  launcher.file_fields.end(); it++)
+              requirement.add_field(*it);
+            file_mode = launcher.mode;
+            break;
+          }
+        case LEGION_EXTERNAL_HDF5_FILE:
+          {
+            if (index >= launcher.file_names.size())
+              REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
+                  "Insufficient 'file_names' provided by index attach launch "
+                  "in parent task %s (UID %lld). Launcher has %zd logical "
+                  "regions but only %zd HDF5 file names.", 
+                  parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                  launcher.handles.size(), launcher.file_names.size())
+            file_name = strdup(launcher.file_names[index]);
+            // Construct the region requirement for this task
+            requirement = RegionRequirement(launcher.handles[index], 
+                LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
+            for (std::map<FieldID,std::vector<const char*> >::const_iterator
+                  it = launcher.field_files.begin();
+                  it != launcher.field_files.end(); it++)
+            {
+              if (index >= it->second.size())
+                REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
+                    "Insufficient 'field_files' provided by index attach launch"
+                    " for field %d in parent task %s (UID %lld). Launcher has "
+                    "%zd logical regions but only %zd field file names.",
+                    it->first, parent_ctx->get_task_name(),
+                    parent_ctx->get_unique_id(), launcher.handles.size(), 
+                    it->second.size())
+              requirement.add_field(it->first);
+              field_map[it->first] = strdup(it->second[index]);
+            }
+            file_mode = launcher.mode;
+            layout_constraint_set.ordering_constraint = ordering_constraint;
+            break;
+          }
+        case LEGION_EXTERNAL_INSTANCE:
+          {
+            layout_constraint_set = launcher.constraints;  
+            if (index >= launcher.pointers.size())
+              REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
+                  "Insufficient 'pointers' provided by index attach launch "
+                  "in parent task %s (UID %lld). Launcher has %zd logical "
+                  "regions but only %zd pointers names.", 
+                  parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                  launcher.handles.size(), launcher.pointers.size())
+            layout_constraint_set.pointer_constraint = launcher.pointers[index];
+            layout_constraint_set.memory_constraint = MemoryConstraint(
+                layout_constraint_set.pointer_constraint.memory.kind());
+            // Construct the region requirement for this task
+            requirement = RegionRequirement(launcher.handles[index], 
+                LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
+            const std::set<FieldID> &fields = launcher.privilege_fields;
+            for (std::set<FieldID>::const_iterator it = 
+                  fields.begin(); it != fields.end(); it++)
+              requirement.add_field(*it);
+            break;
+          }
+        default:
+          assert(false); // should never get here
+      }
+      region = PhysicalRegion(new PhysicalRegionImpl(requirement,
+            mapped_event, completion_event, ApUserEvent::NO_AP_USER_EVENT, 
+            false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
+            false/*virtual mapped*/, runtime)); 
+      if (runtime->legion_spy_enabled)
+      {
+        LegionSpy::log_index_point(owner->get_unique_op_id(), 
+                                   unique_op_id, point);
+        log_requirement();
+      }
+      return region.impl;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointAttachOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Resolve our speculation then do the base case
+      resolve_speculation();
+      AttachOp::trigger_ready();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointAttachOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      commit_operation(false/*deactivate*/);
+      // Tell our owner that we are done, they will do the deactivate
+      owner->handle_point_commit();
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -19412,11 +20226,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DetachOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_detach_op();
+    }
+
+    //--------------------------------------------------------------------------
     void DetachOp::activate_detach_op(void)
     //--------------------------------------------------------------------------
     {
       activate_operation();
       flush = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_detach_op();
+      runtime->free_detach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -19429,21 +20258,6 @@ namespace Legion {
       version_info.clear();
       map_applied_conditions.clear();
       result = Future(); // clear any references on the future
-    }
-
-    //--------------------------------------------------------------------------
-    void DetachOp::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_detach_op();
-    }
-
-    //--------------------------------------------------------------------------
-    void DetachOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_detach_op(); 
-      runtime->free_detach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -19475,27 +20289,30 @@ namespace Legion {
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
-      { 
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
+        log_requirement();
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachOp::log_requirement(void)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                         true/*region*/,
+                                         requirement.region.index_space.id,
+                                         requirement.region.field_space.id,
+                                         requirement.region.tree_id,
+                                         requirement.privilege,
+                                         requirement.prop,
+                                         requirement.redop,
+                                         requirement.parent.index_space.id);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
     }
 
     //--------------------------------------------------------------------------
     void DetachOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // Before we do our dependence analysis, we can remove the 
-      // restricted coherence on the logical region
       ProjectionInfo projection_info;
       RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
@@ -19635,7 +20452,9 @@ namespace Legion {
     void DetachOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      result.impl->set_result(NULL, 0, true/*own*/);
+      // Can be NULL if this is a PointDetachOp
+      if (result.impl != NULL)
+        result.impl->set_result(NULL, 0, true/*own*/);
       InstanceSet references;
       region.impl->get_references(references);
 #ifdef DEBUG_LEGION
@@ -19703,6 +20522,438 @@ namespace Legion {
                                requirement.region.tree_id)
       else
         parent_req_index = unsigned(parent_index);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Index Detach Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexDetachOp::IndexDetachOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexDetachOp::IndexDetachOp(const IndexDetachOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexDetachOp::~IndexDetachOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexDetachOp& IndexDetachOp::operator=(const IndexDetachOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_index_detach();
+    }
+    
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::activate_index_detach(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+      launch_space = NULL;
+      points_completed = 0;
+      points_committed = 0;
+      complete_request = false;
+      commit_request = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_index_detach();
+      runtime->free_index_detach_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::deactivate_index_detach(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      resources = ExternalResources();
+      privilege_path.clear();
+      // We can deactivate all of our point operations
+      for (std::vector<PointDetachOp*>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+        (*it)->deactivate();
+      points.clear();
+      map_applied_conditions.clear();
+      result = Future();
+    }
+
+    //--------------------------------------------------------------------------
+    const char* IndexDetachOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[DETACH_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind IndexDetachOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return DETACH_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t IndexDetachOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
+    Future IndexDetachOp::initialize_detach(InnerContext *ctx,
+                                   LogicalRegion parent,
+                                   RegionTreeNode *upper_bound,
+                                   IndexSpaceNode *launch_bounds,
+                                   ExternalResourcesImpl *external,
+                                   const std::vector<FieldID> &privilege_fields,
+                                   const std::vector<PhysicalRegion> &regions,
+                                   bool flush, bool unordered)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, !unordered/*track*/);
+      // Construct the region requirement
+      // We'll get the projection later after we know its been written
+      // in the dependence analysis stage of the pipeline
+      if (upper_bound->is_region())
+        requirement = RegionRequirement(upper_bound->as_region_node()->handle,
+            0/*fake*/, LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, parent);
+      else
+        requirement = 
+          RegionRequirement(upper_bound->as_partition_node()->handle,
+            0/*fake*/, LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, parent);
+      for (std::vector<FieldID>::const_iterator it =
+            privilege_fields.begin(); it != privilege_fields.end(); it++)
+        requirement.add_field(*it);
+      resources = ExternalResources(external);
+      launch_space = launch_bounds;
+      points.reserve(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        PointDetachOp *point = runtime->get_available_point_detach_op();
+        const DomainPoint index_point = Point<1>(idx);
+        point->initialize_detach(this, ctx, regions[idx], index_point, flush); 
+        points.push_back(point);
+      }
+      // Create the future result that we will complete when we're done
+      result = Future(new FutureImpl(runtime, true/*register*/,
+                  runtime->get_available_distributed_id(),
+                  runtime->address_space, get_completion_event(), this));
+      if (runtime->legion_spy_enabled)
+      {
+        LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
+                                        unique_op_id);
+        runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // First compute the parent index
+      compute_parent_index();
+      initialize_privilege_path(privilege_path, requirement);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Get the projection ID which we know is valid on the external resources
+      requirement.projection = resources.impl->get_projection();
+      if (runtime->legion_spy_enabled)
+        log_requirement();
+      RefinementTracker tracker(this, map_applied_conditions);
+      ProjectionInfo projection_info(runtime, requirement, launch_space);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
+                                                   requirement,
+                                                   projection_info,
+                                                   privilege_path, tracker,
+                                                   map_applied_conditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> mapped_preconditions;
+      std::set<ApEvent> executed_preconditions;
+      for (std::vector<PointDetachOp*>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+      {
+        mapped_preconditions.insert((*it)->get_mapped_event());
+        executed_preconditions.insert((*it)->get_completion_event());
+        (*it)->trigger_ready();
+      }
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      completion_event);
+#endif
+      // Record that we are mapped when all our points are mapped
+      // and we are executed when all our points are executed
+      complete_mapping(Runtime::merge_events(mapped_preconditions));
+      ApEvent done = Runtime::merge_events(NULL, executed_preconditions);
+      if (!request_early_complete(done))
+        complete_execution(Runtime::protect_event(done));
+      else
+        complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      bool complete_now = false;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(!complete_request);
+#endif
+        complete_request = true;
+        complete_now = (points.size() == points_completed);
+      }
+      if (complete_now)
+        complete_detach();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::handle_point_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      bool complete_now = false;
+      {
+        AutoLock o_lock(op_lock);
+        points_completed++;
+        complete_now = complete_request && (points.size() == points_completed);
+      }
+      if (complete_now)
+        complete_detach();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::complete_detach(void)
+    //--------------------------------------------------------------------------
+    {
+      result.impl->set_result(NULL, 0, true/*own*/);
+      complete_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(!commit_request);
+#endif
+        commit_request = true;
+        commit_now = (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::handle_point_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      {
+        AutoLock o_lock(op_lock);
+        points_committed++;
+        commit_now = commit_request && (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned IndexDetachOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx == 0);
+#endif
+      return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::compute_parent_index(void)
+    //--------------------------------------------------------------------------
+    {
+      int parent_index = parent_ctx->find_parent_region_req(requirement);
+      if (parent_index < 0)
+        REPORT_LEGION_ERROR(ERROR_PARENT_TASK_ATTACH,
+                               "Parent task %s (ID %lld) of index attach "
+                               "operation (ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) as a parent",
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
+                               unique_op_id, 
+                               requirement.parent.index_space.id,
+                               requirement.parent.field_space.id, 
+                               requirement.parent.tree_id)
+      else
+        parent_req_index = unsigned(parent_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::log_requirement(void)
+    //--------------------------------------------------------------------------
+    {
+      if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
+        LegionSpy::log_logical_requirement(unique_op_id,
+                                       0/*index*/, false/*region*/,
+                                       requirement.partition.index_partition.id,
+                                       requirement.partition.field_space.id,
+                                       requirement.partition.tree_id,
+                                       requirement.privilege,
+                                       requirement.prop,
+                                       requirement.redop,
+                                       requirement.parent.index_space.id);
+      else
+        LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+      LegionSpy::log_requirement_projection(unique_op_id, 0/*index*/,
+                                            requirement.projection);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Point Detach Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PointDetachOp::PointDetachOp(Runtime *rt)
+      : DetachOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointDetachOp::PointDetachOp(const PointDetachOp &rhs)
+      : DetachOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PointDetachOp::~PointDetachOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointDetachOp& PointDetachOp::operator=(const PointDetachOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDetachOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_detach_op();
+      owner = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDetachOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_detach_op();
+      runtime->free_point_detach_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDetachOp::initialize_detach(IndexDetachOp *own, InnerContext *ctx,
+              const PhysicalRegion &region, const DomainPoint &point, bool flsh)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, false/*track*/);
+      index_point = point;
+      owner = own;
+      flush = flsh;
+      // Get a reference to the region to keep it alive
+      this->region = region; 
+      requirement = region.impl->get_requirement();
+      // Make sure that the privileges are read-write so that we wait for
+      // all prior users of this particular region
+      requirement.privilege = LEGION_READ_WRITE;
+      requirement.prop = LEGION_EXCLUSIVE;
+      // No need for a future here
+      if (runtime->legion_spy_enabled)
+      {
+        LegionSpy::log_index_point(owner->get_unique_op_id(), 
+                                   unique_op_id, point);
+        log_requirement();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDetachOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Resolve our speculation then do the base case
+      resolve_speculation();
+      DetachOp::trigger_ready();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDetachOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      owner->handle_point_complete();
+      DetachOp::trigger_complete();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDetachOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      commit_operation(false/*deactivate*/);
+      // Tell our owner that we are done, they will do the deactivate
+      owner->handle_point_commit(); 
     }
 
     ///////////////////////////////////////////////////////////// 

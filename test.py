@@ -64,6 +64,7 @@ legion_cxx_tests = [
     ['examples/virtual_map/virtual_map', []],
     ['examples/attach_2darray_c_fortran_layout/attach_2darray', []],
     ['examples/attach_array_daxpy/attach_array_daxpy', []],
+    ['examples/attach_index_space/index_space_attach', []],
     ['examples/predication/predication', []],
     ['examples/layout_constraints/transpose', []],
     ['examples/inline_tasks/inline_tasks', []],
