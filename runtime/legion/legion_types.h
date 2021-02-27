@@ -1876,7 +1876,9 @@ namespace Legion {
     class ReplFenceOp;
     class ReplMapOp;
     class ReplAttachOp;
+    class ReplIndexAttachOp;
     class ReplDetachOp;
+    class ReplIndexDetachOp;
     class ReplTraceOp;
     class ReplTraceCaptureOp;
     class ReplTraceCompleteOp;

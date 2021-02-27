@@ -14704,6 +14704,13 @@ namespace Legion {
         delete (*it);
       }
       available_repl_attach_ops.clear();
+      for (std::deque<ReplIndexAttachOp*>::const_iterator it = 
+            available_repl_index_attach_ops.begin(); it !=
+            available_repl_index_attach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_index_attach_ops.clear();
       for (std::deque<ReplDetachOp*>::const_iterator it = 
             available_repl_detach_ops.begin(); it !=
             available_repl_detach_ops.end(); it++)
@@ -14711,6 +14718,13 @@ namespace Legion {
         delete (*it);
       }
       available_repl_detach_ops.clear();
+      for (std::deque<ReplIndexDetachOp*>::const_iterator it = 
+            available_repl_index_detach_ops.begin(); it !=
+            available_repl_index_detach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_index_detach_ops.clear();
       for (std::deque<ReplTraceCaptureOp*>::const_iterator it = 
             available_repl_capture_ops.begin(); it !=
             available_repl_capture_ops.end(); it++)
@@ -24877,10 +24891,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplIndexAttachOp* Runtime::get_available_repl_index_attach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(attach_op_lock, available_repl_index_attach_ops);
+    }
+
+    //--------------------------------------------------------------------------
     ReplDetachOp* Runtime::get_available_repl_detach_op(void)
     //--------------------------------------------------------------------------
     {
       return get_available(detach_op_lock, available_repl_detach_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplIndexDetachOp* Runtime::get_available_repl_index_detach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(detach_op_lock, available_repl_index_detach_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -25419,11 +25447,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::free_repl_index_attach_op(ReplIndexAttachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(attach_op_lock);
+      release_operation<false>(available_repl_index_attach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_repl_detach_op(ReplDetachOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(detach_op_lock);
       release_operation<false>(available_repl_detach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_index_detach_op(ReplIndexDetachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(detach_op_lock);
+      release_operation<false>(available_repl_index_detach_ops, op);
     }
 
     //--------------------------------------------------------------------------

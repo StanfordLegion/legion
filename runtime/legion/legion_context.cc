@@ -16949,6 +16949,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ExternalResources ReplicateContext::attach_resources(
+            const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
+    //--------------------------------------------------------------------------
+    {
+      // TODO
+      assert(false);
+      return ExternalResources();
+    }
+
+    //--------------------------------------------------------------------------
     Future ReplicateContext::detach_resource(PhysicalRegion region, 
                                          const bool flush, const bool unordered)
     //--------------------------------------------------------------------------
@@ -16978,6 +16988,16 @@ namespace Legion {
       }
       add_to_dependence_queue(op, unordered);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future ReplicateContext::detach_resources(ExternalResources resources,
+                                         const bool flush, const bool unordered)
+    //--------------------------------------------------------------------------
+    {
+      // TODO
+      assert(false);
+      return Future();
     }
 
     //--------------------------------------------------------------------------

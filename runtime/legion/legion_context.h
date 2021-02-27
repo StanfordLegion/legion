@@ -2155,8 +2155,13 @@ namespace Legion {
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
+      virtual ExternalResources attach_resources(
+                                          const IndexAttachLauncher &launcher,
+                                          bool deduplicate_across_shards);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual Future detach_resources(ExternalResources resources,
+                                      const bool flush, const bool unordered);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future issue_mapping_fence(void);
