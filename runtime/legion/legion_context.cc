@@ -16494,7 +16494,16 @@ namespace Legion {
                     get_task_name(), get_unique_id());
 #endif
       map_op->initialize_replication(this, inline_mapping_barrier);
-   
+      if (current_trace != NULL)
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
+                      "Attempted an inline mapping of region "
+                      "(%x,%x,%x) inside of trace %d of parent task %s "
+                      "(ID %lld). It is illegal to perform inline mapping "
+                      "operations inside of traces.",
+                      launcher.requirement.region.index_space.id, 
+                      launcher.requirement.region.field_space.id, 
+                      launcher.requirement.region.tree_id, 
+                      current_trace->tid, get_task_name(), get_unique_id())
       bool parent_conflict = false, inline_conflict = false;  
       const int index = 
         has_conflicting_regions(map_op, parent_conflict, inline_conflict);
@@ -16548,6 +16557,17 @@ namespace Legion {
       // if it is then we are done
       if (region.is_mapped())
         return ApEvent::NO_AP_EVENT;
+      if (current_trace != NULL)
+      {
+        const RegionRequirement &req = region.impl->get_requirement();
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
+                      "Attempted an inline mapping of region "
+                      "(%x,%x,%x) inside of trace %d of parent task %s "
+                      "(ID %lld). It is illegal to perform inline mapping "
+                      "operations inside of traces.", req.region.index_space.id,
+                      req.region.field_space.id, req.region.tree_id, 
+                      current_trace->tid, get_task_name(), get_unique_id())
+      }
       ReplMapOp *map_op = runtime->get_available_repl_map_op();
       map_op->initialize(this, region);
       map_op->initialize_replication(this, inline_mapping_barrier);
