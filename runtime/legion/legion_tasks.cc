@@ -9080,8 +9080,6 @@ namespace Legion {
         // to this node so also hold onto these slices until the
         // index space is done
         index_owner->record_origin_mapped_slice(this);
-        // Make an event to indicate when this commits
-        origin_mapped_complete = Runtime::create_rt_user_event();
         return false;
       }
       // Always return true for slice tasks since they should
@@ -9464,12 +9462,27 @@ namespace Legion {
     void SliceTask::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      // If we've got an origin mapped commit event trigger that when
-      // this task is done executing
-      if (origin_mapped_complete.exists())
-        Runtime::trigger_event(origin_mapped_complete,
-            RtEvent(Processor::get_current_finish_event()));
-      TaskOp::trigger_complete();
+      // This is mostly the same as the base TaskOp::trigger_complete
+      // except we also check to see if we have an origin_mapped_complete
+      // event that we need to trigger once we're done
+      RtUserEvent to_trigger;
+      bool task_complete = false;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(!complete_received);
+        assert(!commit_received);
+#endif
+        complete_received = true;
+        // If all our children are also complete then we are done
+        task_complete = children_complete;
+        if (origin_mapped_complete.exists())
+          to_trigger = origin_mapped_complete;
+      }
+      if (task_complete)
+        trigger_task_complete();
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -10063,12 +10076,13 @@ namespace Legion {
         if (profiling_reported.exists())
           preconditions.insert(profiling_reported);
       }
-#ifdef DEBUG_LEGION
-      assert(origin_mapped_complete.exists());
-#endif
-      // Also make sure that this slice has completed before we try to
-      // deactivate the slice by the owner index space task
-      preconditions.insert(origin_mapped_complete);
+      // See if we haven't completed it yet, if so make an event to track it
+      AutoLock o_lock(op_lock);
+      if (!complete_received)
+      {
+        origin_mapped_complete = Runtime::create_rt_user_event();
+        preconditions.insert(origin_mapped_complete);
+      }
     }
 
     //--------------------------------------------------------------------------
