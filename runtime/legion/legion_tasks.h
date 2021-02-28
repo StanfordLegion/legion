@@ -1307,8 +1307,9 @@ namespace Legion {
       void check_target_processors(void) const;
       void update_target_processor(void);
       void expand_replay_slices(std::list<SliceTask*> &slices);
-      void find_profiling_reported(std::set<RtEvent> &preconditions);
+      void find_commit_preconditions(std::set<RtEvent> &preconditions);
     protected:
+      virtual void trigger_complete(void);
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
@@ -1392,6 +1393,9 @@ namespace Legion {
       bool origin_mapped;
       UniqueID remote_owner_uid;
       TraceInfo *remote_trace_info;
+      // An event for tracking when origin-mapped slices on the owner
+      // node have committed so we can trigger things appropriately
+      RtUserEvent origin_mapped_complete;
     protected:
       std::set<RtEvent> map_applied_conditions;
       std::set<ApEvent> point_completions;
