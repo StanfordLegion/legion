@@ -2190,12 +2190,21 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!unmapped_regions.empty());
 #endif
-      if ((trace != NULL) && trace->is_static_trace())
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RUNTIME_REMAPPING,
-          "Illegal runtime remapping in static trace inside of "
+      if (trace != NULL)
+      {
+        if (trace->is_static_trace())
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_RUNTIME_REMAPPING,
+                      "Illegal runtime remapping in static trace inside of "
                       "task %s (UID %lld). Static traces must perfectly "
                       "manage their physical mappings with no runtime help.",
                       get_task_name(), get_unique_id())
+        else
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_RUNTIME_REMAPPING,
+                      "Illegal runtime remapping in dynamic trace %d inside of "
+                      "task %s (UID %lld). Dynamic traces must perfectly "
+                      "manage their physical mappings with no runtime help.",
+                      trace->tid, get_task_name(), get_unique_id())
+      }
       std::set<ApEvent> mapped_events;
       for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
       {
@@ -6154,12 +6163,22 @@ namespace Legion {
                     launcher.requirement.region.tree_id, 
                     get_task_name(), get_unique_id());
 #endif
+      if (current_trace != NULL)
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
+                      "Attempted an inline mapping of region "
+                      "(%x,%x,%x) inside of trace %d of parent task %s "
+                      "(ID %lld). It is illegal to perform inline mapping "
+                      "operations inside of traces.",
+                      launcher.requirement.region.index_space.id, 
+                      launcher.requirement.region.field_space.id, 
+                      launcher.requirement.region.tree_id, 
+                      current_trace->tid, get_task_name(), get_unique_id())
       bool parent_conflict = false, inline_conflict = false;  
       const int index = 
         has_conflicting_regions(map_op, parent_conflict, inline_conflict);
       if (parent_conflict)
         REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
-          "Attempted an inline mapping of region "
+                      "Attempted an inline mapping of region "
                       "(%x,%x,%x) that conflicts with mapped region " 
                       "(%x,%x,%x) at index %d of parent task %s "
                       "(ID %lld) that would ultimately result in "
@@ -6173,7 +6192,7 @@ namespace Legion {
                       index, get_task_name(), get_unique_id())
       if (inline_conflict)
         REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
-          "Attempted an inline mapping of region (%x,%x,%x) "
+                      "Attempted an inline mapping of region (%x,%x,%x) "
                       "that conflicts with previous inline mapping in "
                       "task %s (ID %lld) that would ultimately result in "
                       "deadlock.  Instead you receive this error message.",
@@ -6195,6 +6214,17 @@ namespace Legion {
       // if it is then we are done
       if (region.is_mapped())
         return ApEvent::NO_AP_EVENT;
+      if (current_trace != NULL)
+      {
+        const RegionRequirement &req = region.impl->get_requirement();
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
+                      "Attempted an inline mapping of region "
+                      "(%x,%x,%x) inside of trace %d of parent task %s "
+                      "(ID %lld). It is illegal to perform inline mapping "
+                      "operations inside of traces.", req.region.index_space.id,
+                      req.region.field_space.id, req.region.tree_id, 
+                      current_trace->tid, get_task_name(), get_unique_id())
+      }
       MapOp *map_op = runtime->get_available_map_op();
       map_op->initialize(this, region);
       register_inline_mapped_region(region);
