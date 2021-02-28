@@ -123,7 +123,8 @@ namespace Realm {
 	HDF5LayoutPiece<N,T> *hlp = new HDF5LayoutPiece<N,T>;
 	hlp->bounds = space.bounds;
 	hlp->dsetname = it->dataset_name;
-	hlp->offset = it->offset;
+	for(int j = 0; j < N; j++)
+          hlp->offset[j] = it->offset[j];
 	for(int j = 0; j < N; j++)
 	  hlp->dim_order[j] = it->dim_order[j];
 	layout->piece_lists[idx].pieces.push_back(hlp);
@@ -146,5 +147,14 @@ namespace Realm {
 							      const ProfilingRequestSet&, \
 							      Event);
   FOREACH_NT(DOIT)
+#undef DOIT
 
+  template <int N, typename T>
+  /*static*/ Serialization::PolymorphicSerdezSubclass<InstanceLayoutPiece<N,T>, HDF5LayoutPiece<N,T> > HDF5LayoutPiece<N,T>::serdez_subclass;
+
+#define DOIT(N,T) \
+  template class HDF5LayoutPiece<N,T>;
+  FOREACH_NT(DOIT)
+#undef DOIT
+  
 }; // namespace Realm

@@ -407,11 +407,11 @@
 #endif
 #endif
 
-// The maximum alignment guaranteed on the 
-// target machine bytes.  For most 64-bit 
-// systems this should be 16 bytes.
+// The maximum alignment guaranteed on the target
+// machine in bytes.  On linux systems, this is
+// (at least) twice the size of a pointer.
 #ifndef LEGION_MAX_ALIGNMENT
-#define LEGION_MAX_ALIGNMENT            16
+#define LEGION_MAX_ALIGNMENT            (2*sizeof(void *))
 #endif
 
 // Give an ideal upper bound on the maximum
@@ -1165,7 +1165,7 @@ typedef enum legion_error_t {
   ERROR_PREDICATED_TASK_LAUNCH_FOR_TASK = 392,
   ERROR_PREDICATED_INDEX_TASK_LAUNCH = 393,
   ERROR_ATTEMPTED_INLINE_MAPPING_REGION = 395,
-  ERROR_ATTEMPTED_ATTACH_HDF5 = 397,
+  ERROR_ATTEMPTED_EXTERNAL_ATTACH = 397,
   ERROR_ILLEGAL_PREDICATE_CREATION = 399,
   ERROR_ILLEGAL_END_TRACE_CALL = 402,
   ERROR_UNMATCHED_END_STATIC_TRACE = 403,
@@ -1290,6 +1290,8 @@ typedef enum legion_error_t {
   ERROR_ILLEGAL_PERFORM_REGISTRATION_CALLBACK = 574,
   ERROR_NON_PIECE_RECTANGLE = 575,
   ERROR_DEFERRED_ALLOCATION_FAILURE = 576,
+  ERROR_INDEX_SPACE_ATTACH = 577,
+  ERROR_INDEX_SPACE_DETACH = 578,
   ERROR_RESERVED_SHARDING_ID = 601,
   ERROR_DUPLICATE_SHARDING_ID = 602,
   ERROR_INVALID_SHARDING_ID = 603,

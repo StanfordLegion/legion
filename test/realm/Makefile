@@ -57,6 +57,7 @@ TESTS += subgraphs
 TESTS += large_tls
 TESTS += coverings
 TESTS += alltoall
+TESTS += simple_reduce
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000

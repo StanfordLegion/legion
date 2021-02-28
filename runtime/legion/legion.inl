@@ -18325,6 +18325,239 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void IndexAttachLauncher::attach_file(LogicalRegion handle,
+                                             const char *file_name,
+                                             const std::vector<FieldID> &fields,
+                                             LegionFileMode m)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(resource == LEGION_EXTERNAL_POSIX_FILE);
+#endif
+      if (handles.empty())
+        mode = m;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      else
+        assert(mode == m);
+#endif
+#endif
+      handles.push_back(handle);
+      file_names.push_back(file_name);
+      if (!file_fields.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(fields.size() == file_fields.size());
+#ifndef NDEBUG
+        for (unsigned idx = 0; idx < fields.size(); idx++)
+          assert(file_fields[idx] == fields[idx]);
+#endif
+#endif
+      }
+      else
+        file_fields = fields;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexAttachLauncher::attach_hdf5(LogicalRegion handle,
+                                 const char *file_name,
+                                 const std::map<FieldID,const char*> &field_map,
+                                 LegionFileMode m)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(resource == LEGION_EXTERNAL_HDF5_FILE);
+#endif
+      if (handles.empty())
+        mode = m;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      else
+        assert(mode == m);
+#endif
+#endif
+      handles.push_back(handle);
+      file_names.push_back(file_name);
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool first = field_files.empty();
+#endif
+#endif
+      for (std::map<FieldID,const char*>::const_iterator it =
+            field_map.begin(); it != field_map.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(first || (field_files.find(it->first) != field_files.end()));
+#endif
+        field_files[it->first].push_back(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexAttachLauncher::attach_array_aos(LogicalRegion handle,
+              void *base, bool column_major, const std::vector<FieldID> &fields,
+              Memory mem, const std::map<FieldID,size_t> *alignments)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(handle.exists());
+      assert(resource == LEGION_EXTERNAL_INSTANCE);
+#endif
+      if (handles.empty())
+      {
+        constraints.add_constraint(
+            FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
+        const int dims = handle.get_index_space().get_dim();
+        std::vector<DimensionKind> dim_order(dims+1);
+        // Field dimension first for AOS
+        dim_order[0] = LEGION_DIM_F;
+        if (column_major)
+        {
+          for (int idx = 0; idx < dims; idx++)
+            dim_order[idx+1] = (DimensionKind)(LEGION_DIM_X + idx); 
+        }
+        else
+        {
+          for (int idx = 0; idx < dims; idx++)
+            dim_order[idx+1] = (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
+        }
+        constraints.add_constraint(
+            OrderingConstraint(dim_order, false/*contiguous*/));
+        if (alignments != NULL)
+          for (std::map<FieldID,size_t>::const_iterator it =
+                alignments->begin(); it != alignments->end(); it++)
+            constraints.add_constraint(
+                AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
+        privilege_fields.insert(fields.begin(), fields.end());
+      }
+#ifdef DEBUG_LEGION
+      else
+      {
+        // Check that the fields are the same
+        assert(fields.size() == privilege_fields.size());
+        for (std::vector<FieldID>::const_iterator it =
+              fields.begin(); it != fields.end(); it++)
+          assert(privilege_fields.find(*it) != privilege_fields.end());
+        // Check that the layouts are the same
+        const OrderingConstraint &order = constraints.ordering_constraint;
+        assert(order.ordering.front() == LEGION_DIM_F);
+        const int dims = handle.get_index_space().get_dim();
+        assert(dims == handles.back().get_index_space().get_dim());
+        if (column_major)
+        {
+          for (int idx = 0; idx < dims; idx++)
+            assert(order.ordering[idx+1] == ((DimensionKind)LEGION_DIM_X+idx));
+        }
+        else
+        {
+          for (int idx = 0; idx < dims; idx++)
+            assert(order.ordering[idx+1] == 
+                ((DimensionKind)(LEGION_DIM_X + (dims-1) - idx)));
+        }
+        // Check that the alignments are the same
+        if (alignments != NULL)
+        {
+          assert(alignments->size() == 
+                  constraints.alignment_constraints.size());
+          unsigned index = 0;
+          for (std::map<FieldID,size_t>::const_iterator it =
+                alignments->begin(); it != alignments->end(); it++, index++)
+          {
+            const AlignmentConstraint &alignment = 
+              constraints.alignment_constraints[index];
+            assert(alignment.fid == it->first);
+            assert(alignment.alignment == it->second);
+          }
+        }
+      }
+#endif
+      handles.push_back(handle);
+      pointers.emplace_back(PointerConstraint(mem, uintptr_t(base)));
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexAttachLauncher::attach_array_soa(LogicalRegion handle,
+              void *base, bool column_major, const std::vector<FieldID> &fields,
+              Memory mem, const std::map<FieldID,size_t> *alignments)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(handle.exists());
+      assert(resource == LEGION_EXTERNAL_INSTANCE);
+#endif
+      if (handles.empty())
+      {
+        constraints.add_constraint(
+            FieldConstraint(fields, true/*contiguous*/, true/*inorder*/));
+        const int dims = handle.get_index_space().get_dim();
+        std::vector<DimensionKind> dim_order(dims+1);
+        if (column_major)
+        {
+          for (int idx = 0; idx < dims; idx++)
+            dim_order[idx] = (DimensionKind)(LEGION_DIM_X + idx); 
+        }
+        else
+        {
+          for (int idx = 0; idx < dims; idx++)
+            dim_order[idx] = (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
+        }
+        // Field dimension last for SOA 
+        dim_order[dims] = LEGION_DIM_F;
+        constraints.add_constraint(
+            OrderingConstraint(dim_order, false/*contiguous*/));
+        if (alignments != NULL)
+          for (std::map<FieldID,size_t>::const_iterator it =
+                alignments->begin(); it != alignments->end(); it++)
+            constraints.add_constraint(
+                AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
+        privilege_fields.insert(fields.begin(), fields.end());
+      }
+#ifdef DEBUG_LEGION
+      else
+      {
+        // Check that the fields are the same
+        assert(fields.size() == privilege_fields.size());
+        for (std::vector<FieldID>::const_iterator it =
+              fields.begin(); it != fields.end(); it++)
+          assert(privilege_fields.find(*it) != privilege_fields.end());
+        // Check that the layouts are the same
+        const OrderingConstraint &order = constraints.ordering_constraint;
+        const int dims = handle.get_index_space().get_dim();
+        assert(dims == handles.back().get_index_space().get_dim());
+        if (column_major)
+        {
+          for (int idx = 0; idx < dims; idx++)
+            assert(order.ordering[idx] == ((DimensionKind)LEGION_DIM_X+idx));
+        }
+        else
+        {
+          for (int idx = 0; idx < dims; idx++)
+            assert(order.ordering[idx] == 
+                ((DimensionKind)(LEGION_DIM_X + (dims-1) - idx)));
+        }
+        assert(order.ordering.back() == LEGION_DIM_F);
+        // Check that the alignments are the same
+        if (alignments != NULL)
+        {
+          assert(alignments->size() == 
+                  constraints.alignment_constraints.size());
+          unsigned index = 0;
+          for (std::map<FieldID,size_t>::const_iterator it =
+                alignments->begin(); it != alignments->end(); it++, index++)
+          {
+            const AlignmentConstraint &alignment = 
+              constraints.alignment_constraints[index];
+            assert(alignment.fid == it->first);
+            assert(alignment.alignment == it->second);
+          }
+        }
+      }
+#endif
+      handles.push_back(handle);
+      pointers.emplace_back(PointerConstraint(mem, uintptr_t(base)));
+    }
+
+    //--------------------------------------------------------------------------
     inline void PredicateLauncher::add_predicate(const Predicate &pred)
     //--------------------------------------------------------------------------
     {

@@ -3721,9 +3721,6 @@ namespace Legion {
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
-      void activate_attach_op(void);
-      void deactivate_attach_op(void);
-    public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
@@ -3748,8 +3745,11 @@ namespace Legion {
                                              ApEvent &ready_event,
                                              size_t &instance_footprint);
     protected:
+      void activate_attach_op(void);
+      void deactivate_attach_op(void);
       void check_privilege(void);
       void compute_parent_index(void);
+      void log_requirement(void);
     public:
       ExternalResource resource;
       RegionRequirement requirement;
@@ -3771,6 +3771,89 @@ namespace Legion {
     };
 
     /**
+     * \class IndexAttachOp
+     * This provides support for doing index space attach
+     * operations where we are attaching external resources
+     * to many subregions of a region tree with a single operation
+     */
+    class IndexAttachOp : public Operation,public LegionHeapify<IndexAttachOp> {
+    public:
+      static const AllocationType alloc_type = ATTACH_OP_ALLOC;
+    public:
+      IndexAttachOp(Runtime *rt);
+      IndexAttachOp(const IndexAttachOp &rhs);
+      virtual ~IndexAttachOp(void);
+    public:
+      IndexAttachOp& operator=(const IndexAttachOp &rhs);
+    public:
+      ExternalResources initialize(InnerContext *ctx,
+                                   RegionTreeNode *upper_bound,
+                                   IndexSpaceNode *launch_bounds,
+                                   const IndexAttachLauncher &launcher,
+                                   const std::vector<unsigned> &indexes);
+      inline const RegionRequirement& get_requirement(void) const
+        { return requirement; }
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual size_t get_region_count(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_commit(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    public:
+      void handle_point_commit(void);
+    protected:
+      void activate_index_attach(void);
+      void deactivate_index_attach(void);
+      void compute_parent_index(void);
+      void check_privilege(void);
+      void check_point_requirements(void);
+      void log_requirement(void);
+    protected:
+      RegionRequirement                             requirement;
+      ExternalResources                             resources;
+      RegionTreePath                                privilege_path;
+      IndexSpaceNode*                               launch_space;
+      std::vector<PointAttachOp*>                   points;
+      std::set<RtEvent>                             map_applied_conditions;
+      unsigned                                      parent_req_index;
+      unsigned                                      points_committed;
+      bool                                          commit_request;
+    };
+    
+    /**
+     * \class PointAttachOp
+     * An individual attach operation inside of an index attach operation
+     */
+    class PointAttachOp : public AttachOp {
+    public:
+      PointAttachOp(Runtime *rt);
+      PointAttachOp(const PointAttachOp &rhs);
+      virtual ~PointAttachOp(void);
+    public:
+      PointAttachOp& operator=(const PointAttachOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      PhysicalRegionImpl* initialize(IndexAttachOp *owner, InnerContext *ctx,
+        const IndexAttachLauncher &launcher, const OrderingConstraint &ordering,
+        const DomainPoint &point, unsigned index);
+    public:
+      virtual void trigger_ready(void);
+      virtual void trigger_commit(void);
+    protected:
+      IndexAttachOp *owner;
+      DomainPoint index_point;
+    };
+
+    /**
      * \class DetachOp
      * Operation for detaching a file from a physical instance
      */
@@ -3786,9 +3869,6 @@ namespace Legion {
     public:
       Future initialize_detach(InnerContext *ctx, PhysicalRegion region,
                                const bool flush, const bool unordered);
-    public:
-      void activate_detach_op(void);
-      void deactivate_detach_op(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -3813,7 +3893,10 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
     protected:
+      void activate_detach_op(void);
+      void deactivate_detach_op(void);
       void compute_parent_index(void);
+      void log_requirement(void);
     public:
       PhysicalRegion region;
       RegionRequirement requirement;
@@ -3826,10 +3909,95 @@ namespace Legion {
     };
 
     /**
+     * \class IndexDetachOp
+     * This is an index space detach operation for performing many detaches
+     */
+    class IndexDetachOp : public Operation,public LegionHeapify<IndexDetachOp> {
+    public:
+      static const AllocationType alloc_type = DETACH_OP_ALLOC;
+    public:
+      IndexDetachOp(Runtime *rt);
+      IndexDetachOp(const IndexDetachOp &rhs);
+      virtual ~IndexDetachOp(void);
+    public:
+      IndexDetachOp& operator=(const IndexDetachOp &rhs);
+    public:
+      Future initialize_detach(InnerContext *ctx, LogicalRegion parent,
+                               RegionTreeNode *upper_bound,
+                               IndexSpaceNode *launch_bounds,
+                               ExternalResourcesImpl *external,
+                               const std::vector<FieldID> &privilege_fields,
+                               const std::vector<PhysicalRegion> &regions,
+                               bool flush, bool unordered);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual size_t get_region_count(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_complete(void);
+      virtual void trigger_commit(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    public:
+      void complete_detach(void);
+      void handle_point_complete(void);
+      void handle_point_commit(void);
+    protected:
+      void activate_index_detach(void);
+      void deactivate_index_detach(void);
+      void compute_parent_index(void);
+      void log_requirement(void);
+    protected:
+      RegionRequirement                             requirement;
+      ExternalResources                             resources;
+      RegionTreePath                                privilege_path;
+      IndexSpaceNode*                               launch_space;
+      std::vector<PointDetachOp*>                   points;
+      std::set<RtEvent>                             map_applied_conditions;
+      Future                                        result;
+      unsigned                                      parent_req_index;
+      unsigned                                      points_completed;
+      unsigned                                      points_committed;
+      bool                                          complete_request;
+      bool                                          commit_request;
+    };
+
+    /**
+     * \class PointDetachOp
+     * Indvidiual detach operations for an index space detach
+     */
+    class PointDetachOp : public DetachOp {
+    public:
+      PointDetachOp(Runtime *rt);
+      PointDetachOp(const PointDetachOp &rhs);
+      virtual ~PointDetachOp(void);
+    public:
+      PointDetachOp& operator=(const PointDetachOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      void initialize_detach(IndexDetachOp *owner, InnerContext *ctx,
+            const PhysicalRegion &region, const DomainPoint &point, bool flush);
+    public:
+      virtual void trigger_ready(void);
+      virtual void trigger_complete(void);
+      virtual void trigger_commit(void);
+    protected:
+      IndexDetachOp *owner;
+      DomainPoint index_point;
+    };
+
+    /**
      * \class TimingOp
      * Operation for performing timing measurements
      */
-    class TimingOp : public Operation {
+    class TimingOp : public Operation, public LegionHeapify<TimingOp> {
     public:
       TimingOp(Runtime *rt);
       TimingOp(const TimingOp &rhs);
@@ -3862,7 +4030,7 @@ namespace Legion {
      * \class AllReduceOp 
      * Operation for reducing future maps down to futures
      */
-    class AllReduceOp : public Operation {
+    class AllReduceOp : public Operation, public LegionHeapify<AllReduceOp> {
     public:
       AllReduceOp(Runtime *rt);
       AllReduceOp(const AllReduceOp &rhs);
@@ -3976,7 +4144,8 @@ namespace Legion {
      * This is a remote copy of a MapOp to be used
      * for mapper calls and other operations
      */
-    class RemoteMapOp : public ExternalMapping, public RemoteOp {
+    class RemoteMapOp : public ExternalMapping, public RemoteOp,
+                        public LegionHeapify<RemoteMapOp> {
     public:
       RemoteMapOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteMapOp(const RemoteMapOp &rhs);
@@ -4006,7 +4175,8 @@ namespace Legion {
      * This is a remote copy of a CopyOp to be used
      * for mapper calls and other operations
      */
-    class RemoteCopyOp : public ExternalCopy, public RemoteOp {
+    class RemoteCopyOp : public ExternalCopy, public RemoteOp,
+                         public LegionHeapify<RemoteCopyOp> {
     public:
       RemoteCopyOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteCopyOp(const RemoteCopyOp &rhs);
@@ -4036,7 +4206,8 @@ namespace Legion {
      * This is a remote copy of a CloseOp to be used
      * for mapper calls and other operations
      */
-    class RemoteCloseOp : public ExternalClose, public RemoteOp {
+    class RemoteCloseOp : public ExternalClose, public RemoteOp,
+                          public LegionHeapify<RemoteCloseOp> {
     public:
       RemoteCloseOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteCloseOp(const RemoteCloseOp &rhs);
@@ -4066,7 +4237,8 @@ namespace Legion {
      * This is a remote copy of a AcquireOp to be used
      * for mapper calls and other operations
      */
-    class RemoteAcquireOp : public ExternalAcquire, public RemoteOp {
+    class RemoteAcquireOp : public ExternalAcquire, public RemoteOp,
+                            public LegionHeapify<RemoteAcquireOp> {
     public:
       RemoteAcquireOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteAcquireOp(const RemoteAcquireOp &rhs);
@@ -4096,7 +4268,8 @@ namespace Legion {
      * This is a remote copy of a ReleaseOp to be used
      * for mapper calls and other operations
      */
-    class RemoteReleaseOp : public ExternalRelease, public RemoteOp {
+    class RemoteReleaseOp : public ExternalRelease, public RemoteOp,
+                            public LegionHeapify<RemoteReleaseOp> {
     public:
       RemoteReleaseOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteReleaseOp(const RemoteReleaseOp &rhs);
@@ -4126,7 +4299,8 @@ namespace Legion {
      * This is a remote copy of a FillOp to be used
      * for mapper calls and other operations
      */
-    class RemoteFillOp : public ExternalFill, public RemoteOp {
+    class RemoteFillOp : public ExternalFill, public RemoteOp,
+                         public LegionHeapify<RemoteFillOp> {
     public:
       RemoteFillOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteFillOp(const RemoteFillOp &rhs);
@@ -4156,7 +4330,8 @@ namespace Legion {
      * This is a remote copy of a DependentPartitionOp to be
      * used for mapper calls and other operations
      */
-    class RemotePartitionOp : public ExternalPartition, public RemoteOp {
+    class RemotePartitionOp : public ExternalPartition, public RemoteOp,
+                              public LegionHeapify<RemotePartitionOp> {
     public:
       RemotePartitionOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemotePartitionOp(const RemotePartitionOp &rhs);
@@ -4189,7 +4364,8 @@ namespace Legion {
      * This is a remote copy of a DetachOp to be used for 
      * mapper calls and other operations
      */
-    class RemoteAttachOp : public RemoteOp {
+    class RemoteAttachOp : public RemoteOp,
+                           public LegionHeapify<RemoteAttachOp> {
     public:
       RemoteAttachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteAttachOp(const RemoteAttachOp &rhs);
@@ -4218,7 +4394,8 @@ namespace Legion {
      * This is a remote copy of a DetachOp to be used for 
      * mapper calls and other operations
      */
-    class RemoteDetachOp : public RemoteOp {
+    class RemoteDetachOp : public RemoteOp,
+                           public LegionHeapify<RemoteDetachOp> {
     public:
       RemoteDetachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteDetachOp(const RemoteDetachOp &rhs);
@@ -4247,7 +4424,8 @@ namespace Legion {
      * This is a remote copy of a DeletionOp to be used for 
      * mapper calls and other operations
      */
-    class RemoteDeletionOp : public RemoteOp {
+    class RemoteDeletionOp : public RemoteOp,
+                             public LegionHeapify<RemoteDeletionOp> {
     public:
       RemoteDeletionOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteDeletionOp(const RemoteDeletionOp &rhs);
@@ -4278,7 +4456,8 @@ namespace Legion {
      * for remote ops as it will only be used for checking equivalence
      * sets for valid physical template replay conditions
      */
-    class RemoteReplayOp : public RemoteOp {
+    class RemoteReplayOp : public RemoteOp,
+                           public LegionHeapify<RemoteReplayOp> {
     public:
       RemoteReplayOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteReplayOp(const RemoteReplayOp &rhs);
@@ -4309,7 +4488,8 @@ namespace Legion {
      * for remote ops as it will only be used for updating state for
      * physical template replays
      */
-    class RemoteSummaryOp : public RemoteOp {
+    class RemoteSummaryOp : public RemoteOp,
+                            public LegionHeapify<RemoteSummaryOp> {
     public:
       RemoteSummaryOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteSummaryOp(const RemoteSummaryOp &rhs);

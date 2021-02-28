@@ -19,7 +19,6 @@ import fileinput
 import re
 
 boring_strings = [
-    'Legion::Internal::InnerContext::perform_window_wait',
     'Realm::Runtime::wait_for_shutdown',
 ]
 

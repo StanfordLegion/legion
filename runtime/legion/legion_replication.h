@@ -1853,6 +1853,23 @@ namespace Legion {
     };
 
     /**
+     * \class ReplIndexAttachOp
+     * An index space attach operation that is aware
+     * that it is executing in a control replicated context
+     */
+    class ReplIndexAttachOp : public IndexAttachOp {
+    public:
+      ReplIndexAttachOp(Runtime *rt);
+      ReplIndexAttachOp(const ReplIndexAttachOp &rhs);
+      virtual ~ReplIndexAttachOp(void);
+    public:
+      ReplIndexAttachOp& operator=(const ReplIndexAttachOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    };
+
+    /**
      * \class ReplDetachOp
      * An detach operation that is aware that it is being
      * executed in a control replicated context.
@@ -1881,6 +1898,23 @@ namespace Legion {
         std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> &detachments);
     public:
       RtBarrier resource_barrier;
+    };
+
+    /**
+     * \class ReplIndexDetachOp
+     * An index space detach operation that is aware
+     * that it is executing in a control replicated context
+     */
+    class ReplIndexDetachOp : public IndexDetachOp {
+    public:
+      ReplIndexDetachOp(Runtime *rt);
+      ReplIndexDetachOp(const ReplIndexDetachOp &rhs);
+      virtual ~ReplIndexDetachOp(void);
+    public:
+      ReplIndexDetachOp& operator=(const ReplIndexDetachOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
     };
 
     /**

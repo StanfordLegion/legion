@@ -388,8 +388,13 @@ namespace Legion {
       virtual void issue_release(const ReleaseLauncher &launcher) = 0;
       virtual PhysicalRegion attach_resource(
                                   const AttachLauncher &launcher) = 0;
+      virtual ExternalResources attach_resources(
+                                  const IndexAttachLauncher &launcher,
+                                  bool deduplicate_across_shards) = 0;
       virtual Future detach_resource(PhysicalRegion region, 
                                      const bool flush,const bool unordered) = 0;
+      virtual Future detach_resources(ExternalResources resources,
+                                    const bool flush, const bool unordered) = 0;
       virtual void progress_unordered_operations(void) = 0;
       virtual FutureMap execute_must_epoch(
                                  const MustEpochLauncher &launcher) = 0;
@@ -714,7 +719,8 @@ namespace Legion {
 #endif
     }; 
 
-    class InnerContext : public TaskContext {
+    class InnerContext : public TaskContext,
+                         public LegionHeapify<InnerContext> {
     public:
       // Prepipeline stages need to hold a reference since the
       // logical analysis could clean the context up before it runs
@@ -844,6 +850,26 @@ namespace Legion {
         CustomSerdezID serdez;
         unsigned index;
         bool ancestor;
+      };
+      class AttachProjectionFunctor : public ProjectionFunctor {
+      public:
+        AttachProjectionFunctor(ProjectionID pid,
+                                std::vector<IndexSpace> &&spaces);
+        virtual ~AttachProjectionFunctor(void) { }
+      public:
+        virtual LogicalRegion project(LogicalRegion upper_bound,
+                                      const DomainPoint &point,
+                                      const Domain &launch_domain);
+        virtual LogicalRegion project(LogicalPartition upper_bound,
+                                      const DomainPoint &point,
+                                      const Domain &launch_domain);
+      public:
+        virtual bool is_functional(void) const { return true; }
+        // Some depth >0 means the runtime can't analyze it
+        virtual unsigned get_depth(void) const { return 1; }
+      public:
+        const std::vector<IndexSpace> handles;
+        const ProjectionID pid;
       };
     public:
       InnerContext(Runtime *runtime, SingleTask *owner, int depth, 
@@ -1210,8 +1236,18 @@ namespace Legion {
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
+      virtual ExternalResources attach_resources(
+                                        const IndexAttachLauncher &launcher,
+                                        bool deduplicate_across_shards);
+      virtual RegionTreeNode* compute_index_attach_upper_bound(
+                                        const IndexAttachLauncher &launcher,
+                                        const std::vector<unsigned> &indexes);
+      virtual ProjectionID compute_index_attach_projection(IndexTreeNode *node,
+                                        std::vector<IndexSpace> &spaces);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual Future detach_resources(ExternalResources resources,
+                                      const bool flush, const bool unordered);
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
@@ -1538,6 +1574,11 @@ namespace Legion {
       // Equivalence sets that were invalidated by 
       // invalidate_region_tree_contexts and need to be released
       std::vector<EquivalenceSet*> invalidated_refinements;
+    protected:
+      // This data structure should only be accessed during the logical
+      // analysis stage of the pipeline and therefore no lock is needed
+      std::map<IndexTreeNode*,
+        std::vector<AttachProjectionFunctor*> > attach_functions;
     };
 
     /**
@@ -2114,8 +2155,13 @@ namespace Legion {
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
+      virtual ExternalResources attach_resources(
+                                          const IndexAttachLauncher &launcher,
+                                          bool deduplicate_across_shards);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual Future detach_resources(ExternalResources resources,
+                                      const bool flush, const bool unordered);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future issue_mapping_fence(void);
@@ -2574,7 +2620,8 @@ namespace Legion {
      * \class LeafContext
      * A context for the execution of a leaf task
      */
-    class LeafContext : public TaskContext {
+    class LeafContext : public TaskContext,
+                        public LegionHeapify<LeafContext> {
     public:
       LeafContext(Runtime *runtime, SingleTask *owner,bool inline_task = false);
       LeafContext(const LeafContext &rhs);
@@ -2844,8 +2891,13 @@ namespace Legion {
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
+      virtual ExternalResources attach_resources(
+                                          const IndexAttachLauncher &launcher,
+                                          bool deduplicate_across_shards);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual Future detach_resources(ExternalResources resources,
+                                      const bool flush, const bool unordered);
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);

@@ -77,6 +77,7 @@ list(APPEND REALM_SRC
 if(Legion_USE_CUDA)
   list(APPEND REALM_SRC
     realm/cuda/cuda_module.h    realm/cuda/cuda_module.cc
+    realm/cuda/cuda_internal.h  realm/cuda/cuda_internal.cc
   )
   if(REALM_USE_CUDART_HIJACK)
     list(APPEND REALM_SRC

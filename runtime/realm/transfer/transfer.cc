@@ -21,9 +21,6 @@
 #include "realm/transfer/lowlevel_dma.h"
 #include "realm/mem_impl.h"
 #include "realm/inst_layout.h"
-#ifdef REALM_USE_HDF5
-#include "realm/hdf5/hdf5_access.h"
-#endif
 
 #ifdef REALM_ON_WINDOWS
 #include <basetsd.h>
@@ -33,6 +30,7 @@ typedef SSIZE_T ssize_t;
 namespace Realm {
 
   extern Logger log_dma;
+  Logger log_xplan("xplan");
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -55,15 +53,6 @@ namespace Realm {
     assert(0);
   }
   
-#ifdef REALM_USE_HDF5
-  size_t TransferIterator::step_hdf5(size_t max_bytes, AddressInfoHDF5& info,
-				     bool tentative /*= false*/)
-  {
-    // should never be called
-    return 0;
-  }
-#endif
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -85,10 +74,9 @@ namespace Realm {
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			unsigned flags,
 			bool tentative = false);
-#ifdef REALM_USE_HDF5
-    virtual size_t step_hdf5(size_t max_bytes, AddressInfoHDF5& info,
-			     bool tentative = false);
-#endif
+    virtual size_t step_custom(size_t max_bytes, AddressInfoCustom& info,
+                               bool tentative = false);
+
     virtual void confirm_step(void);
     virtual void cancel_step(void);
 
@@ -319,11 +307,10 @@ namespace Realm {
     return total_bytes;
   }
 
-#ifdef REALM_USE_HDF5
   template <int N, typename T>
-  size_t TransferIteratorBase<N,T>::step_hdf5(size_t max_bytes,
-					      AddressInfoHDF5& info,
-					      bool tentative /*= false*/)
+  size_t TransferIteratorBase<N,T>::step_custom(size_t max_bytes,
+                                                AddressInfoCustom& info,
+                                                bool tentative /*= false*/)
   {
     // check to see if we're done - if not, we'll have a valid rectangle
     if(done() || !have_rect)
@@ -339,82 +326,67 @@ namespace Realm {
       assert(it != inst_layout->fields.end());
       assert((cur_field_offset == 0) &&
 	     (cur_field_size == size_t(it->second.size_in_bytes)) &&
-	     "no support for accessing partial HDF5 fields yet");
+	     "no support for accessing partial fields with step_custom");
       const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
       layout_piece = piece_list.find_piece(cur_point);
       assert(layout_piece != 0);
-      //field_rel_offset = it->second.rel_offset;
-      //log_dma.print() << "F " << field_idx << " " << fields[field_idx] << " : " << it->second.list_idx << " " << field_rel_offset << " " << field_size;
     }
 
-    size_t max_elems = max_bytes / cur_field_size;
     // less than one element?  give up immediately
-    if(max_elems == 0)
+    if(max_bytes < cur_field_size)
       return 0;
 
-    // filename comes from the external resource info
-    const ExternalHDF5Resource *res = checked_cast<ExternalHDF5Resource *>(inst_impl->metadata.ext_resource);
-
-    // std::cout << "step " << this << " " << r << " " << p << " " << field_idx
-    // 	      << " " << max_bytes << ":";
-
-    // HDF5 requires we handle dimensions in order - no permutation allowed
-    // using the current point, find the biggest subrectangle we want to try
-    //  giving out
+    // figure out the subrectangle we'd ideally like to do, staying within
+    //  the max bytes limit
     Rect<N,T> target_subrect;
-    size_t cur_bytes = 0;
     target_subrect.lo = cur_point;
-    if(layout_piece->layout_type == PieceLayoutTypes::HDF5LayoutType) {
-      const HDF5LayoutPiece<N,T> *hlp = static_cast<const HDF5LayoutPiece<N,T> *>(layout_piece);
+    bool grow = true;
+    size_t cur_bytes = cur_field_size;
+    // follow the agreed-upon dimension ordering
+    for(int di = 0; di < N; di++) {
+      int d = dim_order[di];
 
-      info.field_id = cur_field_id;
-      info.filename = &res->filename;
-      info.dsetname = &hlp->dsetname;
+      if(grow) {
+        size_t len = cur_rect.hi[d] - cur_point[d] + 1;
+        size_t piece_limit = layout_piece->bounds.hi[d] - cur_point[d] + 1;
+        if(piece_limit < len) {
+          len = piece_limit;
+          grow = false;
+        }
+        size_t byte_limit = max_bytes / cur_bytes;
+        if(byte_limit < len) {
+          len = byte_limit;
+          grow = false;
+        }
+        target_subrect.hi[d] = cur_point[d] + len - 1;
+        cur_bytes *= len;
+        // if we didn't start this dimension at the lo point, we can't
+        //  grow any further
+        if(cur_point[d] > cur_rect.lo[d])
+          grow = false;
+      } else
+        target_subrect.hi[d] = cur_point[d];
+    }
 
-      bool grow = true;
+    // convert the target rectangle for the dimension-agnostic interface
+    // also make the rectangle _relative_ to the bounds of the piece
+    int64_t target_lo[N], target_hi[N];
+    for(int i = 0; i < N; i++) {
+      target_lo[i] = target_subrect.lo[i] - layout_piece->bounds.lo[i];
+      target_hi[i] = target_subrect.hi[i] - layout_piece->bounds.lo[i];
+    }
+
+    // offer the rectangle - it can be reduced by pruning dimensions
+    int ndims = info.set_rect(inst_impl, layout_piece, N,
+                              target_lo, target_hi, dim_order);
+
+    // if pruning did occur, update target_subrect and cur_bytes to match
+    if(ndims < N) {
+      for(int i = ndims; i < N; i++)
+        target_subrect.hi[dim_order[i]] = target_subrect.lo[dim_order[i]];
       cur_bytes = cur_field_size;
-      // follow the agreed-upon dimension ordering
-      for(int di = 0; di < N; di++) {
-	int d = dim_order[di];
-
-	if(grow) {
-	  size_t len = cur_rect.hi[d] - cur_point[d] + 1;
-	  size_t piece_limit = hlp->bounds.hi[d] - cur_point[d] + 1;
-	  if(piece_limit < len) {
-	    len = piece_limit;
-	    grow = false;
-	  }
-	  size_t byte_limit = max_bytes / cur_bytes;
-	  if(byte_limit < len) {
-	    len = byte_limit;
-	    grow = false;
-	  }
-	  target_subrect.hi[d] = cur_point[d] + len - 1;
-	  cur_bytes *= len;
-	  // if we didn't start this dimension at the lo point, we can't
-	  //  grow any further
-	  if(cur_point[d] > cur_rect.lo[d])
-	    grow = false;
-	} else
-	  target_subrect.hi[d] = cur_point[d];
-      }
-
-      // translate the target_subrect into the dataset's coordinates
-      //   using the dimension order specified in the instance's layout
-      info.dset_bounds.resize(N);
-      info.offset.resize(N);
-      info.extent.resize(N);
-      for(int di = 0; di < N; di++) {
-	int d = dim_order[di];
-
-	info.offset[hlp->dim_order[d]] = (target_subrect.lo[d] - hlp->bounds.lo[d] + hlp->offset[d]);
-	info.extent[hlp->dim_order[d]] = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
-	info.dset_bounds[hlp->dim_order[d]] = (hlp->offset[d] +
-					       (hlp->bounds.hi[d] - hlp->bounds.lo[d]) +
-					       1);
-      }
-    } else {
-      assert(0);
+      for(int i = 0; i < ndims; i++)
+        cur_bytes *= (target_subrect.hi[dim_order[i]] - target_subrect.lo[dim_order[i]] + 1);
     }
 
     // now set 'next_point' to the next point we want - this is just based on
@@ -448,7 +420,6 @@ namespace Realm {
 
     return cur_bytes;
   }
-#endif
   
   template <int N, typename T>
   void TransferIteratorBase<N,T>::confirm_step(void)
@@ -1374,7 +1345,21 @@ namespace Realm {
 
     virtual Event request_metadata(void);
 
+    virtual bool empty(void) const;
     virtual size_t volume(void) const;
+
+    virtual void choose_dim_order(std::vector<int>& dim_order,
+				  const std::vector<CopySrcDstField>& srcs,
+				  const std::vector<CopySrcDstField>& dsts,
+				  const std::vector<IndirectionInfo *>& indirects,
+				  bool force_fortran_order,
+				  size_t max_stride) const;
+
+    virtual TransferIterator *create_iterator(RegionInstance inst,
+					      const std::vector<int>& dim_order,
+					      const std::vector<FieldID>& fields,
+					      const std::vector<size_t>& fld_offsets,
+					      const std::vector<size_t>& fld_sizes) const;
 
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      RegionInstance peer,
@@ -1425,9 +1410,181 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  bool TransferDomainIndexSpace<N,T>::empty(void) const
+  {
+    return is.empty();
+  }
+
+  template <int N, typename T>
   size_t TransferDomainIndexSpace<N,T>::volume(void) const
   {
     return is.volume();
+  }
+
+  // determines the preferred dim order for an affine layout - dims sorted
+  //  by stride, ignoring dimensions that are trivial or strides > max_stride
+  template <int N, typename T>
+  static void preferred_dim_order(std::vector<int>& dim_order,
+				  const AffineLayoutPiece<N,T> *affine,
+				  const std::vector<bool>& trivial,
+				  size_t max_stride)
+  {
+    size_t prev_stride = 0;
+    for(int i = 0; i < N; i++) {
+      size_t best_stride = max_stride+1;
+      int best_dim = -1;
+      for(int j = 0; j < N; j++) {
+	// ignore strides we've already seen, those that are too big, and
+	//  those that correspond to trivial dimensions
+	if(trivial[j] ||
+	   (affine->strides[j] <= prev_stride) ||
+	   (affine->strides[j] >= best_stride))
+	  continue;
+	best_dim = j;
+	best_stride = affine->strides[j];
+      }
+      if(best_dim >= 0) {
+	dim_order.push_back(best_dim);
+	prev_stride = best_stride;
+      } else {
+	break;
+      }
+    }
+  }
+
+  // combines a new dim order preference with existing decisions, choosing
+  //  the new order if it's a superset of the existing order
+  // TODO: come up with rules for being willing to throw away the existing
+  //  order if they conflict
+  static void reconcile_dim_orders(std::vector<int>& existing_order,
+				   const std::vector<int>& new_order)
+  {
+    // a shorter order can't be a (strict) superset
+    if(new_order.size() <= existing_order.size()) return;
+    // differences in the common length are deal-breakers too
+    if(!std::equal(existing_order.begin(), existing_order.end(),
+		   new_order.begin())) return;
+    existing_order = new_order;
+  }
+
+  template <int N, typename T>
+  static void preferred_dim_order(std::vector<int>& dim_order,
+				  const Rect<N,T>& bounds,
+				  RegionInstance inst,
+				  FieldID field_id,
+				  const std::vector<bool>& trivial,
+				  size_t max_stride)
+  {
+    RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
+    // can't wait for it here - make sure it's valid before calling
+    assert(impl->metadata.is_valid());
+    const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(impl->metadata.layout);
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
+    assert(it != layout->fields.end());
+    const InstancePieceList<N,T>& ipl = layout->piece_lists[it->second.list_idx];
+    std::vector<int> preferred;
+    preferred.reserve(N);
+    for(typename std::vector<InstanceLayoutPiece<N,T> *>::const_iterator it2 = ipl.pieces.begin();
+	it2 != ipl.pieces.end();
+	++it2) {
+      // ignore pieces that aren't affine or are outside bounds
+      if((*it2)->layout_type != PieceLayoutTypes::AffineLayoutType)
+	continue;
+      if(!bounds.overlaps((*it2)->bounds))
+	continue;
+      preferred_dim_order(preferred,
+			  checked_cast<AffineLayoutPiece<N,T> *>(*it2),
+			  trivial,
+			  max_stride);
+      reconcile_dim_orders(dim_order, preferred);
+      preferred.clear();
+    }
+  }
+
+  template <int N, typename T>
+  void TransferDomainIndexSpace<N,T>::choose_dim_order(std::vector<int>& dim_order,
+				  const std::vector<CopySrcDstField>& srcs,
+				  const std::vector<CopySrcDstField>& dsts,
+				  const std::vector<IndirectionInfo *>& indirects,
+				  bool force_fortran_order,
+				  size_t max_stride) const
+  {
+    if(force_fortran_order) {
+      dim_order.resize(N);
+      for(int i = 0; i < N; i++)
+	dim_order[i] = i;
+      return;
+    }
+
+    // start with an unconstrained order
+    dim_order.clear();
+    dim_order.reserve(N);
+
+    // dimensions with an extent==1 are trivial and should not factor into
+    //  order decision
+    std::vector<bool> trivial(N);
+    for(int i = 0; i < N; i++)
+      trivial[i] = (is.bounds.lo[i] == is.bounds.hi[i]);
+
+    // allocate this vector once and we'll reuse it
+    std::vector<int> preferred;
+    preferred.reserve(N);
+
+    // consider destinations first
+    for(size_t i = 0; i < dsts.size(); i++) {
+      if((dsts[i].field_id != FieldID(-1)) && dsts[i].inst.exists()) {
+	preferred_dim_order(preferred,
+			    is.bounds, dsts[i].inst, dsts[i].field_id,
+			    trivial, max_stride);
+	reconcile_dim_orders(dim_order, preferred);
+	preferred.clear();
+	continue;
+      }
+
+      // TODO: ask opinion of indirections?
+    }
+
+    // then consider sources
+    for(size_t i = 0; i < srcs.size(); i++) {
+      if((srcs[i].field_id != FieldID(-1)) && srcs[i].inst.exists()) {
+	preferred_dim_order(preferred,
+			    is.bounds, srcs[i].inst, srcs[i].field_id,
+			    trivial, max_stride);
+	reconcile_dim_orders(dim_order, preferred);
+	preferred.clear();
+	continue;
+      }
+
+      // TODO: ask opinion of indirections?
+    }
+
+    // if we didn't end up choosing all the dimensions, add the rest back in
+    //  in arbitrary (ascending, currently) order
+    if(dim_order.size() != N) {
+      std::vector<bool> present(N, false);
+      for(size_t i = 0; i < dim_order.size(); i++)
+	present[dim_order[i]] = true;
+      for(int i = 0; i < N; i++)
+	if(!present[i])
+	  dim_order.push_back(i);
+#ifdef DEBUG_REALM
+      assert(dim_order.size() == N);
+#endif
+    }
+  }
+
+  template <int N, typename T>
+  TransferIterator *TransferDomainIndexSpace<N,T>::create_iterator(RegionInstance inst,
+								   const std::vector<int>& dim_order,
+								   const std::vector<FieldID>& fields,
+								   const std::vector<size_t>& fld_offsets,
+								   const std::vector<size_t>& fld_sizes) const
+  {
+    size_t extra_elems = 0;
+    assert(dim_order.size() == N);
+    return new TransferIteratorIndexSpace<N,T>(is, inst, dim_order.data(),
+					       fields, fld_offsets, fld_sizes,
+					       extra_elems);
   }
 
   template <int N, typename T>
@@ -1437,10 +1594,9 @@ namespace Realm {
 								   const std::vector<size_t>& fld_offsets,
 								   const std::vector<size_t>& fld_sizes) const
   {
-    size_t extra_elems = 0;
-    int dim_order[N];
+    std::vector<int> dim_order(N, -1);
     bool have_ordering = false;
-    bool force_fortran_order = false;
+    bool force_fortran_order = true;//false;
     std::vector<RegionInstance> insts(1, inst);
     if(peer.exists()) insts.push_back(peer);
     for(std::vector<RegionInstance>::iterator ii = insts.begin();
@@ -1482,12 +1638,12 @@ namespace Realm {
 	  // 		  << ((N > 1) ? piece_preferred_order[1] : -1) << ", "
 	  // 		  << ((N > 2) ? piece_preferred_order[2] : -1);
 	  if(have_ordering) {
-	    if(memcmp(dim_order, piece_preferred_order, N * sizeof(int)) != 0) {
+	    if(memcmp(dim_order.data(), piece_preferred_order, N * sizeof(int)) != 0) {
 	      force_fortran_order = true;
 	      break;
 	    }
 	  } else {
-	    memcpy(dim_order, piece_preferred_order, N * sizeof(int));
+	    memcpy(dim_order.data(), piece_preferred_order, N * sizeof(int));
 	    have_ordering = true;
 	  }
 	}
@@ -1495,9 +1651,8 @@ namespace Realm {
     }
     if(!have_ordering || force_fortran_order)
       for(int i = 0; i < N; i++) dim_order[i] = i;
-    return new TransferIteratorIndexSpace<N,T>(is, inst, dim_order,
-					       fields, fld_offsets, fld_sizes,
-					       extra_elems);
+    return this->create_iterator(inst, dim_order,
+				 fields, fld_offsets, fld_sizes);
   }
 
   template <int N, typename T>
@@ -1525,9 +1680,8 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class TransferPlan
+  // class IndirectionInfo
   //
-
 
   std::ostream& operator<<(std::ostream& os, const IndirectionInfo& ii)
   {
@@ -1538,6 +1692,29 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class AddressSplitChannel
+  //
+
+  static AddressSplitChannel *local_addrsplit_channel = 0;
+
+  AddressSplitChannel::AddressSplitChannel(BackgroundWorkManager *bgwork)
+    : SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase>(bgwork,
+								     XFER_ADDR_SPLIT,
+								     "address split")
+  {
+    assert(!local_addrsplit_channel);
+    local_addrsplit_channel = this;
+  }
+
+  AddressSplitChannel::~AddressSplitChannel()
+  {
+    assert(local_addrsplit_channel == this);
+    local_addrsplit_channel = 0;
+  }
+
+  
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class XferDesCreateMessage<AddressSplitXferDes<N,T>>
   //
 
@@ -1545,17 +1722,14 @@ namespace Realm {
   class AddressSplitXferDes;
   
   template <int N, typename T>
-  struct XferDesCreateMessage<AddressSplitXferDes<N,T> > : public XferDesCreateMessageBase {
+  struct AddressSplitXferDesCreateMessage : public XferDesCreateMessageBase {
   public:
     static void handle_message(NodeID sender,
-			       const XferDesCreateMessage<AddressSplitXferDes<N,T> > &args,
+			       const AddressSplitXferDesCreateMessage<N,T> &args,
 			       const void *msgdata,
 			       size_t msglen)
     {
       std::vector<XferDesPortInfo> inputs_info, outputs_info;
-      bool mark_started = false;
-      uint64_t max_req_size = 0;
-      long max_nr = 0;
       int priority = 0;
       size_t element_size;
       std::vector<IndexSpace<N,T> > spaces;
@@ -1564,29 +1738,25 @@ namespace Realm {
 
       bool ok = ((fbd >> inputs_info) &&
 		 (fbd >> outputs_info) &&
-		 (fbd >> mark_started) &&
-		 (fbd >> max_req_size) &&
-		 (fbd >> max_nr) &&
 		 (fbd >> priority) &&
 		 (fbd >> element_size) &&
 		 (fbd >> spaces));
       assert(ok);
       assert(fbd.bytes_left() == 0);
   
-      assert(!args.inst.exists());
-      XferDes *xd = new AddressSplitXferDes<N,T>(args.dma_request,
+      //assert(!args.inst.exists());
+      assert(local_addrsplit_channel);
+      XferDes *xd = new AddressSplitXferDes<N,T>(args.dma_op,
+						 local_addrsplit_channel,
 						 args.launch_node,
 						 args.guid,
 						 inputs_info,
 						 outputs_info,
-						 mark_started,
-						 max_req_size,
-						 max_nr, priority,
-						 args.complete_fence,
+						 priority,
 						 element_size,
 						 spaces);
 
-      xd->channel->enqueue_ready_xd(xd);
+      local_addrsplit_channel->enqueue_ready_xd(xd);
     }
   };
   
@@ -1608,18 +1778,17 @@ namespace Realm {
   public:
     virtual void release();
 
-    virtual void create_xfer_des(DmaRequest *dma_request,
+    virtual void create_xfer_des(uintptr_t dma_op,
 				 NodeID launch_node,
 				 NodeID target_node,
 				 XferDesID guid,
 				 const std::vector<XferDesPortInfo>& inputs_info,
 				 const std::vector<XferDesPortInfo>& outputs_info,
-				 bool mark_started,
-				 uint64_t max_req_size, long max_nr, int priority,
-				 XferDesFence *complete_fence,
-				 RegionInstance inst = RegionInstance::NO_INST);
+				 int priority,
+				 XferDesRedopInfo redop_info,
+				 const void *fill_data, size_t fill_size);
 
-    static ActiveMessageHandlerReg<XferDesCreateMessage<AddressSplitXferDes<N,T> > > areg;
+    static ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N,T> > areg;
 
   protected:
     size_t bytes_per_element;
@@ -1627,20 +1796,19 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  /*static*/ ActiveMessageHandlerReg<XferDesCreateMessage<AddressSplitXferDes<N,T> > > AddressSplitXferDesFactory<N,T>::areg;
+  /*static*/ ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N,T> > AddressSplitXferDesFactory<N,T>::areg;
   
   template <int N, typename T>
   class AddressSplitXferDes : public AddressSplitXferDesBase {
   protected:
     friend class AddressSplitXferDesFactory<N,T>;
-    friend struct XferDesCreateMessage<AddressSplitXferDes<N,T> >;
+    friend struct AddressSplitXferDesCreateMessage<N,T>;
     
-    AddressSplitXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+    AddressSplitXferDes(uintptr_t _dma_op, Channel *_channel,
+			NodeID _launch_node, XferDesID _guid,
 			const std::vector<XferDesPortInfo>& inputs_info,
 			const std::vector<XferDesPortInfo>& outputs_info,
-			bool _mark_start,
-			uint64_t _max_req_size, long max_nr, int _priority,
-			XferDesFence* _complete_fence,
+			int _priority,
 			size_t _element_size,
 			const std::vector<IndexSpace<N,T> >& _spaces);
 
@@ -1681,60 +1849,51 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void AddressSplitXferDesFactory<N,T>::create_xfer_des(DmaRequest *dma_request,
+  void AddressSplitXferDesFactory<N,T>::create_xfer_des(uintptr_t dma_op,
 							NodeID launch_node,
 							NodeID target_node,
 							XferDesID guid,
 							const std::vector<XferDesPortInfo>& inputs_info,
 							const std::vector<XferDesPortInfo>& outputs_info,
-							bool mark_started,
-							uint64_t max_req_size, long max_nr, int priority,
-							XferDesFence *complete_fence,
-							RegionInstance inst /*= RegionInstance::NO_INST*/)
+							int priority,
+							XferDesRedopInfo redop_info,
+							const void *fill_data, size_t fill_size)
   {
+    assert(redop_info.id == 0);
+    assert(fill_size == 0);
     if(target_node == Network::my_node_id) {
       // local creation
-      assert(!inst.exists());
-      XferDes *xd = new AddressSplitXferDes<N,T>(dma_request, launch_node, guid,
+      //assert(!inst.exists());
+      assert(local_addrsplit_channel);
+      XferDes *xd = new AddressSplitXferDes<N,T>(dma_op,
+						 local_addrsplit_channel,
+						 launch_node, guid,
 						 inputs_info, outputs_info,
-						 mark_started,
-						 max_req_size, max_nr, priority,
-						 complete_fence,
+						 priority,
 						 bytes_per_element,
 						 spaces);
 
-      xd->channel->enqueue_ready_xd(xd);
+      local_addrsplit_channel->enqueue_ready_xd(xd);
     } else {
-      // marking the transfer started has to happen locally
-      if(mark_started)
-	dma_request->mark_started();
-      
       // remote creation
       Serialization::ByteCountSerializer bcs;
       {
 	bool ok = ((bcs << inputs_info) &&
 		   (bcs << outputs_info) &&
-		   (bcs << false /*mark_started*/) &&
-		   (bcs << max_req_size) &&
-		   (bcs << max_nr) &&
 		   (bcs << priority) &&
 		   (bcs << bytes_per_element) &&
 		   (bcs << spaces));
 	assert(ok);
       }
       size_t req_size = bcs.bytes_used();
-      ActiveMessage<XferDesCreateMessage<AddressSplitXferDes<N,T> > > amsg(target_node, req_size);
-      amsg->inst = inst;
-      amsg->complete_fence  = complete_fence;
+      ActiveMessage<AddressSplitXferDesCreateMessage<N,T> > amsg(target_node, req_size);
+      //amsg->inst = inst;
       amsg->launch_node = launch_node;
       amsg->guid = guid;
-      amsg->dma_request = dma_request;
+      amsg->dma_op = dma_op;
       {
 	bool ok = ((amsg << inputs_info) &&
 		   (amsg << outputs_info) &&
-		   (amsg << false /*mark_started*/) &&
-		   (amsg << max_req_size) &&
-		   (amsg << max_nr) &&
 		   (amsg << priority) &&
 		   (amsg << bytes_per_element) &&
 		   (amsg << spaces));
@@ -1750,14 +1909,15 @@ namespace Realm {
   // class AddressSplitXferDes<N,T>
   //
 
-  AddressSplitXferDesBase::AddressSplitXferDesBase(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+  AddressSplitXferDesBase::AddressSplitXferDesBase(uintptr_t _dma_op,
+						   Channel *_channel,
+						   NodeID _launch_node, XferDesID _guid,
 						   const std::vector<XferDesPortInfo>& inputs_info,
 						   const std::vector<XferDesPortInfo>& outputs_info,
-						   bool _mark_start,
-						   uint64_t _max_req_size, long max_nr, int _priority,
-						   XferDesFence* _complete_fence)
-    : XferDes(_dma_request, _launch_node, _guid, inputs_info, outputs_info,
-	      _mark_start, _max_req_size, _priority, _complete_fence)
+						   int _priority)
+    : XferDes(_dma_op, _channel, _launch_node, _guid,
+	      inputs_info, outputs_info,
+	      _priority, 0, 0)
   {}
 
   long AddressSplitXferDesBase::get_requests(Request** requests, long nr)
@@ -1785,25 +1945,21 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  AddressSplitXferDes<N,T>::AddressSplitXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+  AddressSplitXferDes<N,T>::AddressSplitXferDes(uintptr_t _dma_op, Channel *_channel,
+						NodeID _launch_node, XferDesID _guid,
 						const std::vector<XferDesPortInfo>& inputs_info,
 						const std::vector<XferDesPortInfo>& outputs_info,
-						bool _mark_start,
-						uint64_t _max_req_size, long max_nr, int _priority,
-						XferDesFence* _complete_fence,
+						int _priority,
 						size_t _element_size,
 						const std::vector<IndexSpace<N,T> >& _spaces)
-    : AddressSplitXferDesBase(_dma_request, _launch_node, _guid,
+    : AddressSplitXferDesBase(_dma_op, _channel, _launch_node, _guid,
 			      inputs_info, outputs_info,
-			      _mark_start, _max_req_size, max_nr, _priority,
-			      _complete_fence)
+			      _priority)
     , spaces(_spaces)
     , element_size(_element_size)
     , point_index(0), point_count(0)
     , output_space_id(-1), output_count(0)
-  {
-    channel = get_channel_manager()->get_address_split_channel();
-  }
+  {}
 
   template <int N, typename T>
   AddressSplitXferDes<N,T>::~AddressSplitXferDes()
@@ -1978,42 +2134,742 @@ namespace Realm {
   
   ////////////////////////////////////////////////////////////////////////
   //
-  // class AddressSplitChannel
+  // class IndirectionInfoBase
   //
 
-  AddressSplitChannel::AddressSplitChannel(BackgroundWorkManager *bgwork)
-    : SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase>(bgwork,
-								     XFER_ADDR_SPLIT,
-								     "address split")
+  class IndirectionInfoBase : public IndirectionInfo {
+  public:
+    IndirectionInfoBase(bool _structured,
+                        FieldID _field_id,
+                        RegionInstance _inst,
+                        bool _is_ranges,
+                        bool _oor_possible,
+                        bool _aliasing_possible,
+                        size_t _subfield_offset,
+                        const std::vector<RegionInstance> _insts);
+
+  protected:
+    // most of the logic to generate unstructured gather/scatter paths is
+    // dimension-agnostic and we can define it in a base class to save
+    // compile time/code size ...
+    virtual void generate_gather_paths(Memory dst_mem,
+				       TransferGraph::XDTemplate::IO dst_edge,
+				       unsigned indirect_idx,
+				       unsigned src_fld_start,
+				       unsigned src_fld_count,
+				       size_t bytes_per_element,
+				       CustomSerdezID serdez_id,
+				       std::vector<TransferGraph::XDTemplate>& xd_nodes,
+				       std::vector<TransferGraph::IBInfo>& ib_edges,
+				       std::vector<TransferDesc::FieldInfo>& src_fields);
+
+    virtual void generate_scatter_paths(Memory src_mem,
+					TransferGraph::XDTemplate::IO src_edge,
+					unsigned indirect_idx,
+					unsigned dst_fld_start,
+					unsigned dst_fld_count,
+					size_t bytes_per_element,
+					CustomSerdezID serdez_id,
+					std::vector<TransferGraph::XDTemplate>& xd_nodes,
+					std::vector<TransferGraph::IBInfo>& ib_edges,
+					std::vector<TransferDesc::FieldInfo>& src_fields);
+
+    // ... but we need three helpers that will be defined in the typed versions
+    virtual size_t num_spaces() const = 0;
+
+    virtual size_t address_size() const = 0;
+
+    virtual XferDesFactory *create_addrsplit_factory(size_t bytes_per_element) const = 0;
+
+    bool structured;
+    FieldID field_id;
+    RegionInstance inst;
+    bool is_ranges;
+    bool oor_possible;
+    bool aliasing_possible;
+    size_t subfield_offset;
+    std::vector<RegionInstance> insts;
+  };
+
+  IndirectionInfoBase::IndirectionInfoBase(bool _structured,
+                                           FieldID _field_id,
+                                           RegionInstance _inst,
+                                           bool _is_ranges,
+                                           bool _oor_possible,
+                                           bool _aliasing_possible,
+                                           size_t _subfield_offset,
+                                           const std::vector<RegionInstance> _insts)
+    : structured(_structured)
+    , field_id(_field_id)
+    , inst(_inst)
+    , is_ranges(_is_ranges)
+    , oor_possible(_oor_possible)
+    , aliasing_possible(_aliasing_possible)
+    , subfield_offset(_subfield_offset)
+    , insts(_insts)
   {}
 
-  AddressSplitChannel::~AddressSplitChannel()
-  {}
+  static TransferGraph::XDTemplate::IO add_copy_path(std::vector<TransferGraph::XDTemplate>& xd_nodes,
+						     std::vector<TransferGraph::IBInfo>& ib_edges,
+						     TransferGraph::XDTemplate::IO start_edge,
+						     const MemPathInfo& info)
+  {
+    size_t hops = info.xd_channels.size();
 
+    if(hops == 0) {
+      // no xd's needed at all - return input edge as output
+      return start_edge;
+    }
+
+    size_t xd_base = xd_nodes.size();
+    size_t ib_base = ib_edges.size();
+    xd_nodes.resize(xd_base + hops);
+    ib_edges.resize(ib_base + hops);
+    for(size_t i = 0; i < hops; i++) {
+      TransferGraph::XDTemplate& xdn = xd_nodes[xd_base + i];
+
+      xdn.factory = info.xd_channels[i]->get_factory();
+      xdn.gather_control_input = -1;
+      xdn.scatter_control_input = -1;
+      xdn.target_node = info.xd_channels[i]->node;
+      xdn.inputs.resize(1);
+      xdn.inputs[0] = ((i == 0) ?
+		         start_edge :
+		         TransferGraph::XDTemplate::mk_edge(ib_base + i - 1));
+      //xdn.inputs[0].indirect_inst = RegionInstance::NO_INST;
+      xdn.outputs.resize(1);
+      xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + i);
+
+      TransferGraph::IBInfo& ibe = ib_edges[ib_base + i];
+      ibe.memory = info.path[i + 1];
+      ibe.size = 65536; // TODO: pick size?
+    }
+
+    // last edge we created is the output
+    return TransferGraph::XDTemplate::mk_edge(ib_base + hops - 1);
+  }
+
+  void IndirectionInfoBase::generate_gather_paths(Memory dst_mem,
+                                                  TransferGraph::XDTemplate::IO dst_edge,
+                                                  unsigned indirect_idx,
+                                                  unsigned src_fld_start,
+                                                  unsigned src_fld_count,
+                                                  size_t bytes_per_element,
+                                                  CustomSerdezID serdez_id,
+                                                  std::vector<TransferGraph::XDTemplate>& xd_nodes,
+                                                  std::vector<TransferGraph::IBInfo>& ib_edges,
+                                                  std::vector<TransferDesc::FieldInfo>& src_fields)
+  {
+    // TODO: see how much of this we can reuse for the structured case?
+    assert(!structured);
+
+    size_t spaces_size = num_spaces();
+
+    // compute the paths from each src data instance and the dst instance
+    std::vector<size_t> path_idx;
+    std::vector<MemPathInfo> path_infos;
+    path_idx.reserve(spaces_size);
+    for(size_t i = 0; i < insts.size(); i++) {
+      size_t idx = path_infos.size();
+      for(size_t j = 0; j < i; j++)
+	if(insts[i].get_location() == insts[j].get_location()) {
+	  idx = path_idx[j];
+	  break;
+	}
+
+      path_idx.push_back(idx);
+      if(idx >= path_infos.size()) {
+	// new path to compute
+	path_infos.resize(idx + 1);
+	bool ok = find_shortest_path(insts[i].get_location(),
+				     dst_mem,
+				     serdez_id,
+                                     0 /*redop_id*/,
+				     path_infos[idx]);
+	assert(ok);
+      }
+    }
+
+    // add a source field for the address
+    unsigned addr_field_start = src_fields.size();
+    src_fields.push_back(TransferDesc::FieldInfo { field_id, 0, address_size(), 0 });
+    TransferGraph::XDTemplate::IO addr_edge =
+      TransferGraph::XDTemplate::mk_inst(inst, addr_field_start, 1);
+
+    // special case - a gather from a single source with no out of range
+    //  accesses
+    if((spaces_size == 1) && !oor_possible) {
+      size_t pathlen = path_infos[0].xd_channels.size();
+      // HACK!
+      Memory local_ib_mem = ID::make_ib_memory(path_infos[0].xd_channels[0]->node, 0).convert<Memory>();
+      // do we have to do anything to get the addresses into a cpu-readable
+      //  memory on that node?
+      MemPathInfo addr_path;
+      bool ok = find_shortest_path(inst.get_location(),
+				   local_ib_mem,
+				   0 /*no serdez*/,
+                                   0 /*redop_id*/,
+				   addr_path,
+				   true /*skip_final_memcpy*/);
+      assert(ok);
+      addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
+
+      size_t xd_idx = xd_nodes.size();
+      size_t ib_idx = ib_edges.size();
+      xd_nodes.resize(xd_idx + pathlen);
+      ib_edges.resize(ib_idx + pathlen - 1);
+
+      for(size_t i = 0; i < pathlen; i++) {
+	TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx + i];
+
+	xdn.target_node = path_infos[0].xd_channels[i]->node;
+	//xdn.kind = path_infos[0].xd_kinds[i];
+	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
+	xdn.gather_control_input = -1;
+	xdn.scatter_control_input = -1;
+	if(i == 0) {
+	  xdn.inputs.resize(2);
+	  xdn.inputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
+								 1,
+								 insts[0],
+								 src_fld_start,
+								 src_fld_count);
+	  xdn.inputs[1] = addr_edge;
+	} else {
+	  xdn.inputs.resize(1);
+	  xdn.inputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i - 1);
+	}
+	if(i == (pathlen - 1)) {
+	  xdn.outputs.resize(1);
+	  xdn.outputs[0] = dst_edge;
+	} else {
+	  xdn.outputs.resize(1);
+	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i);
+
+	  TransferGraph::IBInfo& ibe = ib_edges[ib_idx + i];
+	  ibe.memory = path_infos[0].path[i + 1];
+	  ibe.size = 1 << 20; /*TODO*/
+	}
+      }
+    } else {
+      // step 1: we need the address decoder, possibly with some hops to get
+      //  the data to where a cpu can look at it
+      NodeID addr_node = ID(inst).instance_owner_node();
+      // HACK!
+      Memory addr_ib_mem = ID::make_ib_memory(addr_node, 0).convert<Memory>();
+      MemPathInfo addr_path;
+      bool ok = find_shortest_path(inst.get_location(),
+				   addr_ib_mem,
+				   0 /*no serdez*/,
+                                   0 /*redop_id*/,
+				   addr_path,
+				   true /*skip_final_memcpy*/);
+      assert(ok);
+      addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
+
+      std::vector<TransferGraph::XDTemplate::IO> decoded_addr_edges(spaces_size);
+      TransferGraph::XDTemplate::IO ctrl_edge;
+      {
+	// instantiate decoder
+	size_t xd_base = xd_nodes.size();
+	size_t ib_base = ib_edges.size();
+	xd_nodes.resize(xd_base + 1);
+	ib_edges.resize(ib_base + spaces_size + 1);
+
+	TransferGraph::XDTemplate& xdn = xd_nodes[xd_base];
+	xdn.target_node = addr_node;
+	//xdn.kind = XFER_ADDR_SPLIT;
+	assert(!is_ranges && "need range address splitter");
+        xdn.factory = create_addrsplit_factory(bytes_per_element);
+	xdn.gather_control_input = -1;
+	xdn.scatter_control_input = -1;
+	xdn.inputs.resize(1);
+	xdn.inputs[0] = addr_edge;
+	xdn.outputs.resize(spaces_size + 1);
+	for(size_t i = 0; i < spaces_size; i++) {
+	  xdn.outputs[i] = TransferGraph::XDTemplate::mk_edge(ib_base + i);
+	  decoded_addr_edges[i] = xdn.outputs[i];
+	  ib_edges[ib_base + i].memory = addr_ib_mem;
+	  ib_edges[ib_base + i].size = 65536; // TODO
+	}
+	xdn.outputs[spaces_size] = TransferGraph::XDTemplate::mk_edge(ib_base + spaces_size);
+	ctrl_edge = xdn.outputs[spaces_size];
+	ib_edges[ib_base + spaces_size].memory = addr_ib_mem;
+	ib_edges[ib_base + spaces_size].size = 65536; // TODO
+      }
+
+      // next, see what work we need to get the addresses to where the
+      //  data instances live
+      for(size_t i = 0; i < spaces_size; i++) {
+	// HACK!
+	Memory src_ib_mem = ID::make_ib_memory(ID(insts[i]).instance_owner_node(), 0).convert<Memory>();
+	if(src_ib_mem != addr_ib_mem) {
+	  MemPathInfo path;
+	  bool ok = find_shortest_path(addr_ib_mem, src_ib_mem,
+				       0 /*no serdez*/,
+                                       0 /*redop_id*/,
+				       path);
+	  assert(ok);
+	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
+						decoded_addr_edges[i],
+						path);
+	}
+      }
+
+      // control information has to get to the merge at the end
+      // HACK!
+      NodeID dst_node = ID(dst_mem).memory_owner_node();
+      Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
+      if(dst_ib_mem != addr_ib_mem) {
+	MemPathInfo path;
+	bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
+				     0 /*no serdez*/,
+                                     0 /*redop_id*/,
+				     path);
+	assert(ok);
+	ctrl_edge = add_copy_path(xd_nodes, ib_edges,
+				  ctrl_edge,
+				  path);
+      }
+
+      // next complication: if all the data paths don't use the same final
+      //  step, we need to force them to go through an intermediate
+      // also insist that the final step be owned by the destination node
+      //  (i.e. the merging should not be done via rdma)
+      Channel *last_channel = path_infos[0].xd_channels[path_infos[0].xd_channels.size() - 1];
+      bool same_last_channel = true;
+      for(size_t i = 0; i < path_infos.size(); i++) {
+	if(path_infos[i].xd_channels[path_infos[i].xd_channels.size() - 1] !=
+	   last_channel) {
+	  same_last_channel = false;
+	  break;
+	}
+      }
+      if(!same_last_channel) {
+	// figure out what the final kind will be (might not be the same as
+	//  any of the current paths)
+	MemPathInfo tail_path;
+	bool ok = find_shortest_path(dst_ib_mem, dst_mem,
+				     serdez_id, 0 /*redop_id*/, tail_path);
+	assert(ok && (tail_path.xd_channels.size() == 1));
+	last_channel = tail_path.xd_channels[0];
+	// and fix any path that doesn't use that channel
+	for(size_t i = 0; i < path_infos.size(); i++) {
+	  if(path_infos[i].xd_channels[path_infos[i].xd_channels.size() - 1] ==
+	     last_channel) continue;
+	  //log_new_dma.print() << "fix " << i << " " << path_infos[i].path[0] << " -> " << dst_ib_mem;
+	  bool ok = find_shortest_path(path_infos[i].path[0], dst_ib_mem,
+				       0 /*no serdez*/, 0 /*redop_id*/, path_infos[i]);
+	  assert(ok);
+	  // append last step
+	  path_infos[i].xd_channels.push_back(last_channel);
+	  path_infos[i].path.push_back(dst_mem);
+	  //path_infos[i].xd_target_nodes.push_back(ID(dst_mem).memory_owner_node());
+	}
+      }
+
+      // now any data paths with more than one hop need all but the last hop
+      //  added to the graph
+      std::vector<TransferGraph::XDTemplate::IO> data_edges(spaces_size);
+      for(size_t i = 0; i < spaces_size; i++) {
+	const MemPathInfo& mpi = path_infos[path_idx[i]];
+	size_t hops = mpi.xd_channels.size() - 1;
+	if(hops > 0) {
+	  size_t xd_base = xd_nodes.size();
+	  size_t ib_base = ib_edges.size();
+	  xd_nodes.resize(xd_base + hops);
+	  ib_edges.resize(ib_base + hops);
+	  for(size_t j = 0; j < hops; j++) {
+	    TransferGraph::XDTemplate& xdn = xd_nodes[xd_base + j];
+
+	    xdn.factory = mpi.xd_channels[j]->get_factory();
+	    xdn.gather_control_input = -1;
+	    xdn.scatter_control_input = -1;
+	    xdn.target_node = mpi.xd_channels[j]->node;
+	    if(j == 0) {
+	      xdn.inputs.resize(2);
+	      xdn.inputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
+								     1,
+								     insts[i],
+								     src_fld_start,
+								     src_fld_count);
+	      xdn.inputs[1] = decoded_addr_edges[i];
+	    } else {
+	      xdn.inputs.resize(1);
+	      xdn.inputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j - 1);
+	    }
+	    xdn.outputs.resize(1);
+	    xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j);
+	    ib_edges[ib_base + j].memory = mpi.path[j + 1];
+	    ib_edges[ib_base + j].size = 65536; // TODO: pick size?
+	  }
+	  data_edges[i] = TransferGraph::XDTemplate::mk_edge(ib_base + hops - 1);
+	}
+      }
+
+      // and finally the last xd that merges the streams together
+      size_t xd_idx = xd_nodes.size();
+      xd_nodes.resize(xd_idx + 1);
+      TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx];
+
+      xdn.target_node = ID(dst_mem).memory_owner_node();
+      //xdn.kind = last_kind;
+      xdn.factory = last_channel->get_factory();
+      xdn.gather_control_input = spaces_size;
+      xdn.scatter_control_input = -1;
+      xdn.outputs.resize(1);
+      xdn.outputs[0] = dst_edge;
+
+      xdn.inputs.resize(spaces_size + 1);
+
+      for(size_t i = 0; i < spaces_size; i++) {
+	// can we read (indirectly) right from the source instance?
+	if(path_infos[path_idx[i]].xd_channels.size() == 1) {
+	  int ind_port = xdn.inputs.size();
+	  xdn.inputs.resize(ind_port + 1);
+	  xdn.inputs[i] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
+								 ind_port,
+								 insts[i],
+								 src_fld_start,
+								 src_fld_count);
+	  xdn.inputs[ind_port] = decoded_addr_edges[i];
+	} else {
+	  //assert(data_edges[i] >= 0);
+	  xdn.inputs[i] = data_edges[i];
+	}
+      }
+
+      // control input
+      xdn.inputs[spaces_size] = ctrl_edge;
+    }
+  }
   
+  void IndirectionInfoBase::generate_scatter_paths(Memory src_mem,
+                                                   TransferGraph::XDTemplate::IO src_edge,
+                                                   unsigned indirect_idx,
+                                                   unsigned dst_fld_start,
+                                                   unsigned dst_fld_count,
+                                                   size_t bytes_per_element,
+                                                   CustomSerdezID serdez_id,
+                                                   std::vector<TransferGraph::XDTemplate>& xd_nodes,
+                                                   std::vector<TransferGraph::IBInfo>& ib_edges,
+                                                   std::vector<TransferDesc::FieldInfo>& src_fields)
+  {
+    // TODO: see how much of this we can reuse for the structured case?
+    assert(!structured);
+
+    size_t spaces_size = num_spaces();
+
+    // compute the paths from the src instance to each dst data instance
+    std::vector<size_t> path_idx;
+    std::vector<MemPathInfo> path_infos;
+    path_idx.reserve(spaces_size);
+    for(size_t i = 0; i < insts.size(); i++) {
+      size_t idx = path_infos.size();
+      for(size_t j = 0; j < i; j++)
+	if(insts[i].get_location() == insts[j].get_location()) {
+	  idx = path_idx[j];
+	  break;
+	}
+
+      path_idx.push_back(idx);
+      if(idx >= path_infos.size()) {
+	// new path to compute
+	path_infos.resize(idx + 1);
+	bool ok = find_shortest_path(src_mem,
+				     insts[i].get_location(),
+				     serdez_id,
+                                     0 /*redop_id*/,
+				     path_infos[idx]);
+	assert(ok);
+      }
+    }
+
+    // add a source field for the address
+    unsigned addr_field_start = src_fields.size();
+    src_fields.push_back(TransferDesc::FieldInfo { field_id, 0, address_size(), 0 });
+    TransferGraph::XDTemplate::IO addr_edge =
+      TransferGraph::XDTemplate::mk_inst(inst, addr_field_start, 1);
+
+    // special case - a scatter to a single destination with no out of
+    //  range accesses
+    if((spaces_size == 1) && !oor_possible) {
+      size_t pathlen = path_infos[0].xd_channels.size();
+      // HACK!
+      Memory local_ib_mem = ID::make_ib_memory(path_infos[0].xd_channels[pathlen - 1]->node, 0).convert<Memory>();
+      // do we have to do anything to get the addresses into a cpu-readable
+      //  memory on that node?
+      MemPathInfo addr_path;
+      bool ok = find_shortest_path(inst.get_location(),
+				   local_ib_mem,
+				   0 /*no serdez*/,
+                                   0 /*redop_id*/,
+				   addr_path,
+				   true /*skip_final_memcpy*/);
+      assert(ok);
+      addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
+
+      size_t xd_idx = xd_nodes.size();
+      size_t ib_idx = ib_edges.size();
+      xd_nodes.resize(xd_idx + pathlen);
+      ib_edges.resize(ib_idx + pathlen - 1);
+
+      for(size_t i = 0; i < pathlen; i++) {
+	TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx + i];
+
+	xdn.target_node = path_infos[0].xd_channels[i]->node;
+	//xdn.kind = path_infos[0].xd_kinds[i];
+	xdn.factory = path_infos[0].xd_channels[i]->get_factory();
+	xdn.gather_control_input = -1;
+	xdn.scatter_control_input = -1;
+	if(i == (pathlen - 1)) {
+	  xdn.inputs.resize(2);
+	  xdn.inputs[1] = addr_edge;
+	} else {
+	  xdn.inputs.resize(1);
+	}
+	xdn.inputs[0] = ((i == 0) ?
+			   src_edge :
+			   TransferGraph::XDTemplate::mk_edge(ib_idx + i - 1));
+
+	xdn.outputs.resize(1);
+	if(i == (pathlen - 1)) {
+	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
+								  1,
+								  insts[0],
+								  dst_fld_start,
+								  dst_fld_count);
+	} else {
+	  xdn.outputs.resize(1);
+	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i);
+
+	  TransferGraph::IBInfo& ibe = ib_edges[ib_idx + i];
+	  ibe.memory = path_infos[0].path[i + 1];
+	  ibe.size = 1 << 20; /*TODO*/
+	}
+      }
+    } else {
+      // step 1: we need the address decoder, possibly with some hops to get
+      //  the data to where a cpu can look at it
+      NodeID addr_node = ID(inst).instance_owner_node();
+      // HACK!
+      Memory addr_ib_mem = ID::make_ib_memory(addr_node, 0).convert<Memory>();
+      MemPathInfo addr_path;
+      bool ok = find_shortest_path(inst.get_location(),
+				   addr_ib_mem,
+				   0 /*no serdez*/,
+                                   0 /*redop_id*/,
+				   addr_path,
+				   true /*skip_final_memcpy*/);
+      assert(ok);
+      addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
+
+      std::vector<TransferGraph::XDTemplate::IO> decoded_addr_edges(spaces_size);
+      TransferGraph::XDTemplate::IO ctrl_edge;
+      {
+	// instantiate decoder
+	size_t xd_base = xd_nodes.size();
+	size_t ib_base = ib_edges.size();
+	xd_nodes.resize(xd_base + 1);
+	ib_edges.resize(ib_base + spaces_size + 1);
+
+	TransferGraph::XDTemplate& xdn = xd_nodes[xd_base];
+	xdn.target_node = addr_node;
+	//xdn.kind = XFER_ADDR_SPLIT;
+	assert(!is_ranges && "need range address splitter");
+        xdn.factory = create_addrsplit_factory(bytes_per_element);
+	xdn.gather_control_input = -1;
+	xdn.scatter_control_input = -1;
+	xdn.inputs.resize(1);
+	xdn.inputs[0] = addr_edge;
+	xdn.outputs.resize(spaces_size + 1);
+	for(size_t i = 0; i < spaces_size; i++) {
+	  xdn.outputs[i] = TransferGraph::XDTemplate::mk_edge(ib_base + i);
+	  decoded_addr_edges[i] = xdn.outputs[i];
+	  ib_edges[ib_base + i].memory = addr_ib_mem;
+	  ib_edges[ib_base + i].size = 65536; // TODO
+	}
+	xdn.outputs[spaces_size] = TransferGraph::XDTemplate::mk_edge(ib_base + spaces_size);
+	ctrl_edge = xdn.outputs[spaces_size];
+	ib_edges[ib_base + spaces_size].memory = addr_ib_mem;
+	ib_edges[ib_base + spaces_size].size = 65536; // TODO
+      }
+
+      // next, see what work we need to get the addresses to where the
+      //  last step of each path is running
+      for(size_t i = 0; i < spaces_size; i++) {
+	// HACK!
+	NodeID dst_node = path_infos[path_idx[i]].xd_channels[path_infos[path_idx[i]].xd_channels.size() - 1]->node;
+	Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
+	if(dst_ib_mem != addr_ib_mem) {
+	  MemPathInfo path;
+	  bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
+				       0 /*no serdez*/,
+                                       0 /*redop_id*/,
+				       path);
+	  assert(ok);
+	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
+						decoded_addr_edges[i],
+						path);
+	}
+      }
+
+      // control information has to get to the split at the start
+      // HACK!
+      Memory src_ib_mem = ID::make_ib_memory(ID(src_mem).memory_owner_node(), 0).convert<Memory>();
+      if(src_ib_mem != addr_ib_mem) {
+	MemPathInfo path;
+	bool ok = find_shortest_path(addr_ib_mem, src_ib_mem,
+				     0 /*no serdez*/,
+                                     0 /*redop_id*/,
+				     path);
+	assert(ok);
+	ctrl_edge = add_copy_path(xd_nodes, ib_edges,
+				  ctrl_edge,
+				  path);
+      }
+
+      // next complication: if all the data paths don't use the same first
+      //  step, we need to force them to go through an intermediate
+      Channel *first_channel = path_infos[0].xd_channels[0];
+      bool same_first_channel = true;
+      for(size_t i = 1; i < path_infos.size(); i++)
+	if(path_infos[i].xd_channels[0] != first_channel) {
+	  same_first_channel = false;
+	  break;
+	}
+      if(!same_first_channel) {
+	// figure out what the first channel will be (might not be the same as
+	//  any of the current paths)
+	MemPathInfo head_path;
+	bool ok = find_shortest_path(src_mem, src_ib_mem,
+				     serdez_id,
+                                     0 /*redop_id*/,
+                                     head_path);
+	assert(ok && (head_path.xd_channels.size() == 1));
+	first_channel = head_path.xd_channels[0];
+	// and fix any path that doesn't use that channel
+	for(size_t i = 0; i < path_infos.size(); i++) {
+	  if(path_infos[i].xd_channels[0] == first_channel) continue;
+
+	  bool ok = find_shortest_path(src_ib_mem,
+				       path_infos[i].path[path_infos[i].path.size() - 1],
+				       0 /*no serdez*/,
+                                       0 /*redop_id*/,
+                                       path_infos[i]);
+	  assert(ok);
+	  // prepend last step
+	  path_infos[i].xd_channels.insert(path_infos[i].xd_channels.begin(),
+					   first_channel);
+	  path_infos[i].path.insert(path_infos[i].path.begin(), src_mem);
+	  //path_infos[i].xd_target_nodes.insert(path_infos[i].xd_target_nodes.begin(),
+	  //				       ID(src_mem).memory_owner_node());
+	}
+      }
+
+      // next comes the xd that reads the source and splits the data into
+      //  the various output streams
+      std::vector<TransferGraph::XDTemplate::IO> data_edges(spaces_size);
+      {
+	size_t xd_idx = xd_nodes.size();
+	xd_nodes.resize(xd_idx + 1);
+
+	TransferGraph::XDTemplate& xdn = xd_nodes[xd_idx];
+	xdn.target_node = ID(src_mem).memory_owner_node();
+	//xdn.kind = first_kind;
+	xdn.factory = first_channel->get_factory();
+	xdn.gather_control_input = -1;
+	xdn.scatter_control_input = 1;
+	xdn.inputs.resize(2);
+	xdn.inputs[0] = src_edge;
+	xdn.inputs[1] = ctrl_edge;
+
+	xdn.outputs.resize(spaces_size);
+
+	for(size_t i = 0; i < spaces_size; i++) {
+	  // can we write (indirectly) right into the dest instance?
+	  if(path_infos[path_idx[i]].xd_channels.size() == 1) {
+	    int ind_port = xdn.inputs.size();
+	    xdn.inputs.resize(ind_port + 1);
+	    xdn.outputs[i] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
+								    ind_port,
+								    insts[i],
+								    dst_fld_start,
+								    dst_fld_count);
+	    xdn.inputs[ind_port] = decoded_addr_edges[i];
+	  } else {
+	    // need an ib to write to
+	    size_t ib_idx = ib_edges.size();
+	    ib_edges.resize(ib_idx + 1);
+	    data_edges[i] = TransferGraph::XDTemplate::mk_edge(ib_idx);
+	    xdn.outputs[i] = data_edges[i];
+	    ib_edges[ib_idx].memory = path_infos[path_idx[i]].path[1];
+	    ib_edges[ib_idx].size = 65536; // TODO: pick size?
+	  }
+	}
+      }
+
+      // finally, any data paths with more than one hop need the rest of
+      //  their path added to the graph
+      for(size_t i = 0; i < spaces_size; i++) {
+	const MemPathInfo& mpi = path_infos[path_idx[i]];
+	size_t hops = mpi.xd_channels.size() - 1;
+	if(hops > 0) {
+	  //assert(data_edges[i] >= 0);
+	  
+	  size_t xd_base = xd_nodes.size();
+	  size_t ib_base = ib_edges.size();
+	  xd_nodes.resize(xd_base + hops);
+	  ib_edges.resize(ib_base + hops - 1);
+	  for(size_t j = 0; j < hops; j++) {
+	    TransferGraph::XDTemplate& xdn = xd_nodes[xd_base + j];
+
+	    xdn.factory = mpi.xd_channels[j + 1]->get_factory();
+	    xdn.gather_control_input = -1;
+	    xdn.scatter_control_input = -1;
+	    xdn.target_node = mpi.xd_channels[j + 1]->node;
+	    if(j < (hops - 1)) {
+	      xdn.inputs.resize(1);
+	      xdn.inputs[0] = ((j == 0) ?
+			         data_edges[i] :
+			         TransferGraph::XDTemplate::mk_edge(ib_base + j - 1));
+	      xdn.outputs.resize(1);
+	      xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j);
+	      ib_edges[ib_base + j].memory = mpi.path[j + 2];
+	      ib_edges[ib_base + j].size = 65536; // TODO: pick size?
+	    } else {
+	      // last hop uses the address stream
+	      xdn.inputs.resize(2);
+	      xdn.inputs[0] = ((j == 0) ?
+			         data_edges[i] :
+			         TransferGraph::XDTemplate::mk_edge(ib_base + j - 1));
+	      xdn.inputs[1] = decoded_addr_edges[i];
+	      xdn.outputs.resize(1);
+	      xdn.outputs[0] = TransferGraph::XDTemplate::mk_indirect(indirect_idx,
+								      1,
+								      insts[i],
+								      dst_fld_start,
+								      dst_fld_count);
+	    }
+	  }
+	}
+      }
+    }
+  }
+
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class IndirectionInfoTyped<N,T,N2,T2>
   //
 
   template <int N, typename T, int N2, typename T2>
-  class IndirectionInfoTyped : public IndirectionInfo {
+  class IndirectionInfoTyped : public IndirectionInfoBase {
   public:
     IndirectionInfoTyped(const IndexSpace<N,T>& is,
 			 const typename CopyIndirection<N,T>::template Unstructured<N2,T2>& ind);
 
     virtual Event request_metadata(void);
-    virtual Memory generate_gather_paths(Memory dst_mem, int dst_edge_id,
-					 size_t bytes_per_element,
-					 CustomSerdezID serdez_id,
-					 std::vector<CopyRequest::XDTemplate>& xd_nodes,
-					 std::vector<IBInfo>& ib_edges);
-
-    virtual Memory generate_scatter_paths(Memory src_mem, int src_edge_id,
-					  size_t bytes_per_element,
-					  CustomSerdezID serdez_id,
-					  std::vector<CopyRequest::XDTemplate>& xd_nodes,
-					  std::vector<IBInfo>& ib_edges);
 
     virtual RegionInstance get_pointer_instance(void) const;
 
@@ -2027,31 +2883,26 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
+  protected:
+    virtual size_t num_spaces() const;
+
+    virtual size_t address_size() const;
+
+    virtual XferDesFactory *create_addrsplit_factory(size_t bytes_per_element) const;
+
     IndexSpace<N,T> domain;
-    bool structured;
-    FieldID field_id;
-    RegionInstance inst;
-    bool is_ranges;
-    bool oor_possible;
-    bool aliasing_possible;
-    size_t subfield_offset;
     std::vector<IndexSpace<N2,T2> > spaces;
-    std::vector<RegionInstance> insts;
   };
 
   template <int N, typename T, int N2, typename T2>
   IndirectionInfoTyped<N,T,N2,T2>::IndirectionInfoTyped(const IndexSpace<N,T>& is,
 							const typename CopyIndirection<N,T>::template Unstructured<N2,T2>& ind)
-    : domain(is)
-    , structured(false)
-    , field_id(ind.field_id)
-    , inst(ind.inst)
-    , is_ranges(ind.is_ranges)
-    , oor_possible(ind.oor_possible)
-    , aliasing_possible(ind.aliasing_possible)
-    , subfield_offset(ind.subfield_offset)
+    : IndirectionInfoBase(false /*!structured*/,
+                          ind.field_id, ind.inst, ind.is_ranges,
+                          ind.oor_possible, ind.aliasing_possible,
+                          ind.subfield_offset, ind.insts)
+    , domain(is)
     , spaces(ind.spaces)
-    , insts(ind.insts)
   {}
 
   template <int N, typename T, int N2, typename T2>
@@ -2076,589 +2927,25 @@ namespace Realm {
     return Event::merge_events(evs);
   }
 
-  // adds a memory path to the DAG, optionally skipping a final memcpy
-  static int add_copy_path(std::vector<CopyRequest::XDTemplate>& xd_nodes,
-			   std::vector<IBInfo>& ib_edges,
-			   int start_edge,
-			   const MemPathInfo& info,
-			   bool skip_final_memcpy)
-  {
-    size_t hops = info.xd_kinds.size();
-    if(skip_final_memcpy &&
-       (info.xd_kinds[hops - 1] == XFER_MEM_CPY))
-      hops -= 1;
-
-    if(hops == 0) {
-      // no xd's needed at all - return input edge as output
-      return start_edge;
-    }
-
-    size_t xd_base = xd_nodes.size();
-    size_t ib_base = ib_edges.size();
-    xd_nodes.resize(xd_base + hops);
-    ib_edges.resize(ib_base + hops);
-    for(size_t i = 0; i < hops; i++) {
-      xd_nodes[xd_base + i].set_simple(info.xd_target_nodes[i],
-				       info.xd_kinds[i],
-				       (i == 0) ? start_edge :
-				                  (ib_base + i - 1),
-				       ib_base + i);
-      ib_edges[ib_base + i].set(info.path[i + 1],
-				65536); // TODO: pick size?
-    }
-
-    // last edge we created is the output
-    return (ib_base + hops - 1);
-  }
-
-  
   template <int N, typename T, int N2, typename T2>
-  Memory IndirectionInfoTyped<N,T,N2,T2>::generate_gather_paths(Memory dst_mem,
-								int dst_edge_id,
-								size_t bytes_per_element,
-								CustomSerdezID serdez_id,
-								std::vector<CopyRequest::XDTemplate>& xd_nodes,
-								std::vector<IBInfo>& ib_edges)
+  size_t IndirectionInfoTyped<N,T,N2,T2>::num_spaces() const
   {
-    // compute the paths from each src data instance and the dst instance
-    std::vector<size_t> path_idx;
-    std::vector<MemPathInfo> path_infos;
-    path_idx.reserve(spaces.size());
-    for(size_t i = 0; i < insts.size(); i++) {
-      size_t idx = path_infos.size();
-      for(size_t j = 0; j < i; j++)
-	if(insts[i].get_location() == insts[j].get_location()) {
-	  idx = path_idx[j];
-	  break;
-	}
-
-      path_idx.push_back(idx);
-      if(idx >= path_infos.size()) {
-	// new path to compute
-	path_infos.resize(idx + 1);
-	bool ok = find_shortest_path(insts[i].get_location(),
-				     dst_mem,
-				     serdez_id,
-				     path_infos[idx]);
-	assert(ok);
-      }
-    }
-
-    // special case - a gather from a single source with no out of range
-    //  accesses
-    if((spaces.size() == 1) && !oor_possible) {
-      size_t pathlen = path_infos[0].xd_kinds.size();
-      // HACK!
-      Memory local_ib_mem = ID::make_ib_memory(path_infos[0].xd_target_nodes[0], 0).convert<Memory>();
-      // do we have to do anything to get the addresses into a cpu-readable
-      //  memory on that node?
-      MemPathInfo addr_path;
-      bool ok = find_shortest_path(inst.get_location(),
-				   local_ib_mem,
-				   0 /*no serdez*/,
-				   addr_path);
-      assert(ok);
-      int addr_edge = add_copy_path(xd_nodes, ib_edges,
-				    CopyRequest::XDTemplate::SRC_INST,
-				    addr_path, true /*skip_memcpy*/);
-
-      size_t xd_idx = xd_nodes.size();
-      size_t ib_idx = ib_edges.size();
-      xd_nodes.resize(xd_idx + pathlen);
-      ib_edges.resize(ib_idx + pathlen - 1);
-
-      for(size_t i = 0; i < pathlen; i++) {
-	xd_nodes[xd_idx+i].target_node = path_infos[0].xd_target_nodes[i];
-	xd_nodes[xd_idx+i].kind = path_infos[0].xd_kinds[i];
-	xd_nodes[xd_idx+i].factory = get_xd_factory_by_kind(path_infos[0].xd_kinds[i]);
-	xd_nodes[xd_idx+i].gather_control_input = -1;
-	xd_nodes[xd_idx+i].scatter_control_input = -1;
-	if(i == 0) {
-	  xd_nodes[xd_idx+i].inputs.resize(2);
-	  xd_nodes[xd_idx+i].inputs[0].edge_id = CopyRequest::XDTemplate::INDIRECT_BASE - 1;
-	  xd_nodes[xd_idx+i].inputs[0].indirect_inst = insts[0];
-	  xd_nodes[xd_idx+i].inputs[1].edge_id = addr_edge;
-	  xd_nodes[xd_idx+i].inputs[1].indirect_inst = RegionInstance::NO_INST;
-	} else {
-	  xd_nodes[xd_idx+i].inputs.resize(1);
-	  xd_nodes[xd_idx+i].inputs[0].edge_id = ib_idx + (i - 1);
-	  xd_nodes[xd_idx+i].inputs[0].indirect_inst = RegionInstance::NO_INST;
-	}
-	if(i == (pathlen - 1)) {
-	  xd_nodes[xd_idx+i].outputs.resize(1);
-	  xd_nodes[xd_idx+i].outputs[0].edge_id = dst_edge_id;
-	  xd_nodes[xd_idx+i].outputs[0].indirect_inst = RegionInstance::NO_INST;
-	} else {
-	  xd_nodes[xd_idx+i].outputs.resize(1);
-	  xd_nodes[xd_idx+i].outputs[0].edge_id = ib_idx + i;
-	  xd_nodes[xd_idx+i].outputs[0].indirect_inst = RegionInstance::NO_INST;
-
-	  ib_edges[ib_idx+i].set(path_infos[0].path[i + 1],
-				 1 << 20 /*TODO*/);
-	}
-      }
-    } else {
-      // step 1: we need the address decoder, possibly with some hops to get
-      //  the data to where a cpu can look at it
-      NodeID addr_node = ID(inst).instance_owner_node();
-      // HACK!
-      Memory addr_ib_mem = ID::make_ib_memory(addr_node, 0).convert<Memory>();
-      MemPathInfo addr_path;
-      bool ok = find_shortest_path(inst.get_location(),
-				   addr_ib_mem,
-				   0 /*no serdez*/,
-				   addr_path);
-      assert(ok);
-      int addr_edge = add_copy_path(xd_nodes, ib_edges,
-				    CopyRequest::XDTemplate::SRC_INST,
-				    addr_path, true /*skip_memcpy*/);
-      std::vector<int> decoded_addr_edges(spaces.size(), -1);
-      int ctrl_edge = -1;
-      {
-	// instantiate decoder
-	size_t xd_base = xd_nodes.size();
-	size_t ib_base = ib_edges.size();
-	xd_nodes.resize(xd_base + 1);
-	ib_edges.resize(ib_base + spaces.size() + 1);
-	xd_nodes[xd_base].target_node = addr_node;
-	xd_nodes[xd_base].kind = XFER_ADDR_SPLIT;
-	assert(!is_ranges && "need range address splitter");
-	xd_nodes[xd_base].factory = new AddressSplitXferDesFactory<N2,T2>(bytes_per_element,
-									  spaces);
-	xd_nodes[xd_base].gather_control_input = -1;
-	xd_nodes[xd_base].scatter_control_input = -1;
-	xd_nodes[xd_base].inputs.resize(1);
-	xd_nodes[xd_base].inputs[0].edge_id = addr_edge;
-	xd_nodes[xd_base].inputs[0].indirect_inst = RegionInstance::NO_INST;
-	xd_nodes[xd_base].outputs.resize(spaces.size() + 1);
-	for(size_t i = 0; i < spaces.size(); i++) {
-	  xd_nodes[xd_base].outputs[i].edge_id = ib_base + i;
-	  xd_nodes[xd_base].outputs[i].indirect_inst = RegionInstance::NO_INST;
-	  ib_edges[ib_base + i].set(addr_ib_mem, 65536); // TODO
-	  decoded_addr_edges[i] = ib_base + i;
-	}
-	xd_nodes[xd_base].outputs[spaces.size()].edge_id = ib_base + spaces.size();
-	xd_nodes[xd_base].outputs[spaces.size()].indirect_inst = RegionInstance::NO_INST;
-	ib_edges[ib_base + spaces.size()].set(addr_ib_mem, 65536); // TODO
-	ctrl_edge = ib_base + spaces.size();
-      }
-
-      // next, see what work we need to get the addresses to where the
-      //  data instances live
-      for(size_t i = 0; i < spaces.size(); i++) {
-	// HACK!
-	Memory src_ib_mem = ID::make_ib_memory(ID(insts[i]).instance_owner_node(), 0).convert<Memory>();
-	if(src_ib_mem != addr_ib_mem) {
-	  MemPathInfo path;
-	  bool ok = find_shortest_path(addr_ib_mem, src_ib_mem,
-				       0 /*no serdez*/,
-				       path);
-	  assert(ok);
-	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
-						decoded_addr_edges[i],
-						path, false /*!skip_memcpy*/);
-	}
-      }
-
-      // control information has to get to the merge at the end
-      // HACK!
-      NodeID dst_node = ID(dst_mem).memory_owner_node();
-      Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
-      if(dst_ib_mem != addr_ib_mem) {
-	MemPathInfo path;
-	bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
-				     0 /*no serdez*/,
-				     path);
-	assert(ok);
-	ctrl_edge = add_copy_path(xd_nodes, ib_edges,
-				  ctrl_edge,
-				  path, false /*!skip_memcpy*/);
-      }
-
-      // next complication: if all the data paths don't use the same final
-      //  step, we need to force them to go through an intermediate
-      // also insist that the final step be owned by the destination node
-      //  (i.e. the merging should not be done via rdma)
-      XferDesKind last_kind = path_infos[0].xd_kinds[path_infos[0].xd_kinds.size() - 1];
-      bool same_last_kind = true;
-      for(size_t i = 0; i < path_infos.size(); i++) {
-	if(path_infos[i].xd_kinds[path_infos[i].xd_kinds.size() - 1] !=
-	   last_kind) {
-	  same_last_kind = false;
-	  break;
-	}
-	if(path_infos[i].xd_target_nodes[path_infos[i].xd_kinds.size() - 1] != dst_node) {
-	  same_last_kind = false;
-	  break;
-	}
-      }
-      if(!same_last_kind) {
-	// figure out what the final kind will be (might not be the same as
-	//  any of the current paths)
-	MemPathInfo tail_path;
-	bool ok = find_shortest_path(dst_ib_mem, dst_mem,
-				     serdez_id, tail_path);
-	assert(ok && (tail_path.xd_kinds.size() == 1));
-	last_kind = tail_path.xd_kinds[0];
-	// and fix any path that doesn't use that kind
-	for(size_t i = 0; i < path_infos.size(); i++) {
-	  if(path_infos[i].xd_kinds[path_infos[i].xd_kinds.size() - 1] ==
-	     last_kind) continue;
-	  log_new_dma.print() << "fix " << i << " " << path_infos[i].path[0] << " -> " << dst_ib_mem;
-	  bool ok = find_shortest_path(path_infos[i].path[0], dst_ib_mem,
-				       0 /*no serdez*/, path_infos[i]);
-	  assert(ok);
-	  // append last step
-	  path_infos[i].xd_kinds.push_back(last_kind);
-	  path_infos[i].path.push_back(dst_mem);
-	  path_infos[i].xd_target_nodes.push_back(ID(dst_mem).memory_owner_node());
-	}
-      }
-
-      // now any data paths with more than one hop need all but the last hop
-      //  added to the graph
-      std::vector<int> data_edges(spaces.size(), -1);
-      for(size_t i = 0; i < spaces.size(); i++) {
-	const MemPathInfo& mpi = path_infos[path_idx[i]];
-	size_t hops = mpi.xd_kinds.size() - 1;
-	if(hops > 0) {
-	  size_t xd_base = xd_nodes.size();
-	  size_t ib_base = ib_edges.size();
-	  xd_nodes.resize(xd_base + hops);
-	  ib_edges.resize(ib_base + hops);
-	  for(size_t j = 0; j < hops; j++) {
-	    xd_nodes[xd_base + j].set_simple(mpi.xd_target_nodes[j],
-					     mpi.xd_kinds[j],
-					     (j == 0) ? 0 /*fixed below*/ :
-					                (ib_base + j - 1),
-					     ib_base + j);
-	    if(j == 0) {
-	      xd_nodes[xd_base + j].inputs.resize(2);
-	      xd_nodes[xd_base + j].inputs[0].edge_id = CopyRequest::XDTemplate::INDIRECT_BASE - 1;
-	      xd_nodes[xd_base + j].inputs[0].indirect_inst = insts[i];
-	      xd_nodes[xd_base + j].inputs[1].edge_id = decoded_addr_edges[i];
-	      xd_nodes[xd_base + j].inputs[1].indirect_inst = RegionInstance::NO_INST;
-	    }
-	    ib_edges[ib_base + j].set(mpi.path[j + 1],
-				      65536); // TODO: pick size?
-	  }
-	  data_edges[i] = ib_base + hops - 1;
-	}
-      }
-
-      // and finally the last xd that merges the streams together
-      size_t xd_idx = xd_nodes.size();
-      xd_nodes.resize(xd_idx + 1);
-
-      xd_nodes[xd_idx].target_node = ID(dst_mem).memory_owner_node();
-      xd_nodes[xd_idx].kind = last_kind;
-      xd_nodes[xd_idx].factory = get_xd_factory_by_kind(last_kind);
-      xd_nodes[xd_idx].gather_control_input = spaces.size();
-      xd_nodes[xd_idx].scatter_control_input = -1;
-      xd_nodes[xd_idx].outputs.resize(1);
-      xd_nodes[xd_idx].outputs[0].edge_id = dst_edge_id;
-      xd_nodes[xd_idx].outputs[0].indirect_inst = RegionInstance::NO_INST;
-      xd_nodes[xd_idx].inputs.resize(spaces.size() + 1);
-
-      for(size_t i = 0; i < spaces.size(); i++) {
-	// can we read (indirectly) right from the source instance?
-	if(path_infos[path_idx[i]].xd_kinds.size() == 1) {
-	  int ind_idx = xd_nodes[xd_idx].inputs.size();
-	  xd_nodes[xd_idx].inputs.resize(ind_idx + 1);
-	  xd_nodes[xd_idx].inputs[i].edge_id = CopyRequest::XDTemplate::INDIRECT_BASE - ind_idx;
-	  xd_nodes[xd_idx].inputs[i].indirect_inst = insts[i];
-	  xd_nodes[xd_idx].inputs[ind_idx].edge_id = decoded_addr_edges[i];
-	  xd_nodes[xd_idx].inputs[ind_idx].indirect_inst = RegionInstance::NO_INST;
-	} else {
-	  assert(data_edges[i] >= 0);
-	  xd_nodes[xd_idx].inputs[i].edge_id = data_edges[i];
-	  xd_nodes[xd_idx].inputs[i].indirect_inst = RegionInstance::NO_INST;
-	}
-      }
-
-      // control input
-      xd_nodes[xd_idx].inputs[spaces.size()].edge_id = ctrl_edge;
-      xd_nodes[xd_idx].inputs[spaces.size()].indirect_inst = RegionInstance::NO_INST;      
-    }
-    return Memory::NO_MEMORY;
+    return spaces.size();
   }
 
   template <int N, typename T, int N2, typename T2>
-  Memory IndirectionInfoTyped<N,T,N2,T2>::generate_scatter_paths(Memory src_mem,
-								 int src_edge_id,
-								 size_t bytes_per_element,
-								 CustomSerdezID serdez_id,
-								 std::vector<CopyRequest::XDTemplate>& xd_nodes,
-								 std::vector<IBInfo>& ib_edges)
+  size_t IndirectionInfoTyped<N,T,N2,T2>::address_size() const
   {
-    // compute the paths from the src instance to each dst data instance
-    std::vector<size_t> path_idx;
-    std::vector<MemPathInfo> path_infos;
-    path_idx.reserve(spaces.size());
-    for(size_t i = 0; i < insts.size(); i++) {
-      size_t idx = path_infos.size();
-      for(size_t j = 0; j < i; j++)
-	if(insts[i].get_location() == insts[j].get_location()) {
-	  idx = path_idx[j];
-	  break;
-	}
+    return (is_ranges ?
+              sizeof(Rect<N2,T2>) :
+              sizeof(Point<N2,T2>));
+  }
 
-      path_idx.push_back(idx);
-      if(idx >= path_infos.size()) {
-	// new path to compute
-	path_infos.resize(idx + 1);
-	bool ok = find_shortest_path(src_mem,
-				     insts[i].get_location(),
-				     serdez_id,
-				     path_infos[idx]);
-	assert(ok);
-      }
-    }
-
-    // special case - a scatter to a single destination with no out of
-    //  range accesses
-    if((spaces.size() == 1) && !oor_possible) {
-      size_t pathlen = path_infos[0].xd_kinds.size();
-      // HACK!
-      Memory local_ib_mem = ID::make_ib_memory(path_infos[0].xd_target_nodes[pathlen - 1], 0).convert<Memory>();
-      // do we have to do anything to get the addresses into a cpu-readable
-      //  memory on that node?
-      MemPathInfo addr_path;
-      bool ok = find_shortest_path(inst.get_location(),
-				   local_ib_mem,
-				   0 /*no serdez*/,
-				   addr_path);
-      assert(ok);
-      int addr_edge = add_copy_path(xd_nodes, ib_edges,
-				    CopyRequest::XDTemplate::DST_INST,
-				    addr_path, true /*skip_memcpy*/);
-
-      size_t xd_idx = xd_nodes.size();
-      size_t ib_idx = ib_edges.size();
-      xd_nodes.resize(xd_idx + pathlen);
-      ib_edges.resize(ib_idx + pathlen - 1);
-
-      for(size_t i = 0; i < pathlen; i++) {
-	xd_nodes[xd_idx+i].target_node = path_infos[0].xd_target_nodes[i];
-	xd_nodes[xd_idx+i].kind = path_infos[0].xd_kinds[i];
-	xd_nodes[xd_idx+i].factory = get_xd_factory_by_kind(path_infos[0].xd_kinds[i]);
-	xd_nodes[xd_idx+i].gather_control_input = -1;
-	xd_nodes[xd_idx+i].scatter_control_input = -1;
-	if(i == (pathlen - 1)) {
-	  xd_nodes[xd_idx+i].inputs.resize(2);
-	  xd_nodes[xd_idx+i].inputs[1].edge_id = addr_edge;
-	  xd_nodes[xd_idx+i].inputs[1].indirect_inst = RegionInstance::NO_INST;
-	} else {
-	  xd_nodes[xd_idx+i].inputs.resize(1);
-	}
-	xd_nodes[xd_idx+i].inputs[0].edge_id = ((i == 0) ? src_edge_id :
-						           (ib_idx + i - 1));
-	xd_nodes[xd_idx+i].inputs[0].indirect_inst = RegionInstance::NO_INST;
-
-	if(i == (pathlen - 1)) {
-	  xd_nodes[xd_idx+i].outputs.resize(1);
-	  xd_nodes[xd_idx+i].outputs[0].edge_id = CopyRequest::XDTemplate::INDIRECT_BASE - 1;
-	  xd_nodes[xd_idx+i].outputs[0].indirect_inst = insts[0];
-	} else {
-	  xd_nodes[xd_idx+i].outputs.resize(1);
-	  xd_nodes[xd_idx+i].outputs[0].edge_id = ib_idx + i;
-	  xd_nodes[xd_idx+i].outputs[0].indirect_inst = RegionInstance::NO_INST;
-
-	  ib_edges[ib_idx+i].set(path_infos[0].path[i + 1],
-				 1 << 20 /*TODO*/);
-	}
-      }
-    } else {
-      // step 1: we need the address decoder, possibly with some hops to get
-      //  the data to where a cpu can look at it
-      NodeID addr_node = ID(inst).instance_owner_node();
-      // HACK!
-      Memory addr_ib_mem = ID::make_ib_memory(addr_node, 0).convert<Memory>();
-      MemPathInfo addr_path;
-      bool ok = find_shortest_path(inst.get_location(),
-				   addr_ib_mem,
-				   0 /*no serdez*/,
-				   addr_path);
-      assert(ok);
-      int addr_edge = add_copy_path(xd_nodes, ib_edges,
-				    CopyRequest::XDTemplate::DST_INST,
-				    addr_path, true /*skip_memcpy*/);
-      std::vector<int> decoded_addr_edges(spaces.size(), -1);
-      int ctrl_edge = -1;
-      {
-	// instantiate decoder
-	size_t xd_base = xd_nodes.size();
-	size_t ib_base = ib_edges.size();
-	xd_nodes.resize(xd_base + 1);
-	ib_edges.resize(ib_base + spaces.size() + 1);
-	xd_nodes[xd_base].target_node = addr_node;
-	xd_nodes[xd_base].kind = XFER_ADDR_SPLIT;
-	assert(!is_ranges && "need range address splitter");
-	xd_nodes[xd_base].factory = new AddressSplitXferDesFactory<N2,T2>(bytes_per_element,
-									  spaces);
-	xd_nodes[xd_base].gather_control_input = -1;
-	xd_nodes[xd_base].scatter_control_input = -1;
-	xd_nodes[xd_base].inputs.resize(1);
-	xd_nodes[xd_base].inputs[0].edge_id = addr_edge;
-	xd_nodes[xd_base].inputs[0].indirect_inst = RegionInstance::NO_INST;
-	xd_nodes[xd_base].outputs.resize(spaces.size() + 1);
-	for(size_t i = 0; i < spaces.size(); i++) {
-	  xd_nodes[xd_base].outputs[i].edge_id = ib_base + i;
-	  xd_nodes[xd_base].outputs[i].indirect_inst = RegionInstance::NO_INST;
-	  ib_edges[ib_base + i].set(addr_ib_mem, 65536); // TODO
-	  decoded_addr_edges[i] = ib_base + i;
-	}
-	xd_nodes[xd_base].outputs[spaces.size()].edge_id = ib_base + spaces.size();
-	xd_nodes[xd_base].outputs[spaces.size()].indirect_inst = RegionInstance::NO_INST;
-	ib_edges[ib_base + spaces.size()].set(addr_ib_mem, 65536); // TODO
-	ctrl_edge = ib_base + spaces.size();
-      }
-
-      // next, see what work we need to get the addresses to where the
-      //  last step of each path is running
-      for(size_t i = 0; i < spaces.size(); i++) {
-	// HACK!
-	NodeID dst_node = path_infos[path_idx[i]].xd_target_nodes[path_infos[path_idx[i]].xd_target_nodes.size() - 1];
-	Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
-	if(dst_ib_mem != addr_ib_mem) {
-	  MemPathInfo path;
-	  bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
-				       0 /*no serdez*/,
-				       path);
-	  assert(ok);
-	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
-						decoded_addr_edges[i],
-						path, false /*!skip_memcpy*/);
-	}
-      }
-
-      // control information has to get to the split at the start
-      // HACK!
-      Memory src_ib_mem = ID::make_ib_memory(ID(src_mem).memory_owner_node(), 0).convert<Memory>();
-      if(src_ib_mem != addr_ib_mem) {
-	MemPathInfo path;
-	bool ok = find_shortest_path(addr_ib_mem, src_ib_mem,
-				     0 /*no serdez*/,
-				     path);
-	assert(ok);
-	ctrl_edge = add_copy_path(xd_nodes, ib_edges,
-				  ctrl_edge,
-				  path, false /*!skip_memcpy*/);
-      }
-
-      // next complication: if all the data paths don't use the same first
-      //  step, we need to force them to go through an intermediate
-      XferDesKind first_kind = path_infos[0].xd_kinds[0];
-      bool same_first_kind = true;
-      for(size_t i = 1; i < path_infos.size(); i++)
-	if(path_infos[i].xd_kinds[0] != first_kind) {
-	  same_first_kind = false;
-	  break;
-	}
-      if(!same_first_kind) {
-	// figure out what the first kind will be (might not be the same as
-	//  any of the current paths)
-	MemPathInfo head_path;
-	bool ok = find_shortest_path(src_mem, src_ib_mem,
-				     serdez_id, head_path);
-	assert(ok && (head_path.xd_kinds.size() == 1));
-	first_kind = head_path.xd_kinds[0];
-	// and fix any path that doesn't use that kind
-	for(size_t i = 0; i < path_infos.size(); i++) {
-	  if(path_infos[i].xd_kinds[0] == first_kind) continue;
-
-	  bool ok = find_shortest_path(src_ib_mem,
-				       path_infos[i].path[path_infos[i].path.size() - 1],
-				       0 /*no serdez*/, path_infos[i]);
-	  assert(ok);
-	  // prepend last step
-	  path_infos[i].xd_kinds.insert(path_infos[i].xd_kinds.begin(),
-					first_kind);
-	  path_infos[i].path.insert(path_infos[i].path.begin(), src_mem);
-	  path_infos[i].xd_target_nodes.insert(path_infos[i].xd_target_nodes.begin(),
-					       ID(src_mem).memory_owner_node());
-	}
-      }
-
-      // next comes the xd that reads the source and splits the data into
-      //  the various output streams
-      std::vector<int> data_edges(spaces.size(), -1);
-      {
-	size_t xd_idx = xd_nodes.size();
-	xd_nodes.resize(xd_idx + 1);
-
-	xd_nodes[xd_idx].target_node = ID(src_mem).memory_owner_node();
-	xd_nodes[xd_idx].kind = first_kind;
-	xd_nodes[xd_idx].factory = get_xd_factory_by_kind(first_kind);
-	xd_nodes[xd_idx].gather_control_input = -1;
-	xd_nodes[xd_idx].scatter_control_input = 1;
-	xd_nodes[xd_idx].inputs.resize(2);
-	xd_nodes[xd_idx].inputs[0].edge_id = src_edge_id;
-	xd_nodes[xd_idx].inputs[0].indirect_inst = RegionInstance::NO_INST;
-	xd_nodes[xd_idx].inputs[1].edge_id = ctrl_edge;
-	xd_nodes[xd_idx].inputs[1].indirect_inst = RegionInstance::NO_INST;
-	xd_nodes[xd_idx].outputs.resize(spaces.size());
-
-	for(size_t i = 0; i < spaces.size(); i++) {
-	  // can we write (indirectly) right into the dest instance?
-	  if(path_infos[path_idx[i]].xd_kinds.size() == 1) {
-	    int ind_idx = xd_nodes[xd_idx].inputs.size();
-	    xd_nodes[xd_idx].inputs.resize(ind_idx + 1);
-	    xd_nodes[xd_idx].outputs[i].edge_id = CopyRequest::XDTemplate::INDIRECT_BASE - ind_idx;
-	    xd_nodes[xd_idx].outputs[i].indirect_inst = insts[i];
-	    xd_nodes[xd_idx].inputs[ind_idx].edge_id = decoded_addr_edges[i];
-	    xd_nodes[xd_idx].inputs[ind_idx].indirect_inst = RegionInstance::NO_INST;
-	  } else {
-	    // need an ib to write to
-	    size_t ib_idx = ib_edges.size();
-	    ib_edges.resize(ib_idx + 1);
-	    data_edges[i] = ib_idx;
-	    xd_nodes[xd_idx].outputs[i].edge_id = data_edges[i];
-	    xd_nodes[xd_idx].outputs[i].indirect_inst = RegionInstance::NO_INST;
-	    ib_edges[ib_idx].set(path_infos[path_idx[i]].path[1],
-				 65536); // TODO: pick size?
-	  }
-	}
-
-	// control input
-	xd_nodes[xd_idx].inputs[1].edge_id = ctrl_edge;
-	xd_nodes[xd_idx].inputs[1].indirect_inst = RegionInstance::NO_INST;
-      }
-
-      // finally, any data paths with more than one hop need the rest of
-      //  their path added to the graph
-      for(size_t i = 0; i < spaces.size(); i++) {
-	const MemPathInfo& mpi = path_infos[path_idx[i]];
-	size_t hops = mpi.xd_kinds.size() - 1;
-	if(hops > 0) {
-	  assert(data_edges[i] >= 0);
-	  
-	  size_t xd_base = xd_nodes.size();
-	  size_t ib_base = ib_edges.size();
-	  xd_nodes.resize(xd_base + hops);
-	  ib_edges.resize(ib_base + hops - 1);
-	  for(size_t j = 0; j < hops; j++) {
-	    xd_nodes[xd_base + j].set_simple(mpi.xd_target_nodes[j + 1],
-					     mpi.xd_kinds[j + 1],
-					     (j == 0) ? data_edges[i] :
-					                (ib_base + j - 1),
-					     ib_base + j);
-	    if(j < hops - 1) {
-	      ib_edges[ib_base + j].set(mpi.path[j + 2],
-					65536); // TODO: pick size?
-	    } else {
-	      // last hop uses the address stream
-	      xd_nodes[xd_base + j].inputs.resize(2);
-	      xd_nodes[xd_base + j].inputs[1].edge_id = decoded_addr_edges[i];
-	      xd_nodes[xd_base + j].inputs[1].indirect_inst = RegionInstance::NO_INST;
-	      xd_nodes[xd_base + j].outputs[0].edge_id = CopyRequest::XDTemplate::INDIRECT_BASE - 1;
-	      xd_nodes[xd_base + j].outputs[0].indirect_inst = insts[i];
-	    }
-	  }
-	}
-      }
-    }
-    return Memory::NO_MEMORY;
+  template <int N, typename T, int N2, typename T2>
+  XferDesFactory *IndirectionInfoTyped<N,T,N2,T2>::create_addrsplit_factory(size_t bytes_per_element) const
+  {
+    return new AddressSplitXferDesFactory<N2,T2>(bytes_per_element,
+                                                 spaces);
   }
 
   template <int N, typename T, int N2, typename T2>
@@ -2723,357 +3010,1156 @@ namespace Realm {
     return new IndirectionInfoTyped<N,T,N2,T2>(is, *this);
   }
 
-  class TransferPlan {
-  protected:
-    // subclasses constructed in plan_* calls below
-    TransferPlan(void) {}
 
-  public:
-    virtual ~TransferPlan(void) {}
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferDesc
+  //
 
-    static bool plan_copy(std::vector<TransferPlan *>& plans,
-			  const std::vector<CopySrcDstField> &srcs,
-			  const std::vector<CopySrcDstField> &dsts,
-			  ReductionOpID redop_id = 0, bool red_fold = false);
-
-    static bool plan_fill(std::vector<TransferPlan *>& plans,
-			  const std::vector<CopySrcDstField> &dsts,
-			  const void *fill_value, size_t fill_value_size);
-
-    virtual void execute_plan() = 0;
-
-    virtual Event create_plan(const TransferDomain *td,
-                              const ProfilingRequestSet& requests,
-                              Event wait_on, int priority) = 0;
-
-  };
-
-  class TransferPlanCopy : public TransferPlan {
-  public:
-    TransferPlanCopy(OASByInst *_oas_by_inst,
-		     IndirectionInfo *_gather_info,
-		     IndirectionInfo *_scatter_info);
-    virtual ~TransferPlanCopy(void);
-
-    virtual void execute_plan();
-
-    virtual Event create_plan(const TransferDomain *td,
-                              const ProfilingRequestSet& requests,
-                              Event wait_on, int priority);
-  protected:
-    OASByInst *oas_by_inst;
-    IndirectionInfo *gather_info;
-    IndirectionInfo *scatter_info;
-    Event ev;
-    CopyRequest *r;
-  };
-
-  TransferPlanCopy::TransferPlanCopy(OASByInst *_oas_by_inst,
-				     IndirectionInfo *_gather_info,
-				     IndirectionInfo *_scatter_info)
-    : oas_by_inst(_oas_by_inst)
-    , gather_info(_gather_info)
-    , scatter_info(_scatter_info)
-    , ev(Event::NO_EVENT)
-    , r(NULL)
-  {}
-
-  TransferPlanCopy::~TransferPlanCopy(void)
+  TransferDesc::~TransferDesc()
   {
-    delete oas_by_inst;
-    delete gather_info;
-    delete scatter_info;
+    log_xplan.info() << "destroyed: plan=" << (void *)this;
+
+    delete domain;
+    for(size_t i = 0; i < indirects.size(); i++)
+      delete indirects[i];
+    if(fill_data)
+      free(fill_data);
   }
 
-  class TransferProfile {
-    CopyProfile *r;
-  public:
-    TransferProfile(): r(NULL) {}
-
-    void add_reduc_entry(const CopySrcDstField &src,
-                         const CopySrcDstField &dst,
-                         const TransferDomain *td)
-    {
-      assert(r != NULL);
-      r->add_reduc_entry(src,dst,td);
-    }
-
-    void add_fill_entry(const CopySrcDstField &dst, const TransferDomain *td)
-    {
-      assert(r != NULL);
-      r->add_fill_entry(dst,td);
-    }
-
-    void add_copy_entry(const OASByInst *oas_by_inst,const TransferDomain *td, bool is_src_indirect, bool is_dst_indirect)
-    {
-      assert(r != NULL);
-      r->add_copy_entry(oas_by_inst, td, is_src_indirect, is_dst_indirect);
-    }
-
-    Event create_profile(const ProfilingRequestSet &requests)
-    {
-      GenEventImpl *after_copy = GenEventImpl::create_genevent();
-      Event ev = after_copy->current_event();
-      EventImpl::gen_t after_gen = ID(ev).event_generation();
-      r = new CopyProfile(after_copy,
-                          after_gen, 0, requests);
-      get_runtime()->optable.add_local_operation(ev, r);
-      return ev;
-    }
-
-    void execute_plan() { assert(0); return; }
-    Event create_plan(const TransferDomain *td,
-                      const ProfilingRequestSet& requests,
-                      Event wait_on, int priority)
-    { assert(0); return Event::NO_EVENT; }
-    void execute(Event end_copy, Event start_copy)
-    {
-      assert(r != NULL);
-      r->set_end_copy(end_copy);
-      r->set_start_copy(start_copy);
-      r->check_readiness();
-    }
-    ~TransferProfile() {}
-  };
-
-
-#ifdef MIGRATE_COPY_REQUESTS
-  static NodeID select_dma_node(Memory src_mem, Memory dst_mem,
-				       ReductionOpID redop_id, bool red_fold)
+  bool TransferDesc::request_analysis(TransferOperation *op)
   {
-    NodeID src_node = ID(src_mem).memory_owner_node();
-    NodeID dst_node = ID(dst_mem).memory_owner_node();
+    // early out without lock
+    if(analysis_complete.load_acquire())
+      return true;
 
-    bool src_is_rdma = get_runtime()->get_memory_impl(src_mem)->kind == MemoryImpl::MKIND_GLOBAL;
-    bool dst_is_rdma = get_runtime()->get_memory_impl(dst_mem)->kind == MemoryImpl::MKIND_GLOBAL;
-
-    if(src_is_rdma) {
-      if(dst_is_rdma) {
-	// gasnet -> gasnet - blech
-	log_dma.warning("WARNING: gasnet->gasnet copy being serialized on local node (%d)", Network::my_node_id);
-	return Network::my_node_id;
-      } else {
-	// gathers by the receiver
-	return dst_node;
-      }
+    AutoLock<> al(mutex);
+    if(analysis_complete.load()) {
+      return true;
     } else {
-      if(dst_is_rdma) {
-	// writing to gasnet is also best done by the sender
-	return src_node;
-      } else {
-	// if neither side is gasnet, favor the sender (which may be the same as the target)
-	return src_node;
+      pending_ops.push_back(op);
+      return false;
+    }
+  }
+
+  void TransferDesc::check_analysis_preconditions()
+  {
+    log_xplan.info() << "created: plan=" << (void *)this << " domain=" << *domain << " srcs=" << srcs.size() << " dsts=" << dsts.size();
+    if(log_xplan.want_debug()) {
+      for(size_t i = 0; i < srcs.size(); i++)
+	log_xplan.debug() << "created: plan=" << (void *)this << " srcs[" << i << "]=" << srcs[i];
+      for(size_t i = 0; i < dsts.size(); i++)
+	log_xplan.debug() << "created: plan=" << (void *)this << " dsts[" << i << "]=" << dsts[i];
+      for(size_t i = 0; i < indirects.size(); i++)
+	log_xplan.debug() << "created: plan=" << (void *)this << " indirects[" << i << "]=" << *indirects[i];
+    }
+
+    std::vector<Event> preconditions;
+
+    // we need metadata for the domain and every instance
+    {
+      Event e = domain->request_metadata();
+      if(e.exists()) preconditions.push_back(e);
+    }
+
+    std::set<RegionInstance> insts_seen;
+    for(size_t i = 0; i < srcs.size(); i++)
+      if(srcs[i].inst.exists()) {
+	if(insts_seen.count(srcs[i].inst) > 0) continue;
+	insts_seen.insert(srcs[i].inst);
+	RegionInstanceImpl *impl = get_runtime()->get_instance_impl(srcs[i].inst);
+	Event e = impl->request_metadata();
+	if(e.exists()) preconditions.push_back(e);
+      }
+
+    for(size_t i = 0; i < dsts.size(); i++)
+      if(dsts[i].inst.exists()) {
+	if(insts_seen.count(dsts[i].inst) > 0) continue;
+	insts_seen.insert(dsts[i].inst);
+	RegionInstanceImpl *impl = get_runtime()->get_instance_impl(dsts[i].inst);
+	Event e = impl->request_metadata();
+	if(e.exists()) preconditions.push_back(e);
+      }
+
+    for(size_t i = 0; i < indirects.size(); i++) {
+      Event e = indirects[i]->request_metadata();
+      if(e.exists()) preconditions.push_back(e);
+    }
+
+    if(!preconditions.empty()) {
+      Event merged = Event::merge_events(preconditions);
+      if(merged.exists()) {
+        EventImpl::add_waiter(merged, &deferred_analysis);
+        return;
       }
     }
-  }
-#endif
 
-    Event TransferPlanCopy::create_plan(const TransferDomain *td,
-                                        const ProfilingRequestSet& requests,
-                                        Event wait_on, int priority)
-  {
-    GenEventImpl *finish_event = GenEventImpl::create_genevent();
-    ev = finish_event->current_event();
-    r = new CopyRequest(td, oas_by_inst,
-                                     gather_info, scatter_info,
-                                     wait_on,
-                                     finish_event,
-                                     ID(ev).event_generation(),
-                                     priority, requests);
-    return ev;
+    // no (untriggered) preconditions, so we fall through to immediate analysis
+    perform_analysis();
   }
 
-  void TransferPlanCopy::execute_plan()
+  static size_t compute_ib_size(size_t combined_field_size,
+				size_t domain_size,
+				CustomSerdezID serdez_id)
   {
-#ifdef MIGRATE_COPY_REQUESTS
-    // ask which node should perform the copy
-    Memory src_mem, dst_mem;
+    size_t element_size;
+    size_t serdez_pad = 0;
+    size_t min_granularity = 1;
+    if(serdez_id != 0) {
+      const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table.get(serdez_id, 0);
+      assert(serdez_op != 0);
+      element_size = serdez_op->max_serialized_size;
+      serdez_pad = serdez_op->max_serialized_size;
+    } else {
+      element_size = combined_field_size;
+      min_granularity = combined_field_size;
+    }
+
+    size_t ib_size = domain_size * element_size + serdez_pad;
+    const size_t IB_MAX_SIZE = 16 << 20; // 16MB
+    if(ib_size > IB_MAX_SIZE) {
+      // take up to IB_MAX_SIZE, respecting the min granularity
+      if(min_granularity > 1) {
+	// (really) corner case: if min_granularity exceeds IB_MAX_SIZE, use it
+	//  directly and hope it's ok
+	if(min_granularity > IB_MAX_SIZE) {
+	  ib_size = min_granularity;
+	} else {
+	  size_t extra = IB_MAX_SIZE % min_granularity;
+	  ib_size = IB_MAX_SIZE - extra;
+	}
+      } else
+	ib_size = IB_MAX_SIZE;
+    }
+
+    return ib_size;
+  }
+
+  void TransferDesc::perform_analysis()
+  {
+    // initialize profiling data
+    prof_usage.source = Memory::NO_MEMORY;
+    prof_usage.target = Memory::NO_MEMORY;
+    prof_usage.size = 0;
+
+    // quick check - if the domain is empty, there's nothing to actually do
+    if(domain->empty()) {
+      log_xplan.debug() << "analysis: plan=" << (void *)this << " empty";
+
+      // well, we still have to poke pending ops
+      std::vector<TransferOperation *> to_alloc;
+      {
+	AutoLock<> al(mutex);
+	to_alloc.swap(pending_ops);
+	analysis_complete.store(true);  // release done by mutex
+      }
+
+      for(size_t i = 0; i < to_alloc.size(); i++)
+	to_alloc[i]->allocate_ibs();
+      return;
+    }
+
+    size_t domain_size = domain->volume();
+
+    // first, scan over the sources and figure out how much space we need
+    //  for fill data - don't need to know field order yet
+    for(size_t i = 0; i < srcs.size(); i++)
+      if(srcs[i].field_id == FieldID(-1))
+	fill_size += srcs[i].size;
+
+    size_t fill_ofs = 0;
+    if(fill_size > 0) {
+      fill_data = malloc(fill_size);
+      assert(fill_data);
+    }
+
+    // for now, pick a global dimension ordering
+    // TODO: allow this to vary for independent subgraphs (or dependent ones
+    //   with transposes in line)
+    domain->choose_dim_order(dim_order,
+			     srcs, dsts, indirects,
+			     false /*!force_fortran_order*/,
+			     65536 /*max_stride*/);
+
+    src_fields.resize(srcs.size());
+    dst_fields.resize(dsts.size());
+
+    // TODO: look at layouts and decide if fields should be grouped into
+    //  a smaller number of copies
+    assert(srcs.size() == dsts.size());
+    for(size_t i = 0; i < srcs.size(); i++) {
+      assert(srcs[i].redop_id == 0);
+      if(dsts[i].redop_id == 0) {
+        // sizes of fills or copies should match
+        assert(srcs[i].size == dsts[i].size);
+      } else {
+        // redop must exist and match src/dst sizes
+        const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(dsts[i].redop_id, 0);
+        if(redop == 0) {
+          log_dma.fatal() << "no reduction op registered for ID " << dsts[i].redop_id;
+          abort();
+        }
+        size_t exp_dst_size = dsts[i].red_fold ? redop->sizeof_rhs : redop->sizeof_lhs;
+        assert(srcs[i].size == redop->sizeof_rhs);
+        assert(dsts[i].size == exp_dst_size);
+      }
+      assert(srcs[i].serdez_id == dsts[i].serdez_id);
+
+      size_t combined_field_size = srcs[i].size;
+      CustomSerdezID serdez_id = srcs[i].serdez_id;
+
+      if(dsts[i].redop_id != 0) {
+        // reduction
+	assert((srcs[i].indirect_index == -1) && "help: gather reduce!");
+	assert((dsts[i].indirect_index == -1) && "help: scatter reduce!");
+        assert((srcs[i].serdez_id == 0) &&
+               (dsts[i].serdez_id == 0) && "help: serdez reduce!");
+
+	src_fields[i] = FieldInfo { srcs[i].field_id, srcs[i].subfield_offset, srcs[i].size, srcs[i].serdez_id };
+	dst_fields[i] = FieldInfo { dsts[i].field_id, dsts[i].subfield_offset, dsts[i].size, dsts[i].serdez_id };
+
+        Memory src_mem = srcs[i].inst.get_location();
+        Memory dst_mem = dsts[i].inst.get_location();
+
+        MemPathInfo path_info;
+        bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
+                                     dsts[i].redop_id,
+                                     path_info);
+        if(!ok) {
+          log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (redop=" << dsts[i].redop_id << ")";
+          assert(0);
+        }
+        size_t pathlen = path_info.xd_channels.size();
+        size_t xd_idx = graph.xd_nodes.size();
+        size_t ib_idx = graph.ib_edges.size();
+        size_t ib_alloc_size = 0;
+        graph.xd_nodes.resize(xd_idx + pathlen);
+        if(pathlen > 1) {
+          graph.ib_edges.resize(ib_idx + pathlen - 1);
+          ib_alloc_size = compute_ib_size(combined_field_size,
+                                          domain_size,
+                                          serdez_id);
+        }
+        for(size_t j = 0; j < pathlen; j++) {
+          TransferGraph::XDTemplate& xdn = graph.xd_nodes[xd_idx++];
+
+          //xdn.kind = path_info.xd_kinds[j];
+          xdn.factory = path_info.xd_channels[j]->get_factory();
+          xdn.gather_control_input = -1;
+          xdn.scatter_control_input = -1;
+          xdn.target_node = path_info.xd_channels[j]->node;
+          if(j == (pathlen - 1))
+            xdn.redop = XferDesRedopInfo(dsts[i].redop_id,
+                                         dsts[i].red_fold,
+                                         true /*in_place*/);
+          xdn.inputs.resize(1);
+          xdn.inputs[0] = ((j == 0) ?
+                             TransferGraph::XDTemplate::mk_inst(srcs[i].inst,
+                                                                i, 1) :
+                             TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
+          //xdn.inputs[0].indirect_inst = RegionInstance::NO_INST;
+          xdn.outputs.resize(1);
+          xdn.outputs[0] = ((j == (pathlen - 1)) ?
+                              TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
+                                                                 i, 1) :
+                              TransferGraph::XDTemplate::mk_edge(ib_idx));
+          //xdn.outputs[0].indirect_inst = RegionInstance::NO_INST;
+          if(j < (pathlen - 1)) {
+            TransferGraph::IBInfo& ibe = graph.ib_edges[ib_idx++];
+            ibe.memory = path_info.path[j + 1];
+            ibe.size = ib_alloc_size;
+          }
+        }
+
+        prof_usage.source = src_mem;
+        prof_usage.target = dst_mem;
+        prof_usage.size += domain_size * combined_field_size;
+        prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
+          srcs[i].inst,
+          dsts[i].inst,
+          1 /*num_fields*/,
+          ProfilingMeasurements::OperationCopyInfo::REDUCE,
+          unsigned(pathlen) });
+      }
+      else if(srcs[i].field_id == FieldID(-1)) {
+	// fill
+	assert((dsts[i].indirect_index == -1) && "help: scatter fill!");
+
+	src_fields[i] = FieldInfo { FieldID(-1), 0, 0, 0 };
+	dst_fields[i] = FieldInfo { dsts[i].field_id, dsts[i].subfield_offset, dsts[i].size, dsts[i].serdez_id };
+
+	Memory dst_mem = dsts[i].inst.get_location();
+	MemPathInfo path_info;
+	bool ok = find_shortest_path(Memory::NO_MEMORY, dst_mem, serdez_id,
+                                     0 /*redop_id*/,
+				     path_info);
+	if(!ok) {
+	  log_new_dma.fatal() << "FATAL: no fill path found for " << dst_mem << " (serdez=" << serdez_id << ")";
+	  assert(0);
+	}
+
+	size_t pathlen = path_info.xd_channels.size();
+	size_t xd_idx = graph.xd_nodes.size();
+	//size_t ib_idx = graph.ib_edges.size();
+
+	graph.xd_nodes.resize(xd_idx + pathlen);
+	if(pathlen > 1) {
+	  log_new_dma.fatal() << "FATAL: multi-hop fill path found for " << dst_mem << " (serdez=" << serdez_id << ")";
+	  assert(0);
+	}
+	// just one node for now
+	{
+	  TransferGraph::XDTemplate& xdn = graph.xd_nodes[xd_idx++];
+	      
+	  //xdn.kind = path_info.xd_kinds[j];
+	  xdn.factory = path_info.xd_channels[0]->get_factory();
+	  xdn.gather_control_input = -1;
+	  xdn.scatter_control_input = -1;
+	  xdn.target_node = path_info.xd_channels[0]->node;
+	  xdn.inputs.resize(1);
+	  xdn.inputs[0] = TransferGraph::XDTemplate::mk_fill(fill_ofs,
+							     combined_field_size);
+	  // FIXME: handle multiple fields
+	  memcpy(static_cast<char *>(fill_data)+fill_ofs,
+		 ((srcs[i].size <= CopySrcDstField::MAX_DIRECT_SIZE) ?
+		    srcs[i].fill_data.direct :
+		    srcs[i].fill_data.indirect),
+		 srcs[i].size);
+	  fill_ofs += srcs[i].size;
+
+	  xdn.outputs.resize(1);
+	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
+							      i, 1);
+	}
+
+        prof_usage.source = Memory::NO_MEMORY;
+        prof_usage.target = dst_mem;
+        prof_usage.size += domain_size * combined_field_size;
+        prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
+              RegionInstance::NO_INST,
+              dsts[i].inst,
+              1 /*num_fields*/,
+              ProfilingMeasurements::OperationCopyInfo::FILL,
+              unsigned(pathlen) });
+      } else {
+	src_fields[i] = FieldInfo { srcs[i].field_id, srcs[i].subfield_offset, srcs[i].size, srcs[i].serdez_id };
+	dst_fields[i] = FieldInfo { dsts[i].field_id, dsts[i].subfield_offset, dsts[i].size, dsts[i].serdez_id };
+	
+	if(srcs[i].indirect_index == -1) {
+	  Memory src_mem = srcs[i].inst.get_location();
+
+	  if(dsts[i].indirect_index == -1) {
+	    Memory dst_mem = dsts[i].inst.get_location();
+
+	    MemPathInfo path_info;
+	    bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
+                                         0 /*redop_id*/,
+					 path_info);
+	    if(!ok) {
+	      log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (serdez=" << serdez_id << ")";
+	      assert(0);
+	    }
+	    size_t pathlen = path_info.xd_channels.size();
+	    size_t xd_idx = graph.xd_nodes.size();
+	    size_t ib_idx = graph.ib_edges.size();
+	    size_t ib_alloc_size = 0;
+	    graph.xd_nodes.resize(xd_idx + pathlen);
+	    if(pathlen > 1) {
+	      graph.ib_edges.resize(ib_idx + pathlen - 1);
+	      ib_alloc_size = compute_ib_size(combined_field_size,
+					      domain_size,
+					      serdez_id);
+	    }
+	    for(size_t j = 0; j < pathlen; j++) {
+	      TransferGraph::XDTemplate& xdn = graph.xd_nodes[xd_idx++];
+	      
+	      //xdn.kind = path_info.xd_kinds[j];
+	      xdn.factory = path_info.xd_channels[j]->get_factory();
+	      xdn.gather_control_input = -1;
+	      xdn.scatter_control_input = -1;
+	      xdn.target_node = path_info.xd_channels[j]->node;
+	      xdn.inputs.resize(1);
+	      xdn.inputs[0] = ((j == 0) ?
+			         TransferGraph::XDTemplate::mk_inst(srcs[i].inst,
+								    i, 1) :
+			         TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
+	      //xdn.inputs[0].indirect_inst = RegionInstance::NO_INST;
+	      xdn.outputs.resize(1);
+	      xdn.outputs[0] = ((j == (pathlen - 1)) ?
+				  TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
+								     i, 1) :
+				  TransferGraph::XDTemplate::mk_edge(ib_idx));
+	      //xdn.outputs[0].indirect_inst = RegionInstance::NO_INST;
+	      if(j < (pathlen - 1)) {
+		TransferGraph::IBInfo& ibe = graph.ib_edges[ib_idx++];
+		ibe.memory = path_info.path[j + 1];
+		ibe.size = ib_alloc_size;
+	      }
+	    }
+
+            prof_usage.source = src_mem;
+            prof_usage.target = dst_mem;
+            prof_usage.size += domain_size * combined_field_size;
+            prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
+                 srcs[i].inst,
+                 dsts[i].inst,
+                 1 /*num_fields*/,
+                 ProfilingMeasurements::OperationCopyInfo::COPY,
+                 unsigned(pathlen) });
+	  } else {
+	    // scatter
+	    IndirectionInfo *scatter_info = indirects[dsts[i].indirect_index];
+	    size_t addrsplit_bytes_per_element = ((serdez_id == 0) ?
+						    combined_field_size :
+						    1);
+            size_t prev_nodes = graph.xd_nodes.size();
+	    scatter_info->generate_scatter_paths(src_mem,
+						 TransferGraph::XDTemplate::mk_inst(srcs[i].inst, i, 1),
+						 dsts[i].indirect_index,
+						 i, 1,
+						 addrsplit_bytes_per_element,
+						 serdez_id,
+						 graph.xd_nodes,
+						 graph.ib_edges,
+						 src_fields);
+
+            prof_usage.source = src_mem;
+            prof_usage.target = Memory::NO_MEMORY;
+            prof_usage.size += domain_size * combined_field_size;
+            prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
+                 srcs[i].inst,
+                 RegionInstance::NO_INST,
+                 1 /*num_fields*/,
+                 ProfilingMeasurements::OperationCopyInfo::COPY,
+                 unsigned(graph.xd_nodes.size() - prev_nodes) });
+	  }
+	} else {
+	  size_t addrsplit_bytes_per_element = ((serdez_id == 0) ?
+						  combined_field_size :
+						  1);
+	  if(dsts[i].indirect_index == -1) {
+	    Memory dst_mem = dsts[i].inst.get_location();
+	    IndirectionInfo *gather_info = indirects[srcs[i].indirect_index];
+            size_t prev_nodes = graph.xd_nodes.size();
+	    gather_info->generate_gather_paths(dst_mem,
+					       TransferGraph::XDTemplate::mk_inst(dsts[i].inst, i, 1),
+					       srcs[i].indirect_index,
+					       i, 1,
+					       addrsplit_bytes_per_element,
+					       serdez_id,
+					       graph.xd_nodes,
+					       graph.ib_edges,
+					       src_fields);
+
+            prof_usage.source = Memory::NO_MEMORY;
+            prof_usage.target = dst_mem;
+            prof_usage.size += domain_size * combined_field_size;
+            prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
+                 RegionInstance::NO_INST,
+                 dsts[i].inst,
+                 1 /*num_fields*/,
+                 ProfilingMeasurements::OperationCopyInfo::COPY,
+                 unsigned(graph.xd_nodes.size() - prev_nodes) });
+	  } else {
+	    // scatter+gather
+	    // TODO: optimize case of single source and single dest
+
+            size_t prev_nodes = graph.xd_nodes.size();
+
+	    // need an intermediate buffer for the output of the gather
+	    //  (and input of the scatter)
+	    // TODO: local node isn't necessarily the right choice!
+	    NodeID ib_node = Network::my_node_id;
+	    Memory ib_mem = ID::make_ib_memory(ib_node, 0).convert<Memory>();
+
+	    int ib_idx = graph.ib_edges.size();
+	    graph.ib_edges.resize(ib_idx + 1);
+	    graph.ib_edges[ib_idx].memory = ib_mem;
+	    graph.ib_edges[ib_idx].size = 1 << 20;  //HACK
+
+	    IndirectionInfo *gather_info = indirects[srcs[i].indirect_index];
+	    gather_info->generate_gather_paths(ib_mem,
+					       TransferGraph::XDTemplate::mk_edge(ib_idx),
+					       srcs[i].indirect_index,
+					       i, 1,
+					       addrsplit_bytes_per_element,
+					       serdez_id,
+					       graph.xd_nodes,
+					       graph.ib_edges,
+					       src_fields);
+
+	    IndirectionInfo *scatter_info = indirects[dsts[i].indirect_index];
+	    scatter_info->generate_scatter_paths(ib_mem,
+						 TransferGraph::XDTemplate::mk_edge(ib_idx),
+						 dsts[i].indirect_index,
+						 i, 1,
+						 addrsplit_bytes_per_element,
+						 serdez_id,
+						 graph.xd_nodes,
+						 graph.ib_edges,
+						 src_fields);
+
+            prof_usage.source = Memory::NO_MEMORY;
+            prof_usage.target = Memory::NO_MEMORY;
+            prof_usage.size += domain_size * combined_field_size;
+            prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
+                 RegionInstance::NO_INST,
+                 RegionInstance::NO_INST,
+                 1 /*num_fields*/,
+                 ProfilingMeasurements::OperationCopyInfo::COPY,
+                 unsigned(graph.xd_nodes.size() - prev_nodes) });
+	  }
+	}
+      }
+    }
+
+    if(log_xplan.want_debug()) {
+      log_xplan.debug() << "analysis: plan=" << (void *)this
+			<< " dim_order=" << PrettyVector<int>(dim_order)
+			<< " xds=" << graph.xd_nodes.size()
+			<< " ibs=" << graph.ib_edges.size();
+      for(size_t i = 0; i < graph.xd_nodes.size(); i++)
+        if(graph.xd_nodes[i].redop.id != 0)
+          log_xplan.debug() << "analysis: plan=" << (void *)this
+                            << " xds[" << i << "]: target=" << graph.xd_nodes[i].target_node
+                            << " inputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
+                            << " outputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs)
+                            << " redop=(" << graph.xd_nodes[i].redop.id << "," << graph.xd_nodes[i].redop.is_fold << "," << graph.xd_nodes[i].redop.in_place << ")";
+        else
+          log_xplan.debug() << "analysis: plan=" << (void *)this
+                            << " xds[" << i << "]: target=" << graph.xd_nodes[i].target_node
+                            << " inputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].inputs)
+                            << " outputs=" << PrettyVector<TransferGraph::XDTemplate::IO>(graph.xd_nodes[i].outputs);
+      for(size_t i = 0; i < graph.ib_edges.size(); i++)
+	log_xplan.debug() << "analysis: plan=" << (void *)this
+			  << " ibs[" << i << "]: memory=" << graph.ib_edges[i].memory
+			  << " size=" << graph.ib_edges[i].size;
+    }
+
+    // mark that the analysis is complete and see if there are any pending
+    //  ops that can start allocating ibs
+    std::vector<TransferOperation *> to_alloc;
     {
-      assert(!oas_by_inst->empty());
-      OASByInst::const_iterator it = oas_by_inst->begin();
-      src_mem = it->first.first.get_location();
-      dst_mem = it->first.second.get_location();
+      AutoLock<> al(mutex);
+      to_alloc.swap(pending_ops);
+      analysis_complete.store(true);  // release done by mutex
     }
-    NodeID dma_node = select_dma_node(src_mem, dst_mem, 0, false);
-    log_dma.debug() << "copy: srcmem=" << src_mem << " dstmem=" << dst_mem
-		    << " node=" << dma_node;
-#else
-    NodeID dma_node = Network::my_node_id;
+
+    for(size_t i = 0; i < to_alloc.size(); i++)
+      to_alloc[i]->allocate_ibs();
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferDesc::DeferredAnalysis
+  //
+
+  TransferDesc::DeferredAnalysis::DeferredAnalysis(TransferDesc *_desc)
+    : desc(_desc)
+  {}
+
+  void TransferDesc::DeferredAnalysis::event_triggered(bool poisoned,
+						       TimeLimit work_until)
+  {
+    assert(!poisoned);
+    // TODO: respect time limit
+
+    desc->perform_analysis();
+  }
+
+  void TransferDesc::DeferredAnalysis::print(std::ostream& os) const
+  {
+    os << "deferred_analysis(" << (void *)desc << ")";
+  }
+
+  Event TransferDesc::DeferredAnalysis::get_finish_event(void) const
+  {
+    return Event::NO_EVENT;
+  }
+
+			      
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferOperation
+  //
+
+  TransferOperation::TransferOperation(TransferDesc& _desc,
+				       Event _precondition,
+				       GenEventImpl *_finish_event,
+				       EventImpl::gen_t _finish_gen)
+    : Operation(_finish_event, _finish_gen, _desc.prs)
+    , deferred_start(this)
+    , desc(_desc)
+    , precondition(_precondition)
+    , ib_responses_needed(0)
+    , priority(0) // FIXME
+  {
+    desc.add_reference();
+  }
+
+  TransferOperation::~TransferOperation()
+  {
+    desc.remove_reference();
+  }
+
+  void TransferOperation::print(std::ostream& os) const
+  {
+    os << "transfer_op(" << (void *)this << ")";
+  }
+
+  void TransferOperation::start_or_defer(void)
+  {
+    log_dma.info() << "dma request " << (void *)this
+		   << " created - plan=" << (void *)&desc
+		   << " before=" << precondition
+		   << " after=" << get_finish_event();
+
+    bool poisoned;
+    if(!precondition.has_triggered_faultaware(poisoned)) {
+      EventImpl::add_waiter(precondition, &deferred_start);
+      return;
+    }
+    assert(!poisoned);
+
+    // see if we need to wait for the transfer description analysis
+    if(desc.request_analysis(this)) {
+      // it's ready - go ahead and do ib creation
+      allocate_ibs();
+    } else {
+      // do nothing - the TransferDesc will call us when it's ready
+    }
+  }
+
+  bool TransferOperation::mark_ready(void)
+  {
+    bool ok_to_run = Operation::mark_ready();
+    if(ok_to_run)
+      log_dma.info() << "dma request " << (void *)this
+		     << " ready - plan=" << (void *)&desc
+		     << " before=" << precondition
+		     << " after=" << get_finish_event();
+    return ok_to_run;
+  }
+
+  bool TransferOperation::mark_started(void)
+  {
+    bool ok_to_run = Operation::mark_started();
+    if(ok_to_run)
+      log_dma.info() << "dma request " << (void *)this
+		     << " started - plan=" << (void *)&desc
+		     << " before=" << precondition
+		     << " after=" << get_finish_event();
+    return ok_to_run;
+  }
+
+  void TransferOperation::mark_completed(void)
+  {
+    log_dma.info() << "dma request " << (void *)this
+		   << " completed - plan=" << (void *)&desc
+		   << " before=" << precondition
+		   << " after=" << get_finish_event();
+
+    Operation::mark_completed();
+  }
+
+  void TransferOperation::allocate_ibs()
+  {
+    // make sure we haven't been cancelled
+    bool ok_to_run = mark_ready();
+    if(!ok_to_run) {
+      mark_finished(false /*!successful*/);
+      return;
+    }
+
+    const TransferGraph& tg = desc.graph;
+
+    if(!tg.ib_edges.empty()) {
+      ib_offsets.resize(tg.ib_edges.size(), -1);
+
+      // increase the count by one to prevent a trigger before we finish
+      //  this loop
+      ib_responses_needed.store(tg.ib_edges.size() + 1);
+
+      // sort requests by target memory to reduce risk of resource deadlock
+      // TODO: actually merge requests so that there's at most one per memory
+      typedef std::map<Memory, std::vector<unsigned> > PendingIBRequests;
+      PendingIBRequests pending;
+      for(size_t i = 0; i < tg.ib_edges.size(); i++)
+	pending[tg.ib_edges[i].memory].push_back(i);
+
+      for(PendingIBRequests::const_iterator it = pending.begin();
+	  it != pending.end();
+	  ++it) {
+	Memory tgt_mem = it->first;
+	for(std::vector<unsigned>::const_iterator it2 = it->second.begin();
+	    it2 != it->second.end();
+	    ++it2) {
+	  NodeID owner = ID(tgt_mem).memory_owner_node();
+	  if(owner == Network::my_node_id) {
+	    // local request
+	    ib_req_queue.enqueue_request(tgt_mem, Network::my_node_id,
+					 reinterpret_cast<uintptr_t>(this),
+					 *it2, tg.ib_edges[*it2].size);
+	  } else {
+	    // send message to remote owner
+	    ActiveMessage<RemoteIBAllocRequest> amsg(owner);
+	    amsg->memory = tgt_mem;
+	    amsg->size = tg.ib_edges[*it2].size;
+	    amsg->req_op = reinterpret_cast<uintptr_t>(this);
+	    amsg->ib_index = *it2;
+	    amsg.commit();
+	  }
+	}
+      }
+
+      // once all requests are made, do the extra decrement and continue if they
+      //  are all satisfied
+      if(ib_responses_needed.fetch_sub_acqrel(1) > 1)
+	return;
+    }
+
+    // fall through to creating xds
+    create_xds();
+  }
+
+  std::ostream& operator<<(std::ostream& os, const TransferGraph::XDTemplate::IO& io)
+  {
+    switch(io.iotype) {
+    case TransferGraph::XDTemplate::IO_INST:
+      os << "inst(" << io.inst.inst << "," << io.inst.fld_start << "+" << io.inst.fld_count << ")"; break;
+    case TransferGraph::XDTemplate::IO_INDIRECT_INST:
+      os << "ind(" << io.indirect.ind_idx << "," << io.indirect.port << "," << io.indirect.inst << "," << io.indirect.fld_start << "+" << io.indirect.fld_count << ")"; break;
+    case TransferGraph::XDTemplate::IO_EDGE:
+      os << "edge(" << io.edge << ")"; break;
+    case TransferGraph::XDTemplate::IO_FILL_DATA:
+      os << "fill(" << io.fill.fill_start << "+" << io.fill.fill_size << ")"; break;
+    default:
+      assert(0);
+    }
+    return os;
+  }
+
+  void TransferOperation::notify_ib_allocation(unsigned ib_index,
+					       off_t ib_offset)
+  {
+    assert(ib_index < ib_offsets.size());
+#ifdef DEBUG_REALM
+    assert(ib_offsets[ib_index] == -1);
 #endif
-    // we've given oas_by_inst and indirection info to the copyrequest, so forget it
-    assert(oas_by_inst != 0);
-    oas_by_inst = 0;
-    gather_info = 0;
-    scatter_info = 0;
-    if(dma_node == Network::my_node_id) {
-      log_dma.debug("performing copy on local node");
+    ib_offsets[ib_index] = ib_offset;
 
-      get_runtime()->optable.add_local_operation(ev, r);
-      r->check_readiness();
-    } else {
-      r->forward_request(dma_node);
-      get_runtime()->optable.add_remote_operation(ev, dma_node);
-      // done with the local copy of the request
-      r->remove_reference();
-    }
+    // if this was the last response needed, we can continue on to creating xds
+    if(ib_responses_needed.fetch_sub_acqrel(1) == 1)
+      create_xds();
   }
 
-  class TransferPlanReduce : public TransferPlan {
-  public:
-    TransferPlanReduce(const CopySrcDstField& _src,
-		       const CopySrcDstField& _dst,
-		       ReductionOpID _redop_id, bool _red_fold);
+  void TransferOperation::create_xds()
+  {
+    // make sure we haven't been cancelled
+    bool ok_to_run = this->mark_started();
+    if(!ok_to_run) {
+      mark_finished(false /*!successful*/);
+      return;
+    }
 
-    virtual void execute_plan();
+    const TransferGraph& tg = desc.graph;
 
-    virtual Event create_plan(const TransferDomain *td,
-                              const ProfilingRequestSet& requests,
-                              Event wait_on, int priority);
+    // we're going to need pre/next xdguids, so precreate all of them
+    xd_ids.resize(tg.xd_nodes.size(), XferDes::XFERDES_NO_GUID);
+    typedef std::pair<XferDesID,int> IBEdge;
+    const IBEdge dfl_edge(XferDes::XFERDES_NO_GUID, 0);
+    std::vector<IBEdge> ib_pre_ids(tg.ib_edges.size(), dfl_edge);
+    std::vector<IBEdge> ib_next_ids(tg.ib_edges.size(), dfl_edge);
 
-  protected:
-    CopySrcDstField src;
-    CopySrcDstField dst;
-    ReductionOpID redop_id;
-    bool red_fold;
-    Event ev;
-    ReduceRequest *r;
-  };
+    XferDesQueue *xdq = XferDesQueue::get_singleton();
+    for(size_t i = 0; i < tg.xd_nodes.size(); i++) {
+      const TransferGraph::XDTemplate& xdn = tg.xd_nodes[i];
 
-  TransferPlanReduce::TransferPlanReduce(const CopySrcDstField& _src,
-					 const CopySrcDstField& _dst,
-					 ReductionOpID _redop_id, bool _red_fold)
-    : src(_src)
-    , dst(_dst)
-    , redop_id(_redop_id)
-    , red_fold(_red_fold)
-    , ev(Event::NO_EVENT)
-    , r(NULL)
+      XferDesID new_xdid = xdq->get_guid(xdn.target_node);
+
+      xd_ids[i] = new_xdid;
+	
+      for(size_t j = 0; j < xdn.inputs.size(); j++)
+	if(xdn.inputs[j].iotype == TransferGraph::XDTemplate::IO_EDGE)
+	  ib_next_ids[xdn.inputs[j].edge] = std::make_pair(new_xdid, j);
+	
+      for(size_t j = 0; j < xdn.outputs.size(); j++)
+	if(xdn.outputs[j].iotype == TransferGraph::XDTemplate::IO_EDGE)
+	  ib_pre_ids[xdn.outputs[j].edge] = std::make_pair(new_xdid, j);
+    }
+
+    log_new_dma.info() << "xds created: " << std::hex << PrettyVector<XferDesID>(xd_ids) << std::dec;
+    
+    // now actually create xfer descriptors for each template node in our DAG
+    xd_trackers.resize(tg.xd_nodes.size(), 0);
+    for(size_t i = 0; i < tg.xd_nodes.size(); i++) {
+      const TransferGraph::XDTemplate& xdn = tg.xd_nodes[i];
+	
+      NodeID xd_target_node = xdn.target_node;
+      XferDesID xd_guid = xd_ids[i];
+      XferDesFactory *xd_factory = xdn.factory;
+
+      const void *fill_data = 0;
+      size_t fill_size = 0;
+
+      std::vector<XferDesPortInfo> inputs_info(xdn.inputs.size());
+      for(size_t j = 0; j < xdn.inputs.size(); j++) {
+	XferDesPortInfo& ii = inputs_info[j];
+
+	ii.port_type = ((int(j) == xdn.gather_control_input) ?
+			  XferDesPortInfo::GATHER_CONTROL_PORT :
+			(int(j) == xdn.scatter_control_input) ?
+			  XferDesPortInfo::SCATTER_CONTROL_PORT :
+			  XferDesPortInfo::DATA_PORT);
+
+	switch(xdn.inputs[j].iotype) {
+	case TransferGraph::XDTemplate::IO_INST:
+	  {
+	    ii.peer_guid = XferDes::XFERDES_NO_GUID;
+	    ii.peer_port_idx = 0;
+	    ii.indirect_port_idx = -1;
+	    ii.mem = xdn.inputs[j].inst.inst.get_location();
+	    ii.inst = xdn.inputs[j].inst.inst;
+	    std::vector<FieldID> src_fields(xdn.inputs[j].inst.fld_count);
+	    std::vector<size_t> src_offsets(xdn.inputs[j].inst.fld_count);
+	    std::vector<size_t> src_sizes(xdn.inputs[j].inst.fld_count);
+	    for(size_t k = 0; k < xdn.inputs[j].inst.fld_count; k++) {
+	      src_fields[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].id;
+	      src_offsets[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].offset;
+	      src_sizes[k] = desc.src_fields[xdn.inputs[j].inst.fld_start + k].size;
+	    }
+	    ii.iter = desc.domain->create_iterator(xdn.inputs[j].inst.inst,
+						   desc.dim_order,
+						   src_fields,
+						   src_offsets,
+						   src_sizes);
+	    // use first field's serdez - they all have to be the same
+	    ii.serdez_id = desc.src_fields[xdn.inputs[j].inst.fld_start].serdez_id;
+	    ii.ib_offset = 0;
+	    ii.ib_size = 0;
+	    break;
+	  }
+	case TransferGraph::XDTemplate::IO_INDIRECT_INST:
+	  {
+	    ii.peer_guid = XferDes::XFERDES_NO_GUID;
+	    ii.peer_port_idx = 0;
+	    ii.indirect_port_idx = xdn.inputs[j].indirect.port;
+	    ii.mem = xdn.inputs[j].indirect.inst.get_location();
+	    ii.inst = xdn.inputs[j].indirect.inst;
+	    std::vector<FieldID> src_fields(xdn.inputs[j].indirect.fld_count);
+	    std::vector<size_t> src_offsets(xdn.inputs[j].indirect.fld_count);
+	    std::vector<size_t> src_sizes(xdn.inputs[j].indirect.fld_count);
+	    for(size_t k = 0; k < xdn.inputs[j].indirect.fld_count; k++) {
+	      src_fields[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].id;
+	      src_offsets[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].offset;
+	      src_sizes[k] = desc.src_fields[xdn.inputs[j].indirect.fld_start + k].size;
+	    }
+	    IndirectionInfo *gather_info = desc.indirects[xdn.inputs[j].indirect.ind_idx];
+	    ii.iter = gather_info->create_indirect_iterator(ii.mem,
+							    xdn.inputs[j].indirect.inst,
+							    src_fields,
+							    src_offsets,
+							    src_sizes);
+	    // use first field's serdez - they all have to be the same
+	    ii.serdez_id = desc.src_fields[xdn.inputs[j].indirect.fld_start].serdez_id;
+	    ii.ib_offset = 0;
+	    ii.ib_size = 0;
+	    break;
+	  }
+	case TransferGraph::XDTemplate::IO_EDGE:
+	  {
+	    ii.peer_guid = ib_pre_ids[xdn.inputs[j].edge].first;
+	    ii.peer_port_idx = ib_pre_ids[xdn.inputs[j].edge].second;
+	    ii.indirect_port_idx = -1;
+	    ii.mem = tg.ib_edges[xdn.inputs[j].edge].memory;
+	    ii.inst = RegionInstance::NO_INST;
+	    ii.ib_offset = ib_offsets[xdn.inputs[j].edge];
+	    ii.ib_size = tg.ib_edges[xdn.inputs[j].edge].size;
+	    ii.iter = new WrappingFIFOIterator(ii.ib_offset, ii.ib_size);
+	    ii.serdez_id = 0;
+	    break;
+	  }
+	case TransferGraph::XDTemplate::IO_FILL_DATA:
+	  {
+	    // don't actually want an input in this case
+	    assert((j == 0) && (xdn.inputs.size() == 1));
+	    inputs_info.clear();
+	    fill_data = static_cast<const char *>(desc.fill_data) + xdn.inputs[j].fill.fill_start;
+	    fill_size = xdn.inputs[j].fill.fill_size;
+	    break;
+	  }
+	default:
+	  assert(0);
+	}
+#if 0
+	if(0) {
+	    //mark_started = true;
+	  } else if(xdn.inputs[j].edge_id <= XDTemplate::INDIRECT_BASE) {
+	    int ind_idx = XDTemplate::INDIRECT_BASE - xdn.inputs[j].edge_id;
+	    assert(xdn.inputs[j].indirect_inst.exists());
+	    //log_dma.print() << "indirect iter: inst=" << xdn.inputs[j].indirect_inst;
+	    ii.peer_guid = XferDes::XFERDES_NO_GUID;
+	    ii.peer_port_idx = 0;
+	    ii.indirect_port_idx = ind_idx;
+	    ii.mem = xdn.inputs[j].indirect_inst.get_location();
+	    ii.inst = xdn.inputs[j].indirect_inst;
+	    ii.iter = gather_info->create_indirect_iterator(ii.mem,
+							    xdn.inputs[j].indirect_inst,
+							    src_fields,
+							    src_field_offsets,
+							    field_sizes);
+	    ii.serdez_id = serdez_id;
+	    ii.ib_offset = 0;
+	    ii.ib_size = 0;
+	  } else if(xdn.inputs[j].edge_id == XDTemplate::DST_INST) {
+	    // this happens when doing a scatter and DST_INST is actually the
+	    //  destination addresses (which we read)
+	    ii.peer_guid = XferDes::XFERDES_NO_GUID;
+	    ii.peer_port_idx = 0;
+	    ii.indirect_port_idx = -1;
+	    ii.mem = dst_inst.get_location();
+	    ii.inst = dst_inst;
+	    ii.iter = dst_iter;
+	    ii.serdez_id = 0;
+	    ii.ib_offset = 0;
+	    ii.ib_size = 0;
+	  } else {
+	    ii.peer_guid = ib_pre_ids[xdn.inputs[j].edge_id].first;
+	    ii.peer_port_idx = ib_pre_ids[xdn.inputs[j].edge_id].second;
+	    ii.indirect_port_idx = -1;
+	    ii.mem = ib_edges[xdn.inputs[j].edge_id].memory;
+	    ii.inst = RegionInstance::NO_INST;
+	    ii.ib_offset = ib_edges[xdn.inputs[j].edge_id].offset;
+	    ii.ib_size = ib_edges[xdn.inputs[j].edge_id].size;
+	    ii.iter = new WrappingFIFOIterator(ii.ib_offset, ii.ib_size);
+	    ii.serdez_id = 0;
+	}
+#endif
+      }
+
+      std::vector<XferDesPortInfo> outputs_info(xdn.outputs.size());
+      for(size_t j = 0; j < xdn.outputs.size(); j++) {
+	XferDesPortInfo& oi = outputs_info[j];
+
+	oi.port_type = XferDesPortInfo::DATA_PORT;
+
+	switch(xdn.outputs[j].iotype) {
+	case TransferGraph::XDTemplate::IO_INST:
+	  {
+	    oi.peer_guid = XferDes::XFERDES_NO_GUID;
+	    oi.peer_port_idx = 0;
+	    oi.indirect_port_idx = -1;
+	    oi.mem = xdn.outputs[j].inst.inst.get_location();
+	    oi.inst = xdn.outputs[j].inst.inst;
+	    std::vector<FieldID> dst_fields(xdn.outputs[j].inst.fld_count);
+	    std::vector<size_t> dst_offsets(xdn.outputs[j].inst.fld_count);
+	    std::vector<size_t> dst_sizes(xdn.outputs[j].inst.fld_count);
+	    for(size_t k = 0; k < xdn.outputs[j].inst.fld_count; k++) {
+	      dst_fields[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].id;
+	      dst_offsets[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].offset;
+	      dst_sizes[k] = desc.dst_fields[xdn.outputs[j].inst.fld_start + k].size;
+	    }
+	    oi.iter = desc.domain->create_iterator(xdn.outputs[j].inst.inst,
+						   desc.dim_order,
+						   dst_fields,
+						   dst_offsets,
+						   dst_sizes);
+	    // use first field's serdez - they all have to be the same
+	    oi.serdez_id = desc.dst_fields[xdn.outputs[j].inst.fld_start].serdez_id;
+	    oi.ib_offset = 0;
+	    oi.ib_size = 0;
+	    break;
+	  }
+	case TransferGraph::XDTemplate::IO_INDIRECT_INST:
+	  {
+	    oi.peer_guid = XferDes::XFERDES_NO_GUID;
+	    oi.peer_port_idx = 0;
+	    oi.indirect_port_idx = xdn.outputs[j].indirect.port;
+	    oi.mem = xdn.outputs[j].indirect.inst.get_location();
+	    oi.inst = xdn.outputs[j].indirect.inst;
+	    std::vector<FieldID> dst_fields(xdn.outputs[j].indirect.fld_count);
+	    std::vector<size_t> dst_offsets(xdn.outputs[j].indirect.fld_count);
+	    std::vector<size_t> dst_sizes(xdn.outputs[j].indirect.fld_count);
+	    for(size_t k = 0; k < xdn.outputs[j].indirect.fld_count; k++) {
+	      dst_fields[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].id;
+	      dst_offsets[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].offset;
+	      dst_sizes[k] = desc.dst_fields[xdn.outputs[j].indirect.fld_start + k].size;
+	    }
+	    IndirectionInfo *scatter_info = desc.indirects[xdn.outputs[j].indirect.ind_idx];
+	    oi.iter = scatter_info->create_indirect_iterator(oi.mem,
+							     xdn.outputs[j].indirect.inst,
+							     dst_fields,
+							     dst_offsets,
+							     dst_sizes);
+	    // use first field's serdez - they all have to be the same
+	    oi.serdez_id = desc.dst_fields[xdn.outputs[j].indirect.fld_start].serdez_id;
+	    oi.ib_offset = 0;
+	    oi.ib_size = 0;
+	    break;
+	  }
+	case TransferGraph::XDTemplate::IO_EDGE:
+	  {
+	    oi.peer_guid = ib_next_ids[xdn.outputs[j].edge].first;
+	    oi.peer_port_idx = ib_next_ids[xdn.outputs[j].edge].second;
+	    oi.indirect_port_idx = -1;
+	    oi.mem = tg.ib_edges[xdn.outputs[j].edge].memory;
+	    oi.inst = RegionInstance::NO_INST;
+	    oi.ib_offset = ib_offsets[xdn.outputs[j].edge];
+	    oi.ib_size = tg.ib_edges[xdn.outputs[j].edge].size;
+	    oi.iter = new WrappingFIFOIterator(oi.ib_offset, oi.ib_size);
+	    oi.serdez_id = 0;
+	    break;
+	  }
+	default:
+	  assert(0);
+	}
+#if 0
+	  if(xdn.outputs[j].edge_id == XDNemplate::DST_INST) {
+	    oi.peer_guid = XferDes::XFERDES_NO_GUID;
+	    oi.peer_port_idx = 0;
+	    oi.indirect_port_idx = -1;
+	    oi.mem = dst_inst.get_location();
+	    oi.inst = dst_inst;
+	    oi.iter = dst_iter;
+	    oi.serdez_id = serdez_id;
+	    oi.ib_offset = 0;
+	    oi.ib_size = 0;  // doesn't matter
+	  } else if(xdn.outputs[j].edge_id <= XDNemplate::INDIRECT_BASE) {
+	    int ind_idx = XDNemplate::INDIRECT_BASE - xdn.outputs[j].edge_id;
+	    assert(xdn.outputs[j].indirect_inst.exists());
+	    //log_dma.print() << "indirect iter: inst=" << xdn.outputs[j].indirect_inst;
+	    oi.peer_guid = XferDes::XFERDES_NO_GUID;
+	    oi.peer_port_idx = 0;
+	    oi.indirect_port_idx = ind_idx;
+	    oi.mem = xdn.outputs[j].indirect_inst.get_location();
+	    oi.inst = xdn.outputs[j].indirect_inst;
+	    oi.iter = scatter_info->create_indirect_iterator(oi.mem,
+							     xdn.outputs[j].indirect_inst,
+							     dst_fields,
+							     dst_field_offsets,
+							     field_sizes);
+	    oi.serdez_id = serdez_id;
+	    oi.ib_offset = 0;
+	    oi.ib_size = 0;
+	  } else {
+	    oi.peer_guid = ib_next_ids[xdn.outputs[j].edge_id].first;
+	    oi.peer_port_idx = ib_next_ids[xdn.outputs[j].edge_id].second;
+	    oi.indirect_port_idx = -1;
+	    oi.mem = ib_edges[xdn.outputs[j].edge_id].memory;
+	    oi.inst = RegionInstance::NO_INST;
+	    oi.ib_offset = ib_edges[xdn.outputs[j].edge_id].offset;
+	    oi.ib_size = ib_edges[xdn.outputs[j].edge_id].size;
+	    oi.iter = new WrappingFIFOIterator(oi.ib_offset, oi.ib_size);
+	    oi.serdez_id = 0;
+	  }
+#endif
+      }
+
+      xd_trackers[i] = new XDLifetimeTracker(this, xd_ids[i]);
+      add_async_work_item(xd_trackers[i]);
+	
+      xd_factory->create_xfer_des(reinterpret_cast<uintptr_t>(this),
+				  Network::my_node_id, xd_target_node,
+				  xd_guid,
+				  inputs_info,
+				  outputs_info,
+				  priority,
+                                  xdn.redop,
+				  fill_data, fill_size);
+    }
+
+    // record requested profiling information
+    {
+      using namespace ProfilingMeasurements;
+
+      if(measurements.wants_measurement<OperationCopyInfo>())
+        measurements.add_measurement(desc.prof_cpinfo);
+
+      if(measurements.wants_measurement<OperationMemoryUsage>())
+        measurements.add_measurement(desc.prof_usage);
+    }
+
+    mark_finished(true /*successful*/);
+  }
+
+  void TransferOperation::notify_xd_completion(XferDesID xd_id)
+  {
+    // TODO: get timing info as well?
+
+    // scan out list of ids for a match
+    for(size_t i = 0; i < xd_ids.size(); i++) {
+      if(xd_id == xd_ids[i]) {
+	XDLifetimeTracker *tracker = xd_trackers[i];
+	assert(tracker);
+	xd_trackers[i] = 0;
+	destroy_xfer_des(xd_id);
+	// calling this has to be the last thing we do
+	tracker->mark_finished(true /*successful*/);
+	return;
+      }
+    }
+    assert(0);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferOperation::XDLifetimeTracker
+  //
+
+  TransferOperation::XDLifetimeTracker::XDLifetimeTracker(TransferOperation *_op,
+							  XferDesID _xd_id)
+    : Operation::AsyncWorkItem(_op)
+    , xd_id(_xd_id)
   {}
 
-  Event TransferPlanReduce::create_plan(const TransferDomain *td,
-                                        const ProfilingRequestSet& requests,
-                                        Event wait_on, int priority)
+  void TransferOperation::XDLifetimeTracker::request_cancellation(void)
   {
-    // TODO
-    bool inst_lock_needed = false;
-    GenEventImpl *finish_event = GenEventImpl::create_genevent();
-    ev = finish_event->current_event();
-    r = new ReduceRequest(td,
-                          std::vector<CopySrcDstField>(1, src),
-                          dst,
-                          inst_lock_needed,
-                          redop_id, red_fold,
-                          wait_on,
-                          finish_event,
-                          ID(ev).event_generation(),
-                          0 /*priority*/, requests);
-    return ev;
+    // ignored
   }
 
-  void TransferPlanReduce::execute_plan()
+  void TransferOperation::XDLifetimeTracker::print(std::ostream& os) const
   {
-    NodeID src_node = ID(src.inst).instance_owner_node();
-    if(src_node == Network::my_node_id) {
-      log_dma.debug("performing reduction on local node");
-
-      get_runtime()->optable.add_local_operation(ev, r);
-      r->set_dma_queue(dma_queue);
-      r->check_readiness();
-    } else {
-      r->forward_request(src_node);
-      get_runtime()->optable.add_remote_operation(ev, src_node);
-      // done with the local copy of the request
-      r->remove_reference();
-    }
+    os << "xd(" << std::hex << xd_id << std::dec << ")";
   }
 
-  class TransferPlanFill : public TransferPlan {
-  public:
-    TransferPlanFill(const void *_data, size_t _size,
-		     RegionInstance _inst, FieldID _field_id);
 
-    virtual void execute_plan();
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferOperation::DeferredStart
+  //
 
-    virtual Event create_plan(const TransferDomain *td,
-                              const ProfilingRequestSet& requests,
-                              Event wait_on, int priority);
-
-
-  protected:
-    ByteArray data;
-    RegionInstance inst;
-    FieldID field_id;
-    Event ev;
-    FillRequest *r;
-  };
-
-  TransferPlanFill::TransferPlanFill(const void *_data, size_t _size,
-				     RegionInstance _inst, FieldID _field_id)
-    : data(_data, _size)
-    , inst(_inst)
-    , field_id(_field_id)
-    , ev(Event::NO_EVENT)
-    , r(NULL)
+  TransferOperation::DeferredStart::DeferredStart(TransferOperation *_op)
+    : op(_op)
   {}
 
-  Event TransferPlanFill::create_plan(const TransferDomain *td,
-                                     const ProfilingRequestSet& requests,
-                                     Event wait_on, int priority)
+  void TransferOperation::DeferredStart::event_triggered(bool poisoned,
+							 TimeLimit work_until)
   {
-    CopySrcDstField f;
-    f.inst = inst;
-    f.field_id = field_id;
-    f.subfield_offset = 0;
-    f.size = data.size();
+    assert(!poisoned);
+    // TODO: respect time limit
 
-    GenEventImpl *finish_event = GenEventImpl::create_genevent();
-    ev = finish_event->current_event();
-    r = new FillRequest(td, f, data.base(), data.size(),
-                                     wait_on,
-                                     finish_event,
-                                     ID(ev).event_generation(),
-                                     priority, requests);
-    return ev;
-  }
-
-
-  void TransferPlanFill::execute_plan()
-  {
-    NodeID tgt_node = ID(inst).instance_owner_node();
-    if(tgt_node == Network::my_node_id) {
-      get_runtime()->optable.add_local_operation(ev, r);
-      r->set_dma_queue(dma_queue);
-      r->check_readiness();
+    // see if we need to wait for the transfer description analysis
+    if(op->desc.request_analysis(op)) {
+      // it's ready - go ahead and do ib creation
+      op->allocate_ibs();
     } else {
-      r->forward_request(tgt_node);
-      get_runtime()->optable.add_remote_operation(ev, tgt_node);
-      // release local copy of operation
-      r->remove_reference();
+      // do nothing - the TransferDesc will call us when it's ready
     }
   }
 
-  static void find_mergeable_fields(int idx,
-				    const std::vector<CopySrcDstField>& srcs,
-				    const std::vector<CopySrcDstField>& dsts,
-				    const std::vector<bool>& merged,
-				    std::set<int>& fields_to_merge)
+  void TransferOperation::DeferredStart::print(std::ostream& os) const
   {
-    for(size_t i = idx+1; i < srcs.size(); i++) {
-      if(merged[i]) continue;
-      if(srcs[i].inst != srcs[idx].inst) continue;
-      if(srcs[i].serdez_id != srcs[idx].serdez_id) continue;
-      if(srcs[i].indirect_index != srcs[idx].indirect_index) continue;
-      if(dsts[i].inst != dsts[idx].inst) continue;
-      if(dsts[i].serdez_id != dsts[idx].serdez_id) continue;
-      if(dsts[i].indirect_index != dsts[idx].indirect_index) continue;
-      // only merge fields of the same size to avoid issues with wrapping
-      //  around in intermediate buffers
-      if(srcs[i].size != srcs[idx].size) continue;
-      if(dsts[i].size != dsts[idx].size) continue;
-      fields_to_merge.insert(i);
-    }
+    os << "deferred_start(";
+    op->print(os);
+    os << ")";
   }
 
+  Event TransferOperation::DeferredStart::get_finish_event(void) const
+  {
+    return op->finish_event->make_event(op->finish_gen);
+  }
 
 			      
   template <int N, typename T>
@@ -3083,128 +4169,27 @@ namespace Realm {
 			      const Realm::ProfilingRequestSet &requests,
 			      Event wait_on) const
   {
-    TransferProfile tp;
-    bool prof_requests=false;
-    Event prof_ev = Event::NO_EVENT;
-    if (!requests.empty()) {
-      prof_ev = tp.create_profile(requests);
-      prof_requests = true;
-    }
+    // create a (one-use) transfer description
+    TransferDesc *tdesc = new TransferDesc(*this,
+                                           srcs,
+                                           dsts,
+                                           indirects,
+                                           requests);
 
-    TransferDomain *td = TransferDomain::construct(*this);
-    std::vector<TransferPlan *> plans;
-    assert(srcs.size() == dsts.size());
-    std::vector<bool> merged(srcs.size(), false);
-    for(size_t i = 0; i < srcs.size(); i++) {
-      // did we already do this field?
-      if(merged[i]) continue;
+    // and now an operation that uses it
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event ev = finish_event->current_event();
+    TransferOperation *op = new TransferOperation(*tdesc,
+                                                  wait_on,
+                                                  finish_event,
+                                                  ID(ev).event_generation());
+    get_runtime()->optable.add_local_operation(ev, op);
+    op->start_or_defer();
 
-      assert(srcs[i].size == dsts[i].size);
+    // remove our reference to the description (op holds one)
+    tdesc->remove_reference();
 
-      IndirectionInfo *src_indirect = 0;
-      if(srcs[i].indirect_index != -1)
-	src_indirect = indirects[srcs[i].indirect_index]->create_info(*this);
-
-      IndirectionInfo *dst_indirect = 0;
-      if(dsts[i].indirect_index != -1)
-	dst_indirect = indirects[dsts[i].indirect_index]->create_info(*this);
-
-      // if the source field id is -1 and dst has no redop, we can use old fill
-      if(srcs[i].field_id == FieldID(-1)) {
-	// no support for reduction fill yet
-	assert(dsts[i].redop_id == 0);
-	assert(src_indirect == 0);
-	assert(dst_indirect == 0);
-	TransferPlan *p = new TransferPlanFill(((srcs[i].size <= srcs[i].MAX_DIRECT_SIZE) ?
-						  &(srcs[i].fill_data.direct) :
-						  srcs[i].fill_data.indirect),
-					       srcs[i].size,
-					       dsts[i].inst,
-					       dsts[i].field_id);
-	plans.push_back(p);
-        if (prof_requests)
-          tp.add_fill_entry(dsts[i], td);
-	continue;
-      }
-
-      // if the dst has a reduction op, do a reduce
-      if(dsts[i].redop_id != 0) {
-	assert(src_indirect == 0);
-	assert(dst_indirect == 0);
-	TransferPlan *p = new TransferPlanReduce(srcs[i], dsts[i],
-						 dsts[i].redop_id,
-						 dsts[i].red_fold);
-	plans.push_back(p);
-        if (prof_requests) {
-          tp.add_reduc_entry(srcs[i], dsts[i], td);
-        }
-	continue;
-      }
-
-      // per-field copy
-      OffsetsAndSize oas;
-      oas.src_field_id = srcs[i].field_id;
-      oas.dst_field_id = dsts[i].field_id;
-      oas.src_subfield_offset = srcs[i].subfield_offset;
-      oas.dst_subfield_offset = dsts[i].subfield_offset;
-      oas.size = srcs[i].size;
-      oas.serdez_id = srcs[i].serdez_id;
-      OASByInst *oas_by_inst = new OASByInst;
-      (*oas_by_inst)[InstPair(srcs[i].inst, dsts[i].inst)].push_back(oas);
-      if(srcs[i].serdez_id == 0) {
-	std::set<int> fields_to_merge;
-	find_mergeable_fields(i, srcs, dsts, merged, fields_to_merge);
-	for(std::set<int>::const_iterator it = fields_to_merge.begin();
-	    it != fields_to_merge.end();
-	    ++it) {
-	  //log_dma.print() << "merging field " << *it;
-	  OffsetsAndSize oas;
-	  oas.src_field_id = srcs[*it].field_id;
-	  oas.dst_field_id = dsts[*it].field_id;
-	  oas.src_subfield_offset = srcs[*it].subfield_offset;
-	  oas.dst_subfield_offset = dsts[*it].subfield_offset;
-	  oas.size = srcs[*it].size;
-	  oas.serdez_id = srcs[*it].serdez_id;
-	  (*oas_by_inst)[InstPair(srcs[i].inst, dsts[i].inst)].push_back(oas);
-	  merged[*it] = true;
-	}
-      }
-      TransferPlanCopy *p = new TransferPlanCopy(oas_by_inst,
-					 src_indirect, dst_indirect);
-      plans.push_back(p);
-      if (prof_requests) {
-        bool is_dst_indirect = dst_indirect == 0 ? false: true;
-        bool is_src_indirect = src_indirect == 0 ? false: true;
-        tp.add_copy_entry(oas_by_inst, td, is_src_indirect,
-                          is_dst_indirect);
-      }
-    }
-    // hack to eliminate duplicate profiling responses
-    //assert(requests.empty() || (plans.size() == 1));
-    ProfilingRequestSet empty_prs;
-    const ProfilingRequestSet *prsptr = &empty_prs;
-    std::set<Event> finish_events;
-    for(std::vector<TransferPlan *>::iterator it = plans.begin();
-	it != plans.end();
-	++it) {
-      Event e = (*it)->create_plan(td, *prsptr, wait_on, 0 /*priority*/);
-      finish_events.insert(e);
-    }
-    // record profiling state before copies ops begin
-    if (prof_requests)
-      {
-        tp.execute(Event::merge_events(finish_events), wait_on);
-        finish_events.insert(prof_ev);
-      }
-
-    for(std::vector<TransferPlan *>::iterator it = plans.begin();
-        it != plans.end();
-        ++it) {
-      (*it)->execute_plan();
-      delete *it;
-    }
-    delete td;
-    return Event::merge_events(finish_events);
+    return ev;
   }
 
 #define DOIT(N,T) \
