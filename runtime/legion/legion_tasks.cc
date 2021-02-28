@@ -7859,7 +7859,7 @@ namespace Legion {
         for (std::set<SliceTask*>::const_iterator it = 
               origin_mapped_slices.begin(); it != 
               origin_mapped_slices.end(); it++)
-          (*it)->find_profiling_reported(commit_preconditions);
+          (*it)->find_commit_preconditions(commit_preconditions);
       }
       if (must_epoch != NULL)
       {
@@ -8782,6 +8782,7 @@ namespace Legion {
       remote_trace_info = NULL;
       remote_unique_id = get_unique_id();
       origin_mapped = false;
+      origin_mapped_complete = RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -8808,6 +8809,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(local_regions.empty());
       assert(local_fields.empty());
+      assert(!origin_mapped_complete.exists() ||
+              origin_mapped_complete.has_triggered());
 #endif
       map_applied_conditions.clear();
       point_completions.clear();
@@ -9067,16 +9070,18 @@ namespace Legion {
           rez.serialize(impl->get_ready_event());
         }
       }
-      if (is_origin_mapped())
+      if (is_origin_mapped() && !is_remote())
       {
-        // If we're not remote and origin mapped then we need
-        // to hold onto these version infos until we are done
-        // with the whole index space task, so tell our owner
+#ifdef DEBUG_LEGION
+        assert(!origin_mapped_complete.exists());
+#endif
         // Similarly for slices being removed remotely but are
         // origin mapped we may need to receive profiling feedback
         // to this node so also hold onto these slices until the
         // index space is done
         index_owner->record_origin_mapped_slice(this);
+        // Make an event to indicate when this commits
+        origin_mapped_complete = Runtime::create_rt_user_event();
         return false;
       }
       // Always return true for slice tasks since they should
@@ -9453,6 +9458,18 @@ namespace Legion {
         result_size = predicate_false_size;
         return predicate_false_result;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we've got an origin mapped commit event trigger that when
+      // this task is done executing
+      if (origin_mapped_complete.exists())
+        Runtime::trigger_event(origin_mapped_complete,
+            RtEvent(Processor::get_current_finish_event()));
+      TaskOp::trigger_complete();
     }
 
     //--------------------------------------------------------------------------
@@ -10035,9 +10052,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::find_profiling_reported(std::set<RtEvent> &preconditions)
+    void SliceTask::find_commit_preconditions(std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
+      // See if any of our point tasks have any profiling report events
       for (std::vector<PointTask*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
       {
@@ -10045,6 +10063,12 @@ namespace Legion {
         if (profiling_reported.exists())
           preconditions.insert(profiling_reported);
       }
+#ifdef DEBUG_LEGION
+      assert(origin_mapped_complete.exists());
+#endif
+      // Also make sure that this slice has completed before we try to
+      // deactivate the slice by the owner index space task
+      preconditions.insert(origin_mapped_complete);
     }
 
     //--------------------------------------------------------------------------
