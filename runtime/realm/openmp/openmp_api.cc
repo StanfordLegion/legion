@@ -155,9 +155,9 @@ extern "C" {
     ThreadPool::WorkItem *work = wi->pop_work_item();
     assert(work != 0);
     // make sure all workers have finished
-    if(work->remaining_workers.fetch_sub(1) > 1) {
+    if(work->remaining_workers.fetch_sub_acqrel(1) > 1) {
       log_omp.info() << "waiting for workers to complete";
-      while(work->remaining_workers.load() > 0)
+      while(work->remaining_workers.load_acquire() > 0)
 	sched_yield();
     }
     delete work;
@@ -889,9 +889,9 @@ extern "C" {
     ThreadPool::WorkItem *work2 = wi->pop_work_item();
     assert(work == work2);
     // make sure all workers have finished
-    if(work->remaining_workers.fetch_sub(1) > 1) {
+    if(work->remaining_workers.fetch_sub_acqrel(1) > 1) {
       log_omp.info() << "waiting for workers to complete";
-      while(work->remaining_workers.load() > 0)
+      while(work->remaining_workers.load_acquire() > 0)
 	sched_yield();
     }
     delete work;

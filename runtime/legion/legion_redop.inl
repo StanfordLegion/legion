@@ -4277,7 +4277,7 @@ namespace Legion {
     const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
     union { int as_int; short as_short[2]; } oldval, newval;
     int *target = (int *)(ptr - (offset * sizeof(__half)));
-    newval.as_int = *(volatile target*)target;
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = newval.as_int;
       newval.as_short[offset] = __half_as_short(__MAX__(
