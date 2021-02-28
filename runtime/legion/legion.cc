@@ -1794,6 +1794,19 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // IndexAttachLauncher
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexAttachLauncher::IndexAttachLauncher(ExternalResource r,
+                                             LogicalRegion p, const bool restr)
+      : resource(r), parent(p), restricted(restr), mode(LEGION_FILE_READ_ONLY),
+        static_dependences(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // PredicateLauncher
     /////////////////////////////////////////////////////////////
 
@@ -2537,6 +2550,93 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Internal::PhysicalRegionImpl::fail_privilege_check(d, fid, mode);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ExternalResources
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExternalResources::ExternalResources(void)
+      : impl(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResources::ExternalResources(Internal::ExternalResourcesImpl *i)
+      : impl(i)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResources::ExternalResources(const ExternalResources &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResources::ExternalResources(ExternalResources &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResources::~ExternalResources(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResources& ExternalResources::operator=(
+                                                   const ExternalResources &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResources& ExternalResources::operator=(ExternalResources &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ExternalResources::size(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return 0;
+      return impl->size();
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion ExternalResources::operator[](unsigned index) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return PhysicalRegion();
+      return impl->get_region(index);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5616,7 +5716,15 @@ namespace Legion {
                                                  const AttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return runtime->attach_external_resource(ctx, launcher);
+      return ctx->attach_resource(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResources Runtime::attach_external_resources(Context ctx,
+            const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->attach_resources(launcher, deduplicate_across_shards);
     }
 
     //--------------------------------------------------------------------------
@@ -5625,14 +5733,24 @@ namespace Legion {
                                              const bool unordered/*= false*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->detach_external_resource(ctx, region, flush, unordered);
+      return ctx->detach_resource(region, flush, unordered);
+    }
+
+    //--------------------------------------------------------------------------
+    Future Runtime::detach_external_resources(Context ctx,
+                                              ExternalResources resources,
+                                              const bool flush /*= true*/,
+                                              const bool unordered /*= false*/)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->detach_resources(resources, flush, unordered);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::progress_unordered_operations(Context ctx)
     //--------------------------------------------------------------------------
     {
-      runtime->progress_unordered_operations(ctx);
+      ctx->progress_unordered_operations();
     }
 
     //--------------------------------------------------------------------------
@@ -5646,15 +5764,14 @@ namespace Legion {
     {
       AttachLauncher launcher(LEGION_EXTERNAL_HDF5_FILE, handle, parent);
       launcher.attach_hdf5(file_name, field_map, mode);
-      return runtime->attach_external_resource(ctx, launcher);
+      return ctx->attach_resource(launcher);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::detach_hdf5(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      runtime->detach_external_resource(ctx, region, true/*flush*/, 
-                                        false/*unordered*/);
+      ctx->detach_resource(region, true/*flush*/, false/*unordered*/);
     }
 
     //--------------------------------------------------------------------------
@@ -5668,15 +5785,14 @@ namespace Legion {
     {
       AttachLauncher launcher(LEGION_EXTERNAL_POSIX_FILE, handle, parent);
       launcher.attach_file(file_name, field_vec, mode);
-      return runtime->attach_external_resource(ctx, launcher);
+      return ctx->attach_resource(launcher);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::detach_file(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      runtime->detach_external_resource(ctx, region, true/*flush*/,
-                                        false/*unordered*/);
+      ctx->detach_resource(region, true/*flush*/, false/*unordered*/);
     }
     
     //--------------------------------------------------------------------------

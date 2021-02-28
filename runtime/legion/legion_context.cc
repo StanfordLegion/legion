@@ -2004,12 +2004,21 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!unmapped_regions.empty());
 #endif
-      if ((trace != NULL) && trace->is_static_trace())
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RUNTIME_REMAPPING,
-          "Illegal runtime remapping in static trace inside of "
+      if (trace != NULL)
+      {
+        if (trace->is_static_trace())
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_RUNTIME_REMAPPING,
+                      "Illegal runtime remapping in static trace inside of "
                       "task %s (UID %lld). Static traces must perfectly "
                       "manage their physical mappings with no runtime help.",
                       get_task_name(), get_unique_id())
+        else
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_RUNTIME_REMAPPING,
+                      "Illegal runtime remapping in dynamic trace %d inside of "
+                      "task %s (UID %lld). Dynamic traces must perfectly "
+                      "manage their physical mappings with no runtime help.",
+                      trace->tid, get_task_name(), get_unique_id())
+      }
       std::set<ApEvent> mapped_events;
       for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
       {
@@ -2508,6 +2517,25 @@ namespace Legion {
           if ((*it)->remove_base_valid_ref(CONTEXT_REF))
             delete (*it);
         fill_view_cache.clear();
+      }
+      if (!attach_functions.empty())
+      {
+        for (std::map<IndexTreeNode*,
+                std::vector<AttachProjectionFunctor*> >::const_iterator fit =
+              attach_functions.begin(); fit != attach_functions.end(); fit++)
+        {
+          for (std::vector<AttachProjectionFunctor*>::const_iterator it =
+                fit->second.begin(); it != fit->second.end(); it++)
+          {
+            // Unregister it with the runtime if it is not the identity
+            // The runtime will delete the functor for us
+            if ((*it)->pid > 0)
+              runtime->unregister_projection_functor((*it)->pid);
+            else // This is the identity so we can just delete it ourself
+              delete (*it);
+          }
+        }
+        attach_functions.clear();
       }
 #ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
@@ -5730,12 +5758,22 @@ namespace Legion {
                     launcher.requirement.region.tree_id, 
                     get_task_name(), get_unique_id());
 #endif
+      if (current_trace != NULL)
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
+                      "Attempted an inline mapping of region "
+                      "(%x,%x,%x) inside of trace %d of parent task %s "
+                      "(ID %lld). It is illegal to perform inline mapping "
+                      "operations inside of traces.",
+                      launcher.requirement.region.index_space.id, 
+                      launcher.requirement.region.field_space.id, 
+                      launcher.requirement.region.tree_id, 
+                      current_trace->tid, get_task_name(), get_unique_id())
       bool parent_conflict = false, inline_conflict = false;  
       const int index = 
         has_conflicting_regions(map_op, parent_conflict, inline_conflict);
       if (parent_conflict)
         REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
-          "Attempted an inline mapping of region "
+                      "Attempted an inline mapping of region "
                       "(%x,%x,%x) that conflicts with mapped region " 
                       "(%x,%x,%x) at index %d of parent task %s "
                       "(ID %lld) that would ultimately result in "
@@ -5749,7 +5787,7 @@ namespace Legion {
                       index, get_task_name(), get_unique_id())
       if (inline_conflict)
         REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
-          "Attempted an inline mapping of region (%x,%x,%x) "
+                      "Attempted an inline mapping of region (%x,%x,%x) "
                       "that conflicts with previous inline mapping in "
                       "task %s (ID %lld) that would ultimately result in "
                       "deadlock.  Instead you receive this error message.",
@@ -5771,6 +5809,17 @@ namespace Legion {
       // if it is then we are done
       if (region.is_mapped())
         return ApEvent::NO_AP_EVENT;
+      if (current_trace != NULL)
+      {
+        const RegionRequirement &req = region.impl->get_requirement();
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
+                      "Attempted an inline mapping of region "
+                      "(%x,%x,%x) inside of trace %d of parent task %s "
+                      "(ID %lld). It is illegal to perform inline mapping "
+                      "operations inside of traces.", req.region.index_space.id,
+                      req.region.field_space.id, req.region.tree_id, 
+                      current_trace->tid, get_task_name(), get_unique_id())
+      }
       MapOp *map_op = runtime->get_available_map_op();
       map_op->initialize(this, region);
       register_inline_mapped_region(region);
@@ -6078,37 +6127,286 @@ namespace Legion {
       int index = has_conflicting_regions(attach_op, 
                                           parent_conflict, inline_conflict);
       if (parent_conflict)
-        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_ATTACH_HDF5,
-          "Attempted an attach hdf5 file operation on region "
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                      "Attempted an external attach operation on region "
                       "(%x,%x,%x) that conflicts with mapped region " 
                       "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
                       "that would ultimately result in deadlock. Instead you "
                       "receive this error message. Try unmapping the region "
-                      "before invoking attach_hdf5 on file %s",
+                      "before invoking 'attach_external_resource'.",
                       launcher.handle.index_space.id, 
                       launcher.handle.field_space.id, 
                       launcher.handle.tree_id, 
                       regions[index].region.index_space.id,
                       regions[index].region.field_space.id,
                       regions[index].region.tree_id, index, 
-                      get_task_name(), get_unique_id(), launcher.file_name)
+                      get_task_name(), get_unique_id())
       if (inline_conflict)
-        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_ATTACH_HDF5,
-          "Attempted an attach hdf5 file operation on region "
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                      "Attempted an external attach operation on region "
                       "(%x,%x,%x) that conflicts with previous inline "
                       "mapping in task %s (ID %lld) "
                       "that would ultimately result in deadlock. Instead you "
                       "receive this error message. Try unmapping the region "
-                      "before invoking attach_hdf5 on file %s",
+                      "before invoking 'attach_external_resource'.",
                       launcher.handle.index_space.id, 
-                      launcher.handle.field_space.id, 
-                      launcher.handle.tree_id, get_task_name(), 
-                      get_unique_id(), launcher.file_name)
+                      launcher.handle.field_space.id, launcher.handle.tree_id,
+                      get_task_name(), get_unique_id())
       // Add this region to the list of inline mapped regions if it is mapped
       if (result.is_mapped())
         register_inline_mapped_region(result);
       add_to_dependence_queue(attach_op);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResources InnerContext::attach_resources(
+            const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (launcher.handles.empty())
+        return ExternalResources();
+      // This is not control replicated so no need to deduplicate anything
+      std::vector<unsigned> indexes(launcher.handles.size());
+      for (unsigned idx = 0; idx < indexes.size(); idx++)
+        indexes[idx] = idx;
+      // Compute the upper bound partition node from this launcher
+      RegionTreeNode *node = compute_index_attach_upper_bound(launcher,indexes);
+      IndexSpaceNode *launch_space = runtime->forest->get_node(
+       find_index_launch_space(Domain(Point<1>(0),Point<1>(indexes.size()-1))));
+      IndexAttachOp *attach_op = runtime->get_available_index_attach_op();
+      ExternalResources result = 
+        attach_op->initialize(this, node, launch_space, launcher, indexes);
+      const RegionRequirement &req = attach_op->get_requirement();
+      bool parent_conflict = false, inline_conflict = false;
+      int index = has_conflicting_internal(req,parent_conflict,inline_conflict);
+      if (parent_conflict)
+      {
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                        "Attempted an index attach operation with upper bound "
+                        "partition (%x,%x,%x) that conflicts with mapped region"
+                        " (%x,%x,%x) at index %d of parent task %s (ID %lld) "
+                        "that would ultimately result in deadlock. Instead you "
+                        "receive this error message. Try unmapping the region "
+                        "before invoking 'attach_external_resources'.",
+                        req.partition.index_partition.id, 
+                        req.partition.field_space.id, 
+                        req.partition.tree_id, 
+                        regions[index].region.index_space.id,
+                        regions[index].region.field_space.id,
+                        regions[index].region.tree_id, index, 
+                        get_task_name(), get_unique_id())
+        else
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                        "Attempted an index attach operation with upper bound "
+                        "region (%x,%x,%x) that conflicts with mapped region "
+                        "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
+                        "that would ultimately result in deadlock. Instead you "
+                        "receive this error message. Try unmapping the region "
+                        "before invoking 'attach_external_resources'.",
+                        req.region.index_space.id, 
+                        req.region.field_space.id, 
+                        req.region.tree_id, 
+                        regions[index].region.index_space.id,
+                        regions[index].region.field_space.id,
+                        regions[index].region.tree_id, index, 
+                        get_task_name(), get_unique_id())
+      }
+      if (inline_conflict)
+      {
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                        "Attempted an index attach operation with upper bound "
+                        "partition (%x,%x,%x) that conflicts with previous "
+                        "inline mapping in task %s (ID %lld) "
+                        "that would ultimately result in deadlock. Instead you "
+                        "receive this error message. Try unmapping the region "
+                        "before invoking 'attach_external_resources'.",
+                        req.partition.index_partition.id, 
+                        req.partition.field_space.id, req.partition.tree_id,
+                        get_task_name(), get_unique_id())
+        else
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                        "Attempted an index attach operation with upper bound "
+                        "region (%x,%x,%x) that conflicts with previous inline "
+                        "mapping in task %s (ID %lld) "
+                        "that would ultimately result in deadlock. Instead you "
+                        "receive this error message. Try unmapping the region "
+                        "before invoking 'attach_external_resources'.",
+                        req.region.index_space.id, 
+                        req.region.field_space.id, req.region.tree_id,
+                        get_task_name(), get_unique_id())
+      }
+      add_to_dependence_queue(attach_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreeNode* InnerContext::compute_index_attach_upper_bound(
+      const IndexAttachLauncher &launcher, const std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+      unsigned ancestor_depth = 0;
+      RegionTreeNode *common_ancestor = NULL;
+      for (unsigned idx = 0; idx < indexes.size(); idx++)
+      {
+        const unsigned index = indexes[idx];
+        LogicalRegion handle = launcher.handles[index];
+        if (handle.get_tree_id() != launcher.parent.get_tree_id())
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+              "Handle (%d,%d,%d) of index attach operation in parent task %s "
+              "(UID %lld) does not come from the same region tree as the "
+              "parent region (%d,%d,%d). All regions for an index space "
+              "attach must be from the same tree.", handle.index_space.id,
+              handle.field_space.id, handle.tree_id, get_task_name(),
+              get_unique_id(), launcher.parent.index_space.id,
+              launcher.parent.field_space.id, launcher.parent.tree_id)
+        RegionTreeNode *node = runtime->forest->get_node(handle);
+        if (common_ancestor != NULL)
+        {
+          if (common_ancestor == node)
+            REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+               "Handle (%d,%d,%d) of index attach operation in parent task %s "
+              "(UID %lld) is overlaps with previous regions. All regions "
+              "in index space attach operations must be disjoint.",
+              handle.index_space.id, handle.field_space.id, handle.tree_id,
+              get_task_name(), get_unique_id())
+          // Bring them to the same depth
+          unsigned node_depth = node->get_depth();
+          while (ancestor_depth < node_depth)
+          {
+#ifdef DEBUG_LEGION
+            assert(node_depth > 0);
+#endif
+            node = node->get_parent();
+            node_depth--;
+          }
+          while (node_depth < ancestor_depth)
+          {
+#ifdef DEBUG_LEGION
+            assert(ancestor_depth > 0);
+#endif
+            common_ancestor = common_ancestor->get_parent();
+            ancestor_depth--;
+          }
+          while (node != common_ancestor)
+          {
+            // Same depth but different nodes
+#ifdef DEBUG_LEGION
+            assert(ancestor_depth > 0);
+#endif
+            node = node->get_parent();
+            common_ancestor = common_ancestor->get_parent();
+            ancestor_depth--;
+          }
+        }
+        else
+        {
+          common_ancestor = node;
+          ancestor_depth = common_ancestor->get_depth();
+        }
+      }
+      return common_ancestor;
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionID InnerContext::compute_index_attach_projection(
+                    IndexTreeNode *upper_bound, std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      
+      std::map<IndexTreeNode*,std::vector<AttachProjectionFunctor*> >::iterator
+        finder = attach_functions.find(upper_bound);
+      if (finder != attach_functions.end())
+      {
+        for (std::vector<AttachProjectionFunctor*>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          if ((*it)->handles.size() != spaces.size())
+            continue;
+          bool equal = true;
+          for (unsigned idx = 0; idx < spaces.size(); idx++)
+          {
+            if ((*it)->handles[idx] == spaces[idx])
+              continue;
+            equal = false;
+            break;
+          }
+          if (equal)
+            return (*it)->pid;
+        }
+      }
+      else // instantiate the entry in the map
+        finder = attach_functions.insert(std::make_pair(upper_bound,
+              std::vector<AttachProjectionFunctor*>())).first;
+      // If the upper bound is a partition, do a quick check to see if
+      // all the spaces are immediate children of the upper bound, if
+      // so then we can use projection function 0
+      if (!upper_bound->is_index_space_node())
+      {
+        bool all_children = true;
+        IndexPartNode *parent = upper_bound->as_index_part_node();
+        for (std::vector<IndexSpace>::const_iterator it =
+              spaces.begin(); it != spaces.end(); it++)
+        {
+          IndexSpaceNode *child = runtime->forest->get_node(*it);
+          if (child->parent == parent)
+            continue;
+          all_children = false;
+          break;
+        }
+        if (all_children)
+        {
+          // We can use the identity projection in this case
+          // so just make it, but no need to register it with the runtime
+          finder->second.push_back(
+              new AttachProjectionFunctor(0/*identity*/, std::move(spaces)));
+          return 0;
+        }
+      }
+      // If we get here then we need to make it
+      // Generate a fresh dynamic ID and store it
+      const ProjectionID result =
+        runtime->generate_dynamic_projection_id(false/*check context*/);
+      AttachProjectionFunctor *functor =
+        new AttachProjectionFunctor(result, std::move(spaces));
+      runtime->register_projection_functor(result, functor, false/*check*/,
+                                           true/*silence warnings*/);
+      finder->second.push_back(functor);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_projection_function(result, functor->get_depth(),
+                                           functor->is_invertible());
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext::AttachProjectionFunctor::AttachProjectionFunctor(
+                               ProjectionID p, std::vector<IndexSpace> &&spaces)
+      : handles(spaces), pid(p)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion InnerContext::AttachProjectionFunctor::project(
+      LogicalRegion upper_bound, const DomainPoint &point, const Domain &launch)
+    //--------------------------------------------------------------------------
+    {
+      const Point<1> p = point;
+      return runtime->get_logical_subregion_by_tree(handles[p[0]],
+          upper_bound.get_field_space(), upper_bound.get_tree_id());
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion InnerContext::AttachProjectionFunctor::project(
+         LogicalPartition upper, const DomainPoint &point, const Domain &launch)
+    //--------------------------------------------------------------------------
+    {
+      const Point<1> p = point;
+      return runtime->get_logical_subregion_by_tree(handles[p[0]],
+                    upper.get_field_space(), upper.get_tree_id());
     }
 
     //--------------------------------------------------------------------------
@@ -6126,6 +6424,20 @@ namespace Legion {
       }
       DetachOp *op = runtime->get_available_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
+      add_to_dependence_queue(op, unordered);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future InnerContext::detach_resources(ExternalResources resources,
+                                         const bool flush, const bool unordered)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (resources.impl == NULL)
+        return Future();
+      IndexDetachOp *op = runtime->get_available_index_detach_op();
+      Future result = resources.impl->detach(this, op, flush, unordered);
       add_to_dependence_queue(op, unordered);
       return result;
     }
@@ -11325,6 +11637,17 @@ namespace Legion {
                      "task %s (ID %lld)", get_task_name(), get_unique_id())
       return PhysicalRegion();
     }
+
+    //--------------------------------------------------------------------------
+    ExternalResources LeafContext::attach_resources(
+            const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_ATTACH_RESOURCE_OPERATION,
+        "Illegal attach resources operation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return ExternalResources();
+    }
     
     //--------------------------------------------------------------------------
     Future LeafContext::detach_resource(PhysicalRegion region, const bool flush,
@@ -11333,6 +11656,17 @@ namespace Legion {
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
         "Illegal detach resource operation performed in leaf "
+                      "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
+    Future LeafContext::detach_resources(ExternalResources resources,
+                                         const bool flush, const bool unordered)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
+        "Illegal index detach resource operation performed in leaf "
                       "task %s (ID %lld)", get_task_name(), get_unique_id())
       return Future();
     }

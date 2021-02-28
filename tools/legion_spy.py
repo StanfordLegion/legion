@@ -2278,6 +2278,7 @@ class PointSet(object):
                     # Put each point on it's own line
                     self.space_string += ' u <br/>' + point_str
         assert self.space_string is not None
+        self.space_string = self.space_string.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
         return self.space_string
 
 class NodeSet(object):
@@ -2704,6 +2705,10 @@ class IndexSpace(object):
 
     __repr__ = __str__
 
+    @property
+    def html_safe_name(self):
+        return str(self).replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
+
     def check_partition_properties(self):
         # Check all the partitions
         for child in itervalues(self.children):
@@ -3040,7 +3045,7 @@ class Field(object):
 
     @property
     def html_safe_name(self):
-        return str(self).replace('<','&lt;').replace('>','&gt;')
+        return str(self).replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
     __repr__ = __str__
 
@@ -3134,7 +3139,7 @@ class LogicalRegion(object):
 
     @property
     def html_safe_name(self):
-        return str(self).replace('<','&lt;').replace('>','&gt;')
+        return str(self).replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
     def __str__(self):
         if self.name is None:
@@ -3531,7 +3536,7 @@ class LogicalPartition(object):
 
     @property
     def html_safe_name(self):
-        return str(self).replace('<','&lt;').replace('>','&gt;')
+        return str(self).replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
     def __str__(self):
         if self.name is None:
@@ -5529,6 +5534,8 @@ class Operation(object):
 
     def set_name(self, name):
         self.name = name
+        if self.kind != SINGLE_TASK_KIND and self.kind != INDEX_TASK_KIND:
+            self.name += " "+str(self.uid)
         if self.points is not None:
             for point in itervalues(self.points):
                 point.set_name(name)
@@ -5549,8 +5556,12 @@ class Operation(object):
                 close.set_context(context, False)
         # Also recurse for any points we have
         if self.points is not None:
-            for point in itervalues(self.points):
-                point.op.set_context(context, False)
+            if self.kind == INDEX_TASK_KIND:
+                for point in itervalues(self.points):
+                    point.op.set_context(context, False)
+            else:
+                for point in itervalues(self.points):
+                    point.set_context(context, False)
         # Finaly recurse for any summary operations
         if self.summary_op is not None and self.summary_op != self:
             self.summary_op.set_context(context, False)
@@ -5566,6 +5577,9 @@ class Operation(object):
             self.kind = kind
         else:
             assert self.kind is kind
+        if self.points:
+            for point in itervalues(self.points):
+                point.set_op_kind(kind)
 
     def set_events(self, start, finish):
         if start.exists():
@@ -7329,7 +7343,7 @@ class Operation(object):
 
     @property
     def html_safe_name(self):
-        return str(self).replace('<','&lt;').replace('>','&gt;')
+        return str(self).replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
     def print_base_node(self, printer, dataflow):
         title = self.html_safe_name+' (UID: '+str(self.uid)+')'
@@ -7638,7 +7652,7 @@ class Task(object):
 
     @property
     def html_safe_name(self):
-        return str(self).replace('<','&lt;').replace('>','&gt;')
+        return str(self).replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
     def add_operation(self, operation):
         self.operations.append(operation)
@@ -9361,13 +9375,13 @@ class RealmCopy(RealmBase):
                     if has_src_indirect:
                         assert src_index is not None
                         line.append('Src Indirect: '+
-                                str(self.indirections.get_indirect_field(src_index)))
+                                self.indirections.get_indirect_field(src_index).html_safe_name)
                         local_rows = max(local_rows, 
                                 self.indirections.get_group_size(src_index))
                     if has_dst_indirect:
                         assert dst_index is not None
                         line.append('Dst Indirect: '+
-                                str(self.indirections.get_indirect_field(dst_index)))
+                                self.indirections.get_indirect_field(dst_index).html_safe_name)
                         local_rows = max(local_rows, 
                                 self.indirections.get_group_size(dst_index))
                     line.append(dst_field.html_safe_name)
@@ -9660,9 +9674,9 @@ class RealmDeppart(RealmBase):
 
     def print_event_node(self, printer):
         if self.state.detailed_graphs:
-            label = "Realm Deppart ("+str(self.realm_num)+") of "+str(self.index_space)
+            label = "Realm Deppart ("+str(self.realm_num)+") of "+self.index_space.html_safe_name
         else:
-            label = "Realm Deppart of "+str(self.index_space)
+            label = "Realm Deppart of "+self.index_space.html_safe_name
         if self.creator is not None:
             label += " generated by "+self.creator.html_safe_name
         lines = [[{ "label" : label, "colspan" : 3 }]]
@@ -10055,9 +10069,9 @@ detailed_config_pat      = re.compile(
     prefix+"Legion Spy Detailed Logging")
 # Patterns for the shape of the machine
 proc_kind_pat            = re.compile(
-    prefix+"Processor Kind (?P<kind>[0-9]+) (?P<name>[-$()\w. ]+)")
+    prefix+"Processor Kind (?P<kind>[0-9]+) (?P<name>.+)")
 mem_kind_pat             = re.compile(
-    prefix+"Memory Kind (?P<kind>[0-9]+) (?P<name>[-$()\w. ]+)")
+    prefix+"Memory Kind (?P<kind>[0-9]+) (?P<name>.+)")
 processor_pat            = re.compile(
     prefix+"Processor (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
 memory_pat               = re.compile(
@@ -10072,30 +10086,30 @@ mem_mem_pat              = re.compile(
 top_index_pat            = re.compile(
     prefix+"Index Space (?P<uid>[0-9a-f]+)")
 index_name_pat           = re.compile(
-    prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>[-$(){}<>:\w. ]+)")
+    prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>.+)")
 index_part_pat           = re.compile(
     prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-1]) "+
            "(?P<color>[0-9]+)")
 index_part_name_pat      = re.compile(
-    prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>[-$(){}<>:\w. ]+)")
+    prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>.+)")
 index_subspace_pat       = re.compile(
     prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 field_space_pat          = re.compile(
     prefix+"Field Space (?P<uid>[0-9]+)")
 field_space_name_pat     = re.compile(
-    prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>[-$(){}<>:\w. ]+)")
+    prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>.+)")
 field_create_pat         = re.compile(
     prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+)")
 field_name_pat           = re.compile(
-    prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>[-$(){}<>:\w. ]+)")
+    prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>.+)")
 region_pat               = re.compile(
     prefix+"Region (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+)")
 region_name_pat          = re.compile(
     prefix+"Logical Region Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) "+
-            "(?P<name>[-$(){}<>:\w. ]+)")
+            "(?P<name>.+)")
 partition_name_pat       = re.compile(
     prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) "+
-            "(?P<name>[-$(){}<>:\w. ]+)")
+            "(?P<name>.+)")
 index_space_point_pat    = re.compile(
     prefix+"Index Space Point (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 index_space_rect_pat     = re.compile(
@@ -10113,18 +10127,18 @@ diff_expr_pat            = re.compile(
     prefix+"Index Space Difference (?P<expr>[0-9]+) (?P<left>[0-9]+) (?P<right>[0-9]+)")
 # Patterns for operations
 task_name_pat            = re.compile(
-    prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>[-$(){}<>:\w. ]+)")
+    prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>.+)")
 task_variant_pat         = re.compile(
     prefix+"Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<inner>[0-1]) "+
-    "(?P<leaf>[0-1]) (?P<idem>[0-1]+) (?P<name>[-$()<>:\w. ]+)")
+    "(?P<leaf>[0-1]) (?P<idem>[0-1]+) (?P<name>.+)")
 top_task_pat             = re.compile(
-    prefix+"Top Task (?P<tid>[0-9]+) (?P<ctxuid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()<>:\w. ]+)")
+    prefix+"Top Task (?P<tid>[0-9]+) (?P<ctxuid>[0-9]+) (?P<uid>[0-9]+) (?P<name>.+)")
 single_task_pat          = re.compile(
     prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
-            "(?P<name>[-$()<>:\w. ]+)")
+            "(?P<name>.+)")
 index_task_pat           = re.compile(
     prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
-            "(?P<name>[-$()<>:\w. ]+)")
+            "(?P<name>.+)")
 inline_task_pat          = re.compile(
     prefix+"Inline Task (?P<uid>[0-9]+)")
 mapping_pat              = re.compile(
@@ -10754,7 +10768,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(MAP_OP_KIND)
-        op.set_name("Mapping Op "+m.group('uid'))
+        op.set_name("Mapping Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10764,10 +10778,10 @@ def parse_legion_spy_line(line, state):
         inter = True if int(m.group('is_inter')) == 1 else False
         if inter:
             op.set_op_kind(INTER_CLOSE_OP_KIND)
-            op.set_name("Inter Close Op "+m.group('uid'))
+            op.set_name("Inter Close Op")
         else:
             op.set_op_kind(POST_CLOSE_OP_KIND)
-            op.set_name("Post Close Op "+m.group('uid'))
+            op.set_name("Post Close Op")
         
         context = state.get_task(int(m.group('ctx')))
         # Only add this to the context if it not an intermediate
@@ -10785,20 +10799,20 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(FENCE_OP_KIND)
-        op.set_name("Fence Op "+m.group('uid'))
+        op.set_name("Fence Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
     m = trace_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
-        op.set_name("Trace Op "+m.group('uid'))
+        op.set_name("Trace Op")
         return True
     m = copy_op_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(COPY_OP_KIND)
-        op.set_name("Copy Op "+m.group('uid'))
+        op.set_name("Copy Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         op.copy_kind = int(m.group('kind'))
@@ -10813,7 +10827,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(FILL_OP_KIND)
-        op.set_name("Fill Op "+m.group('uid'))
+        op.set_name("Fill Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10821,7 +10835,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(ACQUIRE_OP_KIND)
-        op.set_name("Acquire Op "+m.group('uid'))
+        op.set_name("Acquire Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10829,7 +10843,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(RELEASE_OP_KIND)
-        op.set_name("Release Op "+m.group('uid'))
+        op.set_name("Release Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10837,7 +10851,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(CREATION_OP_KIND)
-        op.set_name("Creation Op "+m.group('uid'))
+        op.set_name("Creation Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10845,7 +10859,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DELETION_OP_KIND)
-        op.set_name("Deletion Op "+m.group('uid'))
+        op.set_name("Deletion Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10853,7 +10867,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(ATTACH_OP_KIND)
-        op.set_name("Attach Op "+m.group('uid'))
+        op.set_name("Attach Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10861,7 +10875,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DETACH_OP_KIND)
-        op.set_name("Detach Op "+m.group('uid'))
+        op.set_name("Detach Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10869,7 +10883,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DYNAMIC_COLLECTIVE_OP_KIND)
-        op.set_name("Dynamic Collective Op "+m.group('uid'))
+        op.set_name("Dynamic Collective Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10877,7 +10891,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(TIMING_OP_KIND)
-        op.set_name("Timing Op "+m.group('uid'))
+        op.set_name("Timing Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10885,7 +10899,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(ALL_REDUCE_OP_KIND)
-        op.set_name("Reduce Op "+m.group('uid'))
+        op.set_name("Reduce Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10893,7 +10907,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(PREDICATE_OP_KIND)
-        op.set_name("Predicate Op "+m.group('uid'))
+        op.set_name("Predicate Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10914,7 +10928,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DEP_PART_OP_KIND)
-        op.set_name("Dependent Partition Op "+m.group('uid'))
+        op.set_name("Dependent Partition Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -10922,7 +10936,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(PENDING_PART_OP_KIND)
-        op.set_name("Pending Partition Op "+m.group('uid'))
+        op.set_name("Pending Partition Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True

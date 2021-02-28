@@ -924,10 +924,17 @@ namespace Realm {
 	}
       }
 
+      // used below, but after we're allowed to look at the object
+      Event e = Event::NO_EVENT;
+      if(log_event.want_debug())
+        e = event_impl->make_event(finish_gen);
+
+      // once we decrement this, if we aren't the last trigger, we can't
+      //  look at *this again
       int count_left = count_needed.fetch_sub_acqrel(1);
 
       // Put the logging first to avoid segfaults
-      log_event.debug() << "received trigger merged event=" << event_impl->make_event(finish_gen)
+      log_event.debug() << "received trigger merged event=" << e
 			<< " left=" << count_left << " poisoned=" << poisoned;
 
       // count is the value before the decrement, so it was 1, it's now 0
