@@ -39,6 +39,7 @@ namespace Realm {
 namespace MPI {
 
   atomic<size_t> messages_sent(0);
+  atomic<size_t> messages_rcvd(0);
 
 
 void AM_Init(int *p_node_this, int *p_node_size)
@@ -114,6 +115,7 @@ static void incoming_message_handled(NodeID sender,
 
     CHECK_MPI( MPI_Send(&msg, AM_MSG_HEADER_SIZE, MPI_CHAR,
 			sender, 0x1, MPI_COMM_WORLD) );
+    messages_sent.fetch_add(1);
 }
 
 void AMPoll()
@@ -185,6 +187,8 @@ void AMPoll()
 
 	if (completion)
 	  incoming_message_handled(tn_src, completion, 0);
+
+        messages_rcvd.fetch_add(1);
     }
 
 }
