@@ -688,7 +688,7 @@ namespace Legion {
       void finalize_transitive_reduction(
           const std::vector<unsigned> &inv_topo_order,
           const std::vector<std::vector<unsigned> > &incoming_reduced);
-      void propagate_copies(std::vector<unsigned> &gen);
+      void propagate_copies(std::vector<unsigned> *gen);
       void eliminate_dead_code(std::vector<unsigned> &gen);
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays(void);

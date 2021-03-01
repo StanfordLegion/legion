@@ -2719,7 +2719,7 @@ namespace Legion {
         propagate_merges(gen);
         if (do_transitive_reduction)
           transitive_reduction(false/*deferred*/);
-        propagate_copies(gen);
+        propagate_copies(&gen);
         eliminate_dead_code(gen);
       }
       prepare_parallel_replay(gen);
@@ -3595,12 +3595,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::propagate_copies(std::vector<unsigned> &gen)
+    void PhysicalTemplate::propagate_copies(std::vector<unsigned> *gen)
     //--------------------------------------------------------------------------
     {
       std::vector<int> substs(events.size(), -1);
       std::vector<Instruction*> new_instructions;
       new_instructions.reserve(instructions.size());
+      std::set<Instruction*> to_prune;
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
         Instruction *inst = instructions[idx];
@@ -3616,7 +3617,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(merge->lhs != (unsigned)substs[merge->lhs]);
 #endif
-            delete inst;
+            if (gen == NULL)
+              to_prune.insert(inst);
+            else
+              delete inst;
           }
           else
             new_instructions.push_back(inst);
@@ -3629,10 +3633,13 @@ namespace Legion {
 
       instructions.swap(new_instructions);
 
-      std::vector<unsigned> new_gen(gen.size(), -1U);
-      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
-          it != frontiers.end(); ++it)
-        new_gen[it->second] = 0;
+      std::vector<unsigned> new_gen((gen == NULL) ? 0 : gen->size(), -1U);
+      if (gen != NULL)
+      {
+        for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+            it != frontiers.end(); ++it)
+          new_gen[it->second] = 0;
+      }
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
@@ -3745,10 +3752,43 @@ namespace Legion {
               break;
             }
         }
-        if (lhs != -1)
+        if ((lhs != -1) && (gen != NULL))
           new_gen[lhs] = idx;
       }
-      gen.swap(new_gen);
+      if (gen != NULL)
+        gen->swap(new_gen);
+      if (!to_prune.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(!slices.empty());
+#endif
+        // Remove these instructions from any slices and then delete them
+        for (unsigned idx = 0; idx < slices.size(); idx++)
+        {
+          std::vector<Instruction*> &slice = slices[idx];
+          for (std::vector<Instruction*>::iterator it =
+                slice.begin(); it != slice.end(); /*nothing*/)
+          {
+            std::set<Instruction*>::iterator finder =
+              to_prune.find(*it);
+            if (finder != to_prune.end())
+            {
+              it = slice.erase(it);
+              delete *finder;
+              to_prune.erase(finder);
+              if (to_prune.empty())
+                break;
+            }
+            else
+              it++;
+          }
+          if (to_prune.empty())
+            break;
+        }
+#ifdef DEBUG_LEGION
+        assert(to_prune.empty());
+#endif
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4729,6 +4769,9 @@ namespace Legion {
         pending_inv_topo_order = NULL;
         delete pending_transitive_reduction;
         pending_transitive_reduction = NULL;
+        // We also need to rerun the propagate copies analysis to
+        // remove any mergers which contain only a single input
+        propagate_copies(NULL/*don't need the gen out*/);
       }
       fence_completion = completion;
       if (recurrent)
