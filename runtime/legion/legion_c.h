@@ -77,8 +77,10 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_acquire_launcher_t);
   NEW_OPAQUE_TYPE(legion_release_launcher_t);
   NEW_OPAQUE_TYPE(legion_attach_launcher_t);
+  NEW_OPAQUE_TYPE(legion_index_attach_launcher_t);
   NEW_OPAQUE_TYPE(legion_must_epoch_launcher_t);
   NEW_OPAQUE_TYPE(legion_physical_region_t);
+  NEW_OPAQUE_TYPE(legion_external_resources_t);
 #define NEW_ACCESSOR_ARRAY_TYPE(DIM) \
   NEW_OPAQUE_TYPE(legion_accessor_array_##DIM##d_t);
   LEGION_FOREACH_N(NEW_ACCESSOR_ARRAY_TYPE)
@@ -3961,6 +3963,101 @@ extern "C" {
                                                legion_context_t ctx);
 
   // -----------------------------------------------------------------------
+  // Index Attach/Detach Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::IndexAttachLauncher::IndexAttachLauncher()
+   */
+  legion_index_attach_launcher_t
+  legion_index_attach_launcher_create(
+      legion_logical_region_t parent_region,
+      legion_external_resource_t resource,
+      bool restricted/*=true*/);
+
+  /**
+   * @see Legion::IndexAttachLauncher::restricted
+   */
+  void
+  legion_index_attach_launcher_set_restricted(
+      legion_index_attach_launcher_t handle, bool restricted);
+
+  /**
+   * @see Legion::IndexAttachLauncher::attach_file
+   */
+  void
+  legion_index_attach_launcher_attach_file(legion_index_attach_launcher_t handle,
+                                           legion_logical_region_t region,
+                                           const char *filename,
+                                           const legion_field_id_t *fields,
+                                           size_t num_fields,
+                                           legion_file_mode_t mode);
+
+  /**
+   * @see Legion::IndexAttachLauncher::attach_hdf5()
+   */
+  void
+  legion_index_attach_launcher_attach_hdf5(legion_index_attach_launcher_t handle,
+                                           legion_logical_region_t region,
+                                           const char *filename,
+                                           legion_field_map_t field_map,
+                                           legion_file_mode_t mode);
+
+  /**
+   * @see Legion::IndexAttachLauncher::attach_array_soa()
+   */
+  void
+  legion_index_attach_launcher_attach_array_soa(legion_index_attach_launcher_t handle,
+                                           legion_logical_region_t region,
+                                           void *base_ptr, bool column_major,
+                                           const legion_field_id_t *fields,
+                                           size_t num_fields,
+                                           legion_memory_t memory);
+
+  /**
+   * @see Legion::IndexAttachLauncher::attach_array_aos()
+   */
+  void
+  legion_index_attach_launcher_attach_array_aos(legion_index_attach_launcher_t handle,
+                                           legion_logical_region_t region,
+                                           void *base_ptr, bool column_major,
+                                           const legion_field_id_t *fields,
+                                           size_t num_fields,
+                                           legion_memory_t memory);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::IndexAttachLauncher::~IndexAttachLauncher()
+   */
+  void
+  legion_index_attach_launcher_destroy(legion_index_attach_launcher_t handle);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::attach_external_resources()
+   */
+  legion_external_resources_t
+  legion_attach_external_resources(legion_runtime_t runtime,
+                                   legion_context_t ctx,
+                                   legion_attach_launcher_t launcher,
+                                   bool deduplicate_across_shards);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::detach_external_resource()
+   */
+  legion_future_t
+  legion_detach_external_resources(legion_runtime_t runtime,
+                                   legion_context_t ctx,
+                                   legion_external_resources_t,
+                                   bool flush, bool unordered);
+
+  // -----------------------------------------------------------------------
   // Must Epoch Operations
   // -----------------------------------------------------------------------
 
@@ -4293,6 +4390,31 @@ extern "C" {
   legion_accessor_array_##DIM##d_destroy(legion_accessor_array_##DIM##d_t handle);
   LEGION_FOREACH_N(DESTROY_ARRAY)
 #undef DESTROY_ARRAY
+
+  // -----------------------------------------------------------------------
+  // External Resource Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see Legion::ExternalResources::~ExternalResources()
+   */
+  void
+  legion_external_resources_destroy(legion_external_resources_t handle);
+
+  /**
+   * @see Legion::ExternalResources::size()
+   */
+  size_t
+  legion_external_resources_size(legion_external_resources_t handle);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::ExternalResources::operator[]()
+   */
+  legion_physical_region_t
+  legion_external_resources_get_region(legion_external_resources_t handle,
+                                       unsigned index);
 
   // -----------------------------------------------------------------------
   // Mappable Operations

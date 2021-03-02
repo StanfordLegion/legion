@@ -112,8 +112,10 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_acquire_launcher_t, AcquireLauncher *);
       NEW_OPAQUE_WRAPPER(legion_release_launcher_t, ReleaseLauncher *);
       NEW_OPAQUE_WRAPPER(legion_attach_launcher_t, AttachLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_index_attach_launcher_t, IndexAttachLauncher *);
       NEW_OPAQUE_WRAPPER(legion_must_epoch_launcher_t, MustEpochLauncher *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
+      NEW_OPAQUE_WRAPPER(legion_external_resources_t, ExternalResources *);
 #define ACCESSOR_ARRAY(DIM) \
       NEW_OPAQUE_WRAPPER(legion_accessor_array_##DIM##d_t, ArrayAccessor##DIM##D *);
       LEGION_FOREACH_N(ACCESSOR_ARRAY)
