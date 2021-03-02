@@ -1484,10 +1484,10 @@ namespace Legion {
       COLLECTIVE_LOC_22 = 22, 
       COLLECTIVE_LOC_23 = 23,
       COLLECTIVE_LOC_24 = 24,
-      //COLLECTIVE_LOC_25 = 25,
-      //COLLECTIVE_LOC_26 = 26,
-      //COLLECTIVE_LOC_27 = 27, 
-      //COLLECTIVE_LOC_28 = 28, 
+      COLLECTIVE_LOC_25 = 25,
+      COLLECTIVE_LOC_26 = 26,
+      COLLECTIVE_LOC_27 = 27, 
+      COLLECTIVE_LOC_28 = 28, 
       COLLECTIVE_LOC_29 = 29,
       COLLECTIVE_LOC_30 = 30,
       COLLECTIVE_LOC_31 = 31, 
@@ -1944,9 +1944,11 @@ namespace Legion {
     friend class Internal::PointFillOp;                     \
     friend class Internal::AttachOp;                        \
     friend class Internal::IndexAttachOp;                   \
+    friend class Internal::ReplIndexAttachOp;               \
     friend class Internal::PointAttachOp;                   \
     friend class Internal::DetachOp;                        \
     friend class Internal::IndexDetachOp;                   \
+    friend class Internal::ReplIndexDetachOp;               \
     friend class Internal::PointDetachOp;                   \
     friend class Internal::TimingOp;                        \
     friend class Internal::AllReduceOp;                     \

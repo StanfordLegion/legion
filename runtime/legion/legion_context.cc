@@ -6673,7 +6673,7 @@ namespace Legion {
         {
           if (common_ancestor == node)
             REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
-               "Handle (%d,%d,%d) of index attach operation in parent task %s "
+              "Handle (%d,%d,%d) of index attach operation in parent task %s "
               "(UID %lld) is overlaps with previous regions. All regions "
               "in index space attach operations must be disjoint.",
               handle.index_space.id, handle.field_space.id, handle.tree_id,
@@ -6718,10 +6718,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionID InnerContext::compute_index_attach_projection(
-                    IndexTreeNode *upper_bound, std::vector<IndexSpace> &spaces)
+                                  IndexTreeNode *upper_bound, IndexAttachOp *op,
+                                  unsigned local_start, size_t local_size, 
+                                  std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
-      
       std::map<IndexTreeNode*,std::vector<AttachProjectionFunctor*> >::iterator
         finder = attach_functions.find(upper_bound);
       if (finder != attach_functions.end())
@@ -6753,15 +6754,17 @@ namespace Legion {
       {
         bool all_children = true;
         IndexPartNode *parent = upper_bound->as_index_part_node();
-        for (std::vector<IndexSpace>::const_iterator it =
-              spaces.begin(); it != spaces.end(); it++)
+        for (unsigned idx = 0; idx < local_size; idx++)
         {
-          IndexSpaceNode *child = runtime->forest->get_node(*it);
+          IndexSpaceNode *child = 
+            runtime->forest->get_node(spaces[local_start+idx]);
           if (child->parent == parent)
             continue;
           all_children = false;
           break;
         }
+        // Bounce this off the operation in case we are control replicated
+        all_children = op->are_all_direct_children(all_children);
         if (all_children)
         {
           // We can use the identity projection in this case
@@ -17003,9 +17006,104 @@ namespace Legion {
             const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
     //--------------------------------------------------------------------------
     {
-      // TODO
-      assert(false);
-      return ExternalResources();
+      AutoRuntimeCall call(this);
+      std::vector<unsigned> indexes;
+      if (!deduplicate_across_shards)
+      {
+        indexes.resize(launcher.handles.size());
+        for (unsigned idx = 0; idx < indexes.size(); idx++)
+          indexes[idx] = idx;
+      }
+      else // ask the shard manager to deduplicate here
+        shard_manager->deduplicate_attaches(launcher, indexes);
+      // Start this inflight before we compute the upper bound
+      IndexAttachLaunchSpace collective(this, COLLECTIVE_LOC_28);
+      collective.exchange_counts(indexes.size());
+      // Compute the upper bound partition node from this launcher
+      RegionTreeNode *node = compute_index_attach_upper_bound(launcher,indexes);
+      ReplIndexAttachOp *attach_op = 
+        runtime->get_available_repl_index_attach_op();
+      IndexSpaceNode *launch_space = collective.get_launch_space();
+      ExternalResources result = 
+        attach_op->initialize(this, node, launch_space, launcher, indexes);
+      attach_op->initialize_replication(this); 
+      const RegionRequirement &req = attach_op->get_requirement();
+      bool parent_conflict = false, inline_conflict = false;
+      int index = has_conflicting_internal(req,parent_conflict,inline_conflict);
+      if (parent_conflict)
+      {
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                        "Attempted an index attach operation with upper bound "
+                        "partition (%x,%x,%x) that conflicts with mapped region"
+                        " (%x,%x,%x) at index %d of parent task %s (ID %lld) "
+                        "that would ultimately result in deadlock. Instead you "
+                        "receive this error message. Try unmapping the region "
+                        "before invoking 'attach_external_resources'.",
+                        req.partition.index_partition.id, 
+                        req.partition.field_space.id, 
+                        req.partition.tree_id, 
+                        regions[index].region.index_space.id,
+                        regions[index].region.field_space.id,
+                        regions[index].region.tree_id, index, 
+                        get_task_name(), get_unique_id())
+        else
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                        "Attempted an index attach operation with upper bound "
+                        "region (%x,%x,%x) that conflicts with mapped region "
+                        "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
+                        "that would ultimately result in deadlock. Instead you "
+                        "receive this error message. Try unmapping the region "
+                        "before invoking 'attach_external_resources'.",
+                        req.region.index_space.id, 
+                        req.region.field_space.id, 
+                        req.region.tree_id, 
+                        regions[index].region.index_space.id,
+                        regions[index].region.field_space.id,
+                        regions[index].region.tree_id, index, 
+                        get_task_name(), get_unique_id())
+      }
+      if (inline_conflict)
+      {
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                        "Attempted an index attach operation with upper bound "
+                        "partition (%x,%x,%x) that conflicts with previous "
+                        "inline mapping in task %s (ID %lld) "
+                        "that would ultimately result in deadlock. Instead you "
+                        "receive this error message. Try unmapping the region "
+                        "before invoking 'attach_external_resources'.",
+                        req.partition.index_partition.id, 
+                        req.partition.field_space.id, req.partition.tree_id,
+                        get_task_name(), get_unique_id())
+        else
+          REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+                        "Attempted an index attach operation with upper bound "
+                        "region (%x,%x,%x) that conflicts with previous inline "
+                        "mapping in task %s (ID %lld) "
+                        "that would ultimately result in deadlock. Instead you "
+                        "receive this error message. Try unmapping the region "
+                        "before invoking 'attach_external_resources'.",
+                        req.region.index_space.id, 
+                        req.region.field_space.id, req.region.tree_id,
+                        get_task_name(), get_unique_id())
+      }
+      add_to_dependence_queue(attach_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreeNode* ReplicateContext::compute_index_attach_upper_bound(
+      const IndexAttachLauncher &launcher, const std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+      // Call the base version first if our indexes are not empty
+      RegionTreeNode *result = indexes.empty() ? NULL :
+        InnerContext::compute_index_attach_upper_bound(launcher, indexes);
+      // Do the exchange between the shards
+      IndexAttachUpperBound exchange(this, COLLECTIVE_LOC_26, runtime->forest);
+      result = exchange.find_upper_bound(result);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -17045,9 +17143,13 @@ namespace Legion {
                                          const bool flush, const bool unordered)
     //--------------------------------------------------------------------------
     {
-      // TODO
-      assert(false);
-      return Future();
+      AutoRuntimeCall call(this);
+      if (resources.impl == NULL)
+        return Future();
+      ReplIndexDetachOp *op = runtime->get_available_repl_index_detach_op();
+      Future result = resources.impl->detach(this, op, flush, unordered);
+      add_to_dependence_queue(op, unordered);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -19565,6 +19667,100 @@ namespace Legion {
       // Check to see if we need to reset the next_replicate_bar_index
       if (next_logical_bar_index == total_shards)
         next_logical_bar_index = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ReplicateContext::AttachDetachShardingFunctor::shard(
+      const DomainPoint &point, const Domain &domain, const size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+      const Point<2> p = point; 
+      return p[0]; // First dimension is always the shard dimension
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::register_attach_detach_sharding_functor(
+                                                               Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      // See Runtime::get_current_static_sharding_id for how we get this ID
+      runtime->register_sharding_functor(LEGION_MAX_APPLICATION_SHARDING_ID,
+          new AttachDetachShardingFunctor(), false/*need check*/,
+          true/*silence warnings*/, NULL, true/*preregistered*/);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunction* 
+                     ReplicateContext::get_attach_detach_sharding_function(void)
+    //--------------------------------------------------------------------------
+    {
+      // See Runtime::get_current_static_sharding_id for how we get this ID
+      return shard_manager->find_sharding_function(
+                LEGION_MAX_APPLICATION_SHARDING_ID);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceNode* ReplicateContext::compute_index_attach_launch_spaces(
+                                               std::vector<size_t> &shard_sizes)
+    //--------------------------------------------------------------------------
+    {
+      // No need for a lock, we're in the logical dependence stage
+      for (std::vector<AttachLaunchSpace*>::const_iterator it =
+            index_attach_launch_spaces.begin(); it !=
+            index_attach_launch_spaces.end(); it++)
+      {
+        const AttachLaunchSpace *space = *it;
+#ifdef DEBUG_LEGION
+        assert(space->shard_sizes.size() == shard_sizes.size());
+#endif
+        bool match = true;
+        for (unsigned idx = 0; idx < shard_sizes.size(); idx++)
+        {
+          if (space->shard_sizes[idx] == shard_sizes[idx])
+            continue;
+          match = false;
+          break;
+        }
+        if (match)
+          return space->launch_space;
+      }
+      // Make the index space first
+      // See if we can make this a rect or a ragged collection of rects
+      coord_t upper_bound = 0;
+      for (std::vector<size_t>::const_iterator it =
+            shard_sizes.begin(); it != shard_sizes.end(); it++)
+      {
+        if (it != shard_sizes.begin())
+        {
+          if (coord_t(*it) != upper_bound)
+            upper_bound = -1;
+        }
+        else
+          upper_bound = *it;
+      }
+      IndexSpace handle;
+      if (upper_bound > 0)
+      {
+        const Domain domain =
+          Rect<2>(Point<2>(0,0),Point<2>(shard_sizes.size()-1,upper_bound-1));
+        handle = TaskContext::create_index_space(domain,
+            NT_TemplateHelper::encode_tag<2,coord_t>());
+      }
+      else
+      {
+        std::vector<Rect<2> > rects(shard_sizes.size());
+        for (unsigned idx = 0; idx < shard_sizes.size(); idx++)
+          rects[idx] = Rect<2>(Point<2>(idx,0),
+                               Point<2>(idx,shard_sizes[idx]-1));
+        const Domain domain = Realm::IndexSpace<2,coord_t>(rects);
+        handle = TaskContext::create_index_space(domain,
+            NT_TemplateHelper::encode_tag<2,coord_t>());
+      }
+      IndexSpaceNode *node = runtime->forest->get_node(handle);
+      AttachLaunchSpace *space = new AttachLaunchSpace(node);
+      space->shard_sizes.swap(shard_sizes);
+      index_attach_launch_spaces.push_back(space);
+      return node;
     }
 
     /////////////////////////////////////////////////////////////

@@ -19594,7 +19594,8 @@ namespace Legion {
       {
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
-        runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
+        if (launch_space != NULL)
+          runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
       resources = ExternalResources(result);
       return resources;
@@ -19606,9 +19607,7 @@ namespace Legion {
     {
       // First compute the parent index
       compute_parent_index();
-      initialize_privilege_path(privilege_path, requirement);
-      if (runtime->check_privileges)
-        check_point_requirements();
+      initialize_privilege_path(privilege_path, requirement); 
     }
 
     //--------------------------------------------------------------------------
@@ -19622,14 +19621,18 @@ namespace Legion {
       if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
         requirement.projection = parent_ctx->compute_index_attach_projection(
             runtime->forest->get_node(requirement.partition.index_partition),
-            spaces);
+            this, 0/*start*/, spaces.size(), spaces);
       else
         requirement.projection = parent_ctx->compute_index_attach_projection(
-            runtime->forest->get_node(requirement.region.index_space), spaces);
+            runtime->forest->get_node(requirement.region.index_space),
+            this, 0/*start*/, spaces.size(), spaces);
       // Save this for later when we go to detach it
       resources.impl->set_projection(requirement.projection);
       if (runtime->check_privileges)
+      {
         check_privilege();
+        check_point_requirements(spaces);
+      }
       if (runtime->legion_spy_enabled)
         log_requirement();
       RefinementTracker tracker(this, map_applied_conditions);
@@ -19910,34 +19913,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexAttachOp::check_point_requirements(void)
+    void IndexAttachOp::check_point_requirements(
+                                          const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx1 = 1; idx1 < points.size(); idx1++)
+      for (unsigned idx1 = 1; idx1 < spaces.size(); idx1++)
       {
-        PointAttachOp *p1 = points[idx1];
-        const RegionRequirement &r1 = p1->get_requirement();
-#ifdef DEBUG_LEGION
-        assert(r1.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
         for (unsigned idx2 = 0; idx2 < idx1; idx2++)
         {
-          PointAttachOp *p2 = points[idx2];
-          const RegionRequirement &r2 = p2->get_requirement();
-#ifdef DEBUG_LEGION
-          assert(r2.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-          if (!runtime->forest->are_disjoint(r1.region.get_index_space(),
-                                             r2.region.get_index_space()))
+          if (!runtime->forest->are_disjoint(spaces[idx1], spaces[idx2]))
             REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
                 "Index attach operation (UID %lld) in parent task %s "
                 "(UID %lld) has interfering attachments to regions (%d,%d,%d) "
                 "and (%d,%d,%d). All regions must be non-interfering",
                 unique_op_id, parent_ctx->get_task_name(),
-                parent_ctx->get_unique_id(), r1.region.index_space.id,
-                r1.region.field_space.id, r1.region.tree_id,
-                r2.region.index_space.id, r2.region.field_space.id,
-                r2.region.tree_id)
+                parent_ctx->get_unique_id(), spaces[idx1].id,
+                requirement.parent.field_space.id, requirement.parent.tree_id,
+                spaces[idx2].id, requirement.parent.field_space.id,
+                requirement.parent.tree_id)
         }
       }
     }

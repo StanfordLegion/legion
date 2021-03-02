@@ -14950,6 +14950,8 @@ namespace Legion {
       register_sharding_functor(0,
           new CyclicShardingFunctor(), false/*need check*/, 
           true/*was preregistered*/, NULL, true/*preregistered*/);
+      // Register the attach-detach sharding functor
+      ReplicateContext::register_attach_detach_sharding_functor(this);
     }
 
     //--------------------------------------------------------------------------
@@ -17892,8 +17894,9 @@ namespace Legion {
     /*static*/ ShardingID& Runtime::get_current_static_sharding_id(void)
     //--------------------------------------------------------------------------
     {
-      static ShardingID current_sharding_id = 
-        LEGION_MAX_APPLICATION_SHARDING_ID;
+      // + 1 since we use that for first one for the attach-detach functor
+      static ShardingID current_sharding_id =
+        LEGION_MAX_APPLICATION_SHARDING_ID + 1;
       return current_sharding_id;
     }
 
