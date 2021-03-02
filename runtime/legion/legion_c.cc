@@ -6452,6 +6452,14 @@ legion_task_layout_constraint_set_add_layout_constraint(
 // Start-up Operations
 //------------------------------------------------------------------------
 
+void
+legion_runtime_initialize(int *argc,
+                          char ***argv,
+                          bool filter /* = false */)
+{
+  return Runtime::initialize(argc, argv, filter);
+}
+
 int
 legion_runtime_start(int argc,
                      char **argv,

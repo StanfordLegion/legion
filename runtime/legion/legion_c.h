@@ -4896,6 +4896,14 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
+   * @see Legion::Runtime::initialize()
+   */
+  void
+  legion_runtime_initialize(int *argc,
+                            char ***argv,
+                            bool filter /* = false */);
+
+  /**
    * @see Legion::Runtime::start()
    */
   int
