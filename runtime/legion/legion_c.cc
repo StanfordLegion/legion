@@ -3005,12 +3005,35 @@ legion_future_map_reduce(legion_runtime_t runtime_,
 }
 
 legion_future_map_t
+legion_construct_future_map(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            legion_domain_t domain_,
+                            legion_domain_point_t *points_,
+                            legion_task_argument_t *data_,
+                            size_t num_points,
+                            bool collective)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  std::map<DomainPoint,TaskArgument> data;
+  for (unsigned idx = 0; idx < num_points; idx++)
+  {
+    DomainPoint point = CObjectWrapper::unwrap(points_[idx]);
+    data[point] = CObjectWrapper::unwrap(data_[idx]);
+  }
+  return CObjectWrapper::wrap(new FutureMap(
+        runtime->construct_future_map(ctx, domain, data, collective)));
+}
+
+legion_future_map_t
 legion_future_map_construct(legion_runtime_t runtime_,
                             legion_context_t ctx_,
                             legion_domain_t domain_,
                             legion_domain_point_t *points_,
                             legion_future_t *futures_,
-                            size_t num_futures)
+                            size_t num_futures,
+                            bool collective)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -3022,7 +3045,7 @@ legion_future_map_construct(legion_runtime_t runtime_,
     futures[point] = *(CObjectWrapper::unwrap(futures_[idx]));
   }
   return CObjectWrapper::wrap(new FutureMap(
-        runtime->construct_future_map(ctx, domain, futures)));
+        runtime->construct_future_map(ctx, domain, futures, collective)));
 }
 
 // -----------------------------------------------------------------------
@@ -5275,6 +5298,24 @@ legion_runtime_yield(legion_runtime_t runtime_, legion_context_t ctx_)
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
   runtime->yield(ctx);
+}
+
+legion_shard_id_t
+legion_runtime_local_shard(legion_runtime_t runtime_, legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  return runtime->local_shard(ctx);
+}
+
+size_t
+legion_runtime_total_shards(legion_runtime_t runtime_, legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  return runtime->total_shards(ctx);
 }
 
 void

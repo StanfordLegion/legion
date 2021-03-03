@@ -2577,12 +2577,27 @@ extern "C" {
    * @see Legion::Runtime::construct_future_map
    */
   legion_future_map_t
+  legion_construct_future_map(legion_runtime_t runtime,
+                              legion_context_t ctx,
+                              legion_domain_t domain,
+                              legion_domain_point_t *points,
+                              legion_task_argument_t *buffers,
+                              size_t num_points,
+                              bool collective);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::construct_future_map
+   */
+  legion_future_map_t
   legion_future_map_construct(legion_runtime_t runtime,
                               legion_context_t ctx,
                               legion_domain_t domain,
                               legion_domain_point_t *points,
                               legion_future_t *futures,
-                              size_t num_futures);
+                              size_t num_futures,
+                              bool collective);
 
   // -----------------------------------------------------------------------
   // Deferred Buffer Operations
@@ -4227,6 +4242,18 @@ extern "C" {
    */
   void
   legion_runtime_yield(legion_runtime_t runtime, legion_context_t ctx);
+
+  /**
+   * @see Legion::Runtime::local_shard()
+   */
+  legion_shard_id_t
+  legion_runtime_local_shard(legion_runtime_t runtime, legion_context_t ctx);
+
+  /**
+   * @see Legion::Runtime::total_shards()
+   */
+  size_t
+  legion_runtime_total_shards(legion_runtime_t runtime, legion_context_t ctx);
 
   void
   legion_runtime_enable_scheduler_lock(void);
