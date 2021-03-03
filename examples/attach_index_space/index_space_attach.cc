@@ -131,6 +131,10 @@ void top_level_task(const Task *task,
     // We'll do this with the simple load balancing technique of round-robin mapping 
     if ((i % total_shards) != local_shard) {
       offset += child_elements;
+      // still need to add the privilege fields
+      xy_launcher.privilege_fields.insert(FID_X);
+      xy_launcher.privilege_fields.insert(FID_Y);
+      z_launcher.privilege_fields.insert(FID_Z);
       continue;
     }
     LogicalRegion input_handle = 
