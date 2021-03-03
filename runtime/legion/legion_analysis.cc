@@ -5552,24 +5552,12 @@ namespace Legion {
                 continue;
               preconditions.insert(it->first);
             }
-            // Then do the source preconditions
             // Be careful that we get the destination fields right in the
             // case that this is an across copy
             CopyAcrossHelper *across_helper = 
               copies.begin()->second[0]->across_helper;
             const FieldMask src_mask = (across_helper == NULL) ? dst_mask :
               across_helper->convert_dst_to_src(dst_mask);
-            for (std::map<InstanceView*,std::vector<CopyUpdate*> >::
-                  const_iterator cit = copies.begin(); cit != 
-                  copies.end(); cit++)
-            {
-              for (std::vector<CopyUpdate*>::const_iterator it =
-                    cit->second.begin(); it != cit->second.end(); it++)
-              {
-                (*it)->compute_source_preconditions(forest, src_mask,
-                                                    src_pre, preconditions);
-              }
-            }
             if (!preconditions.empty())
             {
               const ApEvent copy_precondition = 
@@ -5740,11 +5728,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyFillAggregator::issue_copies(InstanceView *target, 
-                              const std::map<InstanceView*,
-                                             std::vector<CopyUpdate*> > &copies,
-                              ApEvent precondition, const FieldMask &copy_mask,
-                              const PhysicalTraceInfo &trace_info,
-                              const bool has_dst_preconditions)
+               const std::map<InstanceView*,std::vector<CopyUpdate*> > &copies,
+               const ApEvent dst_precondition, const FieldMask &copy_mask,
+               const PhysicalTraceInfo &trace_info,
+               const bool has_dst_preconditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5791,8 +5778,22 @@ namespace Legion {
             else
               tracing_dsts->insert(target, copy_mask);
           }
+          // Incorporate the source preconditions
+          std::set<ApEvent> preconditions;
+          update->compute_source_preconditions(forest, copy_mask,
+                                               src_pre, preconditions);
+          ApEvent copy_precondition;
+          if (!preconditions.empty())
+          {
+            if (dst_precondition.exists())
+              preconditions.insert(dst_precondition);
+            copy_precondition = 
+              Runtime::merge_events(&trace_info, preconditions);
+          }
+          else
+            copy_precondition = dst_precondition;
           const ApEvent result = target_manager->copy_from(
-                                    source->get_manager(), precondition,
+                                    source->get_manager(), copy_precondition,
                                     predicate_guard, update->redop,
                                     copy_expr, copy_mask, trace_info,
                                     tracing_srcs, tracing_dsts,
@@ -5831,7 +5832,7 @@ namespace Legion {
         {
           // Have to group by source instances in order to merge together
           // different index space expressions for the same copy
-          std::map<InstanceView*,std::set<IndexSpaceExpression*> > src_exprs;
+          std::map<InstanceView*,FusedCopy> fused_copies;
           const ReductionOpID redop = cit->second[0]->redop;
           for (std::vector<CopyUpdate*>::const_iterator it = 
                 cit->second.begin(); it != cit->second.end(); it++)
@@ -5844,7 +5845,10 @@ namespace Legion {
             // Should also have the same across helper as the first one
             assert(cit->second[0]->across_helper == (*it)->across_helper);
 #endif
-            src_exprs[(*it)->source].insert((*it)->expr);
+            FusedCopy &fused = fused_copies[(*it)->source];
+            fused.expressions.insert((*it)->expr);
+            (*it)->compute_source_preconditions(forest, copy_mask,
+                                    src_pre, fused.preconditions);
           }
           const FieldMask dst_mask = 
             (cit->second[0]->across_helper == NULL) ? copy_mask : 
@@ -5858,12 +5862,13 @@ namespace Legion {
               tracing_dsts->clear();
             tracing_dsts->insert(target, dst_mask);
           }
-          for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
-                const_iterator it = src_exprs.begin(); 
-                it != src_exprs.end(); it++)
+          for (std::map<InstanceView*,FusedCopy>::iterator it =
+                fused_copies.begin(); it != fused_copies.end(); it++)
           {
-            IndexSpaceExpression *copy_expr = (it->second.size() == 1) ? 
-              *(it->second.begin()) : forest->union_index_spaces(it->second);
+            IndexSpaceExpression *copy_expr =
+              (it->second.expressions.size() == 1) ?
+                *(it->second.expressions.begin()) :
+                forest->union_index_spaces(it->second.expressions);
             // If we're tracing then get the source information
             if (trace_info.recording)
             {
@@ -5873,8 +5878,18 @@ namespace Legion {
                 tracing_srcs->clear();
               tracing_srcs->insert(it->first, copy_mask);
             }
+            ApEvent copy_precondition;
+            if (!it->second.preconditions.empty())
+            {
+              if (dst_precondition.exists())
+                it->second.preconditions.insert(dst_precondition);
+              copy_precondition =
+                Runtime::merge_events(&trace_info, it->second.preconditions);
+            }
+            else
+              copy_precondition = dst_precondition;
             const ApEvent result = target_manager->copy_from(
-                                    it->first->get_manager(), precondition,
+                                    it->first->get_manager(), copy_precondition,
                                     predicate_guard, redop, copy_expr,
                                     copy_mask, trace_info, 
                                     tracing_srcs, tracing_dsts,
