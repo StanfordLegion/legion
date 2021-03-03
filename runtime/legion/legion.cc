@@ -5848,19 +5848,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, const Domain &domain,
-                const std::map<DomainPoint,TaskArgument> &data, bool collective)
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                 bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
-      return ctx->construct_future_map(domain, data, collective);
+      return ctx->construct_future_map(domain, data, collective, sid);
     }
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, const Domain &domain,
-                   const std::map<DomainPoint,Future> &futures, bool collective)
+                                    const std::map<DomainPoint,Future> &futures,
+                                    bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
       return ctx->construct_future_map(domain, futures,
-        Internal::RtUserEvent::NO_RT_USER_EVENT, false/*internal*/, collective);
+      Internal::RtUserEvent::NO_RT_USER_EVENT,false/*internal*/,collective,sid);
     }
 
     //--------------------------------------------------------------------------
