@@ -6119,8 +6119,42 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap InnerContext::construct_future_map(const Domain &domain,
-                                    const std::map<DomainPoint,Future> &futures,
-                                    RtUserEvent domain_deletion, bool internal)
+                const std::map<DomainPoint,TaskArgument> &data, bool collective)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (data.size() != domain.get_volume())
+        REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
+          "The number of buffers passed into a future map construction (%zd) "
+          "does not match the volume of the domain (%zd) for the future map "
+          "in task %s (UID %lld)", data.size(), domain.get_volume(),
+          get_task_name(), get_unique_id())
+      const DistributedID did = runtime->get_available_distributed_id();
+      FutureMapImpl *impl = new FutureMapImpl(this, runtime, domain, did,
+                      __sync_add_and_fetch(&outstanding_children_count, 1),
+                      runtime->address_space, RtEvent::NO_RT_EVENT);
+      LocalReferenceMutator mutator;
+      for (std::map<DomainPoint,TaskArgument>::const_iterator it =
+            data.begin(); it != data.end(); it++)
+      {
+        if (!domain.contains(it->first))
+          REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
+            "Point passed into future map construction is not contained "
+            "within the bounds of the domain in task %s (UID %lld)",
+            get_task_name(), get_unique_id())
+        FutureImpl *future = new FutureImpl(runtime, true/*register*/,
+            runtime->get_available_distributed_id(), runtime->address_space,
+            ApEvent::NO_AP_EVENT);
+        future->set_result(it->second.get_ptr(), it->second.get_size(), false);
+        impl->set_future(it->first, future, &mutator);
+      }
+      return FutureMap(impl);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap InnerContext::construct_future_map(const Domain &domain,
+                    const std::map<DomainPoint,Future> &futures,
+                    RtUserEvent domain_deletion, bool internal, bool collective)
     //--------------------------------------------------------------------------
     {
       if (!internal)
@@ -21573,8 +21607,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap LeafContext::construct_future_map(const Domain &domain,
-                                    const std::map<DomainPoint,Future> &futures,
-                                    RtUserEvent domain_deletion, bool internal)
+                const std::map<DomainPoint,TaskArgument> &data, bool collective)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+        "Illegal construct future map call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return FutureMap();
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap LeafContext::construct_future_map(const Domain &domain,
+                    const std::map<DomainPoint,Future> &futures,
+                    RtUserEvent domain_deletion, bool internal, bool collective)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,

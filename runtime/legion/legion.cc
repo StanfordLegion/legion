@@ -5848,10 +5848,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, const Domain &domain,
-                                    const std::map<DomainPoint,Future> &futures)
+                const std::map<DomainPoint,TaskArgument> &data, bool collective)
     //--------------------------------------------------------------------------
     {
-      return ctx->construct_future_map(domain, futures);
+      return ctx->construct_future_map(domain, data, collective);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap Runtime::construct_future_map(Context ctx, const Domain &domain,
+                   const std::map<DomainPoint,Future> &futures, bool collective)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->construct_future_map(domain, futures,
+        Internal::RtUserEvent::NO_RT_USER_EVENT, false/*internal*/, collective);
     }
 
     //--------------------------------------------------------------------------
@@ -6534,6 +6543,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->yield();
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID Runtime::local_shard(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->get_shard_id();
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Runtime::total_shards(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->get_num_shards();
     }
 
     //--------------------------------------------------------------------------

@@ -180,9 +180,6 @@ def test_compile_fail(filename, debug, verbose, short, timelimit, py_exe_path, f
         for params in runs_with:
             last_cmd = run(filename, debug, False, timelimit, params + flags, env)
     except TestFailure as e:
-        # if it died due to a signal, re-raise
-        if e.retcode < 0:
-            raise
         failure = e.output
         lines = set(line.strip() for line in failure.strip().split('\n')
                     if len(line.strip()) > 0)

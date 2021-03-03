@@ -373,9 +373,13 @@ namespace Legion {
       virtual Future reduce_future_map(const FutureMap &future_map,
                                    ReductionOpID redop, bool deterministic) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false) = 0;
+      virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                     RtUserEvent domain_deletion = RtUserEvent::NO_RT_USER_EVENT,
-                                             bool internal = false) = 0;
+                                             bool internal = false,
+                                             bool collective = false) = 0;
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual ApEvent remap_region(PhysicalRegion region) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
@@ -1222,9 +1226,13 @@ namespace Legion {
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic);
       virtual FutureMap construct_future_map(const Domain &domain,
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false);
+      virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                     RtUserEvent domain_deletion = RtUserEvent::NO_RT_USER_EVENT,
-                                             bool internal = false);
+                                             bool internal = false,
+                                             bool collective = false);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
@@ -2906,9 +2914,13 @@ namespace Legion {
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic);
       virtual FutureMap construct_future_map(const Domain &domain,
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false);
+      virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                     RtUserEvent domain_deletion = RtUserEvent::NO_RT_USER_EVENT,
-                                             bool internal = false);
+                                             bool internal = false,
+                                             bool collective = false);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);

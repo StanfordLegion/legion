@@ -6314,16 +6314,44 @@ namespace Legion {
                                ReductionOpID redop, bool deterministic = false);
 
       /**
-       * Construct a future map from a collection of futures. The user must
-       * also specify the domain of the futures and there must be one future
-       * for every point in the domain.
+       * Construct a future map from a collection of buffers. The user must
+       * also specify the domain of the future map and there must be one buffer 
+       * for every point in the domain. In the case of 'collective=true' the
+       * runtime supports different shards in a control-replicated context
+       * to work collectively to construct the future map. The runtime will
+       * not detect if points are missing or if points are duplicated and
+       * undefined behavior will occur. If the task is not control-replicated
+       * then the 'collective' flag will not have any effect.
        * @param ctx enclosing task context
        * @param domain the domain that names all points in the future map
-       * @param futures the set of futures from which to create the future map
+       * @param data the set of futures from which to create the future map
+       * @param collective whether shards from a control replicated context
+       *                   should work collectively to construct the map
        * @return a new future map containing all the futures
        */
       FutureMap construct_future_map(Context ctx, const Domain &domain,
-                           const std::map<DomainPoint,Future> &futures);
+                           const std::map<DomainPoint,TaskArgument> &data,
+                           bool collective = false);
+
+      /**
+       * Construct a future map from a collection of futures. The user must
+       * also specify the domain of the futures and there must be one future
+       * for every point in the domain. In the case of 'collective=true' the
+       * runtime supports different shards in a control-replicated context
+       * to work collectively to construct the future map. The runtime will
+       * not detect if points are missing or if points are duplicated and
+       * undefined behavior will occur. If the task is not control-replicated
+       * then the 'collective' flag will not have any effect.
+       * @param ctx enclosing task context
+       * @param domain the domain that names all points in the future map
+       * @param futures the set of futures from which to create the future map
+       * @param collective whether shards from a control replicated context
+       *                   should work collectively to construct the map
+       * @return a new future map containing all the futures
+       */
+      FutureMap construct_future_map(Context ctx, const Domain &domain,
+                           const std::map<DomainPoint,Future> &futures,
+                           bool collective = false);
 
       /**
        * @deprecated
@@ -7397,6 +7425,38 @@ namespace Legion {
        * this processor.
        */
       void yield(Context ctx);
+    public:
+      //------------------------------------------------------------------------
+      // Control Replication
+      // In general SPMD-style programming in Legion is wrong. If you find
+      // yourself writing SPMD-style code for large fractions of your program
+      // then you're probably doing something wrong. There are a few exceptions:
+      // 1. index attach/detach operations are collective and may need
+      //    to do per-shard work
+      // 2. I/O in general often needs to do per-shard work
+      // 3. interaction with collective frameworks like MPI and NCCL
+      // 4. others?
+      // For these reasons we allow users to get access to their shard ID and
+      // the total number of shards and to make a future map collectively
+      // Please, please, please be careful with how you use them
+      //------------------------------------------------------------------------
+      /**
+       * Return the ShardID for the execution of this task in a
+       * control-replicated context. If the task is not control
+       * replicated then the ShardID will always be zero.
+       * @param ctx enclosing task context
+       * @return the ShardID for this execution of the task
+       */
+      ShardID local_shard(Context ctx);
+
+      /**
+       * Return the total number of shards for the execution of this task in
+       * a control-replicated context. If the task is not control-replicated
+       * then the total number of shards will always be one.
+       * @param enclosing task context
+       * @return the total number of shards in the execution of the task
+       */
+      size_t total_shards(Context ctx); 
     public:
       //------------------------------------------------------------------------
       // MPI Interoperability 
