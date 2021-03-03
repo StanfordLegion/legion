@@ -6512,7 +6512,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!points.empty());
       assert(collective == NULL);
 #endif
       collective = new IndexAttachExchange(ctx, COLLECTIVE_LOC_25);

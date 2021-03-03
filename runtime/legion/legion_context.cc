@@ -16505,6 +16505,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CONSTRUCT_FUTURE_MAP);
+        hasher.hash(domain);
+        if (!collective)
+        {
+          for (std::map<DomainPoint,TaskArgument>::const_iterator it =
+                data.begin(); it != data.end(); it++)
+          {
+            hasher.hash(it->first);
+            if (runtime->safe_control_replication > 1)
+              hasher.hash(it->second.get_ptr(), it->second.get_size());
+          }
+        }
+        else
+          hasher.hash(sid);
+        verify_replicable(hasher, "construct_future_map");
+      }
       if (data.size() != domain.get_volume())
         REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
           "The number of buffers passed into a future map construction (%zd) "
@@ -16583,6 +16603,25 @@ namespace Legion {
       if (!internal)
       {
         AutoRuntimeCall call(this);
+        if (runtime->safe_control_replication &&
+            ((current_trace == NULL) || !current_trace->is_fixed()))
+        {
+          Murmur3Hasher hasher;
+          hasher.hash(REPLICATE_CONSTRUCT_FUTURE_MAP);
+          hasher.hash(domain);
+          if (!collective)
+          {
+            for (std::map<DomainPoint,Future>::const_iterator it =
+                  futures.begin(); it != futures.end(); it++)
+            {
+              hasher.hash(it->first);
+              hash_future(hasher,runtime->safe_control_replication,it->second);
+            }
+          }
+          else
+            hasher.hash(sid);
+          verify_replicable(hasher, "construct_future_map");
+        }
         if (futures.size() != domain.get_volume())
           REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
             "The number of futures passed into a future map construction (%zd) "
@@ -17186,6 +17225,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_INDEX_ATTACH_RESOURCE);
+        hasher.hash(launcher.resource);
+        hasher.hash(launcher.parent);
+        hasher.hash(launcher.restricted);
+        // Everything else other than the privilege fields is sharded already
+        for (std::set<FieldID>::const_iterator it = 
+              launcher.privilege_fields.begin(); it !=
+              launcher.privilege_fields.end(); it++)
+          hasher.hash(*it);
+        hash_static_dependences(hasher, launcher.static_dependences);
+        verify_replicable(hasher, "attach_resources");
+      }
       std::vector<unsigned> indexes;
       if (!deduplicate_across_shards)
       {
@@ -17297,8 +17352,9 @@ namespace Legion {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DETACH_RESOURCE);
         Serializer rez;
-        ExternalMappable::pack_region_requirement(
-            region.impl->get_requirement(), rez);
+        if (region.impl != NULL)
+          ExternalMappable::pack_region_requirement(
+              region.impl->get_requirement(), rez);
         hasher.hash(rez.get_buffer(), rez.get_used_bytes());
         hasher.hash<bool>(region.is_mapped());
         hasher.hash<bool>(flush);
@@ -17323,6 +17379,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_INDEX_DETACH_RESOURCE);
+        if (resources.impl != NULL)
+        {
+          hasher.hash(resources.impl->parent);
+          for (std::vector<FieldID>::const_iterator it =
+                resources.impl->privilege_fields.begin(); it !=
+                resources.impl->privilege_fields.end(); it++)
+            hasher.hash(*it);
+          if (resources.impl->upper_bound->is_region())
+            hasher.hash(resources.impl->upper_bound->as_region_node()->handle);
+          else
+            hasher.hash(
+                resources.impl->upper_bound->as_partition_node()->handle);
+        }
+        hasher.hash<bool>(flush);
+        verify_replicable(hasher, "detach_resources"); 
+      }
       if (resources.impl == NULL)
         return Future();
       ReplIndexDetachOp *op = runtime->get_available_repl_index_detach_op();
