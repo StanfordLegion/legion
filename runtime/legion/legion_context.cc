@@ -5717,7 +5717,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap InnerContext::construct_future_map(const Domain &domain,
-                const std::map<DomainPoint,TaskArgument> &data, bool collective)
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                 bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5750,7 +5751,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap InnerContext::construct_future_map(const Domain &domain,
-    const std::map<DomainPoint,Future> &futures, bool internal, bool collective)
+                                 const std::map<DomainPoint,Future> &futures,
+                                 bool internal, bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
       if (!internal)
@@ -5762,7 +5764,8 @@ namespace Legion {
             "does not match the volume of the domain (%zd) for the future map "
             "in task %s (UID %lld)", futures.size(), domain.get_volume(),
             get_task_name(), get_unique_id())
-        return construct_future_map(domain, futures, true/*internal*/);
+        return construct_future_map(domain, futures, true/*internal*/,
+                                    collective, sid);
       }
       CreationOp *creation_op = runtime->get_available_creation_op();
       creation_op->initialize_map(this, futures);
@@ -11560,7 +11563,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap LeafContext::construct_future_map(const Domain &domain,
-                const std::map<DomainPoint,TaskArgument> &data, bool collective)
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                 bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -11571,7 +11575,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap LeafContext::construct_future_map(const Domain &domain,
-    const std::map<DomainPoint,Future> &futures, bool internal, bool collective)
+                                 const std::map<DomainPoint,Future> &futures,
+                                 bool internal, bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,

@@ -6128,18 +6128,24 @@ namespace Legion {
        * runtime supports different shards in a control-replicated context
        * to work collectively to construct the future map. The runtime will
        * not detect if points are missing or if points are duplicated and
-       * undefined behavior will occur. If the task is not control-replicated
-       * then the 'collective' flag will not have any effect.
+       * undefined behavior will occur. If 'collective=true', the application
+       * must provide a sharding function that describes assignment of points
+       * to shards for the runtime to use. The runtime will verify this 
+       * sharding function accurately describes all the points passed in.
+       * If the task is not control-replicated then the 'collective' flag
+       * will not have any effect. 
        * @param ctx enclosing task context
        * @param domain the domain that names all points in the future map
        * @param data the set of futures from which to create the future map
        * @param collective whether shards from a control replicated context
        *                   should work collectively to construct the map
+       * @param sid the sharding function ID that describes the sharding
+       *                   pattern if collective=true
        * @return a new future map containing all the futures
        */
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,TaskArgument> &data,
-                           bool collective = false);
+                           bool collective = false, ShardingID sid = 0);
 
       /**
        * Construct a future map from a collection of futures. The user must
@@ -6155,11 +6161,13 @@ namespace Legion {
        * @param futures the set of futures from which to create the future map
        * @param collective whether shards from a control replicated context
        *                   should work collectively to construct the map
+       * @param sid the sharding function ID that describes the sharding
+       *                   pattern if collective=true
        * @return a new future map containing all the futures
        */
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,Future> &futures,
-                           bool collective = false);
+                           bool collective = false, ShardingID sid = 0);
 
       /**
        * @deprecated
