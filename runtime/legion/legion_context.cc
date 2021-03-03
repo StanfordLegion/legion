@@ -16499,6 +16499,149 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureMap ReplicateContext::construct_future_map(const Domain &domain,
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                 bool collective, ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (data.size() != domain.get_volume())
+        REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
+          "The number of buffers passed into a future map construction (%zd) "
+          "does not match the volume of the domain (%zd) for the future map "
+          "in task %s (UID %lld)", data.size(), domain.get_volume(),
+          get_task_name(), get_unique_id())
+      FutureMapImpl *impl = NULL;
+      if (collective)
+      {
+        // Make one future map for all the shards
+        DistributedID did = 0;
+        if (owner_shard->shard_id == dynamic_id_allocator_shard)
+        {
+          ValueBroadcast<DistributedID> collective(this, COLLECTIVE_LOC_99);
+          did = runtime->get_available_distributed_id();
+          collective.broadcast(did);
+        }
+        else
+        {
+          ValueBroadcast<DistributedID> collective(this,
+              dynamic_id_allocator_shard, COLLECTIVE_LOC_99);
+          did = collective.get_value();
+        }
+        const AddressSpaceID owner_space =
+          shard_manager->get_shard_space(dynamic_id_allocator_shard);
+        ReplFutureMapImpl *repl_impl =
+          new ReplFutureMapImpl(this, runtime, domain, domain, did, 
+            __sync_add_and_fetch(&outstanding_children_count, 1),
+            owner_space, RtEvent::NO_RT_EVENT);
+        ShardingFunction *function = shard_manager->find_sharding_function(sid);
+        // Check that all the points abide by the sharding function
+        for (std::map<DomainPoint,TaskArgument>::const_iterator it =
+              data.begin(); it != data.end(); it++)
+          if (function->find_owner(it->first, domain) != owner_shard->shard_id)
+            REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
+                "Sharding function does not match described sharding for "
+                "future map construction in %s (UID %lld)",
+                get_task_name(), get_unique_id())
+        repl_impl->set_sharding_function(function);
+        if (++dynamic_id_allocator_shard == total_shards)
+          dynamic_id_allocator_shard = 0;
+        impl = repl_impl;
+      }
+      else
+      {
+        const DistributedID did = runtime->get_available_distributed_id();
+        impl = new FutureMapImpl(this, runtime, domain, did,
+                      __sync_add_and_fetch(&outstanding_children_count, 1),
+                      runtime->address_space, RtEvent::NO_RT_EVENT);
+      }
+      LocalReferenceMutator mutator;
+      for (std::map<DomainPoint,TaskArgument>::const_iterator it =
+            data.begin(); it != data.end(); it++)
+      {
+        if (!domain.contains(it->first))
+          REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
+            "Point passed into future map construction is not contained "
+            "within the bounds of the domain in task %s (UID %lld)",
+            get_task_name(), get_unique_id())
+        FutureImpl *future = new FutureImpl(runtime, true/*register*/,
+            runtime->get_available_distributed_id(), runtime->address_space,
+            ApEvent::NO_AP_EVENT);
+        future->set_result(it->second.get_ptr(), it->second.get_size(), false);
+        impl->set_future(it->first, future, &mutator);
+      }
+      return FutureMap(impl);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap ReplicateContext::construct_future_map(const Domain &domain,
+                                    const std::map<DomainPoint,Future> &futures,
+                                    RtUserEvent domain_deletion, bool internal,
+                                    bool collective, ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      if (!internal)
+      {
+        AutoRuntimeCall call(this);
+        if (futures.size() != domain.get_volume())
+          REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
+            "The number of futures passed into a future map construction (%zd) "
+            "does not match the volume of the domain (%zd) for the future map "
+            "in task %s (UID %lld)", futures.size(), domain.get_volume(),
+            get_task_name(), get_unique_id())
+        return construct_future_map(domain, futures, domain_deletion,
+                                    true/*internal*/, collective, sid);
+      }
+      CreationOp *creation_op = runtime->get_available_creation_op();
+      creation_op->initialize_map(this, futures);
+      FutureMapImpl *impl = NULL;
+      if (collective)
+      {
+        // Make one future map for all the shards
+        DistributedID did = 0;
+        if (owner_shard->shard_id == dynamic_id_allocator_shard)
+        {
+          ValueBroadcast<DistributedID> collective(this, COLLECTIVE_LOC_99);
+          did = runtime->get_available_distributed_id();
+          collective.broadcast(did);
+        }
+        else
+        {
+          ValueBroadcast<DistributedID> collective(this,
+              dynamic_id_allocator_shard, COLLECTIVE_LOC_99);
+          did = collective.get_value();
+        }
+        const AddressSpaceID owner_space =
+          shard_manager->get_shard_space(dynamic_id_allocator_shard);
+        ReplFutureMapImpl *repl_impl = new ReplFutureMapImpl(this, creation_op,
+                            RtEvent::NO_RT_EVENT, domain, domain, runtime,
+                            did, owner_space, domain_deletion);
+        ShardingFunction *function = shard_manager->find_sharding_function(sid);
+        // Check that all the points abide by the sharding function
+        for (std::map<DomainPoint,Future>::const_iterator it =
+              futures.begin(); it != futures.end(); it++)
+          if (function->find_owner(it->first, domain) != owner_shard->shard_id)
+            REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
+                "Sharding function does not match described sharding for "
+                "future map construction in %s (UID %lld)",
+                get_task_name(), get_unique_id())
+        repl_impl->set_sharding_function(function);
+        if (++dynamic_id_allocator_shard == total_shards)
+          dynamic_id_allocator_shard = 0;
+        impl = repl_impl;
+      }
+      else
+      {
+        const DistributedID did = runtime->get_available_distributed_id();
+        impl = new FutureMapImpl(this, creation_op, RtEvent::NO_RT_EVENT,
+            domain, runtime, did, runtime->address_space, domain_deletion);
+      }
+      add_to_dependence_queue(creation_op);
+      impl->set_all_futures(futures);
+      return FutureMap(impl);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion ReplicateContext::map_region(const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {

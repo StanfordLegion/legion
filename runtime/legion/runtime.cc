@@ -2197,6 +2197,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
+                                  const Domain &domain, const Domain &shard_dom,
+                                  DistributedID did, size_t index, 
+                                  AddressSpaceID owner, RtEvent ready, bool reg,
+                                  RtUserEvent deletion_trigger)
+      : FutureMapImpl(ctx, rt, domain, did, index, owner, 
+                      ready, reg, deletion_trigger),
+        repl_ctx(ctx), shard_domain(shard_dom),
+        future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
+        future_map_barrier(ctx->get_next_future_map_barrier()),
+        collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
+        op_depth(repl_ctx->get_depth()), op_uid(op->get_unique_op_id()),
+        sharding_function_ready(Runtime::create_rt_user_event()), 
+        sharding_function(NULL), collective_performed(false), 
+        has_non_trivial_call(false)
+    //--------------------------------------------------------------------------
+    {
+      repl_ctx->add_reference();
+      // Now register ourselves with the context
+      repl_ctx->register_future_map(this);
+    }
+
+    //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(const ReplFutureMapImpl &rhs)
       : FutureMapImpl(rhs), repl_ctx(NULL), shard_domain(Domain::NO_DOMAIN), 
         future_map_barrier_index(0), collective_index(0), op_depth(0), op_uid(0)

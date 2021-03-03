@@ -5580,7 +5580,6 @@ namespace Legion {
             else
               issue_copies(uit->first, copies, ApEvent::NO_AP_EVENT, 
                            src_mask, trace_info, has_dst_preconditions);
-
           }
         }
       }
