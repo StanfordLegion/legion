@@ -3806,6 +3806,9 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void check_point_requirements(
+                    const std::vector<IndexSpace> &spaces);
+      virtual bool are_all_direct_children(bool local) { return local; }
     public:
       void handle_point_commit(void);
     protected:
@@ -3813,7 +3816,6 @@ namespace Legion {
       void deactivate_index_attach(void);
       void compute_parent_index(void);
       void check_privilege(void);
-      void check_point_requirements(void);
       void log_requirement(void);
     protected:
       RegionRequirement                             requirement;

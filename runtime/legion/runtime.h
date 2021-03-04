@@ -472,6 +472,12 @@ namespace Legion {
                         Runtime *rt, DistributedID did, AddressSpaceID owner,
                         RtUserEvent deletion_trigger=
                                               RtUserEvent::NO_RT_USER_EVENT);
+      ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
+                        const Domain &domain, const Domain &shard_domain,
+                        DistributedID did, size_t index, AddressSpaceID owner,
+                        RtEvent ready_event, bool register_now = true,
+                        RtUserEvent deletion_trigger =
+                                              RtUserEvent::NO_RT_USER_EVENT);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs);
       virtual ~ReplFutureMapImpl(void);
     public:

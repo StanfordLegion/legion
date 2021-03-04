@@ -550,14 +550,20 @@ ifneq ($(findstring gasnet,$(REALM_NETWORKS)),)
       $(error Problem parsing GASNet conduit name: got "$(CONDUIT)" instead of one of: $(GASNET_PREFERRED_CONDUITS))
     endif
   endif
-
-  # General GASNET variables
-  INC_FLAGS	+= -I$(GASNET)/include
-  ifeq ($(strip $(DARWIN)),1)
-    LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lm
-  else
-    LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
+  # Suck in some GASNET variables that they define
+  include $(GASNET)/include/$(CONDUIT)-conduit/$(CONDUIT)-par.mak
+  INC_FLAGS += $(GASNET_INCLUDES)
+  # I don't like some of the flags gasnet includes here like _GNU_SOURCE=1 in lot of cases which makes
+  # this inherently non-portable code. We use many more compilers than just GNU
+  #CC_FLAGS += $(GASNET_DEFINES)
+  #LD_FLAGS += $(GASNET_LDFLAGS)
+  REALM_CC_FLAGS += -DGASNET_CONDUIT_$(shell echo '$(CONDUIT)' | tr '[:lower:]' '[:upper:]')
+  LEGION_LD_FLAGS += $(GASNET_LIBS)
+  # Check if GASNet needs MPI for interop support
+  ifeq ($(strip $(GASNET_LD_REQUIRES_MPI)),1)
+    USE_MPI = 1
   endif
+
   ifneq ($(findstring gasnetex,$(REALM_NETWORKS)),)
     REALM_CC_FLAGS	+= -DREALM_USE_GASNETEX
   else
@@ -569,55 +575,6 @@ ifneq ($(findstring gasnet,$(REALM_NETWORKS)),)
   endif
   # newer versions of gasnet seem to need this
   CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
-
-  # GASNET conduit variables
-  ifeq ($(strip $(CONDUIT)),ibv)
-    INC_FLAGS 	+= -I$(GASNET)/include/ibv-conduit
-    REALM_CC_FLAGS	+= -DGASNET_CONDUIT_IBV
-    LEGION_LD_FLAGS	+= -lgasnet-ibv-par -libverbs
-    # GASNet needs MPI for interop support
-    USE_MPI	= 1
-  endif
-  ifeq ($(strip $(CONDUIT)),ucx)
-    INC_FLAGS 	+= -I$(GASNET)/include/ucx-conduit
-    REALM_CC_FLAGS	+= -DGASNET_CONDUIT_UCX
-    include $(GASNET)/include/ucx-conduit/ucx-par.mak
-    LEGION_LD_FLAGS	+= -lgasnet-ucx-par $(CONDUIT_LIBS)
-    # GASNet needs MPI for interop support
-    USE_MPI	= 1
-  endif
-  ifeq ($(strip $(CONDUIT)),gemini)
-    INC_FLAGS	+= -I$(GASNET)/include/gemini-conduit
-    REALM_CC_FLAGS	+= -DGASNET_CONDUIT_GEMINI
-    LEGION_LD_FLAGS	+= -lgasnet-gemini-par -lugni -ludreg -lpmi -lhugetlbfs
-    # GASNet needs MPI for interop support
-    USE_MPI	= 1
-  endif
-  ifeq ($(strip $(CONDUIT)),aries)
-    INC_FLAGS   += -I$(GASNET)/include/aries-conduit
-    REALM_CC_FLAGS    += -DGASNET_CONDUIT_ARIES
-    LEGION_LD_FLAGS    += -lgasnet-aries-par -lugni -ludreg -lpmi -lhugetlbfs
-    # GASNet needs MPI for interop support
-    USE_MPI	= 1
-  endif
-  ifeq ($(strip $(CONDUIT)),psm)
-    INC_FLAGS 	+= -I$(GASNET)/include/psm-conduit
-    REALM_CC_FLAGS	+= -DGASNET_CONDUIT_PSM
-    LEGION_LD_FLAGS	+= -lgasnet-psm-par -lpsm2 -lpmi2 # PMI2 is required for OpenMPI
-    # GASNet needs MPI for interop support
-    USE_MPI	= 1
-  endif
-  ifeq ($(strip $(CONDUIT)),mpi)
-    INC_FLAGS	+= -I$(GASNET)/include/mpi-conduit
-    REALM_CC_FLAGS	+= -DGASNET_CONDUIT_MPI
-    LEGION_LD_FLAGS	+= -lgasnet-mpi-par -lammpi -lmpi
-    USE_MPI	= 1
-  endif
-  ifeq ($(strip $(CONDUIT)),udp)
-    INC_FLAGS	+= -I$(GASNET)/include/udp-conduit
-    REALM_CC_FLAGS	+= -DGASNET_CONDUIT_UDP
-    LEGION_LD_FLAGS	+= -lgasnet-udp-par -lamudp
-  endif
 endif
 
 # Realm uses MPI if requested
@@ -1104,10 +1061,9 @@ install:
 	$(error Must specify PREFIX for installation)
 endif
 
-# If we're using CUDA we have to link with nvcc
 $(OUTFILE) : $(APP_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
-	$(CXX) -o $(OUTFILE) $(APP_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
+	$(CXX) -o $(OUTFILE) $(APP_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS)
 
 ifeq ($(strip $(SHARED_OBJECTS)),0)
 $(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS)
