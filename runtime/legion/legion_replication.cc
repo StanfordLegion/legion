@@ -6870,6 +6870,7 @@ namespace Legion {
       replayable_collective_id = 0;
       has_blocking_call = false;
       remove_trace_reference = false;
+      is_recording = false;
     }
 
     //--------------------------------------------------------------------------
@@ -6926,6 +6927,8 @@ namespace Legion {
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
         recording_fence = repl_ctx->get_next_mapping_fence_barrier();
+        // Save this for later since we can't access it safely in mapping stage
+        is_recording = true;
       }
       // Register this fence with all previous users in the parent's context
       ReplFenceOp::trigger_dependence_analysis();
@@ -6950,7 +6953,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (local_trace->is_recording())
+      if (is_recording)
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
@@ -7114,6 +7117,7 @@ namespace Legion {
       replayable_collective_id = 0;
       replayed = false;
       has_blocking_call = false;
+      is_recording = false;
     }
 
     //--------------------------------------------------------------------------
@@ -7214,6 +7218,8 @@ namespace Legion {
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
         recording_fence = repl_ctx->get_next_mapping_fence_barrier();
+        // Save this for later since we can't access it safely in mapping stage
+        is_recording = true;
       } 
 
       // If this is a static trace, then we remove our reference when we're done
@@ -7256,7 +7262,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (local_trace->is_recording())
+      if (is_recording)
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
