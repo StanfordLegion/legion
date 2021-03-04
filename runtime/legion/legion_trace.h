@@ -344,6 +344,7 @@ namespace Legion {
       PhysicalTemplate *current_template;
       bool has_blocking_call;
       bool remove_trace_reference;
+      bool is_recording;
     };
 
     /**
@@ -377,6 +378,7 @@ namespace Legion {
       PhysicalTemplate *current_template;
       bool replayed;
       bool has_blocking_call;
+      bool is_recording;
     };
 
     /**

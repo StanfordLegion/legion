@@ -20,6 +20,11 @@ local optimize_match = require("bishop/optimize_match")
 local codegen = require("bishop/codegen")
 local std = require("bishop/std")
 
+do
+  local config, _ = require("regent/config").args()
+  assert(not config["separate"], "Bishop cannot be used with -fseparate 1")
+end
+
 -- Add Language Builtins to Global Environment
 
 local function add_builtin(k, v)

@@ -190,6 +190,14 @@ end
 -- ## Codegen Helpers
 -- #################
 
+function base.normalize_name(name)
+  return string.gsub(
+    string.gsub(
+      string.gsub(name, ".*/", ""),
+      "[<>]", ""),
+    "[^A-Za-z0-9]", "_")
+end
+
 function base.type_meet(a, b)
   local function test()
     local terra query(x : a, y : b)
@@ -1130,7 +1138,7 @@ function base.variant:wrapper_name()
   -- (generated) header file.
   return
     '__regent_task'
-    .. '_' .. self.task:get_task_id():asvalue()
+    .. '_' .. self.task.unique_task_identifier
     .. '_' .. self:get_name()
 end
 
@@ -1246,6 +1254,28 @@ end
 -- #################
 
 base.initial_regent_task_id = 10000
+
+local make_unique_task_identifier
+do
+  local unique_task_ids = {}
+  function make_unique_task_identifier(name)
+    local id = base.normalize_name(tostring(name))
+
+    if not unique_task_ids[id] then
+      unique_task_ids[id] = true
+      return id
+    end
+
+    local offset = 1
+    local id_offset
+    repeat
+      id_offset = id .. "_" .. offset
+      offset = offset + 1
+    until not unique_task_ids[id_offset]
+    unique_task_ids[id_offset] = true
+    return id_offset
+  end
+end
 
 base.task = {}
 function base.task:__index(field)
@@ -1433,7 +1463,11 @@ function base.task:set_task_id(task_id)
   if #self:get_variants() > 0 then
     error("task ID can only be set when task has zero variants")
   end
-  self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+  if base.config["separate"] then
+    self.taskid:setinitializer(task_id)
+  else
+    self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+  end
 end
 
 -- TODO: This is actually safe once we make task ids global variables
@@ -1481,6 +1515,10 @@ function base.task:set_name(name)
   end
 
   self.name = name
+  self.unique_task_identifier = make_unique_task_identifier(name)
+  if base.config["separate"] then
+    self.taskid:setname("__regent_task_" .. self.unique_task_identifier .. "_task_id")
+  end
 end
 
 function base.task:get_name()
@@ -1600,7 +1638,10 @@ function base.task:__tostring()
 end
 
 do
-  local next_task_id = base.initial_regent_task_id
+  local next_task_id
+  if not base.config["separate"] then
+    next_task_id = base.initial_regent_task_id
+  end
   function base.new_task(name, span)
     if type(name) == "string" then
       name = data.newtuple(name)
@@ -1610,12 +1651,20 @@ do
       assert(false)
     end
 
-    local task_id = next_task_id
-    next_task_id = next_task_id + 1
+    local unique_id = make_unique_task_identifier(name)
+    local task_id
+    if base.config["separate"] then
+      task_id = terralib.global(c.legion_task_id_t, c.AUTO_GENERATE_ID,
+                                "__regent_task_" .. unique_id .. "_task_id")
+    else
+      task_id = terralib.constant(c.legion_task_id_t, next_task_id)
+      next_task_id = next_task_id + 1
+    end
     return setmetatable({
       name = name,
       span = span,
-      taskid = terralib.constant(c.legion_task_id_t, task_id),
+      unique_task_identifier = unique_id,
+      taskid = task_id,
       variants = terralib.newlist(),
       calling_convention = false,
 

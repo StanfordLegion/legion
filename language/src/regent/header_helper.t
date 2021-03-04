@@ -46,16 +46,8 @@ local header_helper = {}
 
 local c = base.c
 
-function header_helper.normalize_name(name)
-  return string.gsub(
-    string.gsub(
-      string.gsub(name, ".*/", ""),
-      "[<>]", ""),
-    "[^A-Za-z0-9]", "_")
-end
-
 local function get_launcher_name(task)
-  return header_helper.normalize_name(tostring(task:get_name())) .. "_launcher"
+  return base.normalize_name(tostring(task:get_name())) .. "_launcher"
 end
 
 local function get_task_params(task)
@@ -112,7 +104,7 @@ local function render_c_params(param_list)
   local result = terralib.newlist()
   for _, param in ipairs(param_list) do
     local terra_type, c_type, cxx_type, param_name = unpack(param)
-    result:insert(string.format(c_type, header_helper.normalize_name(param_name)))
+    result:insert(string.format(c_type, base.normalize_name(param_name)))
   end
   return result
 end
@@ -122,7 +114,7 @@ local function render_cxx_params(param_list)
   for _, param in ipairs(param_list) do
     local terra_type, c_type, cxx_type, param_name = unpack(param)
     if cxx_type then
-      result:insert(string.format(cxx_type, header_helper.normalize_name(param_name)))
+      result:insert(string.format(cxx_type, base.normalize_name(param_name)))
     end
   end
   return result
@@ -196,7 +188,7 @@ function header_helper.generate_task_c_interface(task)
 
   local params = get_task_params(task)
   for _, param_list in ipairs(params) do
-    local param_name = header_helper.normalize_name(param_list[1][4])
+    local param_name = base.normalize_name(param_list[1][4])
     local add_name = name .. "_add_argument_" .. param_name
     local add_args = render_c_params(param_list)
     add_args:insert(1, launcher_type .. " launcher")
@@ -282,7 +274,7 @@ function header_helper.generate_task_cxx_interface(task)
   local task_param_symbols = task:get_param_symbols()
   local params = get_task_params(task)
   for i, param_list in ipairs(params) do
-    local param_name = header_helper.normalize_name(param_list[1][4])
+    local param_name = base.normalize_name(param_list[1][4])
     local param_type = task_param_symbols[i]:gettype()
 
     local c_add_name = name .. "_add_argument_" .. param_name
@@ -434,7 +426,7 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
                                  task, params_struct_type,
                                  param_i, first_req_i, param_list, task_param_symbol,
                                  param_field_id_array)
-  local param_name = header_helper.normalize_name(param_list[1][4])
+  local param_name = base.normalize_name(param_list[1][4])
 
   local param_symbol = param_list:map(
     function(param)
