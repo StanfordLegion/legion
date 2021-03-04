@@ -3145,12 +3145,35 @@ legion_future_map_reduce(legion_runtime_t runtime_,
 }
 
 legion_future_map_t
+legion_construct_future_map(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            legion_domain_t domain_,
+                            legion_domain_point_t *points_,
+                            legion_task_argument_t *data_,
+                            size_t num_points,
+                            bool collective)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  std::map<DomainPoint,TaskArgument> data;
+  for (unsigned idx = 0; idx < num_points; idx++)
+  {
+    DomainPoint point = CObjectWrapper::unwrap(points_[idx]);
+    data[point] = CObjectWrapper::unwrap(data_[idx]);
+  }
+  return CObjectWrapper::wrap(new FutureMap(
+        runtime->construct_future_map(ctx, domain, data, collective)));
+}
+
+legion_future_map_t
 legion_future_map_construct(legion_runtime_t runtime_,
                             legion_context_t ctx_,
                             legion_domain_t domain_,
                             legion_domain_point_t *points_,
                             legion_future_t *futures_,
-                            size_t num_futures)
+                            size_t num_futures,
+                            bool collective)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -3162,7 +3185,7 @@ legion_future_map_construct(legion_runtime_t runtime_,
     futures[point] = *(CObjectWrapper::unwrap(futures_[idx]));
   }
   return CObjectWrapper::wrap(new FutureMap(
-        runtime->construct_future_map(ctx, domain, futures)));
+        runtime->construct_future_map(ctx, domain, futures, collective)));
 }
 
 // -----------------------------------------------------------------------
@@ -5119,6 +5142,143 @@ legion_context_progress_unordered_operations(legion_runtime_t runtime_,
 }
 
 // -----------------------------------------------------------------------
+// Index Attach/Detach Operations
+// -----------------------------------------------------------------------
+
+legion_index_attach_launcher_t
+legion_index_attach_launcher_create(
+    legion_logical_region_t parent_region_,
+    legion_external_resource_t resource,
+    bool restricted)
+{
+  LogicalRegion parent_region = CObjectWrapper::unwrap(parent_region_);
+
+  IndexAttachLauncher *launcher =
+    new IndexAttachLauncher(resource, parent_region, restricted);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_index_attach_launcher_set_restricted(
+    legion_index_attach_launcher_t handle_,
+    bool restricted)
+{
+  IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->restricted = restricted;
+}
+
+void
+legion_index_attach_launcher_attach_file(legion_index_attach_launcher_t handle_,
+                                         legion_logical_region_t region_,
+                                         const char *filename,
+                                         const legion_field_id_t *fields_,
+                                         size_t num_fields,
+                                         legion_file_mode_t mode)
+{
+  IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion region = CObjectWrapper::unwrap(region_);
+
+  std::vector<FieldID> fields(num_fields);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+    fields[idx] = fields_[idx];
+
+  handle->attach_file(region, filename, fields, mode);
+}
+
+void
+legion_index_attach_launcher_attach_hdf5(legion_index_attach_launcher_t handle_,
+                                         legion_logical_region_t region_,
+                                         const char *filename,
+                                         legion_field_map_t field_map_,
+                                         legion_file_mode_t mode)
+{
+  IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion region = CObjectWrapper::unwrap(region_);
+
+  std::map<FieldID, const char *> *field_map =
+    CObjectWrapper::unwrap(field_map_);
+
+  handle->attach_hdf5(region, filename, *field_map, mode);
+}
+
+void
+legion_index_attach_launcher_attach_array_soa(legion_index_attach_launcher_t handle_,
+                                         legion_logical_region_t region_,
+                                         void *base_ptr, bool column_major,
+                                         const legion_field_id_t *fields_,
+                                         size_t num_fields,
+                                         legion_memory_t memory_)
+{
+  IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion region = CObjectWrapper::unwrap(region_);
+  Memory memory = CObjectWrapper::unwrap(memory_);
+
+  std::vector<FieldID> fields(num_fields);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+    fields[idx] = fields_[idx];
+
+  handle->attach_array_soa(region, base_ptr, column_major, fields, memory);
+}
+
+void
+legion_index_attach_launcher_attach_array_aos(legion_index_attach_launcher_t handle_,
+                                         legion_logical_region_t region_,
+                                         void *base_ptr, bool column_major,
+                                         const legion_field_id_t *fields_,
+                                         size_t num_fields,
+                                         legion_memory_t memory_)
+{
+  IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion region = CObjectWrapper::unwrap(region_);
+  Memory memory = CObjectWrapper::unwrap(memory_);
+
+  std::vector<FieldID> fields(num_fields);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+    fields[idx] = fields_[idx];
+
+  handle->attach_array_aos(region, base_ptr, column_major, fields, memory);
+}
+
+void
+legion_index_attach_launcher_destroy(legion_index_attach_launcher_t handle_)
+{
+  IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+legion_external_resources_t
+legion_attach_external_resources(legion_runtime_t runtime_,
+                                 legion_context_t ctx_,
+                                 legion_index_attach_launcher_t launcher_,
+                                 bool deduplicate_across_shards)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexAttachLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  ExternalResources resources = 
+    runtime->attach_external_resources(ctx, *launcher, deduplicate_across_shards);
+  return CObjectWrapper::wrap(new ExternalResources(resources));
+}
+
+legion_future_t
+legion_detach_external_resources(legion_runtime_t runtime_,
+                                 legion_context_t ctx_,
+                                 legion_external_resources_t handle_,
+                                 bool flush, bool unordered)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  ExternalResources *handle = CObjectWrapper::unwrap(handle_);
+
+  Future *result = new Future(
+      runtime->detach_external_resources(ctx, *handle, flush, unordered));
+  return CObjectWrapper::wrap(result);
+}
+
+// -----------------------------------------------------------------------
 // Must Epoch Operations
 // -----------------------------------------------------------------------
 
@@ -5337,6 +5497,24 @@ legion_runtime_yield(legion_runtime_t runtime_, legion_context_t ctx_)
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
   runtime->yield(ctx);
+}
+
+legion_shard_id_t
+legion_runtime_local_shard(legion_runtime_t runtime_, legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  return runtime->local_shard(ctx);
+}
+
+size_t
+legion_runtime_total_shards(legion_runtime_t runtime_, legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  return runtime->total_shards(ctx);
 }
 
 void
@@ -5882,6 +6060,36 @@ legion_accessor_array_##DIM##d_ref_point(legion_accessor_array_##DIM##d_t handle
 }
 LEGION_FOREACH_N(REF_POINT)
 #undef REF_POINT
+
+// -----------------------------------------------------------------------
+// External Resource Operations
+// -----------------------------------------------------------------------
+
+void
+legion_external_resources_destroy(legion_external_resources_t handle_)
+{
+  ExternalResources *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+size_t
+legion_external_resources_size(legion_external_resources_t handle_)
+{
+  ExternalResources *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->size();
+}
+
+legion_physical_region_t
+legion_external_resources_get_region(legion_external_resources_t handle_,
+                                     unsigned index)
+{
+  ExternalResources *handle = CObjectWrapper::unwrap(handle_);
+
+  PhysicalRegion result = (*handle)[index];
+  return CObjectWrapper::wrap(new PhysicalRegion(result));
+}
 
 //------------------------------------------------------------------------
 // Mappable Operations
@@ -6458,6 +6666,14 @@ legion_task_layout_constraint_set_add_layout_constraint(
 //------------------------------------------------------------------------
 // Start-up Operations
 //------------------------------------------------------------------------
+
+void
+legion_runtime_initialize(int *argc,
+                          char ***argv,
+                          bool filter /* = false */)
+{
+  return Runtime::initialize(argc, argv, filter);
+}
 
 int
 legion_runtime_start(int argc,

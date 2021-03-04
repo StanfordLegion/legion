@@ -376,9 +376,15 @@ namespace Legion {
                                    ReductionOpID redop, bool deterministic,
                                    MapperID map_id, MappingTagID tag) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false,
+                                             ShardingID sid = 0) = 0;
+      virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                     RtUserEvent domain_deletion = RtUserEvent::NO_RT_USER_EVENT,
-                                             bool internal = false) = 0;
+                                             bool internal = false,
+                                             bool collective = false,
+                                             ShardingID sid = 0) = 0;
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual ApEvent remap_region(PhysicalRegion region) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
@@ -391,8 +397,13 @@ namespace Legion {
       virtual void issue_release(const ReleaseLauncher &launcher) = 0;
       virtual PhysicalRegion attach_resource(
                                   const AttachLauncher &launcher) = 0;
+      virtual ExternalResources attach_resources(
+                                  const IndexAttachLauncher &launcher,
+                                  bool deduplicate_across_shards) = 0;
       virtual Future detach_resource(PhysicalRegion region, 
                                      const bool flush,const bool unordered) = 0;
+      virtual Future detach_resources(ExternalResources resources,
+                                    const bool flush, const bool unordered) = 0;
       virtual void progress_unordered_operations(void) = 0;
       virtual FutureMap execute_must_epoch(
                                  const MustEpochLauncher &launcher) = 0;
@@ -851,6 +862,26 @@ namespace Legion {
         unsigned index;
         bool ancestor;
       };
+      class AttachProjectionFunctor : public ProjectionFunctor {
+      public:
+        AttachProjectionFunctor(ProjectionID pid,
+                                std::vector<IndexSpace> &&spaces);
+        virtual ~AttachProjectionFunctor(void) { }
+      public:
+        virtual LogicalRegion project(LogicalRegion upper_bound,
+                                      const DomainPoint &point,
+                                      const Domain &launch_domain);
+        virtual LogicalRegion project(LogicalPartition upper_bound,
+                                      const DomainPoint &point,
+                                      const Domain &launch_domain);
+      public:
+        virtual bool is_functional(void) const { return true; }
+        // Some depth >0 means the runtime can't analyze it
+        virtual unsigned get_depth(void) const { return 1; }
+      public:
+        const std::vector<IndexSpace> handles;
+        const ProjectionID pid;
+      };
     public:
       InnerContext(Runtime *runtime, SingleTask *owner, int depth, 
                    bool full_inner, const std::vector<RegionRequirement> &reqs,
@@ -1203,9 +1234,15 @@ namespace Legion {
                                        ReductionOpID redop, bool deterministic,
                                        MapperID map_id, MappingTagID tag);
       virtual FutureMap construct_future_map(const Domain &domain,
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false,
+                                             ShardingID sid = 0);
+      virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                     RtUserEvent domain_deletion = RtUserEvent::NO_RT_USER_EVENT,
-                                             bool internal = false);
+                                             bool internal = false,
+                                             bool collective = false,
+                                             ShardingID sid = 0);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
@@ -1217,8 +1254,20 @@ namespace Legion {
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
+      virtual ExternalResources attach_resources(
+                                        const IndexAttachLauncher &launcher,
+                                        bool deduplicate_across_shards);
+      virtual RegionTreeNode* compute_index_attach_upper_bound(
+                                        const IndexAttachLauncher &launcher,
+                                        const std::vector<unsigned> &indexes);
+      ProjectionID compute_index_attach_projection(
+                                        IndexTreeNode *node, IndexAttachOp *op,
+                                        unsigned local_start, size_t local_size,
+                                        std::vector<IndexSpace> &spaces);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual Future detach_resources(ExternalResources resources,
+                                      const bool flush, const bool unordered);
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
@@ -1548,6 +1597,11 @@ namespace Legion {
       // Equivalence sets that were invalidated by 
       // invalidate_region_tree_contexts and need to be released
       std::vector<EquivalenceSet*> invalidated_refinements;
+    protected:
+      // This data structure should only be accessed during the logical
+      // analysis stage of the pipeline and therefore no lock is needed
+      std::map<IndexTreeNode*,
+        std::vector<AttachProjectionFunctor*> > attach_functions;
     };
 
     /**
@@ -1720,12 +1774,15 @@ namespace Legion {
         REPLICATE_EXECUTE_TASK,
         REPLICATE_EXECUTE_INDEX_SPACE,
         REPLICATE_REDUCE_FUTURE_MAP,
+        REPLICATE_CONSTRUCT_FUTURE_MAP,
         REPLICATE_MAP_REGION,
         REPLICATE_REMAP_REGION,
         REPLICATE_FILL_FIELDS,
         REPLICATE_ISSUE_COPY,
         REPLICATE_ATTACH_RESOURCE,
         REPLICATE_DETACH_RESOURCE,
+        REPLICATE_INDEX_ATTACH_RESOURCE,
+        REPLICATE_INDEX_DETACH_RESOURCE,
         REPLICATE_MUST_EPOCH,
         REPLICATE_TIMING_MEASUREMENT,
         REPLICATE_MAPPING_FENCE,
@@ -1738,6 +1795,16 @@ namespace Legion {
         REPLICATE_ADVANCE_DYNAMIC_COLLECTIVE,
         REPLICATE_END_TASK,
         REPLICATE_FUTURE_FROM_VALUE,
+      };
+    public:
+      class AttachDetachShardingFunctor : public ShardingFunctor {
+      public:
+        AttachDetachShardingFunctor(void) { }
+        virtual ~AttachDetachShardingFunctor(void) { }
+      public:
+        virtual ShardID shard(const DomainPoint &point,
+                              const Domain &full_space,
+                              const size_t total_shards);
       };
     public:
       ReplicateContext(Runtime *runtime, ShardTask *owner,int d,bool full_inner,
@@ -2118,6 +2185,16 @@ namespace Legion {
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic,
                                        MapperID map_id, MappingTagID tag);
+      virtual FutureMap construct_future_map(const Domain &domain,
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false,
+                                             ShardingID sid = 0);
+      virtual FutureMap construct_future_map(const Domain &domain,
+                    const std::map<DomainPoint,Future> &futures,
+                    RtUserEvent domain_deletion = RtUserEvent::NO_RT_USER_EVENT,
+                                             bool internal = false,
+                                             bool collective = false,
+                                             ShardingID sid = 0);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       // Unmapping region is the same as for an inner context
@@ -2128,8 +2205,16 @@ namespace Legion {
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
+      virtual ExternalResources attach_resources(
+                                          const IndexAttachLauncher &launcher,
+                                          bool deduplicate_across_shards);
+      virtual RegionTreeNode* compute_index_attach_upper_bound(
+                                        const IndexAttachLauncher &launcher,
+                                        const std::vector<unsigned> &indexes);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual Future detach_resources(ExternalResources resources,
+                                      const bool flush, const bool unordered);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future issue_mapping_fence(void);
@@ -2297,6 +2382,11 @@ namespace Legion {
       void create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
       void create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
     public:
+      static void register_attach_detach_sharding_functor(Runtime *runtime);
+      ShardingFunction* get_attach_detach_sharding_function(void);
+      IndexSpaceNode* compute_index_attach_launch_spaces(
+                                            std::vector<size_t> &shard_sizes);
+    public:
       void hash_future(Murmur3Hasher &hasher, 
                        const unsigned safe_level, const Future &future) const;
       static void hash_future_map(Murmur3Hasher &hasher, const FutureMap &map);
@@ -2445,6 +2535,15 @@ namespace Legion {
     protected:
       std::map<std::pair<unsigned,unsigned>,RtBarrier> ready_clone_barriers;
       std::map<std::pair<unsigned,unsigned>,RtUserEvent> pending_clone_barriers;
+    protected:
+      struct AttachLaunchSpace {
+      public:
+        AttachLaunchSpace(IndexSpaceNode *node) : launch_space(node) { }
+      public:
+        IndexSpaceNode *const launch_space;
+        std::vector<size_t> shard_sizes;
+      };
+      std::vector<AttachLaunchSpace*> index_attach_launch_spaces;
     protected:
       unsigned next_replicate_bar_index;
       unsigned next_logical_bar_index;
@@ -2850,9 +2949,15 @@ namespace Legion {
                                        ReductionOpID redop, bool deterministic,
                                        MapperID map_id, MappingTagID tag);
       virtual FutureMap construct_future_map(const Domain &domain,
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false,
+                                             ShardingID sid = 0);
+      virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                     RtUserEvent domain_deletion = RtUserEvent::NO_RT_USER_EVENT,
-                                             bool internal = false);
+                                             bool internal = false,
+                                             bool collective = false,
+                                             ShardingID sid = 0);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
@@ -2864,8 +2969,13 @@ namespace Legion {
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
+      virtual ExternalResources attach_resources(
+                                          const IndexAttachLauncher &launcher,
+                                          bool deduplicate_across_shards);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual Future detach_resources(ExternalResources resources,
+                                      const bool flush, const bool unordered);
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);

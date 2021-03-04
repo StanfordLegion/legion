@@ -558,6 +558,7 @@ namespace Realm {
             core_rsrv = NULL;
             p_thread = NULL;
             shutdown_flag.store(false);
+            polls_done.store(0);
         }
         ~AM_Manager(void){}
         void init_corereservation(Realm::CoreReservationSet& crs){
@@ -577,6 +578,7 @@ namespace Realm {
                     break;
                 }
                 Realm::MPI::AMPoll();
+                polls_done.fetch_add(1);
             }
         }
         void stop_threads(){
@@ -585,10 +587,17 @@ namespace Realm {
             delete p_thread;
             p_thread = NULL;
         }
+        void ensure_polling_progress(){
+            assert(!shutdown_flag.load());
+            unsigned prev = polls_done.load();
+            while(prev == polls_done.load())
+              sched_yield();
+        }
     protected:
         Realm::CoreReservation *core_rsrv;
         Realm::Thread *p_thread;
         Realm::atomic<bool> shutdown_flag;
+        Realm::atomic<unsigned> polls_done;
     };
 
     AM_Manager g_am_manager;
@@ -712,11 +721,11 @@ namespace Realm {
   void MPIModule::detach(RuntimeImpl *runtime,
 			     std::vector<NetworkSegment *>& segments)
   {
+    g_am_manager.stop_threads();
     if (g_am_win != MPI_WIN_NULL) {
         CHECK_MPI( MPI_Win_unlock_all(g_am_win) );
         CHECK_MPI( MPI_Win_free(&g_am_win) );
     }
-    g_am_manager.stop_threads();
     g_am_manager.release_corereservation();
     Realm::MPI::AM_Finalize();
     free(g_am_bases);
@@ -741,15 +750,28 @@ namespace Realm {
     CHECK_MPI( MPI_Gather(val_in, bytes, MPI_BYTE, vals_out, bytes, MPI_BYTE, root, MPI_COMM_WORLD) );
   }
 
+  static unsigned long prev_total_rcvd = 0;
   bool MPIModule::check_for_quiescence(void)
   {
-    // add up the total messages sent by anybody since the last time we tried
-    unsigned long sent_snapshot = MPI::messages_sent.exchange(0);
-    unsigned long total = 0;
-    CHECK_MPI( MPI_Allreduce(&sent_snapshot, &total,
-			     1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD) );
-    // if it's zero, we're quiescent
-    return (total == 0);
+    // ensure some progress happens on the poller before each quiescence check
+    g_am_manager.ensure_polling_progress();
+
+    // add up the total messages sent/rcvd by anybody since last time we tried
+    unsigned long my_counts[2], totals[2];
+    my_counts[0] = MPI::messages_sent.load();
+    my_counts[1] = MPI::messages_rcvd.load();
+    CHECK_MPI( MPI_Allreduce(my_counts, totals,
+                            2, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD) );
+
+    // we're quiescent if:
+    //  a) the total messages rcvd is the same as total sent (i.e. none in
+    //      flight), and
+    //  b) the total messages rcvd is the same as last attempt (i.e. no new
+    //      messages showed up during the check)
+    bool quiesced = ((totals[0] == totals[1]) &&
+                     (totals[1] == prev_total_rcvd));
+    prev_total_rcvd = totals[1];
+    return quiesced;
   }
 
   // used to create a remote proxy for a memory

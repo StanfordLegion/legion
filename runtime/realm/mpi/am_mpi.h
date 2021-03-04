@@ -41,7 +41,7 @@
 namespace Realm {
 namespace MPI {
 
-extern atomic<size_t> messages_sent;
+extern atomic<size_t> messages_sent, messages_rcvd;
 
 struct AM_msg {
     int type;

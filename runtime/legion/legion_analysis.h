@@ -1323,6 +1323,10 @@ namespace Legion {
       };
       typedef LegionMap<ApEvent,
                FieldMaskSet<Update> >::aligned EventFieldUpdates;
+      struct FusedCopy {
+        std::set<IndexSpaceExpression*> expressions;
+        std::set<ApEvent> preconditions;
+      };
     public:
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, unsigned idx,
                          CopyFillGuard *previous, bool track_events,
@@ -1422,7 +1426,7 @@ namespace Legion {
       void issue_copies(InstanceView *target, 
                         const std::map<InstanceView*,
                                        std::vector<CopyUpdate*> > &copies,
-                        ApEvent precondition, const FieldMask &copy_mask,
+                        const ApEvent precondition, const FieldMask &copy_mask,
                         const PhysicalTraceInfo &trace_info,
                         const bool has_dst_preconditions);
     public:

@@ -2148,6 +2148,63 @@ namespace Legion {
     };
 
     /**
+     * \struct IndexAttachLauncher
+     * An index attach launcher allows the application to attach
+     * many external resources concurrently to different subregions
+     * of a common region tree.
+     */
+    struct IndexAttachLauncher {
+    public:
+      IndexAttachLauncher(ExternalResource resource, 
+                          LogicalRegion parent,
+                          const bool restricted = true);
+    public:
+      inline void attach_file(LogicalRegion handle,
+                              const char *file_name,
+                              const std::vector<FieldID> &fields,
+                              LegionFileMode mode);
+      inline void attach_hdf5(LogicalRegion handle,
+                              const char *file_name,
+                              const std::map<FieldID,const char*> &field_map,
+                              LegionFileMode mode);
+      // Helper methods for AOS and SOA arrays, but it is totally 
+      // acceptable to fill in the layout constraint set manually
+      inline void attach_array_aos(LogicalRegion handle, 
+                             void *base, bool column_major,
+                             const std::vector<FieldID> &fields, Memory mem,
+                             const std::map<FieldID,size_t> *alignments = NULL);
+      inline void attach_array_soa(LogicalRegion handle,
+                             void *base, bool column_major,
+                             const std::vector<FieldID> &fields, Memory mem,
+                             const std::map<FieldID,size_t> *alignments = NULL);
+    public:
+      ExternalResource                              resource;
+      std::vector<LogicalRegion>                    handles;
+      LogicalRegion                                 parent;
+      // Whether these instances will be restricted when attached
+      bool                                          restricted /*= true*/;
+    public:
+      // Data for files
+      LegionFileMode                                mode;
+      std::vector<const char*>                      file_names;
+      std::vector<FieldID>                          file_fields; // normal files
+      std::map<FieldID,
+        std::vector</*file name*/const char*> >     field_files; // hdf5 files
+    public:
+      // Data for external instances
+      LayoutConstraintSet                           constraints;
+      std::vector<PointerConstraint>                pointers; 
+      std::set<FieldID>                             privilege_fields;
+    public:
+      // Optional footprint of the instance in memory in bytes
+      std::vector<size_t>                           footprint;
+    public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      const std::vector<StaticDependence>           *static_dependences;
+    };
+
+    /**
      * \struct PredicateLauncher
      * Predicate launchers are used for merging several predicates
      * into a new predicate either by an 'AND' or an 'OR' operation.
@@ -2426,6 +2483,36 @@ namespace Legion {
     protected:
       void get_bounds(void *realm_is, TypeTag type_tag) const;
     }; 
+
+    /**
+     * \class ExternalResources
+     * An external resources object stores a collection of physical
+     * regions that were attached together using the same index space
+     * attach operation. It acts as a vector-like container of the
+     * physical regions and ensures that they are detached together.
+     */
+    class ExternalResources : public Unserializable<ExternalResources> {
+    public:
+      ExternalResources(void);
+      ExternalResources(const ExternalResources &rhs);
+      ExternalResources(ExternalResources &&rhs);
+      ~ExternalResources(void);
+    private:
+      Internal::ExternalResourcesImpl *impl;
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      explicit ExternalResources(Internal::ExternalResourcesImpl *impl);
+    public:
+      ExternalResources& operator=(const ExternalResources &rhs);
+      ExternalResources& operator=(ExternalResources &&rhs);
+      inline bool operator==(const ExternalResources &reg) const
+        { return (impl == reg.impl); }
+      inline bool operator<(const ExternalResources &reg) const
+        { return (impl < reg.impl); }
+    public:
+      size_t size(void) const;
+      PhysicalRegion operator[](unsigned index) const;
+    };
 
     /**
      * \class FieldAccessor
@@ -6284,16 +6371,52 @@ namespace Legion {
                                MapperID map_id = 0, MappingTagID tag = 0);
 
       /**
-       * Construct a future map from a collection of futures. The user must
-       * also specify the domain of the futures and there must be one future
-       * for every point in the domain.
+       * Construct a future map from a collection of buffers. The user must
+       * also specify the domain of the future map and there must be one buffer 
+       * for every point in the domain. In the case of 'collective=true' the
+       * runtime supports different shards in a control-replicated context
+       * to work collectively to construct the future map. The runtime will
+       * not detect if points are missing or if points are duplicated and
+       * undefined behavior will occur. If 'collective=true', the application
+       * must provide a sharding function that describes assignment of points
+       * to shards for the runtime to use. The runtime will verify this 
+       * sharding function accurately describes all the points passed in.
+       * If the task is not control-replicated then the 'collective' flag
+       * will not have any effect. 
        * @param ctx enclosing task context
        * @param domain the domain that names all points in the future map
-       * @param futures the set of futures from which to create the future map
+       * @param data the set of futures from which to create the future map
+       * @param collective whether shards from a control replicated context
+       *                   should work collectively to construct the map
+       * @param sid the sharding function ID that describes the sharding
+       *                   pattern if collective=true
        * @return a new future map containing all the futures
        */
       FutureMap construct_future_map(Context ctx, const Domain &domain,
-                           const std::map<DomainPoint,Future> &futures);
+                           const std::map<DomainPoint,TaskArgument> &data,
+                           bool collective = false, ShardingID sid = 0);
+
+      /**
+       * Construct a future map from a collection of futures. The user must
+       * also specify the domain of the futures and there must be one future
+       * for every point in the domain. In the case of 'collective=true' the
+       * runtime supports different shards in a control-replicated context
+       * to work collectively to construct the future map. The runtime will
+       * not detect if points are missing or if points are duplicated and
+       * undefined behavior will occur. If the task is not control-replicated
+       * then the 'collective' flag will not have any effect.
+       * @param ctx enclosing task context
+       * @param domain the domain that names all points in the future map
+       * @param futures the set of futures from which to create the future map
+       * @param collective whether shards from a control replicated context
+       *                   should work collectively to construct the map
+       * @param sid the sharding function ID that describes the sharding
+       *                   pattern if collective=true
+       * @return a new future map containing all the futures
+       */
+      FutureMap construct_future_map(Context ctx, const Domain &domain,
+                           const std::map<DomainPoint,Future> &futures,
+                           bool collective = false, ShardingID sid = 0);
 
       /**
        * @deprecated
@@ -6616,6 +6739,45 @@ namespace Legion {
       Future detach_external_resource(Context ctx, PhysicalRegion region,
                                       const bool flush = true,
                                       const bool unordered = false);
+
+      /**
+       * Attach multiple external resources to logical regions using an
+       * index space attach operation. In a control replicated context
+       * this method is an unusual "collective" method meaning that 
+       * different shards are allowed to pass in different arguments
+       * and the runtime will interpret them as different sub-operations
+       * coming from different shards. All the physical regions returned
+       * from this method must be detached together as well using the
+       * 'detach_external_resources' method and cannot be detached
+       * individually using the 'detach_external_resource' method.
+       * @param ctx enclosing task context
+       * @param launcher the index attach launcher describing the external
+       *        resources to be attached
+       * @param deduplicate_across_shards whether the runtime should check
+       *        for duplicate resources across the shards in a control
+       *        replicated context, it is illegal to pass in the same
+       *        resource to different shards if this is set to false
+       * @return an external resources objects containing the physical
+       *        regions for the attached resources with regions in the
+       *        same order as specified in the launcher
+       */
+      ExternalResources attach_external_resources(Context ctx,
+                                     const IndexAttachLauncher &launcher,
+                                     bool deduplicate_across_shards = false);
+
+      /**
+       * Detach multiple external resources that were all created by 
+       * a common call to 'attach_external_resources'. 
+       * @param ctx enclosing task context
+       * @param external the external resources to detach 
+       * @param flush copy out data to the physical region before detaching
+       * @param unordered set to true if this is performed by a different
+       *          thread than the one for the task (e.g a garbage collector)
+       * @return an empty future indicating when the resources are detached
+       */
+      Future detach_external_resources(Context ctx, ExternalResources external,
+                                       const bool flush = true,
+                                       const bool unordered = false);
 
       /**
        * Force progress on unordered operations. After performing one
@@ -7328,6 +7490,38 @@ namespace Legion {
        * this processor.
        */
       void yield(Context ctx);
+    public:
+      //------------------------------------------------------------------------
+      // Control Replication
+      // In general SPMD-style programming in Legion is wrong. If you find
+      // yourself writing SPMD-style code for large fractions of your program
+      // then you're probably doing something wrong. There are a few exceptions:
+      // 1. index attach/detach operations are collective and may need
+      //    to do per-shard work
+      // 2. I/O in general often needs to do per-shard work
+      // 3. interaction with collective frameworks like MPI and NCCL
+      // 4. others?
+      // For these reasons we allow users to get access to their shard ID and
+      // the total number of shards and to make a future map collectively
+      // Please, please, please be careful with how you use them
+      //------------------------------------------------------------------------
+      /**
+       * Return the ShardID for the execution of this task in a
+       * control-replicated context. If the task is not control
+       * replicated then the ShardID will always be zero.
+       * @param ctx enclosing task context
+       * @return the ShardID for this execution of the task
+       */
+      ShardID local_shard(Context ctx);
+
+      /**
+       * Return the total number of shards for the execution of this task in
+       * a control-replicated context. If the task is not control-replicated
+       * then the total number of shards will always be one.
+       * @param enclosing task context
+       * @return the total number of shards in the execution of the task
+       */
+      size_t total_shards(Context ctx); 
     public:
       //------------------------------------------------------------------------
       // MPI Interoperability 

@@ -141,6 +141,7 @@ namespace Legion {
   class Predicate;
   class PhysicalRegion;
   class OutputRegion;
+  class ExternalResources;
   template<PrivilegeMode,typename,int,typename,typename,bool> 
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
@@ -1497,10 +1498,10 @@ namespace Legion {
       COLLECTIVE_LOC_22 = 22, 
       COLLECTIVE_LOC_23 = 23,
       COLLECTIVE_LOC_24 = 24,
-      //COLLECTIVE_LOC_25 = 25,
-      //COLLECTIVE_LOC_26 = 26,
-      //COLLECTIVE_LOC_27 = 27, 
-      //COLLECTIVE_LOC_28 = 28, 
+      COLLECTIVE_LOC_25 = 25,
+      COLLECTIVE_LOC_26 = 26,
+      COLLECTIVE_LOC_27 = 27, 
+      COLLECTIVE_LOC_28 = 28, 
       COLLECTIVE_LOC_29 = 29,
       COLLECTIVE_LOC_30 = 30,
       COLLECTIVE_LOC_31 = 31, 
@@ -1570,6 +1571,8 @@ namespace Legion {
       COLLECTIVE_LOC_95 = 95,
       COLLECTIVE_LOC_96 = 96,
       COLLECTIVE_LOC_97 = 97,
+      COLLECTIVE_LOC_98 = 98,
+      COLLECTIVE_LOC_99 = 99,
     };
 
     // legion_types.h
@@ -1600,6 +1603,7 @@ namespace Legion {
     class ReplFutureMapImpl;
     class PhysicalRegionImpl;
     class OutputRegionImpl;
+    class ExternalResourcesImpl;
     class PieceIteratorImpl;
     class GrantImpl;
     class PredicateImpl;
@@ -1666,7 +1670,11 @@ namespace Legion {
     class IndexFillOp;
     class PointFillOp;
     class AttachOp;
+    class IndexAttachOp;
+    class PointAttachOp;
     class DetachOp;
+    class IndexDetachOp;
+    class PointDetachOp;
     class TimingOp;
     class AllReduceOp;
     class ExternalMappable;
@@ -1885,7 +1893,9 @@ namespace Legion {
     class ReplFenceOp;
     class ReplMapOp;
     class ReplAttachOp;
+    class ReplIndexAttachOp;
     class ReplDetachOp;
+    class ReplIndexDetachOp;
     class ReplTraceOp;
     class ReplTraceCaptureOp;
     class ReplTraceCompleteOp;
@@ -1915,6 +1925,7 @@ namespace Legion {
     friend class Legion::Runtime;                           \
     friend class Internal::Runtime;                         \
     friend class Internal::PhysicalRegionImpl;              \
+    friend class Internal::ExternalResourcesImpl;           \
     friend class Internal::TaskImpl;                        \
     friend class Internal::ProcessorManager;                \
     friend class Internal::MemoryManager;                   \
@@ -1949,7 +1960,13 @@ namespace Legion {
     friend class Internal::IndexFillOp;                     \
     friend class Internal::PointFillOp;                     \
     friend class Internal::AttachOp;                        \
+    friend class Internal::IndexAttachOp;                   \
+    friend class Internal::ReplIndexAttachOp;               \
+    friend class Internal::PointAttachOp;                   \
     friend class Internal::DetachOp;                        \
+    friend class Internal::IndexDetachOp;                   \
+    friend class Internal::ReplIndexDetachOp;               \
+    friend class Internal::PointDetachOp;                   \
     friend class Internal::TimingOp;                        \
     friend class Internal::AllReduceOp;                     \
     friend class Internal::TraceSummaryOp;                  \

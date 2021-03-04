@@ -385,7 +385,7 @@ namespace Realm {
 	  log_pool.info() << "worker " << wi->thread_id << "/" << wi->num_threads << " executing: " << (void *)(wi->fnptr) << "(" << wi->data << ")";
 	  (wi->fnptr)(wi->data);
 	  log_pool.info() << "worker " << wi->thread_id << "/" << wi->num_threads << " done";
-	  wi->work_item->remaining_workers.fetch_sub(1);
+	  wi->work_item->remaining_workers.fetch_sub_acqrel(1);
 	  wi->status.store(WorkerInfo::WORKER_IDLE);
 	  break;
 	}

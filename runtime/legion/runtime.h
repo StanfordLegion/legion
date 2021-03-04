@@ -612,6 +612,12 @@ namespace Legion {
                         Runtime *rt, DistributedID did, AddressSpaceID owner,
                         RtUserEvent deletion_trigger=
                                               RtUserEvent::NO_RT_USER_EVENT);
+      ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
+                        const Domain &domain, const Domain &shard_domain,
+                        DistributedID did, size_t index, AddressSpaceID owner,
+                        RtEvent ready_event, bool register_now = true,
+                        RtUserEvent deletion_trigger =
+                                              RtUserEvent::NO_RT_USER_EVENT);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs);
       virtual ~ReplFutureMapImpl(void);
     public:
@@ -881,6 +887,46 @@ namespace Legion {
       const unsigned index;
       const bool created_region;
       const bool global_indexing;
+    };
+
+    /**
+     * \class ExternalResourcesImpl
+     * This class provides the backing data structure for a collection of
+     * physical regions that represent external data that have been attached
+     * to logical regions in the same region tree
+     */
+    class ExternalResourcesImpl : public Collectable,
+                                  public LegionHeapify<ExternalResourcesImpl> {
+    public:
+      static const AllocationType alloc_type = EXTERNAL_RESOURCES_ALLOC;
+    public:
+      ExternalResourcesImpl(InnerContext *context, size_t num_regions,
+                            RegionTreeNode *upper, IndexSpaceNode *launch,
+                            LogicalRegion parent,
+                            const std::set<FieldID> &privilege_fields);
+      ExternalResourcesImpl(const ExternalResourcesImpl &rhs);
+      ~ExternalResourcesImpl(void);
+    public:
+      ExternalResourcesImpl& operator=(const ExternalResourcesImpl &rhs);
+    public:
+      size_t size(void) const;
+      void set_region(unsigned index, PhysicalRegionImpl *region);
+      PhysicalRegion get_region(unsigned index) const;
+      void set_projection(ProjectionID pid);
+      inline ProjectionID get_projection(void) const { return pid; }
+      Future detach(InnerContext *context, IndexDetachOp *op, 
+                    const bool flush, const bool unordered);
+    public:
+      InnerContext *const context;
+      // Save these for when we go to do the detach
+      RegionTreeNode *const upper_bound;
+      IndexSpaceNode *const launch_bounds;
+      const std::vector<FieldID> privilege_fields;
+      const LogicalRegion parent;
+    protected:
+      std::vector<PhysicalRegion> regions;
+      ProjectionID pid;
+      bool detached;
     };
 
     /**
@@ -2684,11 +2730,6 @@ namespace Legion {
     public:
       void fill_fields(Context ctx, const FillLauncher &launcher);
       void fill_fields(Context ctx, const IndexFillLauncher &launcher);
-      PhysicalRegion attach_external_resource(Context ctx,
-                                              const AttachLauncher &launcher);
-      Future detach_external_resource(Context ctx, PhysicalRegion region, 
-                                      const bool flush, const bool unordered);
-      void progress_unordered_operations(Context ctx);
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
       void issue_copy_operation(Context ctx, const IndexCopyLauncher &launcher);
     public:
@@ -2788,6 +2829,7 @@ namespace Legion {
       ProjectionFunction* find_projection_function(ProjectionID pid,
                                                    bool can_fail = false);
       static ProjectionFunctor* get_projection_functor(ProjectionID pid);
+      void unregister_projection_functor(ProjectionID pid);
     public:
       ShardingID generate_dynamic_sharding_id(bool check_context = true);
       ShardingID generate_library_sharding_ids(const char *name, size_t count);
@@ -3737,7 +3779,11 @@ namespace Legion {
       IndexFillOp*          get_available_index_fill_op(void);
       PointFillOp*          get_available_point_fill_op(void);
       AttachOp*             get_available_attach_op(void);
+      IndexAttachOp*        get_available_index_attach_op(void);
+      PointAttachOp*        get_available_point_attach_op(void);
       DetachOp*             get_available_detach_op(void);
+      IndexDetachOp*        get_available_index_detach_op(void);
+      PointDetachOp*        get_available_point_detach_op(void);
       TimingOp*             get_available_timing_op(void);
       AllReduceOp*          get_available_all_reduce_op(void);
     public: // Control replication operations
@@ -3758,7 +3804,9 @@ namespace Legion {
       ReplFenceOp*          get_available_repl_fence_op(void);
       ReplMapOp*            get_available_repl_map_op(void);
       ReplAttachOp*         get_available_repl_attach_op(void);
+      ReplIndexAttachOp*    get_available_repl_index_attach_op(void);
       ReplDetachOp*         get_available_repl_detach_op(void);
+      ReplIndexDetachOp*    get_available_repl_index_detach_op(void);
       ReplTraceCaptureOp*   get_available_repl_capture_op(void);
       ReplTraceCompleteOp*  get_available_repl_trace_op(void);
       ReplTraceReplayOp*    get_available_repl_replay_op(void);
@@ -3802,7 +3850,11 @@ namespace Legion {
       void free_index_fill_op(IndexFillOp *op);
       void free_point_fill_op(PointFillOp *op);
       void free_attach_op(AttachOp *op);
+      void free_index_attach_op(IndexAttachOp *op);
+      void free_point_attach_op(PointAttachOp *op);
       void free_detach_op(DetachOp *op);
+      void free_index_detach_op(IndexDetachOp *op);
+      void free_point_detach_op(PointDetachOp *op);
       void free_timing_op(TimingOp *op);
       void free_all_reduce_op(AllReduceOp *op);
     public: // Control replication operations
@@ -3823,7 +3875,9 @@ namespace Legion {
       void free_repl_fence_op(ReplFenceOp *op);
       void free_repl_map_op(ReplMapOp *op);
       void free_repl_attach_op(ReplAttachOp *op);
+      void free_repl_index_attach_op(ReplIndexAttachOp *op);
       void free_repl_detach_op(ReplDetachOp *op);
+      void free_repl_index_detach_op(ReplIndexDetachOp *op);
       void free_repl_capture_op(ReplTraceCaptureOp *op);
       void free_repl_trace_op(ReplTraceCompleteOp *op);
       void free_repl_replay_op(ReplTraceReplayOp *op);
@@ -4242,7 +4296,11 @@ namespace Legion {
       std::deque<IndexFillOp*>          available_index_fill_ops;
       std::deque<PointFillOp*>          available_point_fill_ops;
       std::deque<AttachOp*>             available_attach_ops;
+      std::deque<IndexAttachOp*>        available_index_attach_ops;
+      std::deque<PointAttachOp*>        available_point_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
+      std::deque<IndexDetachOp*>        available_index_detach_ops;
+      std::deque<PointDetachOp*>        available_point_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
       std::deque<AllReduceOp*>          available_all_reduce_ops;
     protected: // Control replication operations
@@ -4265,7 +4323,9 @@ namespace Legion {
       std::deque<ReplFenceOp*>          available_repl_fence_ops;
       std::deque<ReplMapOp*>            available_repl_map_ops;
       std::deque<ReplAttachOp*>         available_repl_attach_ops;
+      std::deque<ReplIndexAttachOp*>    available_repl_index_attach_ops;
       std::deque<ReplDetachOp*>         available_repl_detach_ops;
+      std::deque<ReplIndexDetachOp*>    available_repl_index_detach_ops;
       std::deque<ReplTraceCaptureOp*>   available_repl_capture_ops;
       std::deque<ReplTraceCompleteOp*>  available_repl_trace_ops;
       std::deque<ReplTraceReplayOp*>    available_repl_replay_ops;

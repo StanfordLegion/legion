@@ -1088,6 +1088,80 @@ namespace Legion {
     };
 
     /**
+     * \class IndexAttachLaunchSpace
+     * This collective computes the number of points in each
+     * shard of a replicated index attach collective in order
+     * to help compute the index launch space
+     */
+    class IndexAttachLaunchSpace : public AllGatherCollective<false> {
+    public:
+      IndexAttachLaunchSpace(ReplicateContext *ctx,
+                             CollectiveIndexLocation loc);
+      IndexAttachLaunchSpace(const IndexAttachLaunchSpace &rhs);
+      virtual ~IndexAttachLaunchSpace(void);
+    public:
+      IndexAttachLaunchSpace& operator=(const IndexAttachLaunchSpace &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void exchange_counts(size_t count);
+      IndexSpaceNode* get_launch_space(void);
+    protected:
+      std::vector<size_t> sizes;
+      unsigned nonzeros;
+    };
+
+    /**
+     * \class IndexAttachUpperBound
+     * This computes the upper bound node in the region
+     * tree for an index space attach operation
+     */
+    class IndexAttachUpperBound : public AllGatherCollective<false> {
+    public:
+      IndexAttachUpperBound(ReplicateContext *ctx,
+                            CollectiveIndexLocation loc,
+                            RegionTreeForest *forest);
+      IndexAttachUpperBound(const IndexAttachUpperBound &rhs);
+      virtual ~IndexAttachUpperBound(void);
+    public:
+      IndexAttachUpperBound& operator=(const IndexAttachUpperBound &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      RegionTreeNode* find_upper_bound(RegionTreeNode *node);
+    public:
+      RegionTreeForest *const forest;
+    protected:
+      RegionTreeNode *node;
+    };
+
+    /**
+     * \class IndexAttachExchange
+     * This class is used to exchange the needed metadata for
+     * replicated index space attach operations
+     */
+    class IndexAttachExchange : public AllGatherCollective<false> {
+    public:
+      IndexAttachExchange(ReplicateContext *ctx,
+                          CollectiveIndexLocation loc);
+      IndexAttachExchange(const IndexAttachExchange &rhs);
+      virtual ~IndexAttachExchange(void);
+    public:
+      IndexAttachExchange& operator=(const IndexAttachExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void exchange_spaces(std::vector<IndexSpace> &spaces);
+      size_t get_spaces(std::vector<IndexSpace> &spaces, unsigned &local_start);
+      IndexSpaceNode* get_launch_space(void); 
+    protected:
+      std::map<ShardID,std::vector<IndexSpace> > shard_spaces;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases
@@ -1878,6 +1952,33 @@ namespace Legion {
     };
 
     /**
+     * \class ReplIndexAttachOp
+     * An index space attach operation that is aware
+     * that it is executing in a control replicated context
+     */
+    class ReplIndexAttachOp : public IndexAttachOp {
+    public:
+      ReplIndexAttachOp(Runtime *rt);
+      ReplIndexAttachOp(const ReplIndexAttachOp &rhs);
+      virtual ~ReplIndexAttachOp(void);
+    public:
+      ReplIndexAttachOp& operator=(const ReplIndexAttachOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void check_point_requirements(
+                    const std::vector<IndexSpace> &spaces);
+      virtual bool are_all_direct_children(bool local);
+    public:
+      void initialize_replication(ReplicateContext *ctx);
+    protected:
+      IndexAttachExchange *collective;
+      ShardingFunction *sharding_function;
+    };
+
+    /**
      * \class ReplDetachOp
      * An detach operation that is aware that it is being
      * executed in a control replicated context.
@@ -1906,6 +2007,27 @@ namespace Legion {
         std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> &detachments);
     public:
       RtBarrier resource_barrier;
+    };
+
+    /**
+     * \class ReplIndexDetachOp
+     * An index space detach operation that is aware
+     * that it is executing in a control replicated context
+     */
+    class ReplIndexDetachOp : public IndexDetachOp {
+    public:
+      ReplIndexDetachOp(Runtime *rt);
+      ReplIndexDetachOp(const ReplIndexDetachOp &rhs);
+      virtual ~ReplIndexDetachOp(void);
+    public:
+      ReplIndexDetachOp& operator=(const ReplIndexDetachOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+    protected:
+      ShardingFunction *sharding_function;
     };
 
     /**
@@ -1966,6 +2088,7 @@ namespace Legion {
       CollectiveID post_elide_fences_collective_id;
       bool has_blocking_call;
       bool remove_trace_reference;
+      bool is_recording;
     };
 
     /**
@@ -2005,6 +2128,7 @@ namespace Legion {
       CollectiveID post_elide_fences_collective_id;
       bool replayed;
       bool has_blocking_call;
+      bool is_recording;
     };
 
     /**
@@ -2189,6 +2313,16 @@ namespace Legion {
         CREATED_REGION_UPDATE_KIND,
       };
     public:
+      struct AttachDeduplication {
+      public:
+        AttachDeduplication(void) : done_count(0) { }
+      public:
+        RtUserEvent pending;
+        std::vector<const IndexAttachLauncher*> launchers; 
+        std::map<LogicalRegion,const IndexAttachLauncher*> owners;
+        unsigned done_count;
+      };
+    public:
       ShardManager(Runtime *rt, ReplicationID repl_id, 
                    bool control, bool top, size_t total_shards,
                    AddressSpaceID owner_space, SingleTask *original = NULL,
@@ -2272,6 +2406,8 @@ namespace Legion {
       EquivalenceSet* get_initial_equivalence_set(unsigned idx) const;
       EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
                       const FieldMask &mask, DistributedID did, bool &first);
+      void deduplicate_attaches(const IndexAttachLauncher &launcher,
+                                std::vector<unsigned> &indexes);
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
     public:
@@ -2426,6 +2562,8 @@ namespace Legion {
       std::set<std::pair<std::string,std::string> > 
                                unique_registration_callbacks;
 #endif
+    protected:
+      AttachDeduplication *attach_deduplication;
     };
 
   }; // namespace Internal

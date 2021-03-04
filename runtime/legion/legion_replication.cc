@@ -6612,6 +6612,266 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl Index Attach Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplIndexAttachOp::ReplIndexAttachOp(Runtime *rt)
+      : IndexAttachOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplIndexAttachOp::ReplIndexAttachOp(const ReplIndexAttachOp &rhs)
+      : IndexAttachOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplIndexAttachOp::~ReplIndexAttachOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplIndexAttachOp& ReplIndexAttachOp::operator=(
+                                                   const ReplIndexAttachOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexAttachOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_index_attach();
+      collective = NULL;
+      sharding_function = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexAttachOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_index_attach();
+      if (collective != NULL)
+        delete collective;
+      runtime->free_repl_index_attach_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexAttachOp::initialize_replication(ReplicateContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective == NULL);
+#endif
+      collective = new IndexAttachExchange(ctx, COLLECTIVE_LOC_25);
+      std::vector<IndexSpace> spaces(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
+        spaces[idx] = points[idx]->get_requirement().region.get_index_space();
+      collective->exchange_spaces(spaces);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexAttachOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function == NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      sharding_function = repl_ctx->get_attach_detach_sharding_function();
+      IndexAttachOp::trigger_prepipeline_stage();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexAttachOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+#endif
+      std::vector<IndexSpace> spaces;
+      unsigned local_start = 0;
+      size_t local_size = collective->get_spaces(spaces, local_start); 
+      if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
+        requirement.projection = parent_ctx->compute_index_attach_projection(
+            runtime->forest->get_node(requirement.partition.index_partition),
+            this, local_start, local_size, spaces);
+      else
+        requirement.projection = parent_ctx->compute_index_attach_projection(
+            runtime->forest->get_node(requirement.region.index_space),
+            this, local_start, local_size, spaces);
+      // Save this for later when we go to detach it
+      resources.impl->set_projection(requirement.projection);
+      if (runtime->check_privileges)
+      {
+        check_privilege();
+        check_point_requirements(spaces);
+      }
+      if (runtime->legion_spy_enabled)
+        log_requirement();
+      RefinementTracker tracker(this, map_applied_conditions);
+      ProjectionInfo projection_info(runtime, requirement, 
+                                     launch_space, sharding_function);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   projection_info,
+                                                   privilege_path, tracker,
+                                                   map_applied_conditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexAttachOp::check_point_requirements(
+                                          const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      unsigned check_count = 0;
+      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+      const unsigned total_shards = repl_ctx->shard_manager->total_shards; 
+      for (unsigned idx1 = 1; idx1 < spaces.size(); idx1++)
+      {
+        for (unsigned idx2 = 0; idx2 < idx1; idx2++)
+        {
+          // Perfectly balance checks across the shards, this isn't the
+          // best for locality, but it will guarantee perfect local balance
+          if (((check_count++) % total_shards) != local_shard)
+            continue;
+          if (!runtime->forest->are_disjoint(spaces[idx1], spaces[idx2]))
+            REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_ATTACH,
+                "Index attach operation (UID %lld) in parent task %s "
+                "(UID %lld) has interfering attachments to regions (%d,%d,%d) "
+                "and (%d,%d,%d). All regions must be non-interfering",
+                unique_op_id, parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id(), spaces[idx1].id,
+                requirement.parent.field_space.id, requirement.parent.tree_id,
+                spaces[idx2].id, requirement.parent.field_space.id,
+                requirement.parent.tree_id)
+        }
+      }
+    }
+    
+    //--------------------------------------------------------------------------
+    bool ReplIndexAttachOp::are_all_direct_children(bool local)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      AllReduceCollective<ProdReduction<bool> > all_direct_children(repl_ctx,
+       repl_ctx->get_next_collective_index(COLLECTIVE_LOC_27, true/*logical*/));
+      return all_direct_children.sync_all_reduce(local);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Repl Index Detach Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplIndexDetachOp::ReplIndexDetachOp(Runtime *rt)
+      : IndexDetachOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplIndexDetachOp::ReplIndexDetachOp(const ReplIndexDetachOp &rhs)
+      : IndexDetachOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplIndexDetachOp::~ReplIndexDetachOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplIndexDetachOp& ReplIndexDetachOp::operator=(
+                                                   const ReplIndexDetachOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexDetachOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_index_detach();
+      sharding_function = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexDetachOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_index_detach();
+      runtime->free_repl_index_detach_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexDetachOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function == NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      sharding_function = repl_ctx->get_attach_detach_sharding_function();
+      IndexDetachOp::trigger_prepipeline_stage();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexDetachOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+#endif
+      // Get the projection ID which we know is valid on the external resources
+      requirement.projection = resources.impl->get_projection();
+      if (runtime->legion_spy_enabled)
+        log_requirement();
+      RefinementTracker tracker(this, map_applied_conditions);
+      ProjectionInfo projection_info(runtime, requirement,
+                                     launch_space, sharding_function);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   projection_info,
+                                                   privilege_path, tracker,
+                                                   map_applied_conditions);
+    }
+
+    /////////////////////////////////////////////////////////////
     // ReplTraceOp 
     /////////////////////////////////////////////////////////////
 
@@ -6769,6 +7029,7 @@ namespace Legion {
       replayable_collective_id = 0;
       has_blocking_call = false;
       remove_trace_reference = false;
+      is_recording = false;
     }
 
     //--------------------------------------------------------------------------
@@ -6825,6 +7086,8 @@ namespace Legion {
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
         recording_fence = repl_ctx->get_next_mapping_fence_barrier();
+        // Save this for later since we can't access it safely in mapping stage
+        is_recording = true;
       }
       // Register this fence with all previous users in the parent's context
       ReplFenceOp::trigger_dependence_analysis();
@@ -6849,7 +7112,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (local_trace->is_recording())
+      if (is_recording)
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
@@ -7013,6 +7276,7 @@ namespace Legion {
       replayable_collective_id = 0;
       replayed = false;
       has_blocking_call = false;
+      is_recording = false;
     }
 
     //--------------------------------------------------------------------------
@@ -7113,6 +7377,8 @@ namespace Legion {
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
         recording_fence = repl_ctx->get_next_mapping_fence_barrier();
+        // Save this for later since we can't access it safely in mapping stage
+        is_recording = true;
       } 
 
       // If this is a static trace, then we remove our reference when we're done
@@ -7155,7 +7421,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (local_trace->is_recording())
+      if (is_recording)
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
@@ -7969,7 +8235,8 @@ namespace Legion {
         trigger_local_complete(0), trigger_remote_complete(0),
         trigger_local_commit(0), trigger_remote_commit(0), 
         remote_constituents(0), semantic_attach_counter(0), 
-        local_future_result(NULL), shard_task_barrier(bar) 
+        local_future_result(NULL), shard_task_barrier(bar),
+        attach_deduplication(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8079,6 +8346,10 @@ namespace Legion {
             local_shards.begin(); it != local_shards.end(); it++)
         delete (*it);
       local_shards.clear();
+      for (std::map<ShardingID,ShardingFunction*>::const_iterator it =
+            sharding_functions.begin(); it != sharding_functions.end(); it++)
+        delete it->second;
+      sharding_functions.clear();
       // Finally unregister ourselves with the runtime
       const bool owner_manager = (owner_space == runtime->address_space);
       runtime->unregister_shard_manager(repl_id, owner_manager);
@@ -8563,6 +8834,136 @@ namespace Legion {
       }
       first = true;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::deduplicate_attaches(const IndexAttachLauncher &launcher,
+                                            std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+      // If we only have one shard then there is no need to deduplicate
+      if (local_shards.size() == 1)
+      {
+        indexes.resize(launcher.handles.size());
+        for (unsigned idx = 0; idx < indexes.size(); idx++)
+          indexes[idx] = idx;
+        return;
+      }
+      // If we have multiple local shards then try to deduplicate across them
+      RtEvent wait_on;
+      RtUserEvent to_trigger;
+      {
+        AutoLock m_lock(manager_lock);
+        if (attach_deduplication == NULL)
+          attach_deduplication = new AttachDeduplication();
+        if (attach_deduplication->launchers.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(!attach_deduplication->pending.exists());
+#endif
+          attach_deduplication->pending = Runtime::create_rt_user_event();
+        }
+        attach_deduplication->launchers.push_back(&launcher);
+        if (attach_deduplication->launchers.size() == local_shards.size())
+        {
+#ifdef DEBUG_LEGION
+          assert(attach_deduplication->pending.exists());
+#endif
+          to_trigger = attach_deduplication->pending;
+          // Make a new event for signaling when we are done
+          attach_deduplication->pending = Runtime::create_rt_user_event();
+        }
+        else
+          wait_on = attach_deduplication->pending;
+      }
+      if (to_trigger.exists())
+      {
+        // Before triggering, do the compuation to figure out which shard
+        // is going to own any duplicates, do this by cutting across using
+        // snake order of the shards to try and balance them
+        bool done = false;
+        unsigned index = 0;
+        while (!done)
+        {
+          done = true;
+          if ((index % 2) == 0)
+          {
+            for (unsigned idx = 0; 
+                  idx < attach_deduplication->launchers.size(); idx++)
+            {
+              const IndexAttachLauncher *next = 
+                (attach_deduplication->launchers[idx]); 
+              if (index >= next->handles.size())
+                continue;
+              done = false;
+              const LogicalRegion handle = next->handles[index];
+              if (attach_deduplication->owners.find(handle) ==
+                  attach_deduplication->owners.end())
+                attach_deduplication->owners.insert(
+                    std::make_pair(handle, next));
+            }
+          }
+          else
+          {
+            for (int idx = (attach_deduplication->launchers.size() - 1);
+                  idx >= 0; idx--)
+            {
+              const IndexAttachLauncher *next = 
+                (attach_deduplication->launchers[idx]); 
+              if (index >= next->handles.size())
+                continue;
+              done = false;
+              const LogicalRegion handle = next->handles[index];
+              if (attach_deduplication->owners.find(handle) ==
+                  attach_deduplication->owners.end())
+                attach_deduplication->owners.insert(
+                    std::make_pair(handle, next));
+            }
+          }
+          index++;
+        }
+        Runtime::trigger_event(to_trigger);
+        to_trigger = RtUserEvent::NO_RT_USER_EVENT;
+      }
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      // Once we're here, all the launchers can be accessed read-only 
+      // Figure out which of our handles we still own
+      for (unsigned idx = 0; idx < launcher.handles.size(); idx++)
+      {
+        const LogicalRegion handle = launcher.handles[idx];
+        std::map<LogicalRegion,const IndexAttachLauncher*>::const_iterator
+          finder = attach_deduplication->owners.find(handle);
+#ifdef DEBUG_LEGION
+        assert(finder != attach_deduplication->owners.end());
+#endif
+        // Only add it if we own it
+        if (finder->second == &launcher)
+          indexes.push_back(idx);
+      }
+      // When we're done we need to sync on the way out too to make sure
+      // everyone is done accessing our launcher before we leave
+      {
+        AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+        assert(attach_deduplication->done_count < local_shards.size());
+#endif
+        attach_deduplication->done_count++;
+        if (attach_deduplication->done_count == local_shards.size())
+          to_trigger = attach_deduplication->pending;
+        else
+          wait_on = attach_deduplication->pending;
+      }
+      if (to_trigger.exists())
+      {
+        // Need to clean up first
+        delete attach_deduplication;
+        attach_deduplication = NULL;
+        __sync_synchronize();
+        Runtime::trigger_event(to_trigger);
+      }
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -13844,6 +14245,337 @@ namespace Legion {
     {
       perform_collective_async();
       return perform_collective_wait(false/*block*/);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Index Attach Launch Space
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexAttachLaunchSpace::IndexAttachLaunchSpace(ReplicateContext *ctx,
+                                                   CollectiveIndexLocation loc)
+      : AllGatherCollective<false>(loc, ctx), nonzeros(0)
+    //--------------------------------------------------------------------------
+    {
+      sizes.resize(manager->total_shards, 0);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachLaunchSpace::IndexAttachLaunchSpace(
+                                              const IndexAttachLaunchSpace &rhs)
+      : AllGatherCollective<false>(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachLaunchSpace::~IndexAttachLaunchSpace(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachLaunchSpace& IndexAttachLaunchSpace::operator=(
+                                              const IndexAttachLaunchSpace &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachLaunchSpace::pack_collective_stage(Serializer &rez,
+                                                       int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(nonzeros);
+      for (unsigned idx = 0; idx < sizes.size(); idx++)
+      {
+        size_t size = sizes[idx];
+        if (size == 0)
+          continue;
+        rez.serialize(idx);
+        rez.serialize(size);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachLaunchSpace::unpack_collective_stage(Deserializer &derez,
+                                                         int stage)
+    //--------------------------------------------------------------------------
+    {
+      unsigned num_nonzeros;
+      derez.deserialize(num_nonzeros);
+      for (unsigned idx = 0; idx < num_nonzeros; idx++)
+      {
+        unsigned index;
+        derez.deserialize(index);
+        if (sizes[index] == 0)
+          nonzeros++;
+        derez.deserialize(sizes[index]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachLaunchSpace::exchange_counts(size_t count)
+    //--------------------------------------------------------------------------
+    {
+      if (count > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(local_shard < sizes.size());
+#endif
+        sizes[local_shard] = count;
+        nonzeros++;
+      }
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceNode* IndexAttachLaunchSpace::get_launch_space(void)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait();
+      return context->compute_index_attach_launch_spaces(sizes);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Index Attach Upper Bound
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexAttachUpperBound::IndexAttachUpperBound(ReplicateContext *ctx,
+                               CollectiveIndexLocation loc, RegionTreeForest *f)
+      : AllGatherCollective<false>(loc, ctx), forest(f), node(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachUpperBound::IndexAttachUpperBound(
+                                               const IndexAttachUpperBound &rhs)
+      : AllGatherCollective<false>(rhs), forest(rhs.forest)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachUpperBound::~IndexAttachUpperBound(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachUpperBound& IndexAttachUpperBound::operator=(
+                                               const IndexAttachUpperBound &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachUpperBound::pack_collective_stage(Serializer &rez,int stage)
+    //--------------------------------------------------------------------------
+    {
+      if (node != NULL)
+      {
+        if (node->is_region())
+        {
+          rez.serialize<bool>(true); // is region
+          rez.serialize(node->as_region_node()->handle);
+        }
+        else
+        {
+          rez.serialize<bool>(false); // is_region
+          rez.serialize(node->as_partition_node()->handle);
+        }
+      }
+      else
+      {
+        rez.serialize<bool>(true); // is region
+        rez.serialize(LogicalRegion::NO_REGION);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachUpperBound::unpack_collective_stage(Deserializer &derez,
+                                                        int stage)
+    //--------------------------------------------------------------------------
+    {
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *next = NULL;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        if (!handle.exists())
+          return;
+        next = forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        next = forest->get_node(handle);
+      }
+      if (node == NULL)
+      {
+        node = next;
+        return;
+      }
+      if (next == node)
+        return;
+      // Bring them to the same depth
+      unsigned next_depth = next->get_depth();
+      unsigned node_depth = node->get_depth();
+      while (next_depth < node_depth)
+      {
+#ifdef DEBUG_LEGION
+        assert(node_depth > 0);
+#endif
+        node = node->get_parent();
+        node_depth--;
+      }
+      while (node_depth < next_depth)
+      {
+#ifdef DEBUG_LEGION
+        assert(next_depth > 0);
+#endif
+        next = next->get_parent();
+        next_depth--;
+      }
+      while (node != next)
+      {
+        node = node->get_parent();
+        next = next->get_parent();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreeNode* IndexAttachUpperBound::find_upper_bound(RegionTreeNode *n)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(node == NULL);
+#endif
+      node = n;
+      perform_collective_sync();
+      return node;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Index Attach Exchange
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexAttachExchange::IndexAttachExchange(ReplicateContext *ctx,
+                                             CollectiveIndexLocation loc)
+      : AllGatherCollective<false>(loc, ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachExchange::IndexAttachExchange(const IndexAttachExchange &rhs)
+      : AllGatherCollective<false>(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAttachExchange::~IndexAttachExchange(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    IndexAttachExchange& IndexAttachExchange::operator=(
+                                                 const IndexAttachExchange &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachExchange::pack_collective_stage(Serializer &rez,
+                                                    int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(shard_spaces.size());
+      for (std::map<ShardID,std::vector<IndexSpace> >::const_iterator sit =
+            shard_spaces.begin(); sit != shard_spaces.end(); sit++)
+      {
+        rez.serialize(sit->first);
+        rez.serialize<size_t>(sit->second.size());
+        for (std::vector<IndexSpace>::const_iterator it =
+              sit->second.begin(); it != sit->second.end(); it++)
+          rez.serialize(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachExchange::unpack_collective_stage(Deserializer &derez,
+                                                      int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_shards;
+      derez.deserialize(num_shards);
+      for (unsigned idx1 = 0; idx1 < num_shards; idx1++)
+      {
+        ShardID sid;
+        derez.deserialize(sid);
+        size_t num_spaces;
+        derez.deserialize(num_spaces);
+        std::vector<IndexSpace> &spaces = shard_spaces[sid];
+        spaces.resize(num_spaces);
+        for (unsigned idx2 = 0; idx2 < num_spaces; idx2++)
+          derez.deserialize(spaces[idx2]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachExchange::exchange_spaces(std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      shard_spaces[local_shard].swap(spaces);
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    size_t IndexAttachExchange::get_spaces(std::vector<IndexSpace> &spaces,
+                                           unsigned &local_start)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait();
+      size_t total_spaces = 0;
+      for (std::map<ShardID,std::vector<IndexSpace> >::const_iterator it =
+            shard_spaces.begin(); it != shard_spaces.end(); it++)
+        total_spaces += it->second.size();
+      spaces.reserve(total_spaces);
+      size_t local_size = 0;
+      for (std::map<ShardID,std::vector<IndexSpace> >::const_iterator it =
+            shard_spaces.begin(); it != shard_spaces.end(); it++)
+      {
+        if (it->first == local_shard)
+        {
+          local_start = spaces.size();
+          local_size = it->second.size();
+        }
+        spaces.insert(spaces.end(), it->second.begin(), it->second.end());
+      }
+      return local_size;
     }
 
     /////////////////////////////////////////////////////////////

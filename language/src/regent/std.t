@@ -1785,6 +1785,7 @@ end
 -- ## Codegen Helpers
 -- #################
 
+std.normalize_name = base.normalize_name
 std.type_meet = base.type_meet
 std.fmax = base.fmax
 std.fmin = base.fmin
@@ -3562,8 +3563,6 @@ end
 -- ## Tasks
 -- #################
 
-std.initial_regent_task_id = base.initial_regent_task_id
-
 std.new_variant = base.new_variant
 std.is_variant = base.is_variant
 
@@ -4165,7 +4164,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
             replicable = [ options.replicable and std.config["legion-replicable"] ],
           }
 
-          c.legion_runtime_preregister_task_variant_fnptr(
+          var new_task_id = c.legion_runtime_preregister_task_variant_fnptr(
             [task:get_task_id()],
             -- Hack: Only set a user-specified variant ID on the first
             -- variant, otherwise there will be duplicate
@@ -4177,6 +4176,15 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
             [variant:get_name()],
             [execution_constraints], [layout_constraints], options,
             [task_wrappers[variant:wrapper_name()]], nil, 0)
+          [(function()
+              if std.config["separate"] then
+                return quote
+                  [task:get_task_id()] = new_task_id
+                end
+              else
+                return quote end
+              end
+            end)()]
           c.legion_execution_constraint_set_destroy([execution_constraints])
           c.legion_task_layout_constraint_set_destroy([layout_constraints])
         end)
@@ -4221,6 +4229,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   if main_task then
     main_setup = quote
       c.legion_runtime_set_top_level_task_id([main_task:get_task_id()])
+      c.legion_runtime_initialize(&[argc], &[argv], true)
       return c.legion_runtime_start([argc], [argv], false)
     end
   end
@@ -4406,7 +4415,7 @@ local function incremental_compile_tasks()
   return objfiles,task_wrappers
 end
 
-local function compile_tasks_in_parallel()
+local function compile_tasks_in_parallel(issave)
   -- Force codegen; the main process will need to codegen later anyway, so we
   -- might as well do it now and not duplicate the work on the children.
 
@@ -4424,6 +4433,7 @@ local function compile_tasks_in_parallel()
   end
 
   if num_slaves == 1 then
+    assert(issave or not std.config["separate"], "separate compilation in regentlib.start() requires either incremental or parallel compilation")
     return terralib.newlist(), make_task_wrappers()
   end
 
@@ -4547,7 +4557,7 @@ function std.start(main_task, extra_setup_thunk)
   end
 
   assert(std.is_task(main_task))
-  local objfiles,task_wrappers = compile_tasks_in_parallel()
+  local objfiles,task_wrappers = compile_tasks_in_parallel(false)
 
   -- If task wrappers were compiled on separate processes, link them all into a
   -- dynamic library and load that.
@@ -4626,7 +4636,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   assert(not link_flags or filetype == 'sharedlibrary' or filetype == 'executable',
          'Link flags are ignored unless saving to shared library or executable')
 
-  local objfiles,task_wrappers = compile_tasks_in_parallel()
+  local objfiles,task_wrappers = compile_tasks_in_parallel(true)
   if #objfiles > 0 then
     assert(filetype == "object" or filetype == "executable",
            'Parallel compilation only supported for object or executable output')
@@ -4713,7 +4723,7 @@ local function generate_task_interfaces(task_whitelist)
 end
 
 local function generate_header(header_filename, registration_name, task_c_iface, task_cxx_iface)
-  local header_basename = header_helper.normalize_name(header_filename)
+  local header_basename = std.normalize_name(header_filename)
   return string.format(
 [[
 #ifndef __%s__
@@ -4762,7 +4772,7 @@ end
 
 local function write_header(header_filename, registration_name, task_whitelist)
   if not registration_name then
-    registration_name = header_helper.normalize_name(header_filename) .. "_register"
+    registration_name = std.normalize_name(header_filename) .. "_register"
   end
 
   local task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces(task_whitelist)

@@ -663,7 +663,7 @@ namespace Legion {
         op->set_trace_local_id(index);
         last_memoized = index + 1;
       }
-      if ((is_recording() || is_replaying()) &&
+      if (has_physical_trace() &&
           !op->is_internal_op() && op->get_memoizable() == NULL)
         REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
             "Invalid memoization request. Operation of type %s (UID %lld) "
@@ -1228,6 +1228,7 @@ namespace Legion {
       tracing = false;
       current_template = NULL;
       has_blocking_call = has_block;
+      is_recording = false;
       remove_trace_reference = remove_trace_ref;
     }
 
@@ -1283,6 +1284,8 @@ namespace Legion {
             get_completion_event());
         current_template = physical_trace->get_current_template();
         physical_trace->clear_cached_template();
+        // Save this since we can't read it later in the mapping stage
+        is_recording = true;
       }
     }
 
@@ -1291,7 +1294,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (local_trace->is_recording())
+      if (is_recording)
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
@@ -1375,6 +1378,7 @@ namespace Legion {
       current_template = NULL;
       replayed = false;
       has_blocking_call = has_block;
+      is_recording = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1464,6 +1468,8 @@ namespace Legion {
         physical_trace->record_previous_template_completion(completion_event);
         current_template = physical_trace->get_current_template();
         physical_trace->clear_cached_template();
+        // Save this for later since we can't read it safely in mapping stage
+        is_recording = true;
       }
       FenceOp::trigger_dependence_analysis();
     }
@@ -1492,7 +1498,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (local_trace->is_recording())
+      if (is_recording)
       {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);

@@ -3155,6 +3155,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
+                                  const Domain &domain, const Domain &shard_dom,
+                                  DistributedID did, size_t index, 
+                                  AddressSpaceID owner, RtEvent ready, bool reg,
+                                  RtUserEvent deletion_trigger)
+      : FutureMapImpl(ctx, rt, domain, did, index, owner, 
+                      ready, reg, deletion_trigger),
+        repl_ctx(ctx), shard_domain(shard_dom),
+        future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
+        future_map_barrier(ctx->get_next_future_map_barrier()),
+        collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
+        op_depth(repl_ctx->get_depth()), op_uid(op->get_unique_op_id()),
+        sharding_function_ready(Runtime::create_rt_user_event()), 
+        sharding_function(NULL), collective_performed(false), 
+        has_non_trivial_call(false)
+    //--------------------------------------------------------------------------
+    {
+      repl_ctx->add_reference();
+      // Now register ourselves with the context
+      repl_ctx->register_future_map(this);
+    }
+
+    //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(const ReplFutureMapImpl &rhs)
       : FutureMapImpl(rhs), repl_ctx(NULL), shard_domain(Domain::NO_DOMAIN), 
         future_map_barrier_index(0), collective_index(0), op_depth(0), op_uid(0)
@@ -4883,6 +4906,126 @@ namespace Legion {
       assert(manager != NULL);
 #endif
       return manager;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ExternalResourcesImpl
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExternalResourcesImpl::ExternalResourcesImpl(InnerContext *ctx,
+        size_t num_regions, RegionTreeNode *upper, IndexSpaceNode *launch,
+        LogicalRegion par, const std::set<FieldID> &fields)
+      : context(ctx), upper_bound(upper), launch_bounds(launch),
+        privilege_fields(fields.begin(), fields.end()), parent(par),
+        pid(0), detached(false)
+    //--------------------------------------------------------------------------
+    {
+      regions.resize(num_regions);
+      upper_bound->add_base_resource_ref(PHYSICAL_REGION_REF);
+      launch_bounds->add_base_resource_ref(PHYSICAL_REGION_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResourcesImpl::ExternalResourcesImpl(
+                                               const ExternalResourcesImpl &rhs)
+      : context(rhs.context), upper_bound(rhs.upper_bound),
+        launch_bounds(rhs.launch_bounds), 
+        privilege_fields(rhs.privilege_fields), parent(rhs.parent)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResourcesImpl::~ExternalResourcesImpl(void)
+    //--------------------------------------------------------------------------
+    {
+      if (upper_bound->remove_base_resource_ref(PHYSICAL_REGION_REF))
+        delete upper_bound;
+      if (launch_bounds->remove_base_resource_ref(PHYSICAL_REGION_REF))
+        delete launch_bounds;
+    }
+
+    //--------------------------------------------------------------------------
+    ExternalResourcesImpl& ExternalResourcesImpl::operator=(
+                                               const ExternalResourcesImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ExternalResourcesImpl::size(void) const
+    //--------------------------------------------------------------------------
+    {
+      return regions.size();
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalResourcesImpl::set_region(unsigned index, 
+                                           PhysicalRegionImpl *region)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < regions.size());
+      assert(regions[index].impl == NULL);
+#endif
+      regions[index] = PhysicalRegion(region);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion ExternalResourcesImpl::get_region(unsigned index) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < regions.size());
+#endif
+      return regions[index];
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalResourcesImpl::set_projection(ProjectionID id)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(pid == 0);
+#endif
+      pid = id;
+    }
+
+    //--------------------------------------------------------------------------
+    Future ExternalResourcesImpl::detach(InnerContext *ctx, IndexDetachOp *op,
+                                         const bool flush, const bool unordered)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx != context)
+        REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_DETACH,
+            "Attempted detach of external resources in context of task %s "
+            "(UID %lld). Detach of external resources must always be performed "
+            "in the the context of the task in which they are attached.",
+            ctx->get_task_name(), ctx->get_unique_id())
+      if (detached)
+        REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_DETACH,
+            "Duplicate detach of external resources performed in task %s "
+            "(UID %lld). External resources should only be detached once.",
+            ctx->get_task_name(), ctx->get_unique_id())
+      detached = true;
+      // Unmap any mapped regions
+      for (std::vector<PhysicalRegion>::iterator it =
+            regions.begin(); it != regions.end(); it++)
+      {
+        if (!it->impl->is_mapped())
+          continue;
+        it->impl->unmap_region();
+        ctx->unregister_inline_mapped_region(*it);
+      }
+      // Now initialize the detach operation
+      return op->initialize_detach(ctx, parent, upper_bound, launch_bounds,
+                        this, privilege_fields, regions, flush, unordered);
     }
 
     /////////////////////////////////////////////////////////////
@@ -15816,6 +15959,20 @@ namespace Legion {
         delete (*it);
       }
       available_attach_ops.clear();
+      for (std::deque<IndexAttachOp*>::const_iterator it = 
+            available_index_attach_ops.begin(); it !=
+            available_index_attach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_index_attach_ops.clear();
+      for (std::deque<PointAttachOp*>::const_iterator it = 
+            available_point_attach_ops.begin(); it !=
+            available_point_attach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_point_attach_ops.clear();
       for (std::deque<DetachOp*>::const_iterator it = 
             available_detach_ops.begin(); it !=
             available_detach_ops.end(); it++)
@@ -15823,6 +15980,20 @@ namespace Legion {
         delete (*it);
       }
       available_detach_ops.clear();
+      for (std::deque<IndexDetachOp*>::const_iterator it = 
+            available_index_detach_ops.begin(); it !=
+            available_index_detach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_index_detach_ops.clear();
+      for (std::deque<PointDetachOp*>::const_iterator it = 
+            available_point_detach_ops.begin(); it !=
+            available_point_detach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_point_detach_ops.clear();
       for (std::deque<TimingOp*>::const_iterator it = 
             available_timing_ops.begin(); it != 
             available_timing_ops.end(); it++)
@@ -15956,6 +16127,13 @@ namespace Legion {
         delete (*it);
       }
       available_repl_attach_ops.clear();
+      for (std::deque<ReplIndexAttachOp*>::const_iterator it = 
+            available_repl_index_attach_ops.begin(); it !=
+            available_repl_index_attach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_index_attach_ops.clear();
       for (std::deque<ReplDetachOp*>::const_iterator it = 
             available_repl_detach_ops.begin(); it !=
             available_repl_detach_ops.end(); it++)
@@ -15963,6 +16141,13 @@ namespace Legion {
         delete (*it);
       }
       available_repl_detach_ops.clear();
+      for (std::deque<ReplIndexDetachOp*>::const_iterator it = 
+            available_repl_index_detach_ops.begin(); it !=
+            available_repl_index_detach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_index_detach_ops.clear();
       for (std::deque<ReplTraceCaptureOp*>::const_iterator it = 
             available_repl_capture_ops.begin(); it !=
             available_repl_capture_ops.end(); it++)
@@ -16188,6 +16373,8 @@ namespace Legion {
       register_sharding_functor(0,
           new CyclicShardingFunctor(), false/*need check*/, 
           true/*was preregistered*/, NULL, true/*preregistered*/);
+      // Register the attach-detach sharding functor
+      ReplicateContext::register_attach_detach_sharding_functor(this);
     }
 
     //--------------------------------------------------------------------------
@@ -17796,36 +17983,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion Runtime::attach_external_resource(Context ctx, 
-                                                 const AttachLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context attach external resource!");
-      return ctx->attach_resource(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region,
-                                         const bool flush, const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context detach external resource!");
-      return ctx->detach_resource(region, flush, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::progress_unordered_operations(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context progress unordered ops")
-      return ctx->progress_unordered_operations();
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::issue_copy_operation(Context ctx,const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -19160,8 +19317,9 @@ namespace Legion {
     /*static*/ ShardingID& Runtime::get_current_static_sharding_id(void)
     //--------------------------------------------------------------------------
     {
-      static ShardingID current_sharding_id = 
-        LEGION_MAX_APPLICATION_SHARDING_ID;
+      // + 1 since we use that for first one for the attach-detach functor
+      static ShardingID current_sharding_id =
+        LEGION_MAX_APPLICATION_SHARDING_ID + 1;
       return current_sharding_id;
     }
 
@@ -19280,6 +19438,27 @@ namespace Legion {
       }
       else
         return the_runtime->find_sharding_functor(sid, true/*can fail*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::unregister_projection_functor(ProjectionID pid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(runtime_started);
+#endif
+      AutoLock p_lock(projection_lock);
+      std::map<ProjectionID,ProjectionFunction*>::iterator finder =
+        projection_functions.find(pid);
+      if (finder != projection_functions.end())
+      {
+        delete finder->second;
+        projection_functions.erase(finder);
+        return;
+      }
+#ifdef DEBUG_LEGION
+      assert(separate_runtime_instances);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -26066,10 +26245,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexAttachOp* Runtime::get_available_index_attach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(attach_op_lock, available_index_attach_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    PointAttachOp* Runtime::get_available_point_attach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(attach_op_lock, available_point_attach_ops);
+    }
+
+    //--------------------------------------------------------------------------
     DetachOp* Runtime::get_available_detach_op(void)
     //--------------------------------------------------------------------------
     {
       return get_available(detach_op_lock, available_detach_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexDetachOp* Runtime::get_available_index_detach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(detach_op_lock, available_index_detach_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    PointDetachOp* Runtime::get_available_point_detach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(detach_op_lock, available_point_detach_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -26211,10 +26418,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplIndexAttachOp* Runtime::get_available_repl_index_attach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(attach_op_lock, available_repl_index_attach_ops);
+    }
+
+    //--------------------------------------------------------------------------
     ReplDetachOp* Runtime::get_available_repl_detach_op(void)
     //--------------------------------------------------------------------------
     {
       return get_available(detach_op_lock, available_repl_detach_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplIndexDetachOp* Runtime::get_available_repl_index_detach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(detach_op_lock, available_repl_index_detach_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -26569,11 +26790,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::free_index_detach_op(IndexDetachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(detach_op_lock);
+      release_operation<false>(available_index_detach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_point_detach_op(PointDetachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(detach_op_lock);
+      release_operation<true>(available_point_detach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_detach_op(DetachOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(detach_op_lock);
       release_operation<false>(available_detach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_index_attach_op(IndexAttachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(attach_op_lock);
+      release_operation<false>(available_index_attach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_point_attach_op(PointAttachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(attach_op_lock);
+      release_operation<true>(available_point_attach_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -26721,11 +26974,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::free_repl_index_attach_op(ReplIndexAttachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(attach_op_lock);
+      release_operation<false>(available_repl_index_attach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_repl_detach_op(ReplDetachOp *op)
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(detach_op_lock);
       release_operation<false>(available_repl_detach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_index_detach_op(ReplIndexDetachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(detach_op_lock);
+      release_operation<false>(available_repl_index_detach_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -26750,7 +27019,7 @@ namespace Legion {
     {
       AutoLock t_lock(replay_op_lock);
       release_operation<false>(available_repl_replay_ops, op);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Runtime::free_repl_begin_op(ReplTraceBeginOp *op)
@@ -27550,6 +27819,10 @@ namespace Legion {
           return "Future Map";
         case PHYSICAL_REGION_ALLOC:
           return "Physical Region";
+        case OUTPUT_REGION_ALLOC:
+          return "Output Region";
+        case EXTERNAL_RESOURCES_ALLOC:
+          return "External Resources";
         case STATIC_TRACE_ALLOC:
           return "Static Trace";
         case DYNAMIC_TRACE_ALLOC:
