@@ -150,10 +150,14 @@ ifneq ($(strip $(GASNET)),)
     REALM_NETWORKS ?= gasnet1
   endif
 endif
-ifeq ($(strip $(USE_GASNET)),1)
-  REALM_NETWORKS ?= gasnet1
-else
-  REALM_NETWORKS := $(filter "gasnet1 gasnetex",$(REALM_NETWORKS))
+# Backwards compatibility, turn on network support if REALM_NETWORKS is not empty
+REALM_NETWORKS ?=
+ifndef USE_NETWORK
+  ifeq ($(strip $(REALM_NETWORKS)),)
+    USE_NETWORK := 0
+  else
+    USE_NETWORK := 1
+  endif
 endif
 
 # defaults for CUDA
@@ -534,11 +538,22 @@ NVCC_FLAGS += -Xcudafe --diag_suppress=boolean_controlling_expr_is_constant
 endif
 
 # Realm uses GASNet if requested (detect both gasnet1 and gasnetex here)
-ifneq ($(findstring gasnet,$(REALM_NETWORKS)),)
+ifeq ($(strip $(USE_NETWORK)),1)
+ifeq ($(findstring gasnet,$(REALM_NETWORKS)),gasnet)
+  ifeq ($(strip $(REALM_NETWORKS)),gasnetex)
+    REALM_CC_FLAGS	+= -DREALM_USE_GASNETEX
+  else
+    ifeq ($(strip $(REALM_NETWORKS)),gasnet1)
+      REALM_CC_FLAGS	+= -DREALM_USE_GASNET1
+    else
+      $(error Illegal value for REALM_NETWORKS: $(REALM_NETWORKS), needs to be either gasnet1, gasnetex, or mpi)
+    endif
+  endif
   ifeq ($(GASNET),)
     $(error GASNET variable is not defined, aborting build)
   endif
-
+  # newer versions of gasnet seem to need this
+  CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
   # Detect conduit, if requested
   CONDUIT ?= auto
   ifeq ($(strip $(CONDUIT)),auto)
@@ -554,7 +569,7 @@ ifneq ($(findstring gasnet,$(REALM_NETWORKS)),)
     endif
   endif
   # Suck in some GASNET variables that they define
-  include $(GASNET)/include/$(CONDUIT)-conduit/$(CONDUIT)-par.mak
+  include $(GASNET)/include/$(strip $(CONDUIT))-conduit/$(strip $(CONDUIT))-par.mak
   INC_FLAGS += $(GASNET_INCLUDES)
   # I don't like some of the flags gasnet includes here like _GNU_SOURCE=1 in lot of cases which makes
   # this inherently non-portable code. We use many more compilers than just GNU
@@ -565,26 +580,17 @@ ifneq ($(findstring gasnet,$(REALM_NETWORKS)),)
   # Check if GASNet needs MPI for interop support
   ifeq ($(strip $(GASNET_LD_REQUIRES_MPI)),1)
     USE_MPI = 1
-  endif
-
-  ifneq ($(findstring gasnetex,$(REALM_NETWORKS)),)
-    REALM_CC_FLAGS	+= -DREALM_USE_GASNETEX
-  else
-    ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
-      REALM_CC_FLAGS	+= -DREALM_USE_GASNET1
-    else
-      $(error REALM_NETWORKS must be gasnet1 or gasnetex)
-    endif
-  endif
-  # newer versions of gasnet seem to need this
-  CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
-endif
-
+  endif 
+else # Not GASNet network
 # Realm uses MPI if requested
-ifneq ($(findstring mpi,$(REALM_NETWORKS)),)
+ifeq ($(strip $(REALM_NETWORKS)),mpi)
     REALM_CC_FLAGS        += -DREALM_USE_MPI
     USE_MPI = 1
-endif
+else
+  $(error Illegal value for REALM_NETWORKS: $(REALM_NETWORKS), needs to be either gasnet1, gasnetex, or mpi)
+endif # Test for MPI
+endif # Test for GASNet
+endif # Only turn on networks if USE_NETWORK=1
 
 # Realm doesn't use HDF by default
 USE_HDF ?= 0
@@ -775,18 +781,20 @@ REALM_INST_SRC  += $(LG_RT_DIR)/realm/deppart/image_tmpl.cc \
 	           $(LG_RT_DIR)/realm/deppart/byfield_tmpl.cc
 REALM_SRC 	+= $(LG_RT_DIR)/realm/numa/numa_module.cc \
 		   $(LG_RT_DIR)/realm/numa/numasysif.cc
-ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
+ifeq ($(strip $(USE_NETWORK)),1)
+ifeq ($(findstring gasnet1,$(REALM_NETWORKS)),gasnet1)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/gasnet1/gasnet1_module.cc \
                    $(LG_RT_DIR)/realm/gasnet1/gasnetmsg.cc
 endif
-ifneq ($(findstring gasnetex,$(REALM_NETWORKS)),)
+ifeq ($(findstring gasnetex,$(REALM_NETWORKS)),gasnetex)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/gasnetex/gasnetex_module.cc \
 	           $(LG_RT_DIR)/realm/gasnetex/gasnetex_internal.cc \
 	           $(LG_RT_DIR)/realm/gasnetex/gasnetex_handlers.cc
 endif
-ifneq ($(findstring mpi,$(REALM_NETWORKS)),)
+ifeq ($(findstring mpi,$(REALM_NETWORKS)),mpi)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/mpi/mpi_module.cc \
                    $(LG_RT_DIR)/realm/mpi/am_mpi.cc
+endif
 endif
 ifeq ($(strip $(USE_OPENMP)),1)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/openmp/openmp_module.cc \
