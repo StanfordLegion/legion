@@ -18437,12 +18437,36 @@ namespace Legion {
       // This is a valid assertion in general, but not with control replication
       // where you can get two merge close ops updating subsets
       //assert(equivalence_sets.get_valid_mask() * mask);
+#ifndef NDEBUG
+      {
+        FieldMaskSet<EquivalenceSet>::const_iterator finder =
+          equivalence_sets.find(set);
+        assert((finder == equivalence_sets.end()) ||
+                (finder->second * mask));
+      }
+#endif
 #endif
       if (equivalence_sets.insert(set, mask))
       {
         WrapperReferenceMutator mutator(applied_events);
         set->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
         set->add_base_resource_ref(VERSION_MANAGER_REF);
+      }
+      else
+      {
+        // Need to check whether we need to add the first valid reference
+        // See if there were any previous fields that were valid
+        FieldMaskSet<EquivalenceSet>::const_iterator finder =
+          equivalence_sets.find(set);
+#ifdef DEBUG_LEGION
+        assert(finder != equivalence_sets.end());
+#endif
+        const FieldMask previous = finder->second - mask;
+        if (previous * disjoint_complete)
+        {
+          WrapperReferenceMutator mutator(applied_events);
+          set->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+        }
       }
       parent_mask = mask;
       if (!!disjoint_complete)
@@ -18579,7 +18603,7 @@ namespace Legion {
             finder.filter(overlap);
             to_untrack.insert(finder->first, overlap);
             // Remove this if the only remaining fields are not refinements
-            if (!finder->second)
+            if (!finder->second || (finder->second * disjoint_complete))
             {
               // Remove this entirely from the set
               // The version manager resource reference flows back
@@ -18587,16 +18611,8 @@ namespace Legion {
               // Record this to be released once all the effects are applied
               to_release.push_back(finder->first);
             }
-            else
-            {
-              // Add a version manager resource reference to flow back
+            else // Need a reference to flow back here
               finder->first->add_base_resource_ref(VERSION_MANAGER_REF);
-              if (finder->second * disjoint_complete)
-                // We're going to release this, but we can't fully remove
-                // the equivalence set since it is still valid for other fields
-                // Record this to be released once all the effects are applied
-                to_release.push_back(finder->first);
-            }
           }
         }
         else
@@ -18699,10 +18715,15 @@ namespace Legion {
             equivalence_sets.find(it->first);
           if (finder != equivalence_sets.end())
           {
+            // Check to see if we have recorded a valid reference yet
+            // for this equivalence set
+            if (!(finder->second * disjoint_complete))
+            {
+              // Remove the duplicate references
+              if (it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+                assert(false); // should never end up deleting this
+            }
             finder.merge(it->second);
-            // Remove the duplicate references
-            if (it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
-              assert(false); // should never end up deleting this
             if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
               assert(false); // should never end up deleting this
           }
