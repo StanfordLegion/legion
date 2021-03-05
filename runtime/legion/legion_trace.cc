@@ -2807,6 +2807,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TraceViewSet::record_first_failed(FailedPrecondition *condition) const
+    //--------------------------------------------------------------------------
+    {
+      ViewExprs::const_iterator vit = conditions.begin();
+      FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+        vit->second.begin();
+      condition->view = vit->first;
+      condition->expr = it->first;
+      condition->mask = it->second;
+    }
+
+    //--------------------------------------------------------------------------
     void TraceViewSet::transpose_uniquely(LegionMap<IndexSpaceExpression*,
                              FieldMaskSet<LogicalView> >::aligned &target) const
     //--------------------------------------------------------------------------
@@ -3405,6 +3417,8 @@ namespace Legion {
       if ((precondition_views != NULL) && ((postcondition_views == NULL) ||
           !precondition_views->subsumed_by(*postcondition_views, true, failed)))
       {
+        if ((failed != NULL) && (postcondition_views == NULL))
+          precondition_views->record_first_failed(failed);
         replayable = false;
         not_subsumed = true;
       }

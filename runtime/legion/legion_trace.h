@@ -577,6 +577,7 @@ namespace Legion {
                        FailedPrecondition *condition = NULL) const;
       bool independent_of(const TraceViewSet &set,
                        FailedPrecondition *condition = NULL) const;
+      void record_first_failed(FailedPrecondition *condition = NULL) const;
       void transpose_uniquely(LegionMap<IndexSpaceExpression*,
                             FieldMaskSet<LogicalView> >::aligned &target) const;
       void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
