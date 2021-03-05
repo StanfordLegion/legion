@@ -141,6 +141,7 @@ endif
 
 # backwards-compatibility for GASNet builds - any of GASNET_ROOT, GASNET, or
 #  USE_GASNET=1 will set REALM_NETWORKS=gasnet1
+USE_GASNET ?= 0
 ifdef GASNET_ROOT
   GASNET ?= $(GASNET_ROOT)
 endif
@@ -151,6 +152,8 @@ ifneq ($(strip $(GASNET)),)
 endif
 ifeq ($(strip $(USE_GASNET)),1)
   REALM_NETWORKS ?= gasnet1
+else
+  REALM_NETWORKS := $(filter "gasnet1 gasnetex",$(REALM_NETWORKS))
 endif
 
 # defaults for CUDA
