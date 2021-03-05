@@ -18140,6 +18140,7 @@ namespace Legion {
       {
         WrapperReferenceMutator mutator(applied_events);
         set->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+        set->add_base_resource_ref(VERSION_MANAGER_REF);
       }
     }
 
@@ -18163,7 +18164,10 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             sets.begin(); it != sets.end(); it++)
         if (equivalence_sets.insert(it->first, it->second))
+        {
           it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+          it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+        }
     }
 
     //--------------------------------------------------------------------------
@@ -18438,6 +18442,7 @@ namespace Legion {
       {
         WrapperReferenceMutator mutator(applied_events);
         set->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+        set->add_base_resource_ref(VERSION_MANAGER_REF);
       }
       parent_mask = mask;
       if (!!disjoint_complete)
@@ -18573,14 +18578,24 @@ namespace Legion {
           {
             finder.filter(overlap);
             to_untrack.insert(finder->first, overlap);
-            // Add a version manager reference to flow back
-            finder->first->add_base_resource_ref(VERSION_MANAGER_REF);
             // Remove this if the only remaining fields are not refinements
-            if (!finder->second || (finder->second * disjoint_complete))
+            if (!finder->second)
             {
+              // Remove this entirely from the set
+              // The version manager resource reference flows back
               to_delete.push_back(finder->first);
               // Record this to be released once all the effects are applied
               to_release.push_back(finder->first);
+            }
+            else
+            {
+              // Add a version manager resource reference to flow back
+              finder->first->add_base_resource_ref(VERSION_MANAGER_REF);
+              if (finder->second * disjoint_complete)
+                // We're going to release this, but we can't fully remove
+                // the equivalence set since it is still valid for other fields
+                // Record this to be released once all the effects are applied
+                to_release.push_back(finder->first);
             }
           }
         }
@@ -18601,14 +18616,15 @@ namespace Legion {
               continue;
             to_untrack.insert(it->first, overlap);
             it.filter(overlap);
-            // Add a version manager reference to flow back
-            it->first->add_base_resource_ref(VERSION_MANAGER_REF);
             if (!it->second)
             {
               to_delete.push_back(it->first);
               // Record this to be released once all the effects are applied
               to_release.push_back(it->first);
+              // Version manager resource reference flows back
             }
+            else // Add a version manager reference to flow back
+              it->first->add_base_resource_ref(VERSION_MANAGER_REF);
           }
         }
         if (!to_delete.empty())
@@ -18684,13 +18700,15 @@ namespace Legion {
           if (finder != equivalence_sets.end())
           {
             finder.merge(it->second);
-            // Remove the duplicate reference
+            // Remove the duplicate references
             if (it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+              assert(false); // should never end up deleting this
+            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
               assert(false); // should never end up deleting this
           }
           else
             // Did not have this before so just insert it
-            // Reference flows back
+            // References flow back
             equivalence_sets.insert(it->first, it->second);
         }
         src.equivalence_sets.clear();
