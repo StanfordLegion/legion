@@ -18953,6 +18953,7 @@ namespace Legion {
 #endif
         LocalReferenceMutator mutator;
         it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
+        it->first->add_base_resource_ref(VERSION_MANAGER_REF);
       }
     }
 
