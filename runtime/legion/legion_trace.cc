@@ -3443,8 +3443,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool replayable = true;
-      if ((precondition_views != NULL) && ((postcondition_views == NULL) ||
-          !precondition_views->subsumed_by(*postcondition_views, true, failed)))
+      // Note that it is ok to have precondition views and no postcondition
+      // views because that means that everything was read-only and therefore
+      // still idempotent and replayable
+      if ((precondition_views != NULL) && (postcondition_views != NULL) &&
+          !precondition_views->subsumed_by(*postcondition_views, true, failed))
       {
         if ((failed != NULL) && (postcondition_views == NULL))
           precondition_views->record_first_failed(failed);
