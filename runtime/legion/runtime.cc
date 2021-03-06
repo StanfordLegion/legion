@@ -866,7 +866,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent FutureImpl::request_application_instance(Memory target,
-        SingleTask *task, UniqueID task_uid, AddressSpaceID source, RtEvent pre)
+                     SingleTask *task, UniqueID task_uid, AddressSpaceID source,
+                     RtEvent pre, ApUserEvent inst_ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -883,6 +884,10 @@ namespace Legion {
           instances.find(target);
         if (inst_finder != instances.end())
         {
+          // Trigger the ready event if there is one
+          if (inst_ready.exists())
+            Runtime::trigger_event(NULL, inst_ready,
+                  inst_finder->second->ready_event);
           if (source != runtime->address_space)
           {
             // Send the response back to the requester
@@ -903,12 +908,21 @@ namespace Legion {
         if (target_space != runtime->address_space)
         {
           // See if we already have a pending request in flight
-          std::map<Memory,RtUserEvent>::const_iterator finder =
-            pending_requests.find(target);
+          std::map<Memory,std::pair<RtUserEvent,ApUserEvent> >::iterator
+            finder = pending_requests.find(target);
           if (finder != pending_requests.end())
-            return finder->second;
+          {
+            if (inst_ready.exists())
+            {
+              if (finder->second.second.exists())
+                Runtime::trigger_event(NULL, inst_ready, finder->second.second);
+              else
+                finder->second.second = inst_ready;
+            }
+            return finder->second.first;
+          }
           send_event = Runtime::create_rt_user_event();
-          pending_requests[target] = send_event;
+          pending_requests[target] = std::make_pair(send_event, inst_ready);
         }
         else
         {
@@ -921,12 +935,23 @@ namespace Legion {
             if (finder == pending_instances.end())
             {
               pending_instances[target] = 
-                PendingInstance(task, task_uid, false/*eager*/);
+                PendingInstance(task, task_uid, inst_ready, false/*eager*/);
               if (source != runtime->address_space)
                 pending_instances[target].remote_requests.insert(source);
             }
-            else if (source != runtime->address_space)
-              finder->second.remote_requests.insert(source);
+            else
+            {
+              if (inst_ready.exists())
+              {
+                if (finder->second.inst_ready.exists())
+                  Runtime::trigger_event(NULL, inst_ready,
+                      finder->second.inst_ready);
+                else
+                  finder->second.inst_ready = inst_ready;
+              }
+              if (source != runtime->address_space)
+                finder->second.remote_requests.insert(source);
+            }
             ready_event = subscription_event;
             if (pre.exists())
             {
@@ -938,14 +963,17 @@ namespace Legion {
           }
           else
           {
-            find_or_create_instance(target, task, task_uid,
-                        false/*eager*/, false/*need lock*/);
+            find_or_create_instance(target, task, task_uid, false/*eager*/,
+                                    false/*need lock*/, inst_ready);
             return RtEvent::NO_RT_EVENT;
           }
         }
       }
       if (send_event.exists())
       {
+#ifdef DEBUG_LEGION
+        assert(!inst_ready.exists()); // should have cleared this
+#endif
         // Send the request to the node that owns the memory
         Serializer rez;
         {
@@ -1027,16 +1055,11 @@ namespace Legion {
         if (!empty && (canonical_instance == NULL))
           return future_complete;
       }
-      // If we didn't find, that's either because we failed to make it or
-      // we raced with the request to make it from another node, so just
-      // do the request again here. Either we'll fail again and report
-      // the right error message or we'll end up doing the right thing now
-      const RtEvent ready = request_application_instance(target, task,
-                    task->get_unique_op_id(), runtime->address_space);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      // Call ourselves again since it should be there now if we succeeded
-      return find_application_instance_ready(target, task);
+      // Make an event and request it
+      const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
+      request_application_instance(target, task, task->get_unique_op_id(),
+                      runtime->address_space, RtEvent::NO_RT_EVENT, ready);
+      return ready;
     }
 
     //--------------------------------------------------------------------------
@@ -1284,7 +1307,8 @@ namespace Legion {
             pending_instances.begin(); it != pending_instances.end(); it++)
       {
         FutureInstance *instance = find_or_create_instance(it->first,
-          it->second.op, it->second.uid, it->second.eager, false/*need lock*/);
+                     it->second.op, it->second.uid, it->second.eager,
+                     false/*need lock*/, it->second.inst_ready);
         if (!it->second.remote_requests.empty())
         {
           for (std::set<AddressSpaceID>::const_iterator rit =
@@ -1320,7 +1344,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureInstance* FutureImpl::find_or_create_instance(Memory memory,
-                Operation *op, UniqueID creator_uid, bool eager, bool need_lock)
+                Operation *op, UniqueID creator_uid, bool eager,
+                bool need_lock, ApUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1331,22 +1356,31 @@ namespace Legion {
       {
         AutoLock f_lock(future_lock);
         return find_or_create_instance(memory, op, creator_uid, eager,
-                                       false/*need lock*/);
+                                       false/*need lock*/, ready_event);
       }
 #ifdef DEBUG_LEGION
       assert(!empty);
 #endif
       // Handle the case where we don't have a payload
       if (canonical_instance == NULL)
+      {
+        if (ready_event.exists())
+          Runtime::trigger_event(NULL, ready_event);
         return NULL;
+      }
       // See if we've already got one
       std::map<Memory,FutureInstance*>::const_iterator finder =
         instances.find(memory);
       if (finder != instances.end())
+      {
+        if (ready_event.exists())
+          Runtime::trigger_event(NULL,ready_event,finder->second->ready_event);
         return finder->second;
+      }
       // Don't have it so we need to make it
       MemoryManager *manager = runtime->find_memory_manager(memory); 
-      const ApUserEvent ready_event = Runtime::create_ap_user_event(NULL);
+      if (!ready_event.exists())
+        ready_event = Runtime::create_ap_user_event(NULL);
       FutureInstance *instance = manager->create_future_instance(op,
           creator_uid, ready_event, canonical_instance->size, eager);
       // Can happen if we fail to allocation and op is NULL
@@ -1578,12 +1612,14 @@ namespace Legion {
         assert(instances.find((*it)->memory) == instances.end());
 #endif
         instances[(*it)->memory] = *it;
-        std::map<Memory,RtUserEvent>::iterator finder =
+        std::map<Memory,std::pair<RtUserEvent,ApUserEvent> >::iterator finder =
           pending_requests.find((*it)->memory);
 #ifdef DEBUG_LEGION
         assert(finder != pending_requests.end());
 #endif
-        Runtime::trigger_event(finder->second, precondition);
+        Runtime::trigger_event(finder->second.first, precondition);
+        if (finder->second.second.exists())
+          Runtime::trigger_event(NULL,finder->second.second,(*it)->ready_event);
         pending_requests.erase(finder);
       }
     }

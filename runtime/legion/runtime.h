@@ -227,9 +227,12 @@ namespace Legion {
           : op(NULL), uid(0), eager(false) { }
         PendingInstance(Operation *o, UniqueID id, bool e)
           : op(o), uid(id), eager(e) { }
+        PendingInstance(Operation *o, UniqueID id, ApUserEvent r, bool e)
+          : op(o), uid(id), inst_ready(r), eager(e) { }
       public:
         Operation *op;
         UniqueID uid;
+        ApUserEvent inst_ready;
         std::set<AddressSpaceID> remote_requests;
         bool eager;
       };
@@ -262,7 +265,9 @@ namespace Legion {
                              bool silence_warnings = false, 
                              const char *warning_string = NULL);
       RtEvent request_application_instance(Memory target, SingleTask *task,
-       UniqueID uid, AddressSpaceID source, RtEvent pre = RtEvent::NO_RT_EVENT);
+                       UniqueID uid, AddressSpaceID source,
+                       RtEvent pre = RtEvent::NO_RT_EVENT,
+                       ApUserEvent ready_event = ApUserEvent::NO_AP_USER_EVENT);
       ApEvent find_application_instance_ready(Memory target, SingleTask *task);
       RtEvent request_internal_buffer(Operation *op, bool eager);
       const void *find_internal_buffer(TaskContext *ctx, size_t &expected_size);
@@ -321,7 +326,8 @@ namespace Legion {
       void finish_set_future(void); // must be holding lock
       void create_pending_instances(void); // must be holding lock
       FutureInstance* find_or_create_instance(Memory memory, Operation *op,
-                        UniqueID op_uid, bool eager,bool need_lock = true);
+                        UniqueID op_uid, bool eager, bool need_lock = true,
+                        ApUserEvent inst_ready = ApUserEvent::NO_AP_USER_EVENT);
       void mark_sampled(void);
       void broadcast_result(std::set<AddressSpaceID> &targets,
                             const bool need_lock);
@@ -378,7 +384,7 @@ namespace Legion {
       // Instances that need to be made once canonical instance is set
       std::map<Memory,PendingInstance> pending_instances;
       // Requests to create instances on remote nodes
-      std::map<Memory,RtUserEvent> pending_requests;
+      std::map<Memory,std::pair<RtUserEvent,ApUserEvent> > pending_requests;
       // Annoying case of having effects from pending requests
       RtEvent pending_precondition;
     private:
