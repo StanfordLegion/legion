@@ -531,7 +531,7 @@ namespace Legion {
         EquivalenceSet *eq;
         FieldMask mask;
 
-        std::string to_string(void) const;
+        std::string to_string(TaskContext *ctx) const;
       };
     public:
       TraceViewSet(RegionTreeForest *forest);
