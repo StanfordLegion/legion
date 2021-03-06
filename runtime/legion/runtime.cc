@@ -1023,6 +1023,9 @@ namespace Legion {
           instances.find(target);
         if (finder != instances.end())
           return finder->second->ready_event;
+        // Handle the case where we have a future with no payload
+        if (!empty && (canonical_instance == NULL))
+          return future_complete;
       }
       // If we didn't find, that's either because we failed to make it or
       // we raced with the request to make it from another node, so just
