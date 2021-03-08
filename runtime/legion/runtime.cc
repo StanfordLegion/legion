@@ -23233,10 +23233,10 @@ namespace Legion {
     void Runtime::unbind_implicit_task_from_external_thread(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
-      if (!Processor::get_executing_processor().exists())
+      if (Processor::get_executing_processor().exists())
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
             "Illegal call to unbind an implicit task from an external thread "
-            "for task %s (UID %lld) from a non-external thread.",
+            "for task %s (UID %lld) from an internal Realm task thread.",
             ctx->get_task_name(), ctx->get_unique_id())
       implicit_runtime = NULL;
       implicit_context = NULL;
@@ -23247,10 +23247,10 @@ namespace Legion {
     void Runtime::bind_implicit_task_to_external_thread(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
-      if (!Processor::get_executing_processor().exists())
+      if (Processor::get_executing_processor().exists())
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
             "Illegal call to bind an implicit task to an external thread "
-            "for task %s (UID %lld) from a non-external thread.",
+            "for task %s (UID %lld) from an internal Realm task thread.",
             ctx->get_task_name(), ctx->get_unique_id())
       implicit_runtime = this;
       implicit_context = ctx;
