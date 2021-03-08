@@ -3450,6 +3450,8 @@ namespace Legion {
                                   bool control_replicable,
                                   unsigned shard_per_address_space,
                                   int shard_id);
+      void unbind_implicit_task_from_external_thread(Context ctx);
+      void bind_implicit_task_to_external_thread(Context ctx);
       void finish_implicit_task(Context ctx);
       static void set_top_level_task_id(TaskID top_id);
       static void set_top_level_task_mapper_id(MapperID mapper_id);
