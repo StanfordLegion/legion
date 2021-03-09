@@ -164,6 +164,7 @@ namespace Realm {
 	ByteArray user_data;
       };
 
+      RWLock task_table_mutex;
       std::map<Processor::TaskFuncID, TaskTableEntry> task_table;
 
       virtual void execute_task(Processor::TaskFuncID func_id,
