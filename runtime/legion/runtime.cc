@@ -11671,6 +11671,14 @@ namespace Legion {
         delete profiler;
         profiler = NULL;
       }
+      // Free any input arguments
+      if (input_args.argc > 0)
+      {
+        for (int i = 0; i < input_args.argc; i++)
+          if (input_args.argv[i] != NULL)
+            free(input_args.argv[i]);
+        free(input_args.argv);
+      }
       delete forest;
       delete external;
       delete mapper_runtime;
@@ -22880,7 +22888,7 @@ namespace Legion {
       const int num_args = *argc;
       // Next we configure the realm runtime after which we can access the
       // machine model and make events and reservations and do reigstrations
-      std::vector<std::string> cmdline(num_args-1);
+      std::vector<std::string> cmdline((num_args > 0) ? num_args-1 : 0);
       for (int i = 1; i < num_args; i++)
         cmdline[i-1] = (*argv)[i];
 #ifndef NDEBUG
@@ -23547,13 +23555,27 @@ namespace Legion {
         }
         if (address_spaces.size() > 1)
           config.configure_collective_settings(address_spaces.size());
-        InputArgs input_args;
-        input_args.argc = argc;
-        input_args.argv = argv;
+        
         // Now we make runtime instances for each of the local processors
         for (std::set<Processor>::const_iterator it =
               local_procs.begin(); it != local_procs.end(); it++)
         {
+          // Make a separate copy of the input arguments for each runtime
+          InputArgs input_args;
+          input_args.argc = argc;
+          if (argc > 0)
+          {
+            input_args.argv = (char**)malloc(argc*sizeof(char*));
+            for (int i = 0; i < argc; i++)
+            {
+              if (argv[i] != NULL)
+                input_args.argv[i] = strdup(argv[i]);
+              else
+                input_args.argv[i] = NULL;
+            }
+          }
+          else
+            input_args.argv = NULL;
           const AddressSpace local_space = proc_spaces[*it];
           // Only one local processor here
           std::set<Processor> fake_local_procs;
@@ -23587,9 +23609,22 @@ namespace Legion {
           config.configure_collective_settings(address_spaces.size());
         // Make one runtime instance and record it with all the processors
         const AddressSpace local_space = local_procs.begin()->address_space();
+        // Make a separate copy of the input arguments for the runtime
         InputArgs input_args;
         input_args.argc = argc;
-        input_args.argv = argv;
+        if (argc > 0)
+        {
+          input_args.argv = (char**)malloc(argc*sizeof(char*));
+          for (int i = 0; i < argc; i++)
+          {
+            if (argv[i] != NULL)
+              input_args.argv[i] = strdup(argv[i]);
+            else
+              input_args.argv[i] = NULL;
+          }
+        }
+        else
+          input_args.argv = NULL;
         Runtime *runtime = new Runtime(machine, config, background,
                                        input_args, local_space,
                                        local_procs, local_util_procs,
