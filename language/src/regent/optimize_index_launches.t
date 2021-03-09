@@ -1010,11 +1010,6 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
   local is_constant_time = not node.annotations.constant_time_launch:is(ast.annotation.Forbid)
 
-  if #loop_vars > 0 then
-    is_constant_time = false
-    report_fail_ctl(call, "constant time launch failed: local variable refers to loop index")
-  end
-
   local free_vars = terralib.newlist()
 
   -- Perform a simpler analysis if the expression is not a task launch
