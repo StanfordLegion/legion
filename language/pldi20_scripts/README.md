@@ -19,12 +19,12 @@ fi
 Then run the following:
 
 ```bash
-git clone -b python-paw19-parallelizer-dcr https://gitlab.com/StanfordLegion/legion.git
+git clone -b regent-dcr-pldi2020 https://gitlab.com/StanfordLegion/legion.git
 cd legion/language
-./paw19_scripts/setup.sh
-./paw19_scripts/build_stencil.sh stencil.run1
-./paw19_scripts/build_circuit.sh circuit.run1
-./paw19_scripts/build_pennant.sh pennant.run1
+./pldi20_scripts/setup.sh
+./pldi20_scripts/build_stencil.sh stencil.run1
+./pldi20_scripts/build_circuit.sh circuit.run1
+./pldi20_scripts/build_pennant.sh pennant.run1
 (cd stencil.run1 && for n in 1 2 4 16; do sbatch --nodes $n sbatch_stencil.sh; done)
 (cd circuit.run1 && for n in 1 2 4 16; do sbatch --nodes $n sbatch_circuit.sh; done)
 (cd pennant.run1 && for n in 1 2 4 16; do sbatch --nodes $n sbatch_pennant.sh; done)
