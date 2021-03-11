@@ -47,13 +47,15 @@ list(APPEND REALM_TESTS
   )
 
 if(Legion_USE_CUDA)
+  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
+
   # some tests have CUDA source files too
   set(CUDASRC_memspeed memspeed_gpu.cu)
+  set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
 endif()
 
 foreach(test IN LISTS REALM_TESTS)
   if(CUDASRC_${test})
-    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
     cuda_add_executable(${test} ${test} ${CUDASRC_${test}})
   else()
     add_executable(${test} ${test}.cc)
@@ -74,6 +76,7 @@ set(TESTARGS_compqueue         -ll:cpu 4)
 set(TESTARGS_event_subscribe   -ll:cpu 4)
 set(TESTARGS_deferred_allocs   -ll:gsize 0 -all)
 set(TESTARGS_scatter           -p1 2 -p2 2)
+set(TESTARGS_simple_reduce     -all)
 
 if(Legion_ENABLE_TESTING)
   foreach(test IN LISTS REALM_TESTS)
