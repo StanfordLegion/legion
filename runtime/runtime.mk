@@ -513,7 +513,7 @@ SLIB_REALM_DEPS	+= -L$(CUDA)/lib -lcuda
 else
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcudart -lcuda
 SLIB_LEGION_DEPS += -L$(CUDA)/lib -lcudart -lcuda
-SLIB_REALM_DEPS	+= -L$(CUDA)/lib -lcuda
+SLIB_REALM_DEPS	+= -L$(CUDA)/lib -lcudart -lcuda
 endif
 else
 ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
@@ -523,7 +523,7 @@ SLIB_REALM_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda
 else
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcudart -lcuda -Xlinker -rpath=$(CUDA)/lib64
 SLIB_LEGION_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcudart -lcuda
-SLIB_REALM_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda
+SLIB_REALM_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcudart -lcuda
 endif
 endif
 # Add support for Legion GPU reductions

@@ -20,6 +20,10 @@
 
 #include "realm/realm_config.h"
 
+#ifdef REALM_USE_CUDA
+#include "realm/cuda/cuda_redop.h"
+#endif
+
 namespace Realm {
 
     // a reduction op needs to look like this
@@ -62,6 +66,33 @@ namespace Realm {
                                   const void *rhs2_ptr, size_t rhs2_stride,
                                   size_t count, const void *userdata);
 
+#ifdef REALM_USE_CUDA
+      // CUDA kernels for apply/fold - these are not actually the functions,
+      //  but just information (e.g. host wrapper fnptr) that can be used
+      //  to look up the actual kernels
+      void *cuda_apply_excl_fn, *cuda_apply_nonexcl_fn;
+      void *cuda_fold_excl_fn, *cuda_fold_nonexcl_fn;
+#endif
+
+      ReductionOpUntyped()
+      : sizeof_this(sizeof(ReductionOpUntyped))
+      , sizeof_lhs(0)
+      , sizeof_rhs(0)
+      , sizeof_userdata(0)
+      , identity(0)
+      , userdata(0)
+      , cpu_apply_excl_fn(0)
+      , cpu_apply_nonexcl_fn(0)
+      , cpu_fold_excl_fn(0)
+      , cpu_fold_nonexcl_fn(0)
+#ifdef REALM_USE_CUDA
+      , cuda_apply_excl_fn(0)
+      , cuda_apply_nonexcl_fn(0)
+      , cuda_fold_excl_fn(0)
+      , cuda_fold_nonexcl_fn(0)
+#endif
+      {}
+
       template <class REDOP>
       static ReductionOpUntyped *create_reduction_op(void)
       {
@@ -102,6 +133,35 @@ namespace Realm {
       }
     };
 
+#if defined(REALM_USE_CUDA) && defined(__NVCC__)
+    // with a cuda-capable compiler, we'll automatically add cuda reduction
+    //  kernels if the REDOP class defines has_cuda_reductions AND it's true
+    // this requires a bunch of SFINAE template-fu
+    template <typename T>
+    struct HasHasCudaReductions {
+      struct YES { char dummy[1]; };
+      struct NO { char dummy[2]; };
+      struct AltnerativeDefinition { static const bool has_cuda_reductions = false; };
+      template <typename T2> struct Combined : public T2, public AltnerativeDefinition {};
+      template <typename T2, T2> struct CheckAmbiguous {};
+      template <typename T2> static NO has_member(CheckAmbiguous<const bool *, &Combined<T2>::has_cuda_reductions> *);
+      template <typename T2> static YES has_member(...);
+      const static bool value = sizeof(has_member<T>(0)) == sizeof(YES);
+    };
+
+    template <typename T, bool OK> struct MaybeAddCudaReductions;
+    template <typename T>
+    struct MaybeAddCudaReductions<T, false> {
+      static void if_member_exists(ReductionOpUntyped *redop) {};
+      static void if_member_is_true(ReductionOpUntyped *redop) {};
+    };
+    template <typename T>
+    struct MaybeAddCudaReductions<T, true> {
+      static void if_member_exists(ReductionOpUntyped *redop) { MaybeAddCudaReductions<T, T::has_cuda_reductions>::if_member_is_true(redop); }
+      static void if_member_is_true(ReductionOpUntyped *redop) { Cuda::add_cuda_redop_kernels<T>(redop); }
+    };
+#endif
+
     template <typename REDOP>
     struct ReductionOp : public ReductionOpUntyped {
       // tacked on to end of ReductionOpUntyped struct
@@ -122,6 +182,11 @@ namespace Realm {
         cpu_apply_nonexcl_fn = &ReductionKernels::cpu_apply_wrapper<REDOP, false>;
         cpu_fold_excl_fn = &ReductionKernels::cpu_fold_wrapper<REDOP, true>;
         cpu_fold_nonexcl_fn = &ReductionKernels::cpu_fold_wrapper<REDOP, false>;
+#if defined(REALM_USE_CUDA) && defined(__NVCC__)
+        // if REDOP defines/sets 'has_cuda_reductions' to true, try to
+        //  automatically build wrappers for apply_cuda<> and fold_cuda<>
+        MaybeAddCudaReductions<REDOP, HasHasCudaReductions<REDOP>::value>::if_member_exists(this);
+#endif
       }
 
     protected:

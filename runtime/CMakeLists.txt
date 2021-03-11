@@ -436,6 +436,8 @@ if(Legion_USE_CUDA)
     # so list(FILTER ...) doesn't exist until cmake 3.6 - do string regex instead
     string(REGEX REPLACE "[^\;]*cudart[^\;]*(\;?)" "" CUDA_LIBRARIES "${CUDA_LIBRARIES}")
     set(CUDA_LIBRARIES ${CUDA_LIBRARIES} PARENT_SCOPE)
+  else()
+    target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDART_LIBRARY})
   endif()
 
   target_include_directories(RealmRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
