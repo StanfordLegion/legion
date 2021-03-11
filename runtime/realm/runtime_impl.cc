@@ -323,6 +323,30 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // struct ReductionOpUntyped
+  //
+
+  /*static*/ ReductionOpUntyped *ReductionOpUntyped::clone_reduction_op(const ReductionOpUntyped *redop)
+  {
+    void *ptr = malloc(redop->sizeof_this);
+    assert(ptr);
+    memcpy(ptr, redop, redop->sizeof_this);
+    ReductionOpUntyped *cloned = static_cast<ReductionOpUntyped *>(ptr);
+    // fix up identity and userdata fields, if non-null
+    if(redop->identity)
+      cloned->identity = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(redop->identity) -
+                                                  reinterpret_cast<uintptr_t>(redop) +
+                                                  reinterpret_cast<uintptr_t>(cloned));
+    if(redop->userdata)
+      cloned->userdata = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(redop->userdata) -
+                                                  reinterpret_cast<uintptr_t>(redop) +
+                                                  reinterpret_cast<uintptr_t>(cloned));
+    return cloned;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class Runtime
   //
 
@@ -432,11 +456,11 @@ namespace Realm {
     {
       assert(impl != 0);
 
-      ReductionOpUntyped *cloned = redop->clone();
+      ReductionOpUntyped *cloned = ReductionOpUntyped::clone_reduction_op(redop);
       bool conflict = ((RuntimeImpl *)impl)->reduce_op_table.put(redop_id, cloned);
       if(conflict) {
 	log_runtime.error() << "duplicate registration of reduction op " << redop_id;
-	delete cloned;
+	free(cloned);
 	return false;
       }
 

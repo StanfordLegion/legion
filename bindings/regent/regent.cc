@@ -38,156 +38,73 @@ typedef CObjectWrapper::ArrayAccessor2D ArrayAccessor2D;
 typedef CObjectWrapper::ArrayAccessor3D ArrayAccessor3D;
 
 template <class ELEM_REDOP>
-class ArrayReductionOp : public Realm::ReductionOpUntyped {
-public:
-  ArrayReductionOp(unsigned n)
-    : Realm::ReductionOpUntyped(sizeof(typename ELEM_REDOP::LHS) * n,
-                                sizeof(typename ELEM_REDOP::RHS) * n,
-// TODO: This will break if we change how a reduction list entry is laid out
-#ifdef NEED_TO_FIX_REDUCTION_LISTS_FOR_DEPPART
-                                sizeof(ptr_t) +
-                                sizeof(typename ELEM_REDOP::RHS) * n,
-#else
-                                0,
-#endif
-                                true, true),
-    N(n) {}
-
-  virtual Realm::ReductionOpUntyped *clone(void) const
-  {
-    return new ArrayReductionOp<ELEM_REDOP>(N);
-  }
-
-  virtual void apply(void *lhs_ptr, const void *rhs_ptr, size_t count,
-                     bool exclusive = false) const
-  {
-    typename ELEM_REDOP::LHS *lhs =
-      static_cast<typename ELEM_REDOP::LHS *>(lhs_ptr);
-    const typename ELEM_REDOP::RHS *rhs =
-      static_cast<const typename ELEM_REDOP::RHS *>(rhs_ptr);
-    size_t total_count = count * N;
-    if (exclusive)
-      for (size_t i = 0; i < total_count; i++)
-        ELEM_REDOP::template apply<true>(lhs[i], rhs[i]);
-    else
-      for (size_t i = 0; i < total_count; i++)
-        ELEM_REDOP::template apply<false>(lhs[i], rhs[i]);
-  }
-
-  virtual void apply_strided(void *lhs_ptr, const void *rhs_ptr,
-                             off_t lhs_stride, off_t rhs_stride, size_t count,
-                             bool exclusive = false) const
-  {
-    if (exclusive) {
-      for (size_t i = 0; i < count; i++) {
-        typename ELEM_REDOP::LHS *lhs =
-          static_cast<typename ELEM_REDOP::LHS *>(lhs_ptr);
-        const typename ELEM_REDOP::RHS *rhs =
-          static_cast<const typename ELEM_REDOP::RHS *>(rhs_ptr);
-        for (unsigned n = 0; n < N; ++n)
-          ELEM_REDOP::template apply<true>(lhs[n], rhs[n]);
-        lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
-        rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
-      }
-    } else {
-      for (size_t i = 0; i < count; i++) {
-        typename ELEM_REDOP::LHS *lhs =
-          static_cast<typename ELEM_REDOP::LHS *>(lhs_ptr);
-        const typename ELEM_REDOP::RHS *rhs =
-          static_cast<const typename ELEM_REDOP::RHS *>(rhs_ptr);
-        for (unsigned n = 0; n < N; ++n)
-          ELEM_REDOP::template apply<false>(lhs[n], rhs[n]);
-        lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
-        rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
-      }
-    }
-  }
-
-  virtual void fold(void *rhs1_ptr, const void *rhs2_ptr, size_t count,
-                    bool exclusive = false) const
-  {
-    typename ELEM_REDOP::RHS *rhs1 =
-      static_cast<typename ELEM_REDOP::RHS *>(rhs1_ptr);
-    const typename ELEM_REDOP::RHS *rhs2 =
-      static_cast<const typename ELEM_REDOP::RHS *>(rhs2_ptr);
-    size_t total_count = count * N;
-    if (exclusive)
-      for (size_t i = 0; i < total_count; i++)
-        ELEM_REDOP::template fold<true>(rhs1[i], rhs2[i]);
-    else
-      for (size_t i = 0; i < total_count; i++)
-        ELEM_REDOP::template fold<false>(rhs1[i], rhs2[i]);
-  }
-
-  virtual void fold_strided(void *lhs_ptr, const void *rhs_ptr,
-                            off_t lhs_stride, off_t rhs_stride, size_t count,
-                            bool exclusive = false) const
-  {
-    if(exclusive) {
-      for(size_t i = 0; i < count; i++) {
-        typename ELEM_REDOP::LHS *lhs =
-          static_cast<typename ELEM_REDOP::LHS *>(lhs_ptr);
-        const typename ELEM_REDOP::RHS *rhs =
-          static_cast<const typename ELEM_REDOP::RHS *>(rhs_ptr);
-        for (unsigned n = 0; n < N; ++n)
-          ELEM_REDOP::template fold<true>(lhs[n], rhs[n]);
-        lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
-        rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
-      }
-    } else {
-      for(size_t i = 0; i < count; i++) {
-        typename ELEM_REDOP::LHS *lhs =
-          static_cast<typename ELEM_REDOP::LHS *>(lhs_ptr);
-        const typename ELEM_REDOP::RHS *rhs =
-          static_cast<const typename ELEM_REDOP::RHS *>(rhs_ptr);
-        for (unsigned n = 0; n < N; ++n)
-          ELEM_REDOP::template fold<false>(lhs[n], rhs[n]);
-        lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
-        rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
-      }
-    }
-  }
-
-  virtual void init(void *ptr, size_t count) const
-  {
-    typename ELEM_REDOP::RHS *rhs_ptr =
-      static_cast<typename ELEM_REDOP::RHS *>(ptr);
-    size_t total_count = count * N;
-    for (size_t i = 0; i < total_count; i++)
-      *rhs_ptr++ = ELEM_REDOP::identity;
-  }
-
-#ifdef NEED_TO_FIX_REDUCTION_LISTS_FOR_DEPPART
-  virtual void apply_list_entry(void *lhs_ptr, const void *entry_ptr, size_t count,
-                                off_t ptr_offset, bool exclusive = false) const
-  {
-    // TODO: Implement this function
-    assert(false);
-  }
-
-  virtual void fold_list_entry(void *rhs_ptr, const void *entry_ptr, size_t count,
-                                off_t ptr_offset, bool exclusive = false) const
-  {
-    // TODO: Implement this function
-    assert(false);
-  }
-
-  virtual void get_list_pointers(unsigned *ptrs, const void *entry_ptr, size_t count) const
-  {
-    // TODO: Implement this function
-    assert(false);
-  }
-#endif
-
-private:
+struct ArrayReductionOp : public Realm::ReductionOpUntyped {
   unsigned N;
+  typename ELEM_REDOP::RHS identity_val[1 /*really N*/];
+
+protected:
+  template <bool EXCL>
+  static void cpu_apply_wrapper(void *lhs_ptr, size_t lhs_stride,
+                                const void *rhs_ptr, size_t rhs_stride,
+                                size_t count, const void *userdata)
+  {
+    unsigned N = *static_cast<const unsigned *>(userdata);
+    for (size_t i = 0; i < count; i++) {
+      typename ELEM_REDOP::LHS *lhs =
+        static_cast<typename ELEM_REDOP::LHS *>(lhs_ptr);
+      const typename ELEM_REDOP::RHS *rhs =
+        static_cast<const typename ELEM_REDOP::RHS *>(rhs_ptr);
+      for (unsigned n = 0; n < N; ++n)
+        ELEM_REDOP::template apply<EXCL>(lhs[n], rhs[n]);
+      lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
+      rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
+    }
+  }
+
+  template <bool EXCL>
+  static void cpu_fold_wrapper(void *rhs1_ptr, size_t rhs1_stride,
+                               const void *rhs2_ptr, size_t rhs2_stride,
+                               size_t count, const void *userdata)
+  {
+    unsigned N = *static_cast<const unsigned *>(userdata);
+    for(size_t i = 0; i < count; i++) {
+      typename ELEM_REDOP::RHS *rhs1 =
+        static_cast<typename ELEM_REDOP::RHS *>(rhs1_ptr);
+      const typename ELEM_REDOP::RHS *rhs2 =
+        static_cast<const typename ELEM_REDOP::RHS *>(rhs2_ptr);
+      for (unsigned n = 0; n < N; ++n)
+        ELEM_REDOP::template fold<EXCL>(rhs1[n], rhs2[n]);
+      rhs1_ptr = static_cast<char *>(rhs1_ptr) + rhs1_stride;
+      rhs2_ptr = static_cast<const char *>(rhs2_ptr) + rhs2_stride;
+    }
+  }
+
+  ArrayReductionOp(unsigned n)
+  {
+    sizeof_this = (sizeof(ArrayReductionOp<ELEM_REDOP>) +
+                   ((n - 1) * sizeof(typename ELEM_REDOP::RHS)));
+    sizeof_lhs = sizeof(typename ELEM_REDOP::LHS) * n;
+    sizeof_rhs = sizeof(typename ELEM_REDOP::RHS) * n;
+    sizeof_userdata = sizeof(unsigned);
+    identity = identity_val;
+    userdata = &N;
+    cpu_apply_excl_fn = &cpu_apply_wrapper<true>;
+    cpu_apply_nonexcl_fn = &cpu_apply_wrapper<false>;
+    cpu_fold_excl_fn = &cpu_fold_wrapper<true>;
+    cpu_fold_nonexcl_fn = &cpu_fold_wrapper<false>;
+    N = n;
+    for(unsigned i = 0; i < n; i++)
+      identity_val[i] = ELEM_REDOP::identity;
+  }
 
 public:
-  static Realm::ReductionOpUntyped *create_array_reduction_op(unsigned array_size)
+  static ArrayReductionOp<ELEM_REDOP> *create_array_reduction_op(unsigned array_size)
   {
-    ArrayReductionOp<ELEM_REDOP> *redop =
-      new ArrayReductionOp<ELEM_REDOP>(array_size);
-    return redop;
+    size_t bytes = (sizeof(ArrayReductionOp<ELEM_REDOP>) +
+                    ((array_size - 1) * sizeof(typename ELEM_REDOP::RHS)));
+    void *ptr = malloc(bytes);
+    assert(ptr);
+    return new(ptr) ArrayReductionOp<ELEM_REDOP>(array_size);
   }
 };
 
@@ -197,7 +114,7 @@ public:
     void REG(legion_reduction_op_id_t redop_id, unsigned array_size,         \
              bool permit_duplicates)                                         \
     {                                                                        \
-      ArrayReductionOp<CLASS> *op = new ArrayReductionOp<CLASS>(array_size); \
+      ArrayReductionOp<CLASS> *op = ArrayReductionOp<CLASS>::create_array_reduction_op(array_size); \
       Runtime::register_reduction_op(redop_id, op, NULL, NULL,               \
                                      permit_duplicates);                     \
     }                                                                        \

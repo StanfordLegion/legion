@@ -3267,13 +3267,13 @@ namespace Realm {
                 void *out_ptr = reinterpret_cast<void *>(out_base + out_offset);
                 const void *in_ptr = reinterpret_cast<const void *>(in_base + in_offset);
                 if(redop_info.is_fold)
-                  redop->fold_strided(out_ptr, in_ptr,
-                                      ostride, istride,
-                                      elems, false /*!exclusive*/);
+                  (redop->cpu_fold_nonexcl_fn)(out_ptr, ostride,
+                                               in_ptr, istride,
+                                               elems, redop->userdata);
                 else
-                  redop->apply_strided(out_ptr, in_ptr,
-                                       ostride, istride,
-                                       elems, false /*!exclusive*/);
+                  (redop->cpu_apply_nonexcl_fn)(out_ptr, ostride,
+                                                in_ptr, istride,
+                                                elems, redop->userdata);
 
                 in_alc.advance(in_dim-1,
                                elems * ((in_dim == 1) ? in_elem_size : 1));

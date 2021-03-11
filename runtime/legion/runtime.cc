@@ -23959,7 +23959,7 @@ namespace Legion {
       const ReductionOp *reduction_op = 
         get_reduction_op(redop, true/*has lock*/);
       void *fill_buffer = malloc(reduction_op->sizeof_rhs);
-      reduction_op->init(fill_buffer, 1);
+      memcpy(fill_buffer, reduction_op->identity, reduction_op->sizeof_rhs);
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(fill_buffer, reduction_op->sizeof_rhs);
       FillView *fill_view = new FillView(forest, get_available_distributed_id(),

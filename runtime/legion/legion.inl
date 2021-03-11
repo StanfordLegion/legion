@@ -251,7 +251,7 @@ namespace Legion {
                               void *&ptr, size_t &size)
       {
         REDOP_RHS init_serdez;
-        reduction_op->init(&init_serdez, 1);
+        memcpy(&init_serdez, reduction_op->identity, reduction_op->sizeof_rhs);
         size_t new_size = init_serdez.legion_buffer_size();
         if (new_size > size)
         {
@@ -269,7 +269,8 @@ namespace Legion {
         REDOP_RHS lhs_serdez, rhs_serdez;
         lhs_serdez.legion_deserialize(lhs_ptr);
         rhs_serdez.legion_deserialize(rhs_ptr);
-        reduction_op->fold(&lhs_serdez, &rhs_serdez, 1, true/*exclusive*/);
+        (reduction_op->cpu_fold_excl_fn)(&lhs_serdez, 0, &rhs_serdez, 0,
+                                         1, reduction_op->userdata);
         size_t new_size = lhs_serdez.legion_buffer_size();
         // Reallocate the buffer if it has grown
         if (new_size > lhs_size)

@@ -4996,7 +4996,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(reduction_op != NULL);
-      assert(reduction_op->is_foldable);
+      assert(reduction_op->identity);
       assert(reduction_state == NULL);
 #endif
       reduction_state_size = reduction_op->sizeof_rhs;
@@ -5006,7 +5006,8 @@ namespace Legion {
         (*(serdez_redop_fns->init_fn))(reduction_op, reduction_state, 
                                        reduction_state_size);
       else
-        reduction_op->init(reduction_state, 1);
+        memcpy(reduction_state, reduction_op->identity,
+               reduction_op->sizeof_rhs);
     }
 
     //--------------------------------------------------------------------------
@@ -5018,7 +5019,8 @@ namespace Legion {
       // Apply the reduction operation
 #ifdef DEBUG_LEGION
       assert(reduction_op != NULL);
-      assert(reduction_op->is_foldable);
+      assert(reduction_op->cpu_fold_excl_fn);
+      assert(reduction_op->cpu_fold_nonexcl_fn);
       assert(reduction_state != NULL);
 #endif
       // Perform the reduction, see if we have to do serdez reductions
@@ -5031,7 +5033,16 @@ namespace Legion {
                                        reduction_state_size, result);
       }
       else
-        reduction_op->fold(reduction_state, result, 1, exclusive);
+      {
+        if (exclusive)
+          (reduction_op->cpu_fold_excl_fn)(reduction_state, 0,
+                                           result, 0,
+                                           1, reduction_op->userdata);
+        else
+          (reduction_op->cpu_fold_nonexcl_fn)(reduction_state, 0,
+                                              result, 0,
+                                              1, reduction_op->userdata);
+      }
 
       // If we're the owner, then free the memory
       if (owner)
@@ -7046,7 +7057,7 @@ namespace Legion {
       reduction_op = Runtime::get_reduction_op(redop);
       deterministic_redop = deterministic;
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
-      if (!reduction_op->is_foldable)
+      if (!reduction_op->identity)
         REPORT_LEGION_ERROR(ERROR_REDUCTION_OPERATION_INDEX,
                       "Reduction operation %d for index task launch %s "
                       "(ID %lld) is not foldable.",

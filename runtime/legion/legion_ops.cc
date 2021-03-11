@@ -19245,7 +19245,7 @@ namespace Legion {
       std::map<DomainPoint,Future> futures;
       future_map.impl->get_all_futures(futures);
       void *result_buffer = malloc(redop->sizeof_rhs);
-      redop->init(result_buffer, 1/*count*/);
+      memcpy(result_buffer, redop->identity, redop->sizeof_rhs);
       for (std::map<DomainPoint,Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
       {
@@ -19259,7 +19259,8 @@ namespace Legion {
               "RHS inputs of %zd bytes.", parent_ctx->get_task_name(),
               parent_ctx->get_unique_id(), future_size, redop->sizeof_rhs)
         const void *data = impl->get_untyped_result(true,NULL,true/*internal*/);
-        redop->fold(result_buffer, data, 1/*count*/, true/*exclusive*/);
+        (redop->cpu_fold_excl_fn)(result_buffer, 0, data, 0,
+                                  1, redop->userdata);
       }
       if (runtime->legion_spy_enabled)
       {
