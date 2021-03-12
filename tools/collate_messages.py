@@ -108,7 +108,7 @@ def parseInput(sourceFile, tokens, lineNumber, enums):
             if name in enums:
                 code = enums[name]
             else:
-                print 'undefined declaration', name, 'missing enum in legion_config.h'
+                print('undefined declaration', name, 'missing enum in legion_config.h')
                 sys.exit(1)
             type = declaration.replace('REPORT_LEGION_', '').lower()
             return declaration, name, code, type, message, lineNumber, declarationLineNumber
@@ -142,7 +142,7 @@ def addToDatabase(type, name, code, message, connection, sourceFile, lineNumber)
     filename = sourceFile.name
     
     insertCommand = "insert into " + type + "(code, name, message) values (" + code + ", \"" + name + "\", \"" + sanitizedMessage(message) + "\");"
-    print type, name, 'code', code, filename + ":" + str(lineNumber)
+    print(type, name, 'code', code, filename + ":" + str(lineNumber))
     connection.execute(insertCommand)
     
     createInstancesTableCommand = "create table if not exists instances(code int key, sourceFile text, lineNumber int);"
@@ -154,7 +154,7 @@ def addToDatabase(type, name, code, message, connection, sourceFile, lineNumber)
 
 
 def parseSourceFile(fileName, connection, enums):
-    print fileName
+    print(fileName)
     
     with open(fileName, 'rt') as sourceFile:
         lineNumber = 0
@@ -346,7 +346,7 @@ def loadMessageNames(file):
 class MyParser(argparse.ArgumentParser):
     def error(self, message):
         self.print_usage(sys.stderr)
-        print 'error', message
+        print('error', message)
         sys.exit(2)
 parser = MyParser(description = 'Legion Tools: collate messages')
 parser.add_argument('--prefix', dest='prefix', action='store', help='path prefix to source files', default='')
@@ -356,12 +356,12 @@ parser.add_argument('--legion_config_h', dest='legionConfigH', action='store', h
 
 args = parser.parse_args()
 
-print 'this program parses a list of files.  it reads the filenames from stdin and writes html files as output.'
-print 'example: find . -name *.cc | python3 collate_messages.py --glossaryFile=glossaryFile.txt --glossaryURL="http://legion.stanford.edu"'
+print('this program parses a list of files.  it reads the filenames from stdin and writes html files as output.')
+print('example: find . -name *.cc | python3 collate_messages.py --glossaryFile=glossaryFile.txt --glossaryURL="http://legion.stanford.edu"')
 
 legionConfigFile = open(args.legionConfigH, 'r')
 if legionConfigFile == None:
-    print 'invalid legion config file path', legionConfigH
+    print('invalid legion config file path', legionConfigH)
     sys.exit(-1)
 
 enums = loadEnums(legionConfigFile)
