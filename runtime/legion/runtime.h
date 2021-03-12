@@ -1627,7 +1627,7 @@ namespace Legion {
      * an extra function call overhead to every runtime call because C++
      * is terrible and doesn't have mix-in classes.
      */
-    class Runtime {
+    class Runtime : public LegionHeapify<Runtime> {
     public:
       struct LegionConfiguration {
       public:
