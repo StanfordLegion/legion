@@ -669,7 +669,7 @@ if(Legion_REDOP_COMPLEX)
   list(APPEND LEGION_SRC mathtypes/complex.h)
 endif()
 
-if(Legion_USE_CUDA AND Legion_GPU_REDUCTIONS)
+if(Legion_USE_CUDA)
   list(APPEND LEGION_CUDA_SRC
     legion/legion_redop.cu
   )

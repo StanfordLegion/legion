@@ -24142,6 +24142,23 @@ namespace Legion {
       return table;
     }
 
+#if defined(LEGION_USE_CUDA) && !defined(LEGION_GPU_REDUCTIONS)
+    // Define a free function for Runtime::register_reduction_op because
+    //  legion_redop.cu cannot include runtime.h
+    //--------------------------------------------------------------------------
+    void runtime_register_reduction_op(ReductionOpID redop_id,
+                                       ReductionOp *redop,
+                                       SerdezInitFnptr init_fnptr,
+                                       SerdezFoldFnptr fold_fnptr,
+                                       bool permit_duplicates,
+                                       bool has_lock = false)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::register_reduction_op(redop_id, redop, init_fnptr, fold_fnptr,
+                                     permit_duplicates, has_lock);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::register_reduction_op(ReductionOpID redop_id,
                                                    ReductionOp *redop,
