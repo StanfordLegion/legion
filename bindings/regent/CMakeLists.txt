@@ -27,12 +27,13 @@ list(APPEND REGENT_SRC
   regent.h                regent.cc
   regent_partitions.h     regent_partitions.cc
   regent_partitions_cxx.h
-  regent_util.h
+  regent_util.h           regent_redop.h
 )
 
 if(Legion_USE_CUDA)
   list(APPEND REGENT_SRC
     regent_cudart_hijack.h regent_cudart_hijack.cc
+    regent_cuda.cu
   )
 endif()
 
@@ -47,8 +48,12 @@ list(APPEND REGENT_SRC
   murmur_hash3.h  murmur_hash3.cc
 )
 
-add_library(Regent ${REGENT_SRC})
-target_link_libraries(Regent PUBLIC Legion::Legion)
+if(Legion_USE_CUDA)
+  cuda_add_library(Regent ${REGENT_SRC})
+else()
+  add_library(Regent ${REGENT_SRC})
+endif()
+target_link_libraries(Regent Legion::Legion)
 
 if(Legion_USE_CUDA)
   target_include_directories(Regent PRIVATE ${CUDA_INCLUDE_DIRS})
