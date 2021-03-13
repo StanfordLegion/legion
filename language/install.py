@@ -245,7 +245,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, 
             try:
                 nvcc_version = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')
             except (FileNotFoundError,subprocess.CalledProcessError):
-                print('Error: Unabled to verify CUDA version is not blacklisted for Regent')
+                print('Error: Unable to verify CUDA version is not blacklisted for Regent')
                 sys.exit(1)
         pattern = re.compile(' V(?P<major>[0-9]+)\.(?P<minor>[0-9]+)')
         major_version = None
