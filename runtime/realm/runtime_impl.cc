@@ -1647,9 +1647,11 @@ namespace Realm {
 	    it != n->dma_channels.end();
 	    ++it)
 	  if(*it) {
+            RemoteChannelInfo *rci = (*it)->construct_remote_info();
 	    ok = (ok &&
 		  (dbs << NODE_ANNOUNCE_DMA_CHANNEL) &&
-		  (*it)->serialize_remote_info(dbs));
+                  (dbs << *rci));
+            delete rci;
 	  }
 
 	ok = (ok && (dbs << NODE_ANNOUNCE_DONE));

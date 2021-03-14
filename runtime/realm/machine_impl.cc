@@ -635,8 +635,11 @@ namespace Realm {
 
 	case NODE_ANNOUNCE_DMA_CHANNEL:
 	  {
-	    RemoteChannel *rc = RemoteChannel::deserialize_new(fbd);
-	    if(rc) {
+	    RemoteChannelInfo *rci = RemoteChannelInfo::deserialize_new(fbd);
+	    if(rci) {
+              RemoteChannel *rc = rci->create_remote_channel();
+              delete rci;
+
 	      log_annc.debug() << "adding channel: " << *rc;
 	      assert(rc->node == node_id);
 	      if(remote)

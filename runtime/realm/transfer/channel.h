@@ -704,7 +704,10 @@ namespace Realm {
     protected:
       uintptr_t channel;
     };
-      
+
+    class RemoteChannelInfo;
+    class RemoteChannel;
+
     class Channel {
     public:
       Channel(XferDesKind _kind)
@@ -780,8 +783,7 @@ namespace Realm {
 				 unsigned *bw_ret = 0,
 				 unsigned *lat_ret = 0);
 
-      template <typename S>
-      bool serialize_remote_info(S& serializer) const;
+      virtual RemoteChannelInfo *construct_remote_info() const;
 
       void print(std::ostream& os) const;
 
@@ -833,8 +835,49 @@ namespace Realm {
       SimpleXferDesFactory factory_singleton;
     };      
 
+    // polymorphic container for info necessary to create a remote channel
+    class REALM_INTERNAL_API_EXTERNAL_LINKAGE RemoteChannelInfo {
+    public:
+      virtual ~RemoteChannelInfo() {};
+
+      virtual RemoteChannel *create_remote_channel() = 0;
+
+      template <typename S>
+      static RemoteChannelInfo *deserialize_new(S& deserializer);
+    };
+
+    template <typename S>
+    bool serialize(S& serializer, const RemoteChannelInfo& rci);
+
+    class SimpleRemoteChannelInfo : public RemoteChannelInfo {
+    public:
+      SimpleRemoteChannelInfo(NodeID _owner, XferDesKind _kind,
+                              uintptr_t _remote_ptr,
+                              const std::vector<Channel::SupportedPath>& _paths);
+
+      virtual RemoteChannel *create_remote_channel();
+
+      template <typename S>
+      bool serialize(S& serializer) const;
+
+      template <typename S>
+      static RemoteChannelInfo *deserialize_new(S& deserializer);
+
+    protected:
+      SimpleRemoteChannelInfo();
+
+      static Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo, SimpleRemoteChannelInfo> serdez_subclass;
+
+      NodeID owner;
+      XferDesKind kind;
+      uintptr_t remote_ptr;
+      std::vector<Channel::SupportedPath> paths;
+    };
+
     class RemoteChannel : public Channel {
     protected:
+      friend class SimpleRemoteChannelInfo;
+
       RemoteChannel(uintptr_t _remote_ptr);
 
       virtual void shutdown();
@@ -842,9 +885,6 @@ namespace Realm {
       virtual XferDesFactory *get_factory();
 
     public:
-      template <typename S>
-      static RemoteChannel *deserialize_new(S& serializer);
-
       /*
        * Submit nr asynchronous requests into the channel instance.
        * This is supposed to be a non-blocking function call, and
