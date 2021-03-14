@@ -663,8 +663,8 @@ ifeq ($(strip $(DEBUG)),1)
   LEGION_CC_FLAGS	+= -DDEBUG_LEGION
 else
   CFLAGS	+= -O2
-  CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
-  FC_FLAGS	+= -O2 -fno-strict-aliasing
+  CC_FLAGS	+= -O2 #-ggdb
+  FC_FLAGS	+= -O2
 endif
 
 BOUNDS_CHECKS ?= 0
