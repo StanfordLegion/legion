@@ -7000,7 +7000,10 @@ namespace Legion {
         if ((owner_space != context->runtime->address_space) &&
             (source != owner_space) && !local_only)
         {
-          send_semantic_info(owner_space, tag, buffer, size, is_mutable); 
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          send_semantic_info(owner_space, tag, buffer, size, is_mutable, done); 
+          if (!done.has_triggered())
+            done.wait();
         }
       }
       else
@@ -10239,7 +10242,12 @@ namespace Legion {
         // didn't come from the owner, then send it 
         if ((owner_space != context->runtime->address_space) &&
             (source != owner_space) && !local_only)
-          send_semantic_info(owner_space, tag, buffer, size, is_mutable);
+        {
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          send_semantic_info(owner_space, tag, buffer, size, is_mutable, done);
+          if (!done.has_triggered())
+            done.wait();
+        }
       }
       else
         legion_free(SEMANTIC_INFO_ALLOC, local, size);
@@ -13837,7 +13845,10 @@ namespace Legion {
         if ((owner_space != context->runtime->address_space) &&
             (source != owner_space) && !local_only)
         {
-          send_semantic_info(owner_space, tag, buffer, size, is_mutable); 
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          send_semantic_info(owner_space, tag, buffer, size, is_mutable, done);
+          if (!done.has_triggered())
+            done.wait();
         }
       }
       else

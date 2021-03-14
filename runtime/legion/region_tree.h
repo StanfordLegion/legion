@@ -1582,8 +1582,7 @@ namespace Legion {
       virtual void send_semantic_request(AddressSpaceID target, 
         SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                        const void *buffer, size_t size, bool is_mutable,
-                        RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT) = 0;
+       const void *buffer, size_t size, bool is_mutable, RtUserEvent ready) = 0;
     public:
       RegionTreeForest *const context;
       const unsigned depth;
@@ -1702,8 +1701,7 @@ namespace Legion {
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                           const void *buffer, size_t size, bool is_mutable,
-                           RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
+          const void *buffer, size_t size, bool is_mutable, RtUserEvent ready);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
                             bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
@@ -2584,8 +2582,7 @@ namespace Legion {
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                             const void *buffer, size_t size, bool is_mutable,
-                             RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
+          const void *buffer, size_t size, bool is_mutable, RtUserEvent ready);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
                             bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
@@ -2881,8 +2878,7 @@ namespace Legion {
       bool retrieve_semantic_information(FieldID fid, SemanticTag tag,
              const void *&result, size_t &size, bool can_fail, bool wait_until);
       void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                             const void *result, size_t size, bool is_mutable,
-                             RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
+           const void *result, size_t size, bool is_mutable, RtUserEvent ready);
       void send_semantic_field_info(AddressSpaceID target, FieldID fid,
             SemanticTag tag, const void *result, size_t size, bool is_mutable,
             RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
@@ -3149,8 +3145,7 @@ namespace Legion {
       virtual void send_semantic_request(AddressSpaceID target, 
         SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                         const void *buffer, size_t size, bool is_mutable,
-                         RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT) = 0;
+       const void *buffer, size_t size, bool is_mutable, RtUserEvent ready) = 0;
     public:
       // Logical traversal operations
       void register_logical_user(ContextID ctx,
@@ -3424,8 +3419,7 @@ namespace Legion {
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                             const void *buffer, size_t size, bool is_mutable,
-                             RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
+          const void *buffer, size_t size, bool is_mutable, RtUserEvent ready);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
                             bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
@@ -3552,8 +3546,7 @@ namespace Legion {
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                             const void *buffer, size_t size, bool is_mutable,
-                             RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
+          const void *buffer, size_t size, bool is_mutable, RtUserEvent ready);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
                             bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
