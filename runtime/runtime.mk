@@ -437,7 +437,7 @@ endif
 ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_CC_FLAGS        += -DREALM_USE_CUDART_HIJACK
 endif
-INC_FLAGS	+= -I$(CUDA)/include -I$(LG_RT_DIR)/realm/transfer
+INC_FLAGS	+= -I$(CUDA)/include
 ifeq ($(strip $(DEBUG)),1)
 NVCC_FLAGS	+= -g -O0
 #NVCC_FLAGS	+= -G
