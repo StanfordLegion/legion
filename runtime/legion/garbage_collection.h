@@ -374,6 +374,7 @@ namespace Legion {
       inline bool is_registered(void) const { return registered_with_runtime; }
       bool has_remote_instance(AddressSpaceID remote_space) const;
       void update_remote_instances(AddressSpaceID remote_space);
+      void filter_remote_instances(AddressSpaceID remote_space);
     public:
       inline bool has_remote_instances(void) const;
       template<typename FUNCTOR>

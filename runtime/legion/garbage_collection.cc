@@ -1449,6 +1449,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DistributedCollectable::filter_remote_instances(
+                                                     AddressSpaceID remote_inst)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      remote_instances.remove(remote_inst);
+    }
+
+    //--------------------------------------------------------------------------
     void DistributedCollectable::register_with_runtime(
                                                       ReferenceMutator *mutator)
     //--------------------------------------------------------------------------

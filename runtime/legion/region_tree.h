@@ -629,7 +629,8 @@ namespace Legion {
                                   RtEvent initialized,
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
                                   IndexSpaceExprID expr_id = 0,
-                                  std::set<RtEvent> *applied = NULL);
+                                  std::set<RtEvent> *applied = NULL,
+                                  bool add_remote_reference = true);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode *par, LegionColor color,
                                   DistributedID did, RtEvent initialized,
@@ -1897,7 +1898,22 @@ namespace Legion {
       IndexPartNode *const parent;
       const ApEvent index_space_ready;
     protected:
+      // Must hold the node lock when accessing these data structures
+      std::map<LegionColor,IndexPartNode*> color_map;
+      std::map<LegionColor,IndexPartition> remote_colors;
+      std::set<RegionNode*> logical_nodes;
+      std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
+      std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
+    protected:
       unsigned                  send_references;
+      // Keep track of whether we're attempting to do a send of this node
+      unsigned                  send_count;
+      // An event for tracking the effects of sends
+      RtEvent                   send_effects;
+      // An even to signal when we're done with all our sends that
+      // an notify_invalid call might be waiting on to check the
+      // set of remote references
+      RtUserEvent               send_done;
       // On the owner node track when the index space is set
       RtUserEvent               realm_index_space_set;
       // Keep track of whether we've tightened these bounds
@@ -1905,15 +1921,6 @@ namespace Legion {
       bool                      tight_index_space;
       // Keep track of whether we're still valid on the owner
       bool                      tree_valid;
-      // An event for tracking the effects of sends
-      RtEvent                   send_effects;
-      // Must hold the node lock when accessing the
-      // remaining data structures
-      std::map<LegionColor,IndexPartNode*> color_map;
-      std::map<LegionColor,IndexPartition> remote_colors;
-      std::set<RegionNode*> logical_nodes;
-      std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
-      std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
     };
 
     /**
@@ -2667,15 +2674,7 @@ namespace Legion {
       const ApEvent partition_ready;
       const ApUserEvent partial_pending;
     protected:
-      RtEvent disjoint_ready;
-      bool disjoint;
-    protected:
-      bool has_complete, complete;
-      bool tree_valid;
-      RtEvent send_effects;
-      volatile IndexSpaceExpression *union_expr;
-    protected:
-      // Must hold the node lock when accessing
+      // Must hold the node lock when accessing these data structures
       // the remaining data structures
       std::map<LegionColor,IndexSpaceNode*> color_map;
       std::map<LegionColor,RtUserEvent> pending_child_map;
@@ -2687,6 +2686,16 @@ namespace Legion {
       std::map<LegionColor,ApUserEvent> pending_children;
       // Support for remote disjoint events being stored
       RtUserEvent remote_disjoint_ready;
+    protected:
+      RtEvent disjoint_ready;
+      bool disjoint;
+    protected:
+      bool has_complete, complete;
+      bool tree_valid;
+      unsigned send_count;
+      RtUserEvent send_done;
+      RtEvent send_effects;
+      volatile IndexSpaceExpression *union_expr;
     };
 
     /**
