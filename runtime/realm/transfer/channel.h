@@ -223,6 +223,60 @@ namespace Realm {
       size_t pos[MAX_DIM];
     };
 
+    // a control port is used to steer inputs/outputs of transfer descriptors -
+    //   the information is encoded into 32b packets which may be read/written
+    //   at different times due to flow control, so the encoder and decoder
+    //   both need to be stateful
+    namespace ControlPort {
+      // apart from the first control word (which carries the space_shift
+      //   amount), the bottom two bits of each control word mean:
+      static const unsigned CTRL_LO_MORE = 0; // 00: count.lo, space_index, not last
+      static const unsigned CTRL_LO_LAST = 1; // 01: count.lo, space_index, last
+      static const unsigned CTRL_MID     = 2; // 10: count.mid (32 bits)
+      static const unsigned CTRL_HIGH    = 3; // 11: count.hi (2+space_shift bits)
+
+      class Encoder {
+      public:
+        Encoder();
+        ~Encoder();
+
+        void set_port_count(size_t ports);
+
+        // encodes some/all of the { count, port, last } packet into the next
+        //  32b - returns true if encoding is complete or false if it should
+        //  be called again with the same arguments for another 32b packet
+        bool encode(unsigned& data, size_t count, int port, bool last);
+
+      protected:
+        unsigned short port_shift;
+
+        enum State {
+          STATE_INIT,
+          STATE_HAVE_PORT_COUNT,
+          STATE_IDLE,
+          STATE_SENT_HIGH,
+          STATE_SENT_MID,
+          STATE_DONE
+        };
+        unsigned char state;
+      };
+
+      class Decoder {
+      public:
+        Decoder();
+        ~Decoder();
+
+        // decodes the next 32b of packed data, returning true if a complete
+        //  { count, port, last } has been received
+        bool decode(unsigned data,
+                    size_t& count, int& port, bool& last);
+
+      protected:
+        size_t temp_count;
+        unsigned short port_shift;
+      };
+    };
+
     class XferDes {
     public:
       // a pointer to the DmaRequest that contains this XferDes
@@ -258,6 +312,7 @@ namespace Realm {
       };
       std::vector<XferPort> input_ports, output_ports;
       struct ControlPortState {
+        ControlPort::Decoder decoder;
 	int control_port_idx;
 	int current_io_port;
 	size_t remaining_count; // units of bytes for normal (elements for serialized data?)
