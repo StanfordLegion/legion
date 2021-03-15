@@ -380,6 +380,7 @@ namespace Legion {
       bool has_remote_instance(AddressSpaceID remote_space) const;
       void update_remote_instances(AddressSpaceID remote_space, 
                                    bool need_lock = true);
+      void filter_remote_instances(AddressSpaceID remote_space);
     public:
       inline bool has_remote_instances(void) const;
       inline size_t count_remote_instances(void) const;

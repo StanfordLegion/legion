@@ -135,13 +135,6 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
 set(CMAKE_CXX_FLAGS_TSAN "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=thread -DTSAN_ENABLED" CACHE STRING "additional C++ compiler flags for thread sanitizer" FORCE)
 set(CMAKE_EXE_LINKER_FLAGS_TSAN "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -fsanitize=thread" CACHE STRING "additional linker flags for thread sanitizier" FORCE)
 
-# Legion can't handle certain optimizations. See:
-# https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
-check_cxx_compiler_flag("-fno-strict-aliasing" COMPILER_SUPPORTS_NO_STRICT_ALIASING)
-if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
-endif()
-
 # if requested (and we know how to) make any warnings during the build fatal
 option(Legion_BUILD_WARN_AS_ERROR "Consider warnings during build of Legion to be fatal errors" OFF)
 if(Legion_BUILD_WARN_AS_ERROR)

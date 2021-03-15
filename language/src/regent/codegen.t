@@ -8531,7 +8531,7 @@ function codegen.stat_for_list(cx, node)
       end)
       local args = data.filter(function(arg) return reductions[arg] == nil end, symbols)
       local shared_mem_size = cudahelper.compute_reduction_buffer_size(cuda_cx, node, reductions)
-      local device_ptrs, device_ptrs_map, host_ptrs_map, host_preamble =
+      local device_ptrs, device_ptrs_map, host_ptrs_map, host_preamble, buffer_cleanups =
         cudahelper.generate_reduction_preamble(cuda_cx, reductions)
       local kernel_preamble, kernel_postamble =
         cudahelper.generate_reduction_kernel(cuda_cx, reductions, device_ptrs_map)
@@ -8618,7 +8618,7 @@ function codegen.stat_for_list(cx, node)
       end
 
       preamble = host_preamble
-      postamble = host_postamble
+      postamble = quote [host_postamble]; [buffer_cleanups]; end
     end  -- if openmp then
   end
 

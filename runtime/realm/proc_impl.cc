@@ -1060,13 +1060,7 @@ namespace Realm {
 					 CodeDescriptor& codedesc,
 					 const ByteArrayRef& user_data)
   {
-    // first, make sure we haven't seen this task id before
-    if(task_table.count(func_id) > 0) {
-      log_taskreg.fatal() << "duplicate task registration: proc=" << me << " func=" << func_id;
-      assert(0);
-    }
-
-    // next, get see if we have a function pointer to register
+    // see if we have a function pointer to register
     Processor::TaskFuncPtr fnptr;
     const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();
 
@@ -1091,11 +1085,21 @@ namespace Realm {
 
     fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
 
-    log_taskreg.info() << "task " << func_id << " registered on " << me << ": " << codedesc;
+    {
+      RWLock::AutoWriterLock al(task_table_mutex);
 
-    TaskTableEntry &tte = task_table[func_id];
-    tte.fnptr = fnptr;
-    tte.user_data = user_data;
+      // first, make sure we haven't seen this task id before
+      if(task_table.count(func_id) > 0) {
+        log_taskreg.fatal() << "duplicate task registration: proc=" << me << " func=" << func_id;
+        assert(0);
+      }
+
+      TaskTableEntry &tte = task_table[func_id];
+      tte.fnptr = fnptr;
+      tte.user_data = user_data;
+    }
+
+    log_taskreg.info() << "task " << func_id << " registered on " << me << ": " << codedesc;
   }
 
   void LocalTaskProcessor::execute_task(Processor::TaskFuncID func_id,
@@ -1104,15 +1108,20 @@ namespace Realm {
     if(func_id == Processor::TASK_ID_PROCESSOR_NOP)
       return;
 
-    std::map<Processor::TaskFuncID, TaskTableEntry>::const_iterator it = task_table.find(func_id);
-    if(it == task_table.end()) {
-      // TODO: remove this hack once the tools are available to the HLR to call these directly
-      if(func_id < Processor::TASK_ID_FIRST_AVAILABLE) {
-	log_taskreg.info() << "task " << func_id << " not registered on " << me << ": ignoring missing legacy setup/shutdown task";
-	return;
+    std::map<Processor::TaskFuncID, TaskTableEntry>::const_iterator it;
+    {
+      RWLock::AutoReaderLock al(task_table_mutex);
+
+      it = task_table.find(func_id);
+      if(it == task_table.end()) {
+        // TODO: remove this hack once the tools are available to the HLR to call these directly
+        if(func_id < Processor::TASK_ID_FIRST_AVAILABLE) {
+          log_taskreg.info() << "task " << func_id << " not registered on " << me << ": ignoring missing legacy setup/shutdown task";
+          return;
+        }
+        log_taskreg.fatal() << "task " << func_id << " not registered on " << me;
+        assert(0);
       }
-      log_taskreg.fatal() << "task " << func_id << " not registered on " << me;
-      assert(0);
     }
 
     const TaskTableEntry& tte = it->second;
