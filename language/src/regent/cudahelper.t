@@ -559,41 +559,54 @@ end)
 function cudahelper.generate_reduction_preamble(cx, reductions)
   local preamble = terralib.newlist()
   local device_ptrs = terralib.newlist()
+  local buffer_cleanups = terralib.newlist()
   local device_ptrs_map = {}
   local host_ptrs_map = {}
 
   for red_var, red_op in pairs(reductions) do
     local device_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
     local host_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
+    local device_buffer =
+      terralib.newsymbol(c.legion_deferred_buffer_char_1d_t,
+                         "__d_buffer_" .. red_var.displayname)
+    local host_buffer =
+      terralib.newsymbol(c.legion_deferred_buffer_char_1d_t,
+                         "__h_buffer_" .. red_var.displayname)
     local init_kernel_id = cudahelper.generate_buffer_init_kernel(red_var.type, red_op)
     local init_args = terralib.newlist({device_ptr})
     preamble:insert(quote
       var [device_ptr] = [&red_var.type](nil)
       var [host_ptr] = [&red_var.type](nil)
+      var [device_buffer]
+      var [host_buffer]
       do
         var bounds : c.legion_rect_1d_t
         bounds.lo.x[0] = 0
         bounds.hi.x[0] = [sizeof(red_var.type) * GLOBAL_RED_BUFFER - 1]
-        var buffer = c.legion_deferred_buffer_char_1d_create(bounds, c.GPU_FB_MEM, [&int8](nil))
+        [device_buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.GPU_FB_MEM, [&int8](nil))
         [device_ptr] =
-          [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
+          [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([device_buffer], bounds.lo)))
         [cudahelper.codegen_kernel_call(cx, init_kernel_id, GLOBAL_RED_BUFFER, init_args, 0, true)]
       end
       do
         var bounds : c.legion_rect_1d_t
         bounds.lo.x[0] = 0
         bounds.hi.x[0] = [sizeof(red_var.type) - 1]
-        var buffer = c.legion_deferred_buffer_char_1d_create(bounds, c.Z_COPY_MEM, [&int8](nil))
+        [host_buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.Z_COPY_MEM, [&int8](nil))
         [host_ptr] =
-          [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
+          [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([host_buffer], bounds.lo)))
       end
     end)
     device_ptrs:insert(device_ptr)
     device_ptrs_map[device_ptr] = red_var
     host_ptrs_map[device_ptr] = host_ptr
+    buffer_cleanups:insert(quote
+      c.legion_deferred_buffer_char_1d_destroy([host_buffer])
+      c.legion_deferred_buffer_char_1d_destroy([device_buffer])
+    end)
   end
 
-  return device_ptrs, device_ptrs_map, host_ptrs_map, preamble
+  return device_ptrs, device_ptrs_map, host_ptrs_map, preamble, buffer_cleanups
 end
 
 function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, num_threads, red_op, type)
