@@ -1497,6 +1497,7 @@ function cudahelper.generate_argument_spill(args)
   end
 
   local kernel_arg = terralib.newsymbol(&arg_type)
+  local buffer = terralib.newsymbol(c.legion_deferred_buffer_char_1d_t, "__spill_buf")
   local buffer_size = sizeof(arg_type)
   buffer_size = (buffer_size + 7) / 8 * 8
 
@@ -1505,13 +1506,14 @@ function cudahelper.generate_argument_spill(args)
 
   param_pack:insert(quote
     var [kernel_arg]
+    var [buffer]
     do
       var bounds : c.legion_rect_1d_t
       bounds.lo.x[0] = 0
       bounds.hi.x[0] = [buffer_size - 1]
-      var buffer = c.legion_deferred_buffer_char_1d_create(bounds, c.Z_COPY_MEM, [&int8](nil))
+      [buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.Z_COPY_MEM, [&int8](nil))
       [kernel_arg] =
-        [&arg_type]([&opaque](c.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
+        [&arg_type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([buffer], bounds.lo)))
     end
   end)
   arg_type.entries:map(function(pair)
@@ -1521,7 +1523,11 @@ function cudahelper.generate_argument_spill(args)
     param_unpack:insert(quote var [arg] = (@[kernel_arg]).[field_name] end)
   end)
 
-  return param_pack, param_unpack, kernel_arg
+  local spill_cleanup = quote
+    c.legion_deferred_buffer_char_1d_destroy([buffer])
+  end
+
+  return param_pack, param_unpack, spill_cleanup, kernel_arg
 end
 
 return cudahelper

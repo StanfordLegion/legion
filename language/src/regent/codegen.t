@@ -8545,9 +8545,11 @@ function codegen.stat_for_list(cx, node)
 
       local kernel_param_pack = quote end
       local kernel_param_unpack = quote end
+      local spill_cleanup = quote end
       if need_spiil then
         local arg = nil
-        kernel_param_pack, kernel_param_unpack, arg = cudahelper.generate_argument_spill(args)
+        kernel_param_pack, kernel_param_unpack, spill_cleanup, arg =
+          cudahelper.generate_argument_spill(args)
         args = terralib.newlist({arg})
       else
         -- Sort arguments in descending order of sizes to avoid misalignment
@@ -8615,6 +8617,7 @@ function codegen.stat_for_list(cx, node)
         [bounds_setup]
         [kernel_param_pack]
         [kernel_call]
+        [spill_cleanup]
       end
 
       preamble = host_preamble
