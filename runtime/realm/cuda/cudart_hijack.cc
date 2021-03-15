@@ -118,7 +118,32 @@ extern "C" {
 								  ext != 0,
 								  size,
 								  constant != 0,
-								  global != 0));
+								  global != 0,
+                                                                  false /*unmanaged*/));
+  }
+
+  REALM_PUBLIC_API
+  void __cudaRegisterManagedVar(void **handle,
+                                const void *host_var,
+                                char *device_addr,
+                                const char *device_name,
+                                int ext, int size, int constant, int global)
+  {
+    // mark that the hijack code is active
+    cudart_hijack_active = true;
+
+#ifdef DEBUG_CUDART_REGISTRATION
+    std::cout << "registering managed variable " << device_name << std::endl;
+#endif
+    const FatBin *fat_bin = *(const FatBin **)handle;
+    GlobalRegistrations::register_variable(new RegisteredVariable(fat_bin,
+								  host_var,
+								  device_name,
+								  ext != 0,
+								  size,
+								  constant != 0,
+								  global != 0,
+                                                                  true /*managed*/));
   }
       
   REALM_PUBLIC_API

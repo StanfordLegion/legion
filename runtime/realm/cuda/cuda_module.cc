@@ -2896,6 +2896,21 @@ namespace Realm {
       size_t size;
       CHECK_CU( cuModuleGetGlobal(&ptr, &size, module, var->device_name) );
       device_variables[var->host_var] = ptr;
+
+      // if this is a managed variable, the "host_var" is actually a pointer
+      //  we need to fill in, so do that now
+      if(var->managed) {
+        CUdeviceptr *indirect = const_cast<CUdeviceptr *>(static_cast<const CUdeviceptr *>(var->host_var));
+        if(*indirect) {
+          // it's already set - make sure we're consistent (we're probably not)
+          if(*indirect != ptr) {
+            log_gpu.fatal() << "__managed__ variables are not supported when using multiple devices with CUDART hijack enabled";
+            abort();
+          }
+        } else {
+          *indirect = ptr;
+        }
+      }
     }
     
     void GPU::register_function(const RegisteredFunction *func)
@@ -3571,9 +3586,11 @@ namespace Realm {
 
     RegisteredVariable::RegisteredVariable(const FatBin *_fat_bin, const void *_host_var,
 					   const char *_device_name, bool _external,
-					   int _size, bool _constant, bool _global)
+					   int _size, bool _constant, bool _global,
+                                           bool _managed)
       : fat_bin(_fat_bin), host_var(_host_var), device_name(_device_name),
-	external(_external), size(_size), constant(_constant), global(_global)
+	external(_external), size(_size), constant(_constant), global(_global),
+        managed(_managed)
     {}
 
 
