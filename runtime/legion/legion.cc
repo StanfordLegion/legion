@@ -7128,6 +7128,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::unbind_implicit_task_from_external_thread(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      runtime->unbind_implicit_task_from_external_thread(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::bind_implicit_task_to_external_thread(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      runtime->bind_implicit_task_to_external_thread(ctx);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::finish_implicit_task(Context ctx)
     //--------------------------------------------------------------------------
     {

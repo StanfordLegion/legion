@@ -8436,6 +8436,23 @@ namespace Legion {
                                   int shard_id = -1);
 
       /**
+       * Unbind an implicit context from the external thread it is 
+       * currently associated with. It is the user's responsibility
+       * to make sure that no more than one external thread is bound
+       * to an implicit task's context at a time or undefined 
+       * behavior will occur.
+       */
+      void unbind_implicit_task_from_external_thread(Context ctx);
+
+      /**
+       * Bind an implicit context to an external thread.
+       * It is the user's responsibility to make sure that no more 
+       * than one external thread is bound to an implicit task's context
+       * at a time or undefined behavior will occur.
+       */
+      void bind_implicit_task_to_external_thread(Context ctx);
+
+      /**
        * This is the final method for marking the end of an 
        * implicit top-level task. Note that it executes asychronously
        * and it is still the responsibility of the user to wait for 

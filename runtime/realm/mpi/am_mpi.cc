@@ -142,14 +142,15 @@ void AMPoll()
             payload = msg->stuff + msg->header_size;
 	    payload_mode = PAYLOAD_COPY;
         } else if (msg->type == 1) {
+            int32_t msg_tag;
+            memcpy(&msg_tag, msg->stuff, sizeof(int32_t));
             header = msg->stuff + 4;
-
-            int msg_tag = *(int32_t *)(msg->stuff);
             payload = (char *) malloc(msg->payload_size);
 	    payload_mode = PAYLOAD_FREE;
             CHECK_MPI( MPI_Recv(payload, msg->payload_size, MPI_BYTE, tn_src, msg_tag, comm_medium, &status) );
         } else if (msg->type == 2) {
-            int offset = *(int32_t *)(msg->stuff);
+            int32_t offset;
+            memcpy(&offset, msg->stuff, sizeof(int32_t));
             header = msg->stuff + 4;
             payload = (char *) g_am_base + offset;
 	    payload_mode = PAYLOAD_KEEP;  // already in dest memory
@@ -223,7 +224,8 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         CHECK_MPI( MPI_Win_flush(tgt, g_am_win) );
 
         msg->type = 2;
-        *((int32_t *) msg_header) = (int32_t) dest;
+        int32_t dest_as_int32 = dest;
+        memcpy(msg_header, &dest_as_int32, sizeof(int32_t));
         memcpy(msg_header + 4, header, header_size);
         int n = AM_MSG_HEADER_SIZE + 4 + header_size;
         assert(tgt != node_this);
@@ -247,13 +249,13 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         CHECK_MPI( MPI_Send(buf_send, n, MPI_CHAR, tgt, 0x1, MPI_COMM_WORLD) );
     } else {
         msg->type = 1;
-        int msg_tag = 0x0;
+        int32_t msg_tag = 0x0;
         if (thread_id == 0) {
             thread_id = num_threads.fetch_add_acqrel(1) + 1;
         }
         am_seq = (am_seq + 1) & 0x1f;
         msg_tag = (thread_id << 10) + am_seq;
-        *((int32_t *) msg_header) = (int32_t) msg_tag;
+        memcpy(msg_header, &msg_tag, sizeof(int32_t));
         memcpy(msg_header + 4, header, header_size);
         int n = AM_MSG_HEADER_SIZE + 4 + header_size;
         assert(tgt != node_this);

@@ -60,7 +60,7 @@ PYTHON_BINDINGS_DIR:=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 include $(LG_RT_DIR)/runtime.mk
 
-legion_cffi.py: legion_cffi.py.in legion_cffi_build.py
+legion_cffi.py: legion_cffi.py.in legion_cffi_build.py $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(PYTHON_EXE) $(PYTHON_BINDINGS_DIR)/legion_cffi_build.py --defines-dir $(DEFINE_HEADERS_DIR)
 
 clean::
