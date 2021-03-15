@@ -7070,21 +7070,9 @@ namespace Legion {
         }
         post_task_queue.push_back(PostTaskArgs(ctx, task_index, result, size, 
               inst, wait_on, callback_functor, own_functor));
+        // If we've already got a completion queue then use it
         if (post_task_comp_queue.exists())
-        {
-          // If we've already got a completion queue then use it
           post_task_comp_queue.add_event(wait_on);
-        }
-        else if (post_task_queue.size() >= 
-                  context_configuration.meta_task_vector_width)
-        {
-          // Make a completion queue to use
-          post_task_comp_queue = CompletionQueue::create_completion_queue(0);
-          // Fill in the completion queue with events
-          for (std::list<PostTaskArgs>::const_iterator it = 
-                post_task_queue.begin(); it != post_task_queue.end(); it++)
-            post_task_comp_queue.add_event(it->wait_on);
-        }
         if (issue_task)
         {
           if (!post_task_comp_queue.exists())
@@ -7176,17 +7164,34 @@ namespace Legion {
         {
           if (!post_task_comp_queue.exists())
           {
-            // Find the one with the minimum index
-            size_t min_index = 0;
-            for (std::list<PostTaskArgs>::const_iterator it = 
-                  post_task_queue.begin(); it != post_task_queue.end(); it++)
+            // See if we want to switch over to using a completion queue
+            if (post_task_queue.size() < 
+                  context_configuration.meta_task_vector_width)
             {
-              if (!precondition.exists() || (it->index < min_index))
+              // Find the one with the minimum index
+              size_t min_index = 0;
+              for (std::list<PostTaskArgs>::const_iterator it = 
+                    post_task_queue.begin(); it != post_task_queue.end(); it++)
               {
-                precondition = it->wait_on;
-                min_index = it->index;
-                next_ctx = it->context;
+                if (!precondition.exists() || (it->index < min_index))
+                {
+                  precondition = it->wait_on;
+                  min_index = it->index;
+                  next_ctx = it->context;
+                }
               }
+            }
+            else
+            {
+              // Switch over to using a completion queue
+              post_task_comp_queue =
+                CompletionQueue::create_completion_queue(0);
+              // Fill in the completion queue with events
+              for (std::list<PostTaskArgs>::const_iterator it = 
+                    post_task_queue.begin(); it != post_task_queue.end(); it++)
+                post_task_comp_queue.add_event(it->wait_on);
+              precondition = RtEvent(post_task_comp_queue.get_nonempty_event());
+              next_ctx = post_task_queue.front().context;
             }
           }
           else
