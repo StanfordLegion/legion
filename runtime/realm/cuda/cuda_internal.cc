@@ -47,7 +47,8 @@ namespace Realm {
 	       (int(i) == output_control.control_port_idx) ||
 	       input_ports[i].is_indirect_port) {
 	      assert((input_ports[i].mem->kind == MemoryImpl::MKIND_SYSMEM) ||
-		     (input_ports[i].mem->kind == MemoryImpl::MKIND_ZEROCOPY));
+		     (input_ports[i].mem->kind == MemoryImpl::MKIND_ZEROCOPY) ||
+		     (input_ports[i].mem->kind == MemoryImpl::MKIND_MANAGED));
 	      continue;
 	    }
 	    assert(input_ports[i].mem == input_ports[0].mem);
@@ -214,6 +215,12 @@ namespace Realm {
 	      add_path(*it, fbm, bw, latency, false, false,
 		       XFER_GPU_TO_FB);
 
+	    for(std::set<Memory>::const_iterator it = src_gpu->managed_mems.begin();
+		it != src_gpu->managed_mems.end();
+		++it)
+	      add_path(*it, fbm, bw, latency, false, false,
+		       XFER_GPU_TO_FB);
+
 	    break;
 	  }
 
@@ -223,6 +230,12 @@ namespace Realm {
 	    unsigned latency = 0;
 	    for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
 		it != src_gpu->pinned_sysmems.end();
+		++it)
+	      add_path(fbm, *it, bw, latency, false, false,
+		       XFER_GPU_FROM_FB);
+
+	    for(std::set<Memory>::const_iterator it = src_gpu->managed_mems.begin();
+		it != src_gpu->managed_mems.end();
 		++it)
 	      add_path(fbm, *it, bw, latency, false, false,
 		       XFER_GPU_FROM_FB);

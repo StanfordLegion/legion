@@ -54,6 +54,7 @@ namespace Realm {
       // defined even if REALM_USE_CUDA isn't
       // TODO: make kinds more extensible
       MKIND_GPUFB,   // GPU framebuffer memory (accessible via cudaMemcpy)
+      MKIND_MANAGED, // memory that is coherent for both CPU and GPU
 
       MKIND_ZEROCOPY, // CPU memory, pinned for GPU access
       MKIND_DISK,    // disk memory accessible by owner node

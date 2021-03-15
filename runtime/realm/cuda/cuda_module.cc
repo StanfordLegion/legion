@@ -993,7 +993,9 @@ namespace Realm {
       r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
       r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
 
-      if(!pinned_sysmems.empty()) {
+      // treat managed mem like pinned sysmem on the assumption that most data
+      //  is usually in system memory
+      if(!pinned_sysmems.empty() || !managed_mems.empty()) {
 	r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
 	r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
 
@@ -1011,8 +1013,19 @@ namespace Realm {
 	  mma.latency = 200;  // "bad"
 	  r->add_mem_mem_affinity(mma);
 	}
+
+	for(std::set<Memory>::const_iterator it = managed_mems.begin();
+	    it != managed_mems.end();
+	    ++it) {
+	  Machine::MemoryMemoryAffinity mma;
+	  mma.m1 = fbmem->me;
+	  mma.m2 = *it;
+	  mma.bandwidth = 20; // "medium"
+	  mma.latency = 300;  // "worse" (pessimistically assume faults)
+	  r->add_mem_mem_affinity(mma);
+	}
       } else {
-	log_gpu.warning() << "GPU " << proc->me << " has no pinned system memories!?";
+	log_gpu.warning() << "GPU " << proc->me << " has no accessible system memories!?";
       }
 
       // only create a p2p channel if we have peers (and an fb)
@@ -2208,8 +2221,9 @@ namespace Realm {
     // class GPUZCMemory
 
     GPUZCMemory::GPUZCMemory(Memory _me,
-			     CUdeviceptr _gpu_base, void *_cpu_base, size_t _size)
-      : LocalManagedMemory(_me, _size, MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM, 0)
+			     CUdeviceptr _gpu_base, void *_cpu_base, size_t _size,
+                             MemoryKind _kind, Memory::Kind _lowlevel_kind)
+      : LocalManagedMemory(_me, _size, _kind, 256, _lowlevel_kind, 0)
       , gpu_base(_gpu_base), cpu_base((char *)_cpu_base)
     {
       // advertise ourselves as a host memory
@@ -2654,7 +2668,7 @@ namespace Realm {
 	     CUcontext _context,
 	     int num_streams)
       : module(_module), info(_info), worker(_worker)
-      , proc(0), fbmem(0), context(_context), next_stream(0)
+      , proc(0), fbmem(0), context(_context), fbmem_base(0), next_stream(0)
     {
       push_context();
 
@@ -2707,7 +2721,8 @@ namespace Realm {
       }
 
       // free memory
-      CHECK_CU( cuMemFree(fbmem_base) );
+      if(fbmem_base)
+        CHECK_CU( cuMemFree(fbmem_base) );
 
       CHECK_CU( cuDevicePrimaryCtxRelease(info->device) );
     }
@@ -2743,12 +2758,31 @@ namespace Realm {
 	runtime->add_proc_mem_affinity(pma);
       }
 
-      if(module->zcmem) {
+      for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
+          it != pinned_sysmems.end();
+          ++it) {
+        // no processor affinity to IB memories
+        if(!ID(*it).is_memory()) continue;
+
 	Machine::ProcessorMemoryAffinity pma;
 	pma.p = p;
-	pma.m = module->zcmem->me;
+	pma.m = *it;
 	pma.bandwidth = 20; // "medium"
 	pma.latency = 200;  // "bad"
+	runtime->add_proc_mem_affinity(pma);
+      }
+
+      for(std::set<Memory>::const_iterator it = managed_mems.begin();
+          it != managed_mems.end();
+          ++it) {
+        // no processor affinity to IB memories
+        if(!ID(*it).is_memory()) continue;
+
+	Machine::ProcessorMemoryAffinity pma;
+	pma.p = p;
+	pma.m = *it;
+	pma.bandwidth = 20; // "medium"
+        pma.latency = 300;  // "worse" (pessimistically assume faults)
 	runtime->add_proc_mem_affinity(pma);
       }
 
@@ -2989,6 +3023,7 @@ namespace Realm {
       , cfg_zc_mem_size(64 << 20)
       , cfg_zc_ib_size(256 << 20)
       , cfg_fb_mem_size(256 << 20)
+      , cfg_uvm_mem_size(0)
       , cfg_num_gpus(0)
       , cfg_gpu_streams(12)
       , cfg_use_worker_threads(false)
@@ -3002,6 +3037,7 @@ namespace Realm {
       , cfg_max_ctxsync_threads(4)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
+      , uvm_base(0), uvmmem(0)
     {}
       
     CudaModule::~CudaModule(void)
@@ -3085,6 +3121,7 @@ namespace Realm {
 	cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
 	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
 	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
+          .add_option_int_units("-ll:msize", m->cfg_uvm_mem_size, 'm')
 	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
 	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
 	  .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
@@ -3248,7 +3285,8 @@ namespace Realm {
 
 	Memory m = runtime->next_local_memory_id();
 	zcmem = new GPUZCMemory(m, zcmem_gpu_base, zcmem_cpu_base, 
-				cfg_zc_mem_size);
+				cfg_zc_mem_size,
+                                MemoryImpl::MKIND_ZEROCOPY, Memory::Kind::Z_COPY_MEM);
 	runtime->add_memory(zcmem);
 
 	// add the ZC memory as a pinned memory to all GPUs
@@ -3303,6 +3341,57 @@ namespace Realm {
           }
         }
       }
+
+      // a single unified (managed) memory for everybody
+      if((cfg_uvm_mem_size > 0) && !gpus.empty()) {
+	CUdeviceptr uvm_gpu_base;
+	// borrow GPU 0's context for the allocation call
+	{
+	  AutoGPUContext agc(gpus[0]);
+
+          CUresult ret = cuMemAllocManaged(&uvm_gpu_base, cfg_uvm_mem_size,
+                                           CU_MEM_ATTACH_GLOBAL);
+	  if(ret != CUDA_SUCCESS) {
+	    if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+	      log_gpu.fatal() << "unable to allocate managed memory: "
+			      << cfg_uvm_mem_size << " bytes needed (from -ll:msize)";
+	    } else {
+	      const char *errstring = "error message not available";
+#if CUDA_VERSION >= 6050
+	      cuGetErrorName(ret, &errstring);
+#endif
+	      log_gpu.fatal() << "unexpected error from cuMemAllocManaged: result=" << ret
+			      << " (" << errstring << ")";
+	    }
+	    abort();
+	  }
+        }
+
+        uvm_base = reinterpret_cast<void *>(uvm_gpu_base);
+	Memory m = runtime->next_local_memory_id();
+	uvmmem = new GPUZCMemory(m, uvm_gpu_base, uvm_base,
+                                 cfg_uvm_mem_size,
+                                 MemoryImpl::MKIND_MANAGED,
+                                 Memory::Kind::GPU_MANAGED_MEM);
+	runtime->add_memory(uvmmem);
+
+        // add the managed memory to any GPU capable of coherent access
+	for(unsigned i = 0; i < gpus.size(); i++) {
+          int concurrent_access;
+	  {
+	    AutoGPUContext agc(gpus[i]);
+            CHECK_CU( cuDeviceGetAttribute(&concurrent_access,
+                                           CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
+                                           gpus[i]->info->device) );
+          }
+
+          if(concurrent_access) {
+            gpus[i]->managed_mems.insert(uvmmem->me);
+          } else {
+            log_gpu.warning() << "GPU #" << i << " is not capable of concurrent access to managed memory!";
+	  }
+	}
+      }
     }
 
     // create any processors provided by the module (default == do nothing)
@@ -3336,9 +3425,11 @@ namespace Realm {
 	for(std::vector<MemoryImpl *>::iterator it = all_local_mems.begin();
 	    it != all_local_mems.end();
 	    it++) {
-	  // ignore FB/ZC memories or anything that doesn't have a "direct" pointer
+	  // ignore FB/ZC/managed memories or anything that doesn't have a
+          //   "direct" pointer
 	  if(((*it)->kind == MemoryImpl::MKIND_GPUFB) ||
-	     ((*it)->kind == MemoryImpl::MKIND_ZEROCOPY))
+	     ((*it)->kind == MemoryImpl::MKIND_ZEROCOPY) ||
+             ((*it)->kind == MemoryImpl::MKIND_MANAGED))
 	    continue;
 
 	  void *base = (*it)->get_direct_ptr(0, (*it)->size);
@@ -3436,6 +3527,12 @@ namespace Realm {
 	assert(!gpus.empty());
 	AutoGPUContext agc(gpus[0]);
 	CHECK_CU( cuMemFreeHost(zcib_cpu_base) );
+      }
+
+      if(uvm_base) {
+	assert(!gpus.empty());
+	AutoGPUContext agc(gpus[0]);
+	CHECK_CU( cuMemFree(reinterpret_cast<CUdeviceptr>(uvm_base)) );
       }
 
       // also unregister any host memory at this time

@@ -581,6 +581,21 @@ extern "C" {
 				 dst_device, stream) );
     return cudaSuccess;
   }
+
+  REALM_PUBLIC_API
+  cudaError_t cudaMemAdvise(const void *dev_ptr,
+                            size_t count,
+                            cudaMemoryAdvise advice,
+                            int device)
+  {
+    /*GPUProcessor *p =*/ get_gpu_or_die("cudaMemAdvise");
+
+    // NOTE: we assume the enums for cudaMeoryAdvise match the ones for
+    //  CUmem_advise
+    CHECK_CU( cuMemAdvise((CUdeviceptr)dev_ptr, count,
+                          (CUmem_advise)advice, (CUdevice)device) );
+    return cudaSuccess;
+  }
 #endif
 
   REALM_PUBLIC_API
