@@ -2063,6 +2063,7 @@ namespace Legion {
       CollectiveID post_elide_fences_collective_id;
       bool has_blocking_call;
       bool remove_trace_reference;
+      bool is_recording;
     };
 
     /**
@@ -2102,6 +2103,7 @@ namespace Legion {
       CollectiveID post_elide_fences_collective_id;
       bool replayed;
       bool has_blocking_call;
+      bool is_recording;
     };
 
     /**

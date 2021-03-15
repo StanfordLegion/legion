@@ -344,6 +344,7 @@ namespace Legion {
       PhysicalTemplate *current_template;
       bool has_blocking_call;
       bool remove_trace_reference;
+      bool is_recording;
     };
 
     /**
@@ -377,6 +378,7 @@ namespace Legion {
       PhysicalTemplate *current_template;
       bool replayed;
       bool has_blocking_call;
+      bool is_recording;
     };
 
     /**
@@ -538,7 +540,7 @@ namespace Legion {
         IndexSpaceExpression *expr;
         FieldMask mask;
 
-        std::string to_string(void) const;
+        std::string to_string(TaskContext *ctx) const;
       };
     public:
       TraceViewSet(RegionTreeForest *forest, DistributedID owner_did,
@@ -575,6 +577,7 @@ namespace Legion {
                        FailedPrecondition *condition = NULL) const;
       bool independent_of(const TraceViewSet &set,
                        FailedPrecondition *condition = NULL) const;
+      void record_first_failed(FailedPrecondition *condition = NULL) const;
       void transpose_uniquely(LegionMap<IndexSpaceExpression*,
                             FieldMaskSet<LogicalView> >::aligned &target) const;
       void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,

@@ -663,7 +663,7 @@ namespace Legion {
         op->set_trace_local_id(index);
         last_memoized = index + 1;
       }
-      if ((is_recording() || is_replaying()) &&
+      if (has_physical_trace() &&
           !op->is_internal_op() && op->get_memoizable() == NULL)
         REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
             "Invalid memoization request. Operation of type %s (UID %lld) "
@@ -1228,6 +1228,7 @@ namespace Legion {
       tracing = false;
       current_template = NULL;
       has_blocking_call = has_block;
+      is_recording = false;
       remove_trace_reference = remove_trace_ref;
     }
 
@@ -1283,6 +1284,8 @@ namespace Legion {
             get_completion_event());
         current_template = physical_trace->get_current_template();
         physical_trace->clear_cached_template();
+        // Save this since we can't read it later in the mapping stage
+        is_recording = true;
       }
     }
 
@@ -1291,7 +1294,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (local_trace->is_recording())
+      if (is_recording)
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
@@ -1375,6 +1378,7 @@ namespace Legion {
       current_template = NULL;
       replayed = false;
       has_blocking_call = has_block;
+      is_recording = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1464,6 +1468,8 @@ namespace Legion {
         physical_trace->record_previous_template_completion(completion_event);
         current_template = physical_trace->get_current_template();
         physical_trace->clear_cached_template();
+        // Save this for later since we can't read it safely in mapping stage
+        is_recording = true;
       }
       FenceOp::trigger_dependence_analysis();
     }
@@ -1492,7 +1498,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (local_trace->is_recording())
+      if (is_recording)
       {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
@@ -2162,13 +2168,42 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    std::string TraceViewSet::FailedPrecondition::to_string(void) const
+    std::string TraceViewSet::FailedPrecondition::to_string(
+                                                         TaskContext *ctx) const
     //--------------------------------------------------------------------------
     {
+      const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+          REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+        };
+      IndividualManager *manager = view->get_manager()->as_individual_manager();
+      FieldSpaceNode *field_space = manager->field_space_node;
+      Memory memory = manager->memory_manager->memory;
       char *m = mask.to_string();
+      std::vector<FieldID> fields;
+      field_space->get_field_set(mask, ctx, fields);
+
       std::stringstream ss;
-      ss << "view: " << view << ", Index expr: " << expr->expr_id
-         << ", Field Mask: " << m;
+      ss << "view: " << view << " in " << mem_names[memory.kind()]
+         << " memory " << std::hex << memory.id << std::dec
+         << ", Index expr: " << expr->expr_id
+         << ", Field Mask: " << m << ", Fields: ";
+      for (std::vector<FieldID>::const_iterator it =
+            fields.begin(); it != fields.end(); it++)
+      {
+        if (it != fields.begin())
+          ss << ", ";
+        const void *name = NULL;
+        size_t name_size = 0;
+        if (field_space->retrieve_semantic_information(LEGION_NAME_SEMANTIC_TAG,
+              name, name_size, true/*can fail*/, false/*wait until*/))
+        {
+          ss << ((const char*)name) << " (" << *it << ")";
+        }
+        else
+          ss << *it;
+      }
       return ss.str();
     }
 
@@ -2801,6 +2836,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TraceViewSet::record_first_failed(FailedPrecondition *condition) const
+    //--------------------------------------------------------------------------
+    {
+      ViewExprs::const_iterator vit = conditions.begin();
+      FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+        vit->second.begin();
+      condition->view = vit->first;
+      condition->expr = it->first;
+      condition->mask = it->second;
+    }
+
+    //--------------------------------------------------------------------------
     void TraceViewSet::transpose_uniquely(LegionMap<IndexSpaceExpression*,
                              FieldMaskSet<LogicalView> >::aligned &target) const
     //--------------------------------------------------------------------------
@@ -3396,9 +3443,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool replayable = true;
-      if ((precondition_views != NULL) && ((postcondition_views == NULL) ||
-          !precondition_views->subsumed_by(*postcondition_views, true, failed)))
+      // Note that it is ok to have precondition views and no postcondition
+      // views because that means that everything was read-only and therefore
+      // still idempotent and replayable
+      if ((precondition_views != NULL) && (postcondition_views != NULL) &&
+          !precondition_views->subsumed_by(*postcondition_views, true, failed))
       {
+        if ((failed != NULL) && (postcondition_views == NULL))
+          precondition_views->record_first_failed(failed);
         replayable = false;
         not_subsumed = true;
       }
@@ -4035,10 +4087,12 @@ namespace Legion {
           {
             if (not_subsumed)
               return Replayable(
-                  false, "precondition not subsumed: " + condition.to_string());
+                  false, "precondition not subsumed: " +
+                    condition.to_string(trace->logical_trace->ctx));
             else
               return Replayable(
-               false, "postcondition anti dependent: " + condition.to_string());
+               false, "postcondition anti dependent: " +
+                 condition.to_string(trace->logical_trace->ctx));
           }
           else
           {
