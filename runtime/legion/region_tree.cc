@@ -7120,7 +7120,7 @@ namespace Legion {
         IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
         handle(h), parent(par), index_space_ready(ready), 
-        send_references((parent != NULL) ? 1 : 0), send_count(0),
+        send_references((parent != NULL) ? 1 : 0),
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
         tight_index_space(false), tree_valid(is_owner())
@@ -7213,33 +7213,18 @@ namespace Legion {
     {
       if (is_owner())
       {
-        RtEvent wait_on;
-        {
-          AutoLock n_lock(node_lock);
+        AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
-          assert(tree_valid);
+        assert(tree_valid);
 #endif
-          tree_valid = false;
-          if (send_count > 0)
-          {
-#ifdef DEBUG_LEGION
-            assert(!send_done.exists());
-#endif
-            send_done = Runtime::create_rt_user_event();
-            wait_on = send_done;
-          }
-        }
-        // Need to make sure that any sends which have speculatively
-        // update the remote instances are actually done in case they
-        // ultimately ended up not doing their send of the node
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-        // Remove gc references from remote nodes for the root
-        if (has_remote_instances())
+        tree_valid = false;
+        // Send the invalidations
+        if ((send_references == 0) && has_remote_instances())
         {
           // Make sure invalidation are not handled before send effects
-          InvalidFunctor functor(this, mutator, (send_effects.exists() &&
-          !send_effects.has_triggered()) ? send_effects : RtEvent::NO_RT_EVENT);
+          InvalidFunctor functor(this, mutator,
+              (send_effects.exists() && !send_effects.has_triggered()) ?
+              send_effects : RtEvent::NO_RT_EVENT);
           map_over_remote_instances(functor);
           if (!functor.applied.empty())
             send_effects = Runtime::merge_events(functor.applied);
@@ -7882,6 +7867,7 @@ namespace Legion {
       bool pack_space = false;
       bool still_valid = false;
       bool has_reference = false;
+      bool add_remote_reference = false;
       // Do our check to see if we're still valid
       {
         AutoLock n_lock(node_lock);
@@ -7904,6 +7890,7 @@ namespace Legion {
         if (tree_valid && ((parent == NULL) || (send_references > 0)))
         {
           still_valid = true; 
+          add_remote_reference = true;
           // Grab a reference on the parent to keep it from being deleted
           if (parent != NULL)
           {
@@ -7918,8 +7905,13 @@ namespace Legion {
         }
         else if (above)
           return false;
-        // Record that we have an outstanding send
-        send_count++;
+        else if (tree_valid || (send_references > 0))
+        {
+          // Technically this invalid, but we still need to send a 
+          // remote reference because we haven't issued the invalidates
+          // yet so we need one to be there when it arrives
+          add_remote_reference = true;
+        }
         update_remote_instances(target);
         // Have to record this atomically with recording as a remote instance
         pack_space = realm_index_space_set.has_triggered();
@@ -7933,27 +7925,33 @@ namespace Legion {
         {
           // If this is above then we don't care about it if it
           // is not still valid
-          RtUserEvent to_trigger;
           bool remove_reference = false;
           if (has_reference)
           {
             AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
             assert(send_references > 0);
-            assert(send_count > 0);
 #endif
             remove_reference = (--send_references == 0);
-            if (((--send_count) == 0) && send_done.exists())
-            {
-              to_trigger = send_done;
-              send_done = RtUserEvent::NO_RT_USER_EVENT;
-            }
             // Remove this from the remote instances since we did
             // not actually end up sending it
             filter_remote_instances(target);
+            // Send the invalidations
+            if (remove_reference && !tree_valid && has_remote_instances())
+            {
+              // Make sure invalidation are not handled before send effects
+              LocalReferenceMutator mutator;
+              InvalidFunctor functor(this, &mutator,
+                  (send_effects.exists() && !send_effects.has_triggered()) ?
+                  send_effects : RtEvent::NO_RT_EVENT);
+              map_over_remote_instances(functor);
+              const RtEvent done = mutator.get_done_event();
+              if (done.exists())
+                functor.applied.insert(done);
+              if (!functor.applied.empty())
+                send_effects = Runtime::merge_events(functor.applied);
+            }
           }
-          if (to_trigger.exists())
-            Runtime::trigger_event(to_trigger);
           if (remove_reference && parent->remove_nested_resource_ref(did))
             delete parent;
           return false;
@@ -7961,7 +7959,6 @@ namespace Legion {
         else
           still_valid = false;
       }
-      RtUserEvent to_trigger;
       bool remove_reference = false;
       {
         AutoLock n_lock(node_lock); 
@@ -7979,7 +7976,7 @@ namespace Legion {
             rez.serialize(index_space_ready);
             rez.serialize(expr_id);
             rez.serialize(initialized);
-            rez.serialize<bool>(still_valid);
+            rez.serialize<bool>(add_remote_reference);
             if (pack_space)
               pack_index_space(rez, true/*include size*/);
             else
@@ -8002,18 +7999,23 @@ namespace Legion {
           assert(send_references > 0);
 #endif
           remove_reference = (--send_references == 0);
-        }
-#ifdef DEBUG_LEGION
-        assert(send_count > 0);
-#endif
-        if (((--send_count) == 0) && send_done.exists())
-        {
-          to_trigger = send_done;
-          send_done = RtUserEvent::NO_RT_USER_EVENT;
+          // Send the invalidations
+          if (remove_reference && !tree_valid && has_remote_instances())
+          {
+            // Make sure invalidation are not handled before send effects
+            LocalReferenceMutator mutator;
+            InvalidFunctor functor(this, &mutator,
+                (send_effects.exists() && !send_effects.has_triggered()) ?
+                send_effects : RtEvent::NO_RT_EVENT);
+            map_over_remote_instances(functor);
+            const RtEvent done = mutator.get_done_event();
+            if (done.exists())
+              functor.applied.insert(done);
+            if (!functor.applied.empty())
+              send_effects = Runtime::merge_events(functor.applied);
+          }
         }
       }
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
       if (remove_reference && parent->remove_nested_resource_ref(did))
         delete parent;
       return still_valid;
@@ -8027,6 +8029,22 @@ namespace Legion {
       {
         AutoLock n_lock(node_lock);
         remove_reference = (--send_references == 0);
+        // Send the invalidations
+        if (is_owner() && remove_reference &&
+            !tree_valid && has_remote_instances())
+        {
+          // Make sure invalidation are not handled before send effects
+          LocalReferenceMutator mutator;
+          InvalidFunctor functor(this, &mutator,
+              (send_effects.exists() && !send_effects.has_triggered()) ?
+              send_effects : RtEvent::NO_RT_EVENT);
+          map_over_remote_instances(functor);
+          const RtEvent done = mutator.get_done_event();
+          if (done.exists())
+            functor.applied.insert(done);
+          if (!functor.applied.empty())
+            send_effects = Runtime::merge_events(functor.applied);
+        }
       }
       if (remove_reference && parent->remove_nested_resource_ref(did))
         delete parent;

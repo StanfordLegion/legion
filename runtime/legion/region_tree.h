@@ -1906,14 +1906,8 @@ namespace Legion {
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
     protected:
       unsigned                  send_references;
-      // Keep track of whether we're attempting to do a send of this node
-      unsigned                  send_count;
       // An event for tracking the effects of sends
       RtEvent                   send_effects;
-      // An even to signal when we're done with all our sends that
-      // an notify_invalid call might be waiting on to check the
-      // set of remote references
-      RtUserEvent               send_done;
       // On the owner node track when the index space is set
       RtUserEvent               realm_index_space_set;
       // Keep track of whether we've tightened these bounds
