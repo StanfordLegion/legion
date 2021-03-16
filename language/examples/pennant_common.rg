@@ -46,7 +46,8 @@ do
   end
   local cxx = os.getenv('CXX') or 'c++'
 
-  local cxx_flags = "-O2 -std=c++0x -Wall -Werror"
+  local cxx_flags = os.getenv('CXXFLAGS') or ''
+  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
