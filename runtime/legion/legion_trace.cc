@@ -7591,6 +7591,7 @@ namespace Legion {
             manager->send_trace_update(nit->first, rez);
           }
           // Now we wait to see that we get all of our remote barriers updated
+          RtEvent remote_frontiers_ready;
           {
             AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
@@ -7631,11 +7632,15 @@ namespace Legion {
             if (updated_frontiers < remote_frontiers.size())
             {
               update_frontiers_ready = Runtime::create_rt_user_event();
-              replay_precondition = update_frontiers_ready;
+              remote_frontiers_ready = update_frontiers_ready;
             }
             else // Reset this back to zero for the next round
               updated_frontiers = 0;
           }
+          // Wait for the remote frontiers to be updated
+          if (remote_frontiers_ready.exists() &&
+              !remote_frontiers_ready.has_triggered())
+            remote_frontiers_ready.wait();
           // Reset this back to zero after barrier updates
           recurrent_replays = 0;
         }
