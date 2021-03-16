@@ -114,10 +114,21 @@ class LegionConsole(code.InteractiveConsole):
 
 def run_repl():
     try:
-        shell = LegionConsole()
+        localvals = dict()
+        shell = LegionConsole(localvals)
         shell.interact(banner='Welcome to Legion Python interactive console')
-    except SystemExit:
+    except (SystemExit, KeyboardInterrupt):
         pass
+    finally:
+        # Wait for execution to finish here before removing the module
+        # because executing tasks might still need to refer to it
+        future = c.legion_runtime_issue_execution_fence(
+                top_level.runtime[0], top_level.context[0])
+        # block waiting on the future
+        c.legion_future_wait(future, True, ffi.NULL)
+        c.legion_future_destroy(future)
+        del localvals
+        del shell
 
 
 def remove_all_aliases(to_delete):
