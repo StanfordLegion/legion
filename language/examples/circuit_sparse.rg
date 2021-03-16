@@ -573,7 +573,8 @@ do
   end
 end
 
-terra create_colorings(conf : Config)
+__demand(__inline)
+task create_colorings(conf : Config)
   var coloring : Colorings
   coloring.privacy_map = c.legion_point_coloring_create()
   coloring.private_node_map = c.legion_point_coloring_create()
@@ -628,7 +629,32 @@ do
 end
 
 task parse_input(conf : Config)
-  return parse_input_args(conf)
+  conf = parse_input_args(conf)
+
+  regentlib.assert(conf.num_pieces % conf.pieces_per_superpiece == 0,
+      "pieces should be evenly distributed to superpieces")
+  conf.shared_nodes_per_piece =
+    [int](ceil(conf.nodes_per_piece * conf.pct_shared_nodes / 100.0))
+  format.println("circuit settings: loops={} prune={} pieces={} (pieces/superpiece={}) nodes/piece={} (nodes/piece={}) wires/piece={} pct_in_piece={} seed={}",
+    conf.num_loops, conf.prune, conf.num_pieces, conf.pieces_per_superpiece, conf.nodes_per_piece,
+    conf.shared_nodes_per_piece, conf.wires_per_piece, conf.pct_wire_in_piece, conf.random_seed)
+
+  var num_pieces = conf.num_pieces
+  var num_circuit_nodes : uint64 = num_pieces * conf.nodes_per_piece
+  var num_circuit_wires : uint64 = num_pieces * conf.wires_per_piece
+
+  -- report mesh size in bytes
+  do
+    var node_size = [ terralib.sizeof(node) ]
+    var wire_size = [ terralib.sizeof(wire(wild,wild,wild)) ]
+    format.println("Circuit memory usage:")
+    format.println("  Nodes : {10} * {4} bytes = {12} bytes", num_circuit_nodes, node_size, num_circuit_nodes * node_size)
+    format.println("  Wires : {10} * {4} bytes = {12} bytes", num_circuit_wires, wire_size, num_circuit_wires * wire_size)
+    var total = ((num_circuit_nodes * node_size) + (num_circuit_wires * wire_size))
+    format.println("  Total                             {12} bytes", total)
+  end
+
+  return conf
 end
 
 task get_elapsed(all_times : region(timestamp))
@@ -686,14 +712,7 @@ task toplevel()
   conf.num_neighbors = 5 -- set 0 if density parameter is to be picked
   conf.window = 3 -- find neighbors among [piece_id - window, piece_id + window]
 
-  conf = parse_input_args(conf)
-  regentlib.assert(conf.num_pieces % conf.pieces_per_superpiece == 0,
-      "pieces should be evenly distributed to superpieces")
-  conf.shared_nodes_per_piece =
-    [int](ceil(conf.nodes_per_piece * conf.pct_shared_nodes / 100.0))
-  format.println("circuit settings: loops={} prune={} pieces={} (pieces/superpiece={}) nodes/piece={} (nodes/piece={}) wires/piece={} pct_in_piece={} seed={}",
-    conf.num_loops, conf.prune, conf.num_pieces, conf.pieces_per_superpiece, conf.nodes_per_piece,
-    conf.shared_nodes_per_piece, conf.wires_per_piece, conf.pct_wire_in_piece, conf.random_seed)
+  conf = parse_input(conf)
 
   var num_pieces = conf.num_pieces
   var num_superpieces = conf.num_pieces / conf.pieces_per_superpiece
@@ -703,17 +722,6 @@ task toplevel()
   var all_nodes = region(ispace(ptr, num_circuit_nodes), node)
   var all_wires = region(ispace(ptr, num_circuit_wires), wire(wild, wild, wild))
   var all_times = region(ispace(ptr, num_superpieces), timestamp)
-
-  -- report mesh size in bytes
-  do
-    var node_size = [ terralib.sizeof(node) ]
-    var wire_size = [ terralib.sizeof(wire(wild,wild,wild)) ]
-    format.println("Circuit memory usage:")
-    format.println("  Nodes : {10} * {4} bytes = {12} bytes", num_circuit_nodes, node_size, num_circuit_nodes * node_size)
-    format.println("  Wires : {10} * {4} bytes = {12} bytes", num_circuit_wires, wire_size, num_circuit_wires * wire_size)
-    var total = ((num_circuit_nodes * node_size) + (num_circuit_wires * wire_size))
-    format.println("  Total                             {12} bytes", total)
-  end
 
   var colorings = create_colorings(conf)
   var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map, ispace(ptr, 2))
@@ -747,7 +755,6 @@ task toplevel()
     end
   end
 
-  format.println("Starting main simulation loop")
   var simulation_success = true
   var steps = conf.steps
   var prune = conf.prune

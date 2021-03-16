@@ -525,7 +525,7 @@ end
 
 __demand(__inner, __replicable)
 task main()
-  var conf = common.read_config()
+  var conf = read_config()
 
   var nbloated = int2d { conf.nx, conf.ny } -- Grid size along each dimension, including border.
   var nt = int2d { conf.ntx, conf.nty } -- Number of tiles to make in each dimension.
