@@ -735,6 +735,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     # if MARCH is set in the environment, give that to cmake as BUILD_MARCH
     if 'MARCH' in env:
         cmdline.append('-DBUILD_MARCH=' + env['MARCH'])
+    # cmake before 3.16 doesn't know how to look for CUDAHOSTCXX
+    if 'CUDAHOSTCXX' in env:
+        cmdline.append('-DCMAKE_CUDA_HOST_COMPILER=' + env['CUDAHOSTCXX'])
     # last argument to cmake is the root of the tree
     cmdline.append(root_dir)
 
