@@ -13,49 +13,63 @@ variables:
 
 # Local variables (included on a case-by-case basis in each job):
 .gcc48: &gcc48
+  CC:  "gcc-4.8"
   CXX: "g++-4.8"
   F90: "gfortran-4.8"
 .gcc49: &gcc49
+  CC:  "gcc-4.9"
   CXX: "g++-4.9"
   F90: "gfortran-4.9"
 .gcc5: &gcc5
+  CC:  "gcc-5"
   CXX: "g++-5"
   F90: "gfortran-5"
 .gcc6: &gcc6
+  CC:  "gcc-6"
   CXX: "g++-6"
   F90: "gfortran-6"
 .gcc7: &gcc7
+  CC:  "gcc-7"
   CXX: "g++-7"
   F90: "gfortran-7"
 .gcc8: &gcc8
+  CC:  "gcc-8"
   CXX: "g++-8"
   F90: "gfortran-8"
 .gcc9: &gcc9
+  CC:  "gcc-9"
   CXX: "g++-9"
   F90: "gfortran-9"
 .gcc10: &gcc10
+  CC:  "gcc-10"
   CXX: "g++-10"
   F90: "gfortran-10"
 
 .clang35: &clang35
+  CC:  "clang-3.5"
   CXX: "clang++-3.5"
   F90: "gfortran-5"
 .clang38: &clang38
+  CC:  "clang-3.8"
   CXX: "clang++-3.8"
   F90: "gfortran-5"
   # clang3.8 seems to generate bad code for some newer x86 cpus
   # we have some non-AVX systems in our CI runner pool, so back up to westmere
   MARCH: "westmere"
 .clang7: &clang7
+  CC:  "clang-7"
   CXX: "clang++-7"
   F90: "gfortran-5"
 .clang8: &clang8
+  CC:  "clang-8"
   CXX: "clang++-8"
   F90: "gfortran-5"
 .clang9: &clang9
+  CC:  "clang-9"
   CXX: "clang++-9"
   F90: "gfortran-9"
 .clang10: &clang10
+  CC:  "clang-10"
   CXX: "clang++-10"
   F90: "gfortran-10"
 
