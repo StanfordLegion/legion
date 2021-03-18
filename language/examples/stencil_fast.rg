@@ -376,7 +376,7 @@ local function make_stencil(radius)
                      xp : region(ispace(int2d), point),
                      ym : region(ispace(int2d), point),
                      yp : region(ispace(int2d), point),
-                     times : region(timestamp),
+                     times : region(ispace(int1d), timestamp),
                      print_ts : bool)
   where
     reads writes(private.{input, output}, times),
@@ -451,7 +451,7 @@ task increment(private : region(ispace(int2d), point),
                xp : region(ispace(int2d), point),
                ym : region(ispace(int2d), point),
                yp : region(ispace(int2d), point),
-               times : region(timestamp),
+               times : region(ispace(int1d), timestamp),
                print_ts : bool)
 where reads writes(private.input, xm.input, xp.input, ym.input, yp.input, times) do
   [make_increment_interior(private, exterior)]
@@ -504,7 +504,7 @@ task read_config()
   return common.read_config()
 end
 
-task get_elapsed(all_times : region(timestamp))
+task get_elapsed(all_times : region(ispace(int1d), timestamp))
 where reads(all_times) do
   var start = [int64:max()]
   var stop = [int64:min()]
@@ -557,7 +557,7 @@ task main()
   var pym_out = [make_ghost_y_partition(true)](ym, tiles, n, nt, radius, 0)
   var pyp_out = [make_ghost_y_partition(true)](yp, tiles, n, nt, radius, 0)
 
-  var times = region(ispace(ptr, nt2), timestamp)
+  var times = region(ispace(int1d, nt2), timestamp)
   var p_times = partition(equal, times, ispace(int1d, nt2))
 
   fill(times.{start, stop}, 0)
