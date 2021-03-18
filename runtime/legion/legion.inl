@@ -15356,7 +15356,8 @@ namespace Legion {
                                                 typename REDOP::RHS value) const
     //--------------------------------------------------------------------------
     {
-      REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
+      REDOP::template fold<EXCLUSIVE>(
+          this->accessor[Point<1,coord_t>(0)], value);
     }
 
     //--------------------------------------------------------------------------
@@ -15365,7 +15366,8 @@ namespace Legion {
                                                 typename REDOP::RHS value) const
     //--------------------------------------------------------------------------
     {
-      REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
+      REDOP::template fold<EXCLUSIVE>(
+          this->accessor[Point<1,coord_t>(0)], value);
     }
 
 #ifdef LEGION_BOUNDS_CHECKS
@@ -20381,12 +20383,31 @@ namespace Legion {
               create_temporary_buffer<Rect<N,T> >(memory, bounds);
             Realm::AffineAccessor<size_t,1,coord_t> device_scan_volumes =
               create_temporary_buffer<size_t>(memory, scan_bounds);
+#ifdef LEGION_USE_CUDA            
             cudaMemcpyAsync(device_piece_rects.ptr(bounds.lo),
                 &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
                 cudaMemcpyHostToDevice);
             cudaMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo), 
                 &scan_volumes.front(), scan_volumes.size() * sizeof(size_t), 
                 cudaMemcpyHostToDevice);
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+            hipMemcpyAsync(device_piece_rects.ptr(bounds.lo),
+                &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
+                hipMemcpyHostToDevice, hipGetTaskStream());
+            hipMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo),
+                &scan_volumes.front(), scan_volumes.size() * sizeof(size_t),
+                hipMemcpyHostToDevice, hipGetTaskStream());
+#else
+            cudaMemcpyAsync(device_piece_rects.ptr(bounds.lo),
+                &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
+                cudaMemcpyHostToDevice, hipGetTaskStream());
+            cudaMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo),
+                &scan_volumes.front(), scan_volumes.size() * sizeof(size_t),
+                cudaMemcpyHostToDevice, hipGetTaskStream());
+#endif
+#endif
             const size_t blocks = (sum_volume + LEGION_THREADS_PER_BLOCK - 1) / 
               LEGION_THREADS_PER_BLOCK;
             // Iterate over all the fields we should handle
@@ -20420,35 +20441,112 @@ namespace Legion {
                 const Realm::AffineAccessor<typename REDOP::RHS,N,T> 
                   dst_accessor(dst_insts[fidx], dst_fields[fidx], piece_rect);
                 // Now launch the kernel
-                if (exclusive)
+                if (exclusive) {
+#ifdef LEGION_USE_CUDA
                   fold_kernel<REDOP,N,T,true>
                     <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
                     dst_accessor, src_accessor, device_piece_rects,
                     device_scan_volumes, order, sum_volume, piece_rects.size());
-                else
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+                  hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(fold_kernel<REDOP,N,T,true>), 
+                    dim3(blocks), dim3(LEGION_THREADS_PER_BLOCK), 
+                    0, hipGetTaskStream(),
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#else
+                  fold_kernel<REDOP,N,T,true>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK, 0, hipGetTaskStream()>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#endif
+                } else {
+#ifdef LEGION_USE_CUDA
                   fold_kernel<REDOP,N,T,false>
                     <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
                     dst_accessor, src_accessor, device_piece_rects,
                     device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+                  hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(fold_kernel<REDOP,N,T,false>), 
+                    dim3(blocks), dim3(LEGION_THREADS_PER_BLOCK), 
+                    0, hipGetTaskStream(),
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#else
+                  fold_kernel<REDOP,N,T,false>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK, 0, hipGetTaskStream()>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#endif
+                } 
               }
               else
               {
                 const Realm::AffineAccessor<typename REDOP::LHS,N,T> 
                   dst_accessor(dst_insts[fidx], dst_fields[fidx], piece_rect);
                 // Now launch the kernel
-                if (exclusive)
+                if (exclusive) {
+#ifdef LEGION_USE_CUDA
                   apply_kernel<REDOP,N,T,true>
                     <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
                     dst_accessor, src_accessor, device_piece_rects,
                     device_scan_volumes, order, sum_volume, piece_rects.size());
-                else
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+                  hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(apply_kernel<REDOP,N,T,true>), 
+                    dim3(blocks), dim3(LEGION_THREADS_PER_BLOCK), 
+                    0, hipGetTaskStream(),
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#else
+                  apply_kernel<REDOP,N,T,true>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK, 0, hipGetTaskStream()>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#endif 
+                } else {
+#ifdef LEGION_USE_CUDA
                   apply_kernel<REDOP,N,T,false>
                     <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
                     dst_accessor, src_accessor, device_piece_rects,
                     device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+                  hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(apply_kernel<REDOP,N,T,false>), 
+                    dim3(blocks), dim3(LEGION_THREADS_PER_BLOCK), 0, 
+                    hipGetTaskStream(),
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#else
+                  apply_kernel<REDOP,N,T,false>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK, 0, hipGetTaskStream()>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#endif 
+                }
               }
             }
           }
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+          hipStreamSynchronize(hipGetTaskStream());
+#else
+          cudaStreamSynchronize(hipGetTaskStream());
+#endif
+#endif
         }
 
         template<typename N, typename T>

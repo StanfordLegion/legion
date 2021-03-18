@@ -37,4 +37,6 @@
 
 #cmakedefine LEGION_SPY
 
+#cmakedefine LEGION_USE_HIP
+
 #cmakedefine LEGION_USE_LIBDL

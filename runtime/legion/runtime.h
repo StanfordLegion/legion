@@ -874,7 +874,7 @@ namespace Legion {
     public:
       MemoryManager& operator=(const MemoryManager &rhs);
     public:
-#ifdef LEGION_USE_CUDA
+#if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
       inline Processor get_local_gpu(void) const { return local_gpu; }
 #endif
     public:
@@ -1057,7 +1057,7 @@ namespace Legion {
       std::map<uintptr_t,size_t> allocations;
       std::map<RtEvent,uintptr_t> pending_collectables;
 #endif
-#ifdef LEGION_USE_CUDA
+#if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
       Processor local_gpu;
 #endif
     };

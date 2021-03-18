@@ -40,6 +40,9 @@
 #ifdef LEGION_USE_CUDA
 #include <cuda.h>
 #endif
+#ifdef LEGION_USE_HIP
+#include <hip/hip_runtime.h>
+#endif
 #endif
 
 #define REPORT_DUMMY_CONTEXT(message)                        \
@@ -4179,7 +4182,7 @@ namespace Legion {
         capacity(m.capacity()), remaining_capacity(capacity), runtime(rt)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_USE_CUDA
+#if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
       if (memory.kind() == Memory::GPU_FB_MEM)
       {
         Machine::ProcessorQuery finder(runtime->machine);
@@ -7260,6 +7263,56 @@ namespace Legion {
             break;
           }
 #endif
+#ifdef LEGION_USE_HIP
+        case Z_COPY_MEM:
+        case GPU_FB_MEM:
+          {
+            if (needs_deferral)
+            {
+              MallocInstanceArgs args(this, footprint, &result);
+              const RtEvent wait_on =
+                runtime->issue_application_processor_task(args,
+                  LG_LATENCY_WORK_PRIORITY, local_gpu);
+              if (wait_on.exists() && !wait_on.has_triggered())
+                wait_on.wait();
+              return result;
+            }
+            else
+            {
+              // Use the driver API here to avoid the CUDA hijack
+              if (memory.kind() == Memory::GPU_FB_MEM)
+              {
+                hipDeviceptr_t ptr;
+                if (hipMalloc((void **)&ptr, footprint) == hipSuccess)
+                  result = (uintptr_t)ptr;
+                else
+                  result = 0;
+              }
+              else
+              {
+                void *ptr = NULL;
+                if (hipHostMalloc(&ptr, footprint, hipHostMallocPortable |
+                      hipHostMallocMapped) == hipSuccess)
+                {
+                  result = (uintptr_t)ptr;
+                  // Check that the device pointer is the same as the host
+                  hipDeviceptr_t gpuptr;
+                  if (hipHostGetDevicePointer((void **)&gpuptr,ptr,0)
+                        == hipSuccess)
+                  {
+                    if (ptr != (void*)gpuptr)
+                      result = 0;
+                  }
+                  else
+                    result = 0;
+                }
+                else
+                  result = 0;
+              }
+            }
+            break;
+          }
+#endif
         default:
           REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
               "Unsupported memory kind for LEGION_MALLOC_INSTANCES %d",
@@ -7331,7 +7384,7 @@ namespace Legion {
           if (finder == pending_collectables.end())
           {
             FreeInstanceArgs args(this, ptr);
-#ifdef LEGION_USE_CUDA
+#if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
             if (local_gpu.exists())
               runtime->issue_application_processor_task(args, LG_LOW_PRIORITY, 
                                                         local_gpu, defer);
@@ -7391,6 +7444,35 @@ namespace Legion {
                 cuMemFree((CUdeviceptr)ptr);
               else
                 cuMemFreeHost((void*)ptr);
+            }
+            break;
+          }
+#endif
+#ifdef LEGION_USE_HIP
+        case Z_COPY_MEM:
+        case GPU_FB_MEM:
+          {
+            if (needs_defer)
+            {
+              // Put the allocation back in for when we go to look
+              // for it on the second pass
+              {
+                AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+                assert(allocations.find(ptr) == allocations.end());
+#endif
+                allocations[ptr] = size;
+              }
+              FreeInstanceArgs args(this, ptr);
+              runtime->issue_application_processor_task(args, LG_LOW_PRIORITY,
+                                                        local_gpu, defer);
+            }
+            else
+            {
+              if (memory.kind() == Memory::GPU_FB_MEM)
+                hipFree((void*)ptr);
+              else
+                hipHostFree((void*)ptr);
             }
             break;
           }
@@ -24526,7 +24608,8 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
 #ifdef DEBUG_LEGION
       assert(userlen == sizeof(Runtime**));
-#if !defined(LEGION_MALLOC_INSTANCES) && !defined(LEGION_USE_CUDA)
+#if (!defined(LEGION_MALLOC_INSTANCES) && !defined(LEGION_USE_CUDA)) || \
+      (!defined(LEGION_MALLOC_INSTANCES) && !defined(LEGION_USE_HIP))
       // Meta-tasks can run on application processors only when there
       // are no utility processors for us to use
       if (!runtime->local_utils.empty())

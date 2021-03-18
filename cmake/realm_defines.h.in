@@ -28,6 +28,9 @@
 #cmakedefine REALM_USE_CUDA
 #cmakedefine REALM_USE_CUDART_HIJACK
 
+#cmakedefine REALM_USE_HIP
+#cmakedefine REALM_USE_HIP_HIJACK
+
 #cmakedefine REALM_USE_KOKKOS
 
 #cmakedefine REALM_USE_GASNET1
