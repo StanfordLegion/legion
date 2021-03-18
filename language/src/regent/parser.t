@@ -54,7 +54,9 @@ function parser.annotation_values(p)
 end
 
 function parser.annotation_name(p, required)
-  if p:nextif("__cuda") then
+  if p:nextif("__constant_time_launch") then
+    return "constant_time_launch"
+  elseif p:nextif("__cuda") then
     local values = p:annotation_values()
     return "cuda", values
   elseif p:nextif("__external") then

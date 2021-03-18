@@ -1117,8 +1117,12 @@ function pretty.stat_index_launch_num(cx, node)
   local values = pretty.expr_list(cx, node.values)
   local cx = cx:new_local_scope()
   cx:record_var(node, node.symbol)
+  local ctl = "(linear time launch)"
+  if node.is_constant_time then
+    ctl = "(constant time launch)"
+  end
   result:insert(join({"for", cx:print_var(node.symbol), "=", values,
-                      "do -- index launch"}, true))
+                      "do -- index launch", ctl}, true))
   local call = pretty.expr(cx, node.call)
   if node.reduce_op then
     call = join({pretty.expr(cx, node.reduce_lhs), node.reduce_op .. "=", call}, true)
@@ -1137,8 +1141,12 @@ function pretty.stat_index_launch_list(cx, node)
   local value = pretty.expr(cx, node.value)
   local cx = cx:new_local_scope()
   cx:record_var(node, node.symbol)
+  local ctl = "(linear time launch)"
+  if node.is_constant_time then
+    ctl = "(constant time launch)"
+  end
   result:insert(join({"for", cx:print_var(node.symbol), "in", value,
-                      "do -- index launch"}, true))
+                      "do -- index launch", ctl}, true))
   local call = pretty.expr(cx, node.call)
   if node.reduce_op then
     call = join({pretty.expr(cx, node.reduce_lhs), node.reduce_op .. "=", call}, true)

@@ -3,10 +3,20 @@ attempt is made to keep this list accurate for the master branch.
 
 Version ??.??.? (???? ??, ????)
   * Regent
-    - Breaking change to the Regent calling convention: reductions are
-        now aggregated into region requirements and sorted by the
-        index of the first field in the field space among the set of
-        fields for each reduction.
+    - Contains three breaking changes to the Regent calling convention:
+      - Reductions are now aggregated into region requirements and
+          sorted by the index of the first field in the field space
+          among the set of fields for each reduction.
+      - Task arguments may be passed through either `args` or
+          `local_args` for index launched tasks. (Previously Regent
+          only used `local_args`.)
+      - Region values passed via `args` to an index-launched task may
+          be *bogus*. Instead the region requirement should be used to
+          obtain the original region.
+    - Support for constant time index launches. These are enabled
+        automatically, but can be forced on or off with `__demand` or
+        `__forbid` with `__constant_time_launches`. This should
+        improve scalability at extreme node counts.
     - Experimental support for separate compilation via `-fspeparate 1`
         allows Regent programs to be compiled in parts (potentially in
         parallel). Note that separate compilation currently cannot be

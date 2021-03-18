@@ -418,7 +418,8 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # HTR
     # Contact: Mario Di Renzo <direnzo.mario1@gmail.com>
     htr_dir = os.path.join(tmp_dir, 'htr')
-    cmd(['git', 'clone', 'https://github.com/stanfordhpccenter/HTR-solver.git', htr_dir])
+    # cmd(['git', 'clone', 'https://github.com/stanfordhpccenter/HTR-solver.git', htr_dir])
+    cmd(['git', 'clone', '-b', 'legion-ci', 'git@gitlab.com:mario.direnzo/Prometeo.git', htr_dir])
     htr_env = dict(list(env.items()) + [
         ('LEGION_DIR', root_dir),
         ('LD_LIBRARY_PATH', os.path.join(root_dir, 'bindings', 'regent')),
@@ -743,6 +744,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     # if MARCH is set in the environment, give that to cmake as BUILD_MARCH
     if 'MARCH' in env:
         cmdline.append('-DBUILD_MARCH=' + env['MARCH'])
+    # cmake before 3.16 doesn't know how to look for CUDAHOSTCXX
+    if 'CUDAHOSTCXX' in env:
+        cmdline.append('-DCMAKE_CUDA_HOST_COMPILER=' + env['CUDAHOSTCXX'])
     # last argument to cmake is the root of the tree
     cmdline.append(root_dir)
 

@@ -2899,6 +2899,13 @@ extern "C" {
                                            legion_phase_barrier_t bar);
 
   /**
+   * @see Legion::TaskLauncher::argument
+   */
+  void
+  legion_task_launcher_set_argument(legion_task_launcher_t launcher,
+                                    legion_task_argument_t arg);
+
+  /**
    * @see Legion::TaskLauncher::point
    */
   void
@@ -3216,6 +3223,13 @@ extern "C" {
   void
   legion_index_launcher_add_point_future(legion_index_launcher_t launcher,
                                          legion_argument_map_t map);
+
+  /**
+   * @see Legion::IndexTaskLauncher::global_arg
+   */
+  void
+  legion_index_launcher_set_global_arg(legion_index_launcher_t launcher,
+                                       legion_task_argument_t global_arg);
 
   /**
    * @see Legion::IndexTaskLauncher::sharding_space

@@ -3449,6 +3449,16 @@ legion_task_launcher_add_arrival_barrier(legion_task_launcher_t launcher_,
 }
 
 void
+legion_task_launcher_set_argument(legion_task_launcher_t launcher_,
+                                  legion_task_argument_t arg_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  TaskArgument arg = CObjectWrapper::unwrap(arg_);
+
+  launcher->argument = arg;
+}
+
+void
 legion_task_launcher_set_point(legion_task_launcher_t launcher_,
                                legion_domain_point_t point_)
 {
@@ -3918,6 +3928,16 @@ legion_index_launcher_add_point_future(legion_index_launcher_t launcher_,
   ArgumentMap *map = CObjectWrapper::unwrap(map_);
 
   launcher->point_futures.push_back(*map);
+}
+
+void
+legion_index_launcher_set_global_arg(legion_index_launcher_t launcher_,
+                                     legion_task_argument_t global_arg_)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  TaskArgument global_arg = CObjectWrapper::unwrap(global_arg_);
+
+  launcher->global_arg = global_arg;
 }
 
 void

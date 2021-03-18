@@ -12,42 +12,34 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-ll:cpu", "4"]]
+-- fails-with:
+-- optimize_index_launch_list_ctl3.rg:42: constant time launch failed: argument 4 is not provably projectable or invariant
+--     f(r, 0, j, j+m+2)
+--      ^
 
 import "regent"
 
-local c = regentlib.c
-
-task g(s : region(int), z : int)
-where reads(s), writes(s) do
-  for y in s do
-    @y += @y * z
-  end
+task f(r : region(ispace(int1d), int), x : int, y : int, z : int)
+where reads(r) do
 end
 
-task k() : int
-  var r = region(ispace(ptr, 1), int)
-  var s = region(ispace(ptr, 3), int)
-
-  var p = partition(equal, s, ispace(int1d, 3))
-
-  r[0] = 1
-  s[0] = 200
-  s[1] = 30000
-  s[2] = 4000000
-
-  must_epoch
-    __demand(__index_launch)
-    for i = 0, 3 do
-      g(p[i], 20)
-    end
-    g(r, 10)
-  end
-  return r[0] + s[0] + s[1] + s[2]
+task g(r : region(ispace(int1d), int), x : int, y : int, z : int)
+where reads writes(r) do
 end
 
 task main()
-  regentlib.assert(k() == 84634211, "test failed")
+  var r = region(ispace(int1d, 10), int)
+  var is = ispace(int1d, 4)
+  var p = partition(equal, r, is)
+  fill(r, 0)
+
+  var j = 2
+  var k = 3
+
+  __demand(__constant_time_launch)
+  for i in is do
+    var m = i+j+2
+    f(r, 0, j, j+m+2)
+  end
 end
 regentlib.start(main)
