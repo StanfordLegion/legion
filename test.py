@@ -410,12 +410,16 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     # Contact: Mario Di Renzo <direnzo.mario1@gmail.com>
     htr_dir = os.path.join(tmp_dir, 'htr')
     # cmd(['git', 'clone', 'https://github.com/stanfordhpccenter/HTR-solver.git', htr_dir])
+    # NOTE: the legion-ci branch currently requires g++ (not clang) to build and
+    #  is REALLY slow unless you set DEBUG=0
     cmd(['git', 'clone', '-b', 'legion-ci', 'git@gitlab.com:mario.direnzo/Prometeo.git', htr_dir])
     htr_env = dict(list(env.items()) + [
         ('LEGION_DIR', root_dir),
         ('LD_LIBRARY_PATH', os.path.join(root_dir, 'bindings', 'regent')),
         ('HTR_DIR', htr_dir),
         ('CC', 'gcc'),
+        ('CXX', 'g++'),
+        ('DEBUG', '0'),
     ])
     cmd(['python3', os.path.join(htr_dir, 'unitTests', 'testAll.py')], env=htr_env)
 
