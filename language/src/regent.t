@@ -50,6 +50,7 @@ local language = {
     "extern",
     "fspace",
     "rexpr",
+    "remit",
     "rquote",
     "task",
   },
@@ -142,6 +143,7 @@ local language = {
     "reduces",
     "relaxed",
     "release",
+    "rescape",
     "region",
     "restrict",
     "simultaneous",
@@ -159,11 +161,11 @@ function language:expression(lex)
 end
 
 function language:statement(lex)
-  return passes.entry_stat(lex)
+  return passes.entry_stat(lex, false)
 end
 
 function language:localstatement(lex)
-  return passes.entry_stat(lex)
+  return passes.entry_stat(lex, true)
 end
 
 return language
