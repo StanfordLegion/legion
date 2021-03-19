@@ -28,7 +28,11 @@ def test(root_dir, install_only, debug, max_dim, short, no_pretty,
         # assumes we only need one core/test (it's really 2+) and that there's
         # no cpu core restrictions (which can happen if multiple test runners share
         # a single physical node), so do the math ourselves
-        num_cores = len(os.sched_getaffinity(0))
+        try:
+            num_cores = len(os.sched_getaffinity(0))
+        except AttributeError:
+            # macos doesn't have sched_getaffinity
+            num_cores = multiprocessing.cpu_count()
         install_threads = ['-j', str(num_cores)]
         # assume a non-empty LAUNCHER means we're running 2 processes/test
         if env.get('LAUNCHER'):
