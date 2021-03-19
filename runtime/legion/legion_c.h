@@ -2083,6 +2083,14 @@ extern "C" {
   legion_region_requirement_destroy(legion_region_requirement_t handle);
 
   /**
+   * @see Legion::RegionRequirement::add_field()
+   */
+  void
+  legion_region_requirement_add_field(legion_region_requirement_t handle,
+                                      legion_field_id_t field,
+                                      bool instance_field);
+
+  /**
    * @see Legion::RegionRequirement::add_flags
    */
   void

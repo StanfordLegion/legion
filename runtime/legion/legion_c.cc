@@ -2440,6 +2440,14 @@ legion_region_requirement_destroy(legion_region_requirement_t handle_)
 }
 
 void
+legion_region_requirement_add_field(legion_region_requirement_t req_,
+                                    legion_field_id_t field,
+                                    bool instance)
+{
+  CObjectWrapper::unwrap(req_)->add_field(field, instance);
+}
+
+void
 legion_region_requirement_add_flags(legion_region_requirement_t req_,
                                     legion_region_flags_t flags)
 {
