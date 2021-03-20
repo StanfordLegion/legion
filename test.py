@@ -868,7 +868,12 @@ def run_tests(test_modules=None,
               timelimit=None,
               verbose=False):
     if thread_count is None:
-        thread_count = multiprocessing.cpu_count()
+        try:
+            # this correctly considers the current affinity mask
+            thread_count = len(os.sched_getaffinity(0))
+        except AttributeError:
+            # this works on macos
+            thread_count = multiprocessing.cpu_count()
 
     if root_dir is None:
         root_dir = os.path.dirname(os.path.realpath(__file__))

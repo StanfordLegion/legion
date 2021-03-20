@@ -409,7 +409,12 @@ def install(gasnet=False, cuda=False, openmp=False, python=False, llvm=False, hd
         raise Exception('Cannot clean a pre-existing build directory')
 
     if thread_count is None:
-        thread_count = multiprocessing.cpu_count()
+        try:
+            # this correctly considers the current affinity mask
+            thread_count = len(os.sched_getaffinity(0))
+        except AttributeError:
+            # this works on macos
+            thread_count = multiprocessing.cpu_count()
 
     # Grab LG_RT_DIR from the environment if available, otherwise
     # assume we're running relative to our own location.

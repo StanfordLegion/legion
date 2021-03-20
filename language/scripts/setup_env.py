@@ -388,7 +388,12 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         prefix_dir = os.path.abspath(prefix_dir)
 
     if thread_count is None:
-        thread_count = multiprocessing.cpu_count()
+        try:
+            # this correctly considers the current affinity mask
+            thread_count = len(os.sched_getaffinity(0))
+        except AttributeError:
+            # this works on macos
+            thread_count = multiprocessing.cpu_count()
 
     gasnet_release_dir = None
     conduit = None
