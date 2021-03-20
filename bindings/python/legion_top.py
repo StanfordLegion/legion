@@ -22,7 +22,6 @@ import os
 import sys
 import code
 import types
-import atexit
 import struct
 import readline
 import threading
@@ -97,6 +96,7 @@ class LegionConsole(code.InteractiveConsole):
                  histfile = os.path.expanduser('~/.python-history')):
         code.InteractiveConsole.__init__(self, locals, filename)
         self.init_history(histfile)
+        self.histfile = histfile
 
     def init_history(self, histfile):
         readline.parse_and_bind('tab: complete')
@@ -105,21 +105,21 @@ class LegionConsole(code.InteractiveConsole):
                 readline.read_history_file(histfile)
             except FileNotFoundError:
                 pass
-            atexit.register(self.save_history, histfile)
 
-    def save_history(self, histfile):
+    def save_history(self):
         readline.set_history_length(10000)
-        readline.write_history_file(histfile)
+        readline.write_history_file(self.histfile)
 
 
 def run_repl():
     try:
-        localvals = dict()
-        shell = LegionConsole(localvals)
+        shell = LegionConsole()
         shell.interact(banner='Welcome to Legion Python interactive console')
     except (SystemExit, KeyboardInterrupt):
         pass
     finally:
+        # Save the history
+        shell.save_history()
         # Wait for execution to finish here before removing the module
         # because executing tasks might still need to refer to it
         future = c.legion_runtime_issue_execution_fence(
@@ -127,7 +127,6 @@ def run_repl():
         # block waiting on the future
         c.legion_future_wait(future, True, ffi.NULL)
         c.legion_future_destroy(future)
-        del localvals
         del shell
 
 
