@@ -4090,7 +4090,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartNode* RegionTreeForest::get_node(IndexPartition part,
-                     RtEvent *defer/* = NULL*/, const bool can_fail/* = false*/)
+                                              RtEvent *defer/* = NULL*/, 
+                                              const bool can_fail/* = false*/,
+                                              const bool local_only/* = false*/)
     //--------------------------------------------------------------------------
     {
       if (!part.exists())
@@ -4125,7 +4127,8 @@ namespace Legion {
       }
       // Couldn't find it, so send a request to the owner node
       AddressSpace owner = IndexPartNode::get_owner_space(part, runtime);
-      if (owner == runtime->address_space)
+      // If we only want to do the test locally then return the result too
+      if ((owner == runtime->address_space) || local_only)
       {
         if (can_fail)
           return NULL;
@@ -8079,7 +8082,8 @@ namespace Legion {
 
       IndexPartNode *parent_node = NULL;
       if (parent != IndexPartition::NO_PART)
-        parent_node = context->get_node(parent, NULL, true/*can fail*/);
+        parent_node = context->get_node(parent, NULL/*defer*/,
+                        true/*can fail*/, true/*local only*/);
       IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
           false/*is domain*/, parent_node, color, did, initialized,
           ready_event, expr_id, NULL/*applied*/, is_remote_valid);
