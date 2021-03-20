@@ -45,6 +45,38 @@ if(Legion_USE_CUDA AND NOT Legion_CUDA_NVCC_FLAGS_SET)
   set(Legion_CUDA_NVCC_FLAGS_SET ON)
 endif()
 
+# HIP is only a private dependency of Legion but has a few usage requirements
+# so we add it in here
+set(Legion_USE_HIP @Legion_USE_HIP@)
+if(Legion_USE_HIP)
+  set(Legion_HIP_TARGET @Legion_HIP_TARGET@)
+  find_package(HIP REQUIRED)
+endif()
+
+if(Legion_USE_HIP AND Legion_HIP_TARGET STREQUAL "CUDA" AND NOT Legion_HIP_HIPCC_FLAGS_SET)
+  # CUDA has some issues propogating target interface properties so we
+  # have to extract them from the target and manually add them to the nvcc
+  # flags
+  set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_OPTIONS>)
+  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${PROP}")
+  set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_DEFINITIONS>)
+  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-D$<JOIN:${PROP}, -D>>")
+  set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_INCLUDE_DIRECTORIES>)
+  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
+  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} @HIPCC_FLAGS@")
+
+  # Make sure we don't get duplicates
+  set(Legion_HIP_HIPCC_FLAGS_SET ON)
+endif()
+
+if(Legion_USE_HIP AND Legion_HIP_TARGET STREQUAL "ROCM" AND NOT Legion_HIP_HIPCC_FLAGS_SET)
+  # flags
+  set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} @HIPCC_FLAGS@ @HIP_GENCODE@")
+
+  # Make sure we don't get duplicates
+  set(Legion_HIP_HIPCC_FLAGS_SET ON)
+endif()
+
 # HWLOC is a private dependency and only needs to be pulled in for static
 # builds
 set(Legion_USE_HWLOC @Legion_USE_HWLOC@)

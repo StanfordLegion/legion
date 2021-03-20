@@ -86,6 +86,19 @@ if(Legion_USE_CUDA)
   endif()
 endif()
 
+if(Legion_USE_HIP)
+  list(APPEND REALM_SRC
+    realm/hip/hip_module.h    realm/hip/hip_module.cc
+    realm/hip/hip_internal.h  realm/hip/hip_internal.cc
+		realm/hip/hiphijack_api.h
+  )
+  if(REALM_USE_HIP_HIJACK)
+    list(APPEND REALM_SRC
+      realm/hip/hip_hijack.h
+    )
+  endif()
+endif()
+
 if(Legion_USE_LLVM)
   list(APPEND REALM_SRC
     realm/llvmjit/llvmjit.h
@@ -431,6 +444,37 @@ if(Legion_USE_CUDA)
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
 endif()
 
+if(Legion_USE_HIP)
+  if (Legion_HIP_TARGET STREQUAL "CUDA")
+    if(REALM_USE_HIP_HIJACK)
+      target_sources(RealmRuntime PRIVATE realm/hip/hip_hijack.cc)
+      set(CUDA_LIBRARIES ${CUDA_LIBRARIES} PARENT_SCOPE)
+    endif()
+
+    target_include_directories(RealmRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
+    target_include_directories(RealmRuntime PRIVATE ${HIP_ROOT_DIR}/include)
+    target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
+    # for backwards compatibility in applications
+    target_compile_definitions(RealmRuntime INTERFACE USE_HIP)
+  
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__HIP_PLATFORM_NVCC__")
+  endif()
+
+  if (Legion_HIP_TARGET STREQUAL "ROCM")
+    if(REALM_USE_HIP_HIJACK)
+      target_sources(RealmRuntime PRIVATE realm/hip/hip_hijack.cc)
+    endif()
+
+    set(HIP_LIBRARIES ${HIP_ROOT_DIR}/lib/libamdhip64.so)
+    target_include_directories(RealmRuntime PRIVATE ${HIP_ROOT_DIR}/include ${HIP_ROOT_DIR}/../include)
+    target_link_libraries(RealmRuntime PRIVATE ${HIP_LIBRARIES})
+    # for backwards compatibility in applications
+    target_compile_definitions(RealmRuntime INTERFACE USE_HIP)
+
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__HIP_PLATFORM_HCC__")
+  endif()
+endif()
+
 # fetches a specified property list from the target, performs per-element
 #  replacement of the items in the list, and then write the list back to
 #  the target's property
@@ -630,6 +674,23 @@ if(Legion_USE_CUDA AND Legion_GPU_REDUCTIONS)
   )
 endif()
 
+if(Legion_USE_HIP AND Legion_GPU_REDUCTIONS)
+  if (Legion_HIP_TARGET STREQUAL "CUDA")
+    list(APPEND LEGION_HIP_SRC
+      legion/legion_redop.cu
+    )
+  endif()
+  if (Legion_HIP_TARGET STREQUAL "ROCM")
+    list(APPEND HIP_CUDA_SRC
+      legion/legion_redop.cu
+    )
+    hipify_cuda_file(HIP_HIPIFY_SRC ${HIP_CUDA_SRC})
+    list(APPEND LEGION_HIP_SRC
+      ${HIP_HIPIFY_SRC}
+    )
+  endif()
+endif()
+
 # generate per-dimension object files for deppart stuff
 foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
   # echo -e is not portable, so use perl and try to limit the escape
@@ -693,6 +754,54 @@ if(LEGION_CUDA_SRC)
     target_include_directories(LegionRuntime PUBLIC ${CUDA_INCLUDE_DIRS})
   endif()
 endif()
+
+if(LEGION_HIP_SRC)
+  if (Legion_HIP_TARGET STREQUAL "CUDA")
+    if("${Legion_CUDA_ARCH}" STREQUAL "")
+      set(CUDA_GENCODE "")
+    else()
+      string(REPLACE "," ";" CUDA_GENCODE "${Legion_CUDA_ARCH}")
+      string(REGEX REPLACE "([0-9]+)" "-gencode arch=compute_\\1,code=sm_\\1" CUDA_GENCODE "${CUDA_GENCODE}")
+    endif()
+    # starting with NVCC 10.2, we can error out on all warnings
+    if(Legion_BUILD_WARN_AS_ERROR AND CUDA_VERSION VERSION_GREATER "10.1")
+      set(CUDA_WARNINGS "-Werror all-warnings")
+    else()
+      set(CUDA_WARNINGS "")
+    endif()
+    cuda_compile(LEGION_HIP_OBJS ${LEGION_HIP_SRC} OPTIONS
+      -Xcudafe "--diag_suppress=boolean_controlling_expr_is_constant"
+      ${CUDA_WARNINGS}
+      ${CUDA_GENCODE}
+      ${HIPCC_FLAGS}
+      -I ${CMAKE_CURRENT_SOURCE_DIR}
+      -I ${PROJECT_BINARY_DIR}/runtime
+      -Xcompiler -fPIC
+      DEBUG -g
+      RELEASE -O2
+      RELWITHDEBINFO -g -O2)
+    target_sources(LegionRuntime PRIVATE ${LEGION_HIP_OBJS})
+    target_link_libraries(LegionRuntime PUBLIC ${CUDA_LIBRARIES})
+  endif()
+
+  if (Legion_HIP_TARGET STREQUAL "ROCM")
+    set(HIP_LIBRARIES ${HIP_ROOT_DIR}/lib/libamdhip64.so)
+    set_source_files_properties(${LEGION_HIP_SRC} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+    hip_compile(LEGION_HIP_OBJS ${LEGION_HIP_SRC} HCC_OPTIONS
+      ${HIPCC_FLAGS}
+      ${HIP_GENCODE}
+      -I ${CMAKE_CURRENT_SOURCE_DIR}
+      -I ${CMAKE_CURRENT_SOURCE_DIR}/legion
+      -I ${PROJECT_BINARY_DIR}/runtime
+      -fPIC
+      DEBUG -g
+      RELEASE -O2
+      RELWITHDEBINFO -g -O2)
+    target_sources(LegionRuntime PRIVATE ${LEGION_HIP_OBJS})
+    target_link_libraries(LegionRuntime PUBLIC ${HIP_LIBRARIES})
+  endif()
+endif()
+
 target_link_libraries(LegionRuntime PUBLIC RealmRuntime)
 if(Legion_USE_ZLIB)
   target_link_libraries(LegionRuntime PRIVATE ZLIB::ZLIB)

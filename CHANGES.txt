@@ -17,6 +17,8 @@ Version ??.??.? (???? ??, ????)
         automatically, but can be forced on or off with `__demand` or
         `__forbid` with `__constant_time_launches`. This should
         improve scalability at extreme node counts.
+    - Support for `rescape` and `remit` to generate metaprogrammed
+      code more easily.
     - Experimental support for separate compilation via `-fspeparate 1`
         allows Regent programs to be compiled in parts (potentially in
         parallel). Note that separate compilation currently cannot be

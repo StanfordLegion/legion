@@ -44,6 +44,9 @@
 #ifdef REALM_USE_CUDA
 #include "realm/cuda/cuda_module.h"
 #endif
+#ifdef REALM_USE_HIP
+#include "realm/hip/hip_module.h"
+#endif
 #ifdef REALM_USE_LLVM
 #include "realm/llvmjit/llvmjit_module.h"
 #endif

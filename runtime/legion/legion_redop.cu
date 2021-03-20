@@ -13,6 +13,12 @@
  * limitations under the License.
  */
 
+#include"realm_defines.h"
+
+#ifdef REALM_USE_HIP
+#include "realm/hip/hiphijack_api.h"
+#endif
+
 #include <map>
 #include "legion.h"
 #include "legion_types.h"

@@ -2086,15 +2086,15 @@ namespace Legion {
         Tester(void) : M(0) { }
         Tester(const DomainT<N,T> b) 
           : bounds(b), M(N), has_source(false), 
-            has_transform(false), gpu_warning(true) { }
+            has_transform(false) { }
         Tester(const DomainT<N,T> b, const Rect<N,T> s)
           : bounds(b), source(s), M(N), has_source(true), 
-            has_transform(false), gpu_warning(true) { }
+            has_transform(false) { }
         template<int M2>
         Tester(const DomainT<M2,T> b,
                const AffineTransform<M2,N,T> t) 
           : bounds(b), transform(t), M(M2), has_source(false), 
-            has_transform(!t.is_identity()), gpu_warning(true)
+            has_transform(!t.is_identity())
         { 
           LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM,
               "Accessor DIM larger than LEGION_MAX_DIM");
@@ -2103,7 +2103,7 @@ namespace Legion {
         Tester(const DomainT<M2,T> b, const Rect<N,T> s,
                const AffineTransform<M2,N,T> t) 
           : bounds(b), transform(t), source(s), M(M2), has_source(true), 
-            has_transform(!t.is_identity()), gpu_warning(true)
+            has_transform(!t.is_identity())
         { 
           LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM,
               "Accessor DIM larger than LEGION_MAX_DIM");
@@ -2115,8 +2115,7 @@ namespace Legion {
           if (has_source && !source.contains(p))
             return false;
 #ifdef __CUDA_ARCH__
-          if (gpu_warning)
-            check_gpu_warning();
+          check_gpu_warning();
           // Note that in CUDA this function is likely being inlined
           // everywhere and we can't afford to instantiate templates
           // for every single dimension so do things untyped
@@ -2158,8 +2157,7 @@ namespace Legion {
           if (has_source && !source.contains(r))
             return false;
 #ifdef __CUDA_ARCH__
-          if (gpu_warning)
-            check_gpu_warning();
+          check_gpu_warning();
           // Note that in CUDA this function is likely being inlined
           // everywhere and we can't afford to instantiate templates
           // for every single dimension so do things untyped
@@ -2212,7 +2210,6 @@ namespace Legion {
           bool need_warning = !bounds.dense();
           if (need_warning)
             printf("WARNING: GPU bounds check is imprecise!\n");
-          gpu_warning = false;
 #endif
         }
       private:
@@ -2222,7 +2219,6 @@ namespace Legion {
         int M;
         bool has_source;
         bool has_transform;
-        mutable bool gpu_warning;
       };
     };
 
@@ -10623,7 +10619,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::AffineAccessor<FT,N,T> accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<N,T> region_bounds[MR];
@@ -11124,7 +11120,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::AffineAccessor<FT,1,T> accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<1,T> region_bounds[MR];
@@ -11601,7 +11597,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::AffineAccessor<FT,N,T> accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<N,T> region_bounds[MR];
@@ -12068,7 +12064,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::AffineAccessor<FT,1,T> accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<1,T> region_bounds[MR];
@@ -12438,7 +12434,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::AffineAccessor<FT,N,T> accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -12795,7 +12791,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::AffineAccessor<FT,1,T> accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -13127,7 +13123,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<N,T> region_bounds[MR];
@@ -13446,7 +13442,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<1,T> region_bounds[MR];
@@ -13743,7 +13739,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<N,T> region_bounds[MR];
@@ -14026,7 +14022,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<1,T> region_bounds[MR];
@@ -14240,7 +14236,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -14437,7 +14433,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -15360,7 +15356,8 @@ namespace Legion {
                                                 typename REDOP::RHS value) const
     //--------------------------------------------------------------------------
     {
-      REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
+      REDOP::template fold<EXCLUSIVE>(
+          this->accessor[Point<1,coord_t>(0)], value);
     }
 
     //--------------------------------------------------------------------------
@@ -15369,7 +15366,8 @@ namespace Legion {
                                                 typename REDOP::RHS value) const
     //--------------------------------------------------------------------------
     {
-      REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
+      REDOP::template fold<EXCLUSIVE>(
+          this->accessor[Point<1,coord_t>(0)], value);
     }
 
 #ifdef LEGION_BOUNDS_CHECKS
@@ -20481,12 +20479,31 @@ namespace Legion {
               create_temporary_buffer<Rect<N,T> >(memory, bounds);
             Realm::AffineAccessor<size_t,1,coord_t> device_scan_volumes =
               create_temporary_buffer<size_t>(memory, scan_bounds);
+#ifdef LEGION_USE_CUDA            
             cudaMemcpyAsync(device_piece_rects.ptr(bounds.lo),
                 &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
                 cudaMemcpyHostToDevice);
             cudaMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo), 
                 &scan_volumes.front(), scan_volumes.size() * sizeof(size_t), 
                 cudaMemcpyHostToDevice);
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+            hipMemcpyAsync(device_piece_rects.ptr(bounds.lo),
+                &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
+                hipMemcpyHostToDevice, hipGetTaskStream());
+            hipMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo),
+                &scan_volumes.front(), scan_volumes.size() * sizeof(size_t),
+                hipMemcpyHostToDevice, hipGetTaskStream());
+#else
+            cudaMemcpyAsync(device_piece_rects.ptr(bounds.lo),
+                &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
+                cudaMemcpyHostToDevice, hipGetTaskStream());
+            cudaMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo),
+                &scan_volumes.front(), scan_volumes.size() * sizeof(size_t),
+                cudaMemcpyHostToDevice, hipGetTaskStream());
+#endif
+#endif
             const size_t blocks = (sum_volume + LEGION_THREADS_PER_BLOCK - 1) / 
               LEGION_THREADS_PER_BLOCK;
             // Iterate over all the fields we should handle
@@ -20520,35 +20537,112 @@ namespace Legion {
                 const Realm::AffineAccessor<typename REDOP::RHS,N,T> 
                   dst_accessor(dst_insts[fidx], dst_fields[fidx], piece_rect);
                 // Now launch the kernel
-                if (exclusive)
+                if (exclusive) {
+#ifdef LEGION_USE_CUDA
                   fold_kernel<REDOP,N,T,true>
                     <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
                     dst_accessor, src_accessor, device_piece_rects,
                     device_scan_volumes, order, sum_volume, piece_rects.size());
-                else
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+                  hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(fold_kernel<REDOP,N,T,true>), 
+                    dim3(blocks), dim3(LEGION_THREADS_PER_BLOCK), 
+                    0, hipGetTaskStream(),
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#else
+                  fold_kernel<REDOP,N,T,true>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK, 0, hipGetTaskStream()>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#endif
+                } else {
+#ifdef LEGION_USE_CUDA
                   fold_kernel<REDOP,N,T,false>
                     <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
                     dst_accessor, src_accessor, device_piece_rects,
                     device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+                  hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(fold_kernel<REDOP,N,T,false>), 
+                    dim3(blocks), dim3(LEGION_THREADS_PER_BLOCK), 
+                    0, hipGetTaskStream(),
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#else
+                  fold_kernel<REDOP,N,T,false>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK, 0, hipGetTaskStream()>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#endif
+                } 
               }
               else
               {
                 const Realm::AffineAccessor<typename REDOP::LHS,N,T> 
                   dst_accessor(dst_insts[fidx], dst_fields[fidx], piece_rect);
                 // Now launch the kernel
-                if (exclusive)
+                if (exclusive) {
+#ifdef LEGION_USE_CUDA
                   apply_kernel<REDOP,N,T,true>
                     <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
                     dst_accessor, src_accessor, device_piece_rects,
                     device_scan_volumes, order, sum_volume, piece_rects.size());
-                else
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+                  hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(apply_kernel<REDOP,N,T,true>), 
+                    dim3(blocks), dim3(LEGION_THREADS_PER_BLOCK), 
+                    0, hipGetTaskStream(),
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#else
+                  apply_kernel<REDOP,N,T,true>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK, 0, hipGetTaskStream()>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#endif 
+                } else {
+#ifdef LEGION_USE_CUDA
                   apply_kernel<REDOP,N,T,false>
                     <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
                     dst_accessor, src_accessor, device_piece_rects,
                     device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+                  hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(apply_kernel<REDOP,N,T,false>), 
+                    dim3(blocks), dim3(LEGION_THREADS_PER_BLOCK), 0, 
+                    hipGetTaskStream(),
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#else
+                  apply_kernel<REDOP,N,T,false>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK, 0, hipGetTaskStream()>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#endif 
+                }
               }
             }
           }
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+          hipStreamSynchronize(hipGetTaskStream());
+#else
+          cudaStreamSynchronize(hipGetTaskStream());
+#endif
+#endif
         }
 
         template<typename N, typename T>

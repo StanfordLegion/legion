@@ -25,6 +25,7 @@ MAX_FIELDS	?= 256		# Maximum number of fields in a field space
 OUTPUT_LEVEL    ?= LEVEL_PRINT 	# Compile time logging level
 USE_FORTRAN	?= 0		# Include Fortran support		
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
+USE_HIP		?= 0		# Include HIP support (requires HIP)
 USE_OPENMP	?= 0		# Include OpenMP processor support
 USE_NETWORK	?= 0		# Include support for multi-node execution
 USE_ZLIB	?= 1		# Use ZLib for compression of log files
@@ -44,6 +45,7 @@ REALM_NETWORKS	?= gasnetex	# Set the kind of networking layer to use
 GASNET		?=		# Location of GASNet installation
 CUDA		?=		# Location of CUDA installation
 HDF_ROOT	?=		# Location of HDF5 installation
+HIP_TARGET	?= ROCM		# Set the default HIP target
 PREFIX		?= /usr		# Location of where to install Legion
 
 # Put the binary file name here
@@ -53,6 +55,7 @@ CC_SRC		?=		# .c files
 CXX_SRC		?= 		# .cc files
 CUDA_SRC	?=		# .cu files
 FORT_SRC	?=		# .f90 files
+HIP_SRC		?=		# HIP files
 ASM_SRC		?=		# .S files
 
 # You can modify these variables, some will be appended to by the runtime makefile

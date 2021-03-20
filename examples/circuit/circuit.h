@@ -146,7 +146,7 @@ public:
   static void cpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions,
                             Context ctx, Runtime* rt);
-#ifdef LEGION_USE_CUDA
+#if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
   static void gpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);
 #endif
@@ -174,7 +174,7 @@ public:
   static void cpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions,
                             Context ctx, Runtime* rt);
-#ifdef LEGION_USE_CUDA
+#if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
   static void gpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);
 #endif
@@ -201,7 +201,7 @@ public:
   static void cpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions,
                             Context ctx, Runtime* rt);
-#ifdef LEGION_USE_CUDA
+#if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
   static void gpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);
 #endif
@@ -336,7 +336,7 @@ namespace TaskHelper {
     T::cpu_base_impl(*p, regions, ctx, runtime);
   }
 
-#ifdef LEGION_USE_CUDA
+#if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
   template<typename T>
   void base_gpu_wrapper(const Task *task,
                         const std::vector<PhysicalRegion> &regions,
@@ -357,7 +357,7 @@ namespace TaskHelper {
       Runtime::preregister_task_variant<base_cpu_wrapper<T> >(registrar, T::TASK_NAME);
     }
 
-#ifdef LEGION_USE_CUDA
+#if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
     {
       TaskVariantRegistrar registrar(T::TASK_ID, T::TASK_NAME);
       registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
