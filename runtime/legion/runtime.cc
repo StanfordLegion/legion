@@ -9138,8 +9138,8 @@ namespace Legion {
           }
 #endif
 #ifdef LEGION_USE_HIP
-        case Z_COPY_MEM:
-        case GPU_FB_MEM:
+        case Memory::Z_COPY_MEM:
+        case Memory::GPU_FB_MEM:
           {
             if (needs_deferral)
             {
