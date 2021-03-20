@@ -739,7 +739,8 @@ namespace Legion {
       IndexSpaceNode* get_node(IndexSpace space, RtEvent *defer = NULL, 
                         const bool can_fail = false, const bool first = true);
       IndexPartNode*  get_node(IndexPartition part, RtEvent *defer = NULL, 
-                        const bool can_fail = false, const bool first = true);
+                        const bool can_fail = false, const bool first = true,
+                        const bool local_only = false);
       FieldSpaceNode* get_node(FieldSpace space, 
                                RtEvent *defer = NULL, bool first = true);
       RegionNode*     get_node(LogicalRegion handle, 
