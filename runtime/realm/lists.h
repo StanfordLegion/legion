@@ -29,7 +29,12 @@
 #define REALM_PMTA_DEREF(obj,ptrname)               (ptrname::deref(obj))
 #else
 #define REALM_PMTA_DECL(structtype,membertype,name) membertype structtype::*name
+#ifdef __PGIC__
+// PGI warns on empty declarations so add a useless typedef
+#define REALM_PMTA_DEFN(structtype,membertype,name) typedef int pgi_appeasement_ ## name
+#else
 #define REALM_PMTA_DEFN(structtype,membertype,name)
+#endif
 #define REALM_PMTA_USE(structtype,name)             &structtype::name
 #define REALM_PMTA_DEREF(obj,ptrname)               ((obj)->*(ptrname))
 #endif
