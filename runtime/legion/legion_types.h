@@ -363,8 +363,9 @@ namespace Legion {
       LG_TIGHTEN_INDEX_SPACE_TASK_ID,
       LG_REMOTE_PHYSICAL_REQUEST_TASK_ID,
       LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
-      LG_REPLAY_SLICE_ID,
-      LG_DELETE_TEMPLATE_ID,
+      LG_REPLAY_SLICE_TASK_ID,
+      LG_TRANSITIVE_REDUCTION_TASK_ID,
+      LG_DELETE_TEMPLATE_TASK_ID,
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_PENDING_REPLICATION_TASK_ID,
       LG_DEFER_APPLY_STATE_TASK_ID,
@@ -488,6 +489,7 @@ namespace Legion {
         "Remote Physical Context Request",                        \
         "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
+        "Template Transitive Reduction",                          \
         "Delete Physical Template",                               \
         "Defer Equivalence Set Make Owner",                       \
         "Defer Pending Equivalence Set Replication",              \

@@ -30947,12 +30947,17 @@ namespace Legion {
             RemoteContext::defer_physical_response(args);
             break;
           }
-        case LG_REPLAY_SLICE_ID:
+        case LG_REPLAY_SLICE_TASK_ID:
           {
             PhysicalTemplate::handle_replay_slice(args);
             break;
           }
-        case LG_DELETE_TEMPLATE_ID:
+        case LG_TRANSITIVE_REDUCTION_TASK_ID:
+          {
+            PhysicalTemplate::handle_transitive_reduction(args, runtime);
+            break;
+          }
+        case LG_DELETE_TEMPLATE_TASK_ID:
           {
             PhysicalTemplate::handle_delete_template(args);
             break;
@@ -31226,7 +31231,7 @@ namespace Legion {
             FutureImpl::handle_release(args);
             break;
           }
-        case LG_REPLAY_SLICE_ID:
+        case LG_REPLAY_SLICE_TASK_ID:
           {
             PhysicalTemplate::handle_replay_slice(args);
             break;

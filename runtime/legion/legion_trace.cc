@@ -3804,7 +3804,8 @@ namespace Legion {
         fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false), last_fence(NULL),
-        recording_done(Runtime::create_rt_user_event())
+        recording_done(Runtime::create_rt_user_event()),
+        pending_inv_topo_order(NULL), pending_transitive_reduction(NULL)
     //--------------------------------------------------------------------------
     {
       events.push_back(fence_event);
@@ -3866,6 +3867,10 @@ namespace Legion {
         if (!remote_memos.empty())
           release_remote_memos();
       }
+      if (pending_inv_topo_order != NULL)
+        delete pending_inv_topo_order;
+      if (pending_transitive_reduction != NULL)
+        delete pending_transitive_reduction;
     }
 
     //--------------------------------------------------------------------------
@@ -4176,15 +4181,14 @@ namespace Legion {
       {
         if (trace->runtime->dump_physical_traces)
         {
-          optimize(op);
+          optimize(op, true/*do transitive reduction inline*/);
           dump_template();
         }
         if (!remote_memos.empty())
           release_remote_memos();
         return;
       }
-      optimize(op);
-      if (trace->runtime->dump_physical_traces) dump_template();
+      optimize(op, false/*do transitive reduction inline*/);
       size_t num_events = events.size();
       events.clear();
       events.resize(num_events);
@@ -4192,10 +4196,22 @@ namespace Legion {
       operations.pop_front();
       if (!remote_memos.empty())
         release_remote_memos();
+      // Defer performing the transitive reduction because it might
+      // be expensive (see comment above)
+      if (!trace->runtime->no_trace_optimization)
+      {
+        TransitiveReductionArgs args(this);
+        transitive_reduction_done = trace->runtime->issue_runtime_meta_task(
+                                          args, LG_THROUGHPUT_WORK_PRIORITY);
+      }
+      // Can dump now if we're not deferring the transitive reduction
+      else if (trace->runtime->dump_physical_traces)
+        dump_template();
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::optimize(ReplTraceOp *op)
+    void PhysicalTemplate::optimize(ReplTraceOp *op, 
+                                    bool do_transitive_reduction)
     //--------------------------------------------------------------------------
     {
       std::vector<unsigned> gen;
@@ -4214,8 +4230,9 @@ namespace Legion {
       if (!trace->runtime->no_trace_optimization)
       {
         propagate_merges(gen);
-        transitive_reduction();
-        propagate_copies(gen);
+        if (do_transitive_reduction)
+          transitive_reduction(false/*deferred*/);
+        propagate_copies(&gen);
         eliminate_dead_code(gen);
       }
       prepare_parallel_replay(gen);
@@ -4499,7 +4516,6 @@ namespace Legion {
             }
         }
       }
-
       std::vector<unsigned> inv_gen(instructions.size(), -1U);
       for (unsigned idx = 0; idx < gen.size(); ++idx)
       {
@@ -4620,6 +4636,9 @@ namespace Legion {
         if (it->second.second)
           slice_tasks[slice_index].push_back(it->first);
       }
+      // Keep track of these so that we don't end up leaking them
+      std::vector<Instruction*> crossing_instructions;
+      std::map<unsigned,std::pair<unsigned,unsigned> > crossing_counts;
       for (unsigned idx = 1; idx < instructions.size(); ++idx)
       {
         Instruction *inst = instructions[idx];
@@ -4660,19 +4679,24 @@ namespace Legion {
               if (generator_slice != slice_index)
               {
                 crossing_found = true;
-                std::map<unsigned, unsigned>::iterator finder =
-                  crossing_events.find(rh);
-                if (finder != crossing_events.end())
-                  new_rhs.insert(finder->second);
+                std::map<unsigned, std::pair<unsigned,unsigned> >::iterator
+                  finder = crossing_counts.find(rh);
+                if (finder != crossing_counts.end())
+                {
+                  new_rhs.insert(finder->second.first);
+                  finder->second.second += 1;
+                }
                 else
                 {
                   unsigned new_crossing_event = events.size();
                   events.resize(events.size() + 1);
-                  crossing_events[rh] = new_crossing_event;
+                  crossing_counts[rh] = 
+                    std::pair<unsigned,unsigned>(new_crossing_event,1/*count*/);
                   new_rhs.insert(new_crossing_event);
-                  slices[generator_slice].push_back(
-                      new TriggerEvent(*this, new_crossing_event, rh,
-                        instructions[gen[rh]]->owner));
+                  TriggerEvent *crossing = new TriggerEvent(*this,
+                      new_crossing_event, rh, instructions[gen[rh]]->owner);
+                  slices[generator_slice].push_back(crossing);
+                  crossing_instructions.push_back(crossing);
                 }
               }
               else
@@ -4753,24 +4777,41 @@ namespace Legion {
 #endif
             if (generator_slice != slice_index)
             {
-              std::map<unsigned, unsigned>::iterator finder =
-                crossing_events.find(ev);
-              if (finder != crossing_events.end())
-                *event_to_check = finder->second;
+              std::map<unsigned, std::pair<unsigned,unsigned> >::iterator
+                finder = crossing_counts.find(ev);
+              if (finder != crossing_counts.end())
+              {
+                *event_to_check = finder->second.first;
+                finder->second.second += 1;
+              }
               else
               {
                 unsigned new_crossing_event = events.size();
                 events.resize(events.size() + 1);
-                crossing_events[ev] = new_crossing_event;
+                crossing_counts[ev] =
+                  std::pair<unsigned,unsigned>(new_crossing_event, 1/*count*/);
                 *event_to_check = new_crossing_event;
-                slices[generator_slice].push_back(
-                    new TriggerEvent(*this, new_crossing_event, ev,
-                      instructions[g]->owner));
+                TriggerEvent *crossing = new TriggerEvent(*this,
+                    new_crossing_event, ev, instructions[g]->owner); 
+                slices[generator_slice].push_back(crossing);
+                crossing_instructions.push_back(crossing);
               }
             }
           }
         }
       }
+      // Update the crossing events and their counts
+      if (!crossing_counts.empty())
+      {
+        for (std::map<unsigned,std::pair<unsigned,unsigned> >::const_iterator
+              it = crossing_counts.begin(); it != crossing_counts.end(); it++)
+          crossing_events.insert(it->second);
+      }
+      // Append any new crossing instructions to the list of instructions
+      // so that they will still be deleted when the template is
+      if (!crossing_instructions.empty())
+        instructions.insert(instructions.end(),
+            crossing_instructions.begin(), crossing_instructions.end());
     }
 
     //--------------------------------------------------------------------------
@@ -4787,7 +4828,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::transitive_reduction(void)
+    void PhysicalTemplate::transitive_reduction(bool deferred)
     //--------------------------------------------------------------------------
     {
       // Transitive reduction inspired by Klaus Simon,
@@ -5022,6 +5063,32 @@ namespace Legion {
       }
 
       // Lastly, suppress transitive dependences using chains
+      if (deferred)
+      {
+        // Save the data structures for finalizing the transitive
+        // reduction for later, the next replay will incorporate them
+        std::vector<unsigned> *inv_topo_order_copy = 
+          new std::vector<unsigned>();
+        inv_topo_order_copy->swap(inv_topo_order);
+        std::vector<std::vector<unsigned> > *in_reduced_copy = 
+          new std::vector<std::vector<unsigned> >();
+        in_reduced_copy->swap(incoming_reduced);
+        // Write them to the members
+        pending_inv_topo_order = inv_topo_order_copy;
+        // Need memory fence so writes happen in this order
+        __sync_synchronize();
+        pending_transitive_reduction = in_reduced_copy;
+      }
+      else
+        finalize_transitive_reduction(inv_topo_order, incoming_reduced);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::finalize_transitive_reduction(
+                    const std::vector<unsigned> &inv_topo_order,
+                    const std::vector<std::vector<unsigned> > &incoming_reduced)
+    //--------------------------------------------------------------------------
+    {
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
         if (instructions[idx]->get_kind() == MERGE_EVENT)
         {
@@ -5031,26 +5098,89 @@ namespace Legion {
           assert(order != -1U);
 #endif
           const std::vector<unsigned> &in_reduced = incoming_reduced[order];
+          if (in_reduced.size() == merge->rhs.size())
+          {
+#ifdef DEBUG_LEGION
+            for (unsigned iidx = 0; iidx < in_reduced.size(); ++iidx)
+              assert(merge->rhs.find(in_reduced[iidx]) != merge->rhs.end());
+#endif
+            continue;
+          }
+#ifdef DEBUG_LEGION
           std::set<unsigned> new_rhs;
           for (unsigned iidx = 0; iidx < in_reduced.size(); ++iidx)
           {
-#ifdef DEBUG_LEGION
             assert(merge->rhs.find(in_reduced[iidx]) != merge->rhs.end());
-#endif
             new_rhs.insert(in_reduced[iidx]);
           }
-          if (new_rhs.size() < merge->rhs.size())
-            merge->rhs.swap(new_rhs);
+#else
+          std::set<unsigned> new_rhs(in_reduced.begin(), in_reduced.end());
+#endif
+          // Remove any references to crossing events which are no longer needed
+          if (!crossing_events.empty())
+          {
+            for (std::set<unsigned>::const_iterator it =
+                  merge->rhs.begin(); it != merge->rhs.end(); it++)
+            {
+              std::map<unsigned,unsigned>::iterator finder =
+                crossing_events.find(*it);
+              if ((finder != crossing_events.end()) &&
+                  (new_rhs.find(*it) == new_rhs.end()))
+              {
+#ifdef DEBUG_LEGION
+                assert(finder->second > 0);
+#endif
+                finder->second--;
+              }
+            }
+          }
+          merge->rhs.swap(new_rhs);
         }
+      // Remove any crossing instructions from the slices that are no
+      // longer needed because the transitive reduction eliminated the
+      // need for the edge
+      for (std::map<unsigned,unsigned>::iterator it =
+            crossing_events.begin(); it != crossing_events.end(); /*nothing*/)
+      {
+        if (it->second == 0)
+        {
+          // No more references to this crossing instruction so remove it
+          bool found = false;
+          for (std::vector<std::vector<Instruction*> >::iterator sit =
+                slices.begin(); sit != slices.end(); sit++)
+          {
+            for (std::vector<Instruction*>::iterator iit =
+                  sit->begin(); iit != sit->end(); iit++)
+            {
+              TriggerEvent *trigger = (*iit)->as_trigger_event();
+              if (trigger == NULL)
+                continue;
+              if (trigger->lhs == it->first)
+              {
+                sit->erase(iit);
+                found = true;
+                break;
+              }
+            }
+            if (found)
+              break;
+          }
+          std::map<unsigned,unsigned>::iterator to_delete = it++;
+          crossing_events.erase(to_delete);
+        }
+        else
+          it++;
+      }
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::propagate_copies(std::vector<unsigned> &gen)
+    void PhysicalTemplate::propagate_copies(std::vector<unsigned> *gen)
     //--------------------------------------------------------------------------
     {
       std::vector<int> substs(events.size(), -1);
       std::vector<Instruction*> new_instructions;
       new_instructions.reserve(instructions.size());
+      std::set<Instruction*> to_prune;
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
         Instruction *inst = instructions[idx];
@@ -5066,7 +5196,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(merge->lhs != (unsigned)substs[merge->lhs]);
 #endif
-            delete inst;
+            if (gen == NULL)
+              to_prune.insert(inst);
+            else
+              delete inst;
           }
           else
             new_instructions.push_back(inst);
@@ -5079,8 +5212,9 @@ namespace Legion {
 
       instructions.swap(new_instructions);
 
-      std::vector<unsigned> new_gen(gen.size(), -1U);
-      initialize_generators(new_gen);
+      std::vector<unsigned> new_gen((gen == NULL) ? 0 : gen->size(), -1U);
+      if (gen != NULL)
+        initialize_generators(new_gen);
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
@@ -5206,10 +5340,43 @@ namespace Legion {
               break;
             }
         }
-        if (lhs != -1)
+        if ((lhs != -1) && (gen != NULL))
           new_gen[lhs] = idx;
       }
-      gen.swap(new_gen);
+      if (gen != NULL)
+        gen->swap(new_gen);
+      if (!to_prune.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(!slices.empty());
+#endif
+        // Remove these instructions from any slices and then delete them
+        for (unsigned idx = 0; idx < slices.size(); idx++)
+        {
+          std::vector<Instruction*> &slice = slices[idx];
+          for (std::vector<Instruction*>::iterator it =
+                slice.begin(); it != slice.end(); /*nothing*/)
+          {
+            std::set<Instruction*>::iterator finder =
+              to_prune.find(*it);
+            if (finder != to_prune.end())
+            {
+              it = slice.erase(it);
+              delete *finder;
+              to_prune.erase(finder);
+              if (to_prune.empty())
+                break;
+            }
+            else
+              it++;
+          }
+          if (to_prune.empty())
+            break;
+        }
+#ifdef DEBUG_LEGION
+        assert(to_prune.empty());
+#endif
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6083,6 +6250,22 @@ namespace Legion {
         recurrent = pending_replays.front().second;
         pending_replays.pop_front();
       }
+      // Check to see if we have a pending transitive reduction result
+      if (pending_transitive_reduction != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(pending_inv_topo_order != NULL);
+#endif
+        finalize_transitive_reduction(*pending_inv_topo_order,
+                                      *pending_transitive_reduction);
+        delete pending_inv_topo_order;
+        pending_inv_topo_order = NULL;
+        delete pending_transitive_reduction;
+        pending_transitive_reduction = NULL;
+        // We also need to rerun the propagate copies analysis to
+        // remove any mergers which contain only a single input
+        propagate_copies(NULL/*don't need the gen out*/);
+      }
       fence_completion = completion;
       if (recurrent)
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
@@ -6095,12 +6278,12 @@ namespace Legion {
 
       events[fence_completion_id] = fence_completion;
 
-      for (std::map<unsigned, unsigned>::iterator it = crossing_events.begin();
-           it != crossing_events.end(); ++it)
+      for (std::map<unsigned, unsigned>::iterator it =
+            crossing_events.begin(); it != crossing_events.end(); ++it)
       {
         ApUserEvent ev = Runtime::create_ap_user_event(NULL);
-        events[it->second] = ev;
-        user_events[it->second] = ev;
+        events[it->first] = ev;
+        user_events[it->first] = ev;
       }
 
       const std::vector<Processor> &replay_targets = 
@@ -6144,11 +6327,20 @@ namespace Legion {
       pending_deletion = get_completion_for_deletion();
       if (!pending_deletion.exists())
         return false;
-      const RtEvent precondition = Runtime::protect_event(pending_deletion);
+      RtEvent precondition = Runtime::protect_event(pending_deletion);
+      if (transitive_reduction_done.exists() && 
+          !transitive_reduction_done.has_triggered())
+      {
+        if (precondition.exists())
+          precondition = 
+            Runtime::merge_events(precondition, transitive_reduction_done);
+        else
+          precondition = transitive_reduction_done;
+      }
       if (precondition.exists() && !precondition.has_triggered())
       {
         DeleteTemplateArgs args(this);
-        applied_events.insert(trace->runtime->issue_runtime_meta_task(args, 
+        applied_events.insert(trace->runtime->issue_runtime_meta_task(args,
                                             LG_LOW_PRIORITY, precondition));
         return true;
       }
@@ -6162,6 +6354,18 @@ namespace Legion {
     {
       const ReplaySliceArgs *pargs = (const ReplaySliceArgs*)args;
       pargs->tpl->execute_slice(pargs->slice_index);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalTemplate::handle_transitive_reduction(
+                                             const void *args, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const TransitiveReductionArgs *targs = 
+        (const TransitiveReductionArgs*)args;
+      targs->tpl->transitive_reduction(true/*deferred*/);
+      if (runtime->dump_physical_traces)
+        targs->tpl->dump_template();
     }
 
     //--------------------------------------------------------------------------

@@ -868,6 +868,7 @@ namespace Legion {
                                 std::vector<IndexSpace> &&spaces);
         virtual ~AttachProjectionFunctor(void) { }
       public:
+        using ProjectionFunctor::project;
         virtual LogicalRegion project(LogicalRegion upper_bound,
                                       const DomainPoint &point,
                                       const Domain &launch_domain);

@@ -772,10 +772,6 @@ REALM_CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 # demand warning-free compilation
 CC_FLAGS        += -Wall
 FC_FLAGS	+= -Wall
-ifeq ($(strip $(USE_PGI)),0)
-CC_FLAGS	+= -Wno-strict-overflow
-FC_FLAGS	+= -Wno-strict-overflow
-endif
 ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
 FC_FLAGS	+= -Werror
