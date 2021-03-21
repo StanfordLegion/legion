@@ -356,8 +356,9 @@ namespace Legion {
       LG_TIGHTEN_INDEX_SPACE_TASK_ID,
       LG_REMOTE_PHYSICAL_REQUEST_TASK_ID,
       LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
-      LG_REPLAY_SLICE_ID,
-      LG_DELETE_TEMPLATE_ID,
+      LG_REPLAY_SLICE_TASK_ID,
+      LG_TRANSITIVE_REDUCTION_TASK_ID,
+      LG_DELETE_TEMPLATE_TASK_ID,
       LG_REFINEMENT_TASK_ID,
       LG_REMOTE_REF_TASK_ID,
       LG_DEFER_RAY_TRACE_TASK_ID,
@@ -470,6 +471,7 @@ namespace Legion {
         "Remote Physical Context Request",                        \
         "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
+        "Template Transitive Reduction",                          \
         "Delete Physical Template",                               \
         "Refinement",                                             \
         "Remove Remote References",                               \
