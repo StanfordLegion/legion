@@ -128,7 +128,11 @@ inline float __convert_halfint_to_float(uint16_t __x)
 #ifdef __CUDACC__
 // This brings in __half from 
 #define __CUDA_NO_HALF_OPERATORS__
+#if defined(LEGION_USE_CUDA)
 #include <cuda_fp16.h>
+#elif defined(LEGION_USE_HIP)
+#include <hip/hip_fp16.h>
+#endif
 
 __CUDA_HD__
 inline __half operator-(const __half &one)

@@ -637,25 +637,28 @@ namespace Realm {
       switch(fill_data_size) {
       case 1:
 	{
-	  CHECK_CU( cuMemsetD8Async(CUdeviceptr(dst), 
-				    *reinterpret_cast<const unsigned char *>(fill_data.direct),
-				    bytes,
+          unsigned char fill_u8;
+          memcpy(&fill_u8, fill_data.direct, 1);
+	  CHECK_CU( cuMemsetD8Async(CUdeviceptr(dst),
+                                    fill_u8, bytes,
 				    raw_stream) );
 	  break;
 	}
       case 2:
 	{
+          unsigned short fill_u16;
+          memcpy(&fill_u16, fill_data.direct, 2);
 	  CHECK_CU( cuMemsetD16Async(CUdeviceptr(dst), 
-				     *reinterpret_cast<const unsigned short *>(fill_data.direct),
-				     bytes >> 1,
+				     fill_u16, bytes >> 1,
 				     raw_stream) );
 	  break;
 	}
       case 4:
 	{
+          unsigned int fill_u32;
+          memcpy(&fill_u32, fill_data.direct, 4);
 	  CHECK_CU( cuMemsetD32Async(CUdeviceptr(dst), 
-				     *reinterpret_cast<const unsigned int *>(fill_data.direct),
-				     bytes >> 2,
+				     fill_u32, bytes >> 2,
 				     raw_stream) );
 	  break;
 	}
@@ -669,28 +672,31 @@ namespace Realm {
 	  // 16- and 32-bit fills must be aligned on every piece
 	  if((fill_data_size & 3) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 4) {
-	      unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
+              unsigned int fill_u32;
+              memcpy(&fill_u32, srcdata + offset, 4);
 	      CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset,
 					   fill_data_size /*pitch*/,
-					   val,
+					   fill_u32,
 					   1 /*width*/, elements /*height*/,
 					   raw_stream) );
 	    }
 	  } else if((fill_data_size & 1) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
-	      unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
+              unsigned short fill_u16;
+              memcpy(&fill_u16, srcdata + offset, 2);
 	      CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset,
 					   fill_data_size /*pitch*/,
-					   val,
+					   fill_u16,
 					   1 /*width*/, elements /*height*/,
 					   raw_stream) );
 	    }
 	  } else {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
-	      unsigned char val = *(srcdata + offset);
+              unsigned char fill_u8;
+              memcpy(&fill_u8, srcdata + offset, 1);
 	      CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset,
 					  fill_data_size /*pitch*/,
-					  val,
+					  fill_u8,
 					  1 /*width*/, elements /*height*/,
 					  raw_stream) );
 	    }
@@ -746,25 +752,28 @@ namespace Realm {
       switch(fill_data_size) {
       case 1:
 	{
+          unsigned char fill_u8;
+          memcpy(&fill_u8, fill_data.direct, 1);
 	  CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst), dst_stride,
-				      *reinterpret_cast<const unsigned char *>(fill_data.direct),
-				      bytes, lines,
+				      fill_u8, bytes, lines,
 				      raw_stream) );
 	  break;
 	}
       case 2:
 	{
+          unsigned short fill_u16;
+          memcpy(&fill_u16, fill_data.direct, 2);
 	  CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst), dst_stride,
-				       *reinterpret_cast<const unsigned short *>(fill_data.direct),
-				       bytes >> 1, lines,
+				       fill_u16, bytes >> 1, lines,
 				       raw_stream) );
 	  break;
 	}
       case 4:
 	{
+          unsigned int fill_u32;
+          memcpy(&fill_u32, fill_data.direct, 4);
 	  CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst), dst_stride,
-				       *reinterpret_cast<const unsigned int *>(fill_data.direct),
-				       bytes >> 2, lines,
+				       fill_u32, bytes >> 2, lines,
 				       raw_stream) );
 	  break;
 	}
@@ -778,31 +787,34 @@ namespace Realm {
 	  // 16- and 32-bit fills must be aligned on every piece
 	  if((fill_data_size & 3) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 4) {
-	      unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
+              unsigned int fill_u32;
+              memcpy(&fill_u32, srcdata + offset, 4);
 	      for(size_t l = 0; l < lines; l++)
 		CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					     fill_data_size /*pitch*/,
-					     val,
+					     fill_u32,
 					     1 /*width*/, elements /*height*/,
 					     raw_stream) );
 	    }
 	  } else if((fill_data_size & 1) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
-	      unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
+              unsigned short fill_u16;
+              memcpy(&fill_u16, srcdata + offset, 2);
 	      for(size_t l = 0; l < lines; l++)
 		CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					     fill_data_size /*pitch*/,
-					     val,
+					     fill_u16,
 					     1 /*width*/, elements /*height*/,
 					     raw_stream) );
 	    }
 	  } else {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
-	      unsigned char val = *(srcdata + offset);
+              unsigned char fill_u8;
+              memcpy(&fill_u8, srcdata + offset, 1);
 	      for(size_t l = 0; l < lines; l++)
 		CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					    fill_data_size /*pitch*/,
-					    val,
+					    fill_u8,
 					    1 /*width*/, elements /*height*/,
 					    raw_stream) );
 	    }
@@ -861,25 +873,28 @@ namespace Realm {
       switch(fill_data_size) {
       case 1:
 	{
+          unsigned char fill_u8;
+          memcpy(&fill_u8, fill_data.direct, 1);
 	  CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst), dst_stride,
-				      *reinterpret_cast<const unsigned char *>(fill_data.direct),
-				      bytes, height,
+				      fill_u8, bytes, height,
 				      raw_stream) );
 	  break;
 	}
       case 2:
 	{
+          unsigned short fill_u16;
+          memcpy(&fill_u16, fill_data.direct, 2);
 	  CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst), dst_stride,
-				       *reinterpret_cast<const unsigned short *>(fill_data.direct),
-				       bytes >> 1, height,
+				       fill_u16, bytes >> 1, height,
 				       raw_stream) );
 	  break;
 	}
       case 4:
 	{
+          unsigned int fill_u32;
+          memcpy(&fill_u32, fill_data.direct, 4);
 	  CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst), dst_stride,
-				       *reinterpret_cast<const unsigned int *>(fill_data.direct),
-				       bytes >> 2, height,
+				       fill_u32, bytes >> 2, height,
 				       raw_stream) );
 	  break;
 	}
@@ -893,31 +908,34 @@ namespace Realm {
 	  // 16- and 32-bit fills must be aligned on every piece
 	  if((fill_data_size & 3) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 4) {
-	      unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
+              unsigned int fill_u32;
+              memcpy(&fill_u32, srcdata + offset, 4);
 	      for(size_t l = 0; l < height; l++)
 		CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					     fill_data_size /*pitch*/,
-					     val,
+					     fill_u32,
 					     1 /*width*/, elements /*height*/,
 					     raw_stream) );
 	    }
 	  } else if((fill_data_size & 1) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
-	      unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
+              unsigned short fill_u16;
+              memcpy(&fill_u16, srcdata + offset, 2);
 	      for(size_t l = 0; l < height; l++)
 		CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					     fill_data_size /*pitch*/,
-					     val,
+					     fill_u16,
 					     1 /*width*/, elements /*height*/,
 					     raw_stream) );
 	    }
 	  } else {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
-	      unsigned char val = *(srcdata + offset);
+              unsigned char fill_u8;
+              memcpy(&fill_u8, srcdata + offset, 1);
 	      for(size_t l = 0; l < height; l++)
 		CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					    fill_data_size /*pitch*/,
-					    val,
+					    fill_u8,
 					    1 /*width*/, elements /*height*/,
 					    raw_stream) );
 	    }
@@ -1746,18 +1764,17 @@ namespace Realm {
 
     static size_t reduce_fill_size(const void *fill_data, size_t fill_data_size)
     {
-      const char *as_char = reinterpret_cast<const char *>(fill_data);
+      const char *as_char = static_cast<const char *>(fill_data);
       // try powers of 2 up to 128 bytes
       for(size_t step = 1; step <= 128; step <<= 1) {
-	bool ok = (fill_data_size % step) == 0;  // must divide evenly
-	for(size_t pos = step; ok && (pos < fill_data_size); pos += step)
-	  for(size_t i = 0; i < step; i++)
-	    if(as_char[pos + i] != as_char[pos + i - step]) {
-	      ok = false;
-	      break;
-	    }
-	if(ok)
-	  return step;
+        // must divide evenly
+        if((fill_data_size % step) != 0)
+          continue;
+
+        // compare to ourselves shifted by the step size - it if matches then
+        //  the first few bytes repeat through the rest
+        if(!memcmp(as_char, as_char + step, fill_data_size - step))
+          return step;
       }
       // no attempt to optimize non-power-of-2 repeat patterns right now
       return fill_data_size;

@@ -4134,7 +4134,7 @@ namespace Legion {
           continue;
         if (no_access_regions[idx] || virtual_mapped[idx])
           continue;
-        if (output.chosen_instances.empty())
+        if (output.chosen_instances[idx].empty())
           continue;
         RegionRequirement &req = regions[idx];
         if (req.is_restricted())

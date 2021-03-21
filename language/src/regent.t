@@ -50,11 +50,13 @@ local language = {
     "extern",
     "fspace",
     "rexpr",
+    "remit",
     "rquote",
     "task",
   },
   keywords = {
     "__block",
+    "__constant_time_launch",
     "__context",
     "__cuda",
     "__delete",
@@ -141,6 +143,7 @@ local language = {
     "reduces",
     "relaxed",
     "release",
+    "rescape",
     "region",
     "restrict",
     "simultaneous",
@@ -158,11 +161,11 @@ function language:expression(lex)
 end
 
 function language:statement(lex)
-  return passes.entry_stat(lex)
+  return passes.entry_stat(lex, false)
 end
 
 function language:localstatement(lex)
-  return passes.entry_stat(lex)
+  return passes.entry_stat(lex, true)
 end
 
 return language

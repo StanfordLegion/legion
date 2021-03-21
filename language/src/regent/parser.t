@@ -54,7 +54,9 @@ function parser.annotation_values(p)
 end
 
 function parser.annotation_name(p, required)
-  if p:nextif("__cuda") then
+  if p:nextif("__constant_time_launch") then
+    return "constant_time_launch"
+  elseif p:nextif("__cuda") then
     local values = p:annotation_values()
     return "cuda", values
   elseif p:nextif("__external") then
@@ -1998,6 +2000,20 @@ function parser.stat_break(p, annotations)
   }
 end
 
+function parser.stat_rescape(p, annotations)
+  local start = ast.save(p)
+
+  p:expect("rescape")
+  local stats = p:luastats()
+  p:expect("end")
+
+  return ast.unspecialized.stat.Rescape {
+    stats = stats,
+    annotations = ast.default_annotations(),
+    span = ast.span(start, p),
+  }
+end
+
 function parser.stat_raw_delete(p, annotations)
   local start = ast.save(p)
   p:expect("__delete")
@@ -2202,6 +2218,9 @@ function parser.stat(p)
   elseif p:matches("break") then
     return p:stat_break(annotations)
 
+  elseif p:matches("rescape") then
+    return p:stat_rescape(annotations)
+
   elseif p:matches("__delete") then
     return p:stat_raw_delete(annotations)
 
@@ -2402,7 +2421,19 @@ function parser.top_fspace(p, annotations)
   }
 end
 
-function parser.top_stat(p)
+function parser.top_remit(p, annotations)
+  local start = ast.save(p)
+  p:expect("remit")
+  local expr = p:luaexpr()
+
+  return ast.unspecialized.top.Remit {
+    expr = expr,
+    annotations = annotations,
+    span = ast.span(start, p),
+  }
+end
+
+function parser.top_stat(p, local_stat)
   local annotations = p:annotations(false, true)
 
   if p:matches("extern") or p:matches("task") then
@@ -2411,9 +2442,20 @@ function parser.top_stat(p)
   elseif p:matches("fspace") then
     return p:top_fspace(annotations)
 
+  elseif p:matches("remit") and not local_stat then
+    return p:top_remit(annotations)
+
   else
     p:error("unexpected token in top-level statement")
   end
+end
+
+function parser.top_stat_local(p)
+  return p:top_stat(true)
+end
+
+function parser.top_stat_no_local(p)
+  return p:top_stat(false)
 end
 
 function parser.top_quote_expr(p, annotations)
@@ -2460,8 +2502,12 @@ function parser:entry_expr(lex)
   return parsing.Parse(self, lex, "top_expr")
 end
 
-function parser:entry_stat(lex)
-  return parsing.Parse(self, lex, "top_stat")
+function parser:entry_stat(lex, local_stat)
+  if local_stat then
+    return parsing.Parse(self, lex, "top_stat_local")
+  else
+    return parsing.Parse(self, lex, "top_stat_no_local")
+  end
 end
 
 return parser

@@ -2168,13 +2168,42 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    std::string TraceViewSet::FailedPrecondition::to_string(void) const
+    std::string TraceViewSet::FailedPrecondition::to_string(
+                                                         TaskContext *ctx) const
     //--------------------------------------------------------------------------
     {
+      const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+          REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+        };
+      IndividualManager *manager = view->get_manager()->as_individual_manager();
+      FieldSpaceNode *field_space = manager->field_space_node;
+      Memory memory = manager->memory_manager->memory;
       char *m = mask.to_string();
+      std::vector<FieldID> fields;
+      field_space->get_field_set(mask, ctx, fields);
+
       std::stringstream ss;
-      ss << "view: " << view << ", Index expr: " << expr->expr_id
-         << ", Field Mask: " << m;
+      ss << "view: " << view << " in " << mem_names[memory.kind()]
+         << " memory " << std::hex << memory.id << std::dec
+         << ", Index expr: " << expr->expr_id
+         << ", Field Mask: " << m << ", Fields: ";
+      for (std::vector<FieldID>::const_iterator it =
+            fields.begin(); it != fields.end(); it++)
+      {
+        if (it != fields.begin())
+          ss << ", ";
+        const void *name = NULL;
+        size_t name_size = 0;
+        if (field_space->retrieve_semantic_information(LEGION_NAME_SEMANTIC_TAG,
+              name, name_size, true/*can fail*/, false/*wait until*/))
+        {
+          ss << ((const char*)name) << " (" << *it << ")";
+        }
+        else
+          ss << *it;
+      }
       return ss.str();
     }
 
@@ -3414,8 +3443,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool replayable = true;
-      if ((precondition_views != NULL) && ((postcondition_views == NULL) ||
-          !precondition_views->subsumed_by(*postcondition_views, true, failed)))
+      // Note that it is ok to have precondition views and no postcondition
+      // views because that means that everything was read-only and therefore
+      // still idempotent and replayable
+      if ((precondition_views != NULL) && (postcondition_views != NULL) &&
+          !precondition_views->subsumed_by(*postcondition_views, true, failed))
       {
         if ((failed != NULL) && (postcondition_views == NULL))
           precondition_views->record_first_failed(failed);
@@ -4055,10 +4087,12 @@ namespace Legion {
           {
             if (not_subsumed)
               return Replayable(
-                  false, "precondition not subsumed: " + condition.to_string());
+                  false, "precondition not subsumed: " +
+                    condition.to_string(trace->logical_trace->ctx));
             else
               return Replayable(
-               false, "postcondition anti dependent: " + condition.to_string());
+               false, "postcondition anti dependent: " +
+                 condition.to_string(trace->logical_trace->ctx));
           }
           else
           {
@@ -7557,6 +7591,7 @@ namespace Legion {
             manager->send_trace_update(nit->first, rez);
           }
           // Now we wait to see that we get all of our remote barriers updated
+          RtEvent remote_frontiers_ready;
           {
             AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
@@ -7597,11 +7632,15 @@ namespace Legion {
             if (updated_frontiers < remote_frontiers.size())
             {
               update_frontiers_ready = Runtime::create_rt_user_event();
-              replay_precondition = update_frontiers_ready;
+              remote_frontiers_ready = update_frontiers_ready;
             }
             else // Reset this back to zero for the next round
               updated_frontiers = 0;
           }
+          // Wait for the remote frontiers to be updated
+          if (remote_frontiers_ready.exists() &&
+              !remote_frontiers_ready.has_triggered())
+            remote_frontiers_ready.wait();
           // Reset this back to zero after barrier updates
           recurrent_replays = 0;
         }

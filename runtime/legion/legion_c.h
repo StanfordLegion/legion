@@ -2037,13 +2037,26 @@ extern "C" {
   // -----------------------------------------------------------------------
   // Region Requirement Operations
   // -----------------------------------------------------------------------
-
+  
   /**
    * @see Legion::RegionRequirement::RegionRequirement()
    */
   legion_region_requirement_t
   legion_region_requirement_create_logical_region(
     legion_logical_region_t handle,
+    legion_privilege_mode_t priv,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::RegionRequirement::RegionRequirement()
+   */
+  legion_region_requirement_t
+  legion_region_requirement_create_logical_region_projection(
+    legion_logical_region_t handle,
+    legion_projection_id_t proj /* = 0 */,
     legion_privilege_mode_t priv,
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
@@ -2068,6 +2081,14 @@ extern "C" {
    */
   void
   legion_region_requirement_destroy(legion_region_requirement_t handle);
+
+  /**
+   * @see Legion::RegionRequirement::add_field()
+   */
+  void
+  legion_region_requirement_add_field(legion_region_requirement_t handle,
+                                      legion_field_id_t field,
+                                      bool instance_field);
 
   /**
    * @see Legion::RegionRequirement::add_flags
@@ -2905,6 +2926,13 @@ extern "C" {
                                            legion_phase_barrier_t bar);
 
   /**
+   * @see Legion::TaskLauncher::argument
+   */
+  void
+  legion_task_launcher_set_argument(legion_task_launcher_t launcher,
+                                    legion_task_argument_t arg);
+
+  /**
    * @see Legion::TaskLauncher::point
    */
   void
@@ -3222,6 +3250,13 @@ extern "C" {
   void
   legion_index_launcher_add_point_future(legion_index_launcher_t launcher,
                                          legion_argument_map_t map);
+
+  /**
+   * @see Legion::IndexTaskLauncher::global_arg
+   */
+  void
+  legion_index_launcher_set_global_arg(legion_index_launcher_t launcher,
+                                       legion_task_argument_t global_arg);
 
   /**
    * @see Legion::IndexTaskLauncher::sharding_space

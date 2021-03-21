@@ -49,8 +49,8 @@ void top_level_task(const Task *task,
 {
   int num_loops = 2;
   int num_pieces = 4;
-  int nodes_per_piece = 2;
-  int wires_per_piece = 4;
+  int nodes_per_piece = 64;
+  int wires_per_piece = 64;
   int pct_wire_in_piece = 95;
   int random_seed = 12345;
   int steps = STEPS;

@@ -2392,6 +2392,23 @@ legion_region_requirement_create_logical_region(
 }
 
 legion_region_requirement_t
+legion_region_requirement_create_logical_region_projection(
+  legion_logical_region_t handle_,
+  legion_projection_id_t proj,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag,
+  bool verified)
+{
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  return CObjectWrapper::wrap(
+      new RegionRequirement(handle, proj, priv, prop, parent, tag, verified));
+}
+
+legion_region_requirement_t
 legion_region_requirement_create_logical_partition(
   legion_logical_partition_t handle_,
   legion_projection_id_t proj,
@@ -2409,17 +2426,17 @@ legion_region_requirement_create_logical_partition(
 }
 
 void
-legion_region_requirement_add_field(legion_output_requirement_t req_,
+legion_region_requirement_destroy(legion_region_requirement_t handle_)
+{
+  delete CObjectWrapper::unwrap(handle_);
+}
+
+void
+legion_region_requirement_add_field(legion_region_requirement_t req_,
                                     legion_field_id_t field,
                                     bool instance)
 {
   CObjectWrapper::unwrap(req_)->add_field(field, instance);
-}
-
-void
-legion_region_requirement_destroy(legion_region_requirement_t handle_)
-{
-  delete CObjectWrapper::unwrap(handle_);
 }
 
 void
@@ -3456,6 +3473,16 @@ legion_task_launcher_add_arrival_barrier(legion_task_launcher_t launcher_,
 }
 
 void
+legion_task_launcher_set_argument(legion_task_launcher_t launcher_,
+                                  legion_task_argument_t arg_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  TaskArgument arg = CObjectWrapper::unwrap(arg_);
+
+  launcher->argument = arg;
+}
+
+void
 legion_task_launcher_set_point(legion_task_launcher_t launcher_,
                                legion_domain_point_t point_)
 {
@@ -3925,6 +3952,16 @@ legion_index_launcher_add_point_future(legion_index_launcher_t launcher_,
   ArgumentMap *map = CObjectWrapper::unwrap(map_);
 
   launcher->point_futures.push_back(*map);
+}
+
+void
+legion_index_launcher_set_global_arg(legion_index_launcher_t launcher_,
+                                     legion_task_argument_t global_arg_)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  TaskArgument global_arg = CObjectWrapper::unwrap(global_arg_);
+
+  launcher->global_arg = global_arg;
 }
 
 void

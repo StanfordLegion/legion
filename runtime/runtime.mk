@@ -22,8 +22,10 @@ FC_FLAGS ?=
 LD_FLAGS ?=
 SO_FLAGS ?=
 INC_FLAGS ?=
+HIPCC_FLAGS ?=
 # Make sure that NVCC_FLAGS are simple expanded since later we use shell to append to it (performance).
-NVCC_FLAGS := $(NVCC_FLAGS) -ccbin $(CXX)
+CUDAHOSTCXX ?= $(CXX)
+NVCC_FLAGS := $(NVCC_FLAGS) -ccbin $(CUDAHOSTCXX)
 # These flags are NOT passed on the command line, but are used to
 # generate the public-facing legion/realm_defines.h files.
 # (Additional flags will be picked up from environment variables of
@@ -405,6 +407,65 @@ endif
 
 # Flags for Realm
 
+# General HIP variables
+MK_HIP_TARGET = 
+ifeq ($(strip $(USE_HIP)),1)
+  HIP_TARGET ?= ROCM
+  USE_GPU_REDOP ?= 1
+  ifndef HIP_PATH
+    $(error HIP_PATH variable is not defined, aborting build)
+  endif
+  ifeq ($(strip $(USE_GPU_REDOP)), 1)
+    LEGION_CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
+  endif
+  ifeq ($(strip $(HIP_TARGET)),ROCM)
+    #HIP on AMD
+    HIPCC	        ?= $(HIP_PATH)/bin/hipcc
+    # Latter is preferred, former is for backwards compatability
+    REALM_CC_FLAGS	+= -DREALM_USE_HIP
+    LEGION_CC_FLAGS	+= -DLEGION_USE_HIP
+    CC_FLAGS        	+= -D__HIP_PLATFORM_HCC__
+    HIPCC_FLAGS      	+= -D__CUDACC__ -D__CUDA_ARCH__=800
+    INC_FLAGS		+= -I$(HIP_PATH)/include -I$(HIP_PATH)/../include
+    ifeq ($(strip $(DEBUG)),1)
+      HIPCC_FLAGS	+= -g
+      #NVCC_FLAGS	+= -G
+    else
+      HIPCC_FLAGS	+= -O2
+    endif
+    ifneq ($(strip $(HIP_ARCH)),)
+      HIPCC_FLAGS	+= --amdgpu-target=$(HIP_ARCH)
+    endif
+    LEGION_LD_FLAGS	+= -lm -L$(HIP_PATH)/lib -lamdhip64
+    MK_HIP_TARGET = ROCM
+  else ifeq ($(strip $(HIP_TARGET)),CUDA)
+    # HIP on CUDA
+    ifndef CUDA_PATH
+      $(error CUDA_PATH variable is not defined, aborting build)
+    endif
+    HIPCC ?= $(CUDA_PATH)/bin/nvcc
+    # Latter is preferred, former is for backwards compatability
+    REALM_CC_FLAGS	+= -DREALM_USE_HIP
+    LEGION_CC_FLAGS	+= -DLEGION_USE_HIP
+    CC_FLAGS        	+= -D__HIP_PLATFORM_NVCC__
+    HIPCC_FLAGS      	+= -D__HIP_PLATFORM_NVCC__
+    INC_FLAGS		+= -I$(HIP_PATH)/include  -I$(HIP_PATH)/../include -I$(CUDA_PATH)/include  
+    ifeq ($(strip $(DEBUG)),1)
+      HIPCC_FLAGS	+= -g -O0
+      #NVCC_FLAGS	+= -G
+    else
+      HIPCC_FLAGS	+= -O2
+    endif
+    LEGION_LD_FLAGS	+= -L$(CUDA_PATH)/lib64/stubs -lcuda -L$(CUDA_PATH)/lib64 -lcudart
+    MK_HIP_TARGET = CUDA
+  endif
+
+  USE_HIP_HIJACK ?= 1
+  ifeq ($(strip $(USE_HIP_HIJACK)),1)
+    REALM_CC_FLAGS        += -DREALM_USE_HIP_HIJACK
+  endif
+endif
+
 # Realm uses CUDA if requested
 ifeq ($(strip $(CUDA)),)
   USE_CUDA ?= 0
@@ -437,7 +498,7 @@ endif
 ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_CC_FLAGS        += -DREALM_USE_CUDART_HIJACK
 endif
-INC_FLAGS	+= -I$(CUDA)/include -I$(LG_RT_DIR)/realm/transfer
+INC_FLAGS	+= -I$(CUDA)/include
 ifeq ($(strip $(DEBUG)),1)
 NVCC_FLAGS	+= -g -O0
 #NVCC_FLAGS	+= -G
@@ -663,8 +724,8 @@ ifeq ($(strip $(DEBUG)),1)
   LEGION_CC_FLAGS	+= -DDEBUG_LEGION
 else
   CFLAGS	+= -O2
-  CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
-  FC_FLAGS	+= -O2 -fno-strict-aliasing
+  CC_FLAGS	+= -O2 #-ggdb
+  FC_FLAGS	+= -O2
 endif
 
 BOUNDS_CHECKS ?= 0
@@ -736,12 +797,17 @@ GEN_SRC		?=
 CXX_SRC		+= $(GEN_SRC)
 FORT_SRC	?=
 CUDA_SRC	?=
+HIP_SRC         ?=
 # Backwards compatibility for older makefiles
 GEN_GPU_SRC	?= 
 CUDA_SRC	+= $(GEN_GPU_SRC)
+GEN_HIP_SRC     ?=
+HIP_SRC         += $(GEN_HIP_SRC)
 REALM_SRC	?=
 LEGION_SRC	?=
 LEGION_CUDA_SRC	?=
+LEGION_HIP_SRC  ?=
+LEGION_HIP_GENERATED_SRC  ?=
 MAPPER_SRC	?=
 
 # Set the source files
@@ -813,6 +879,13 @@ ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_SRC       += $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
 endif
 endif
+ifeq ($(strip $(USE_HIP)),1)
+REALM_SRC 	+= $(LG_RT_DIR)/realm/hip/hip_module.cc \
+               $(LG_RT_DIR)/realm/hip/hip_internal.cc
+ifeq ($(strip $(USE_HIP_HIJACK)),1)
+REALM_SRC       += $(LG_RT_DIR)/realm/hip/hip_hijack.cc
+endif
+endif
 ifeq ($(strip $(USE_LLVM)),1)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/llvmjit/llvmjit_module.cc \
                    $(LG_RT_DIR)/realm/llvmjit/llvmjit_internal.cc
@@ -865,6 +938,14 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \
 		    $(LG_RT_DIR)/legion/mapper_manager.cc
 LEGION_CUDA_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
+ifeq ($(strip $(USE_GPU_REDOP)),1)
+  ifeq ($(strip $(MK_HIP_TARGET)),ROCM)
+    LEGION_HIP_SRC  += $(LG_RT_DIR)/legion/legion_redop.cpp
+    LEGION_HIP_GENERATED_SRC  += $(LG_RT_DIR)/legion/legion_redop.cpp
+  else ifeq ($(strip $(MK_HIP_TARGET)),CUDA)
+    LEGION_HIP_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
+  endif
+endif
 # LEGION_INST_SRC will be compiled {MAX_DIM}^2 times in parallel
 LEGION_INST_SRC  += $(LG_RT_DIR)/legion/region_tree_tmpl.cc
 
@@ -1015,6 +1096,16 @@ APP_OBJS	+= $(CUDA_SRC:.cu=.cu.o)
 LEGION_OBJS 	+= $(LEGION_CUDA_SRC:.cu=.cu.o)
 endif
 
+# Only compile the hip objects if we need to 
+ifeq ($(strip $(MK_HIP_TARGET)),ROCM)
+APP_OBJS	+= $(HIP_SRC:.cpp=.cpp.o)
+LEGION_OBJS     += $(LEGION_HIP_SRC:.cpp=.cpp.o)
+endif
+ifeq ($(strip $(MK_HIP_TARGET)),CUDA)
+APP_OBJS	+= $(HIP_SRC:.cu=.cu.o)
+LEGION_OBJS     += $(LEGION_HIP_SRC:.cu=.cu.o)
+endif
+
 USE_FORTRAN ?= 0
 LEGION_USE_FORTRAN ?= 0
 # For backwards compatibility
@@ -1126,11 +1217,37 @@ $(filter %.cc.o,$(LEGION_OBJS)) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM
 $(MAPPER_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
+ifeq ($(strip $(MK_HIP_TARGET)),ROCM)
+$(filter %.cpp.o,$(APP_OBJS)) : %.cpp.o : %.cpp $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(HIPCC) -o $@ -c $< $(HIPCC_FLAGS) $(INC_FLAGS)
+endif
+
+ifeq ($(strip $(MK_HIP_TARGET)),CUDA)
+$(filter %.cu.o,$(APP_OBJS)) : %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(HIPCC) -o $@ -c $< $(HIPCC_FLAGS) $(INC_FLAGS)
+endif
+
+ifeq ($(strip $(USE_CUDA)),1)
 $(filter %.cu.o,$(APP_OBJS)) : %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
+endif
 
+ifeq ($(strip $(MK_HIP_TARGET)),ROCM)
+$(filter %.cpp,$(LEGION_HIP_SRC)): %.cpp : %.cu
+	hipify-perl $< > $@
+$(filter %.cpp.o,$(LEGION_OBJS)): %.cpp.o : %.cpp $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(HIPCC) -o $@ -c $< $(HIPCC_FLAGS) $(INC_FLAGS)
+endif
+
+ifeq ($(strip $(MK_HIP_TARGET)),CUDA)
+$(filter %.cu.o,$(LEGION_OBJS)): %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(HIPCC) -o $@ -c $< $(HIPCC_FLAGS) $(INC_FLAGS)
+endif
+
+ifeq ($(strip $(USE_CUDA)),1)
 $(filter %.cu.o,$(LEGION_OBJS)): %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
+endif
 
 # Special rules for building the legion fortran files because the fortran compiler is dumb
 ifeq ($(strip $(USE_FORTRAN)),1)
@@ -1151,7 +1268,7 @@ endif
 % : %.o
 
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(LEGION_HIP_GENERATED_SRC)
 
 ifeq ($(strip $(USE_LLVM)),1)
 llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)

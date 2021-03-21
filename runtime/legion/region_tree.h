@@ -699,7 +699,8 @@ namespace Legion {
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
                                   IndexSpaceExprID expr_id = 0,
                                   const bool notify_remote = true,
-                                  std::set<RtEvent> *applied = NULL);
+                                  std::set<RtEvent> *applied = NULL,
+                                  bool add_remote_reference = true);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode *par, LegionColor color,
                                   DistributedID did, RtEvent initialized,
@@ -738,7 +739,8 @@ namespace Legion {
       IndexSpaceNode* get_node(IndexSpace space, RtEvent *defer = NULL, 
                         const bool can_fail = false, const bool first = true);
       IndexPartNode*  get_node(IndexPartition part, RtEvent *defer = NULL, 
-                        const bool can_fail = false, const bool first = true);
+                        const bool can_fail = false, const bool first = true,
+                        const bool local_only = false);
       FieldSpaceNode* get_node(FieldSpace space, 
                                RtEvent *defer = NULL, bool first = true);
       RegionNode*     get_node(LogicalRegion handle, 
@@ -1678,8 +1680,7 @@ namespace Legion {
       virtual void send_semantic_request(AddressSpaceID target, 
         SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                        const void *buffer, size_t size, bool is_mutable,
-                        RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT) = 0;
+       const void *buffer, size_t size, bool is_mutable, RtUserEvent ready) = 0;
     public:
       void update_creation_set(const ShardMapping &mapping);
     public:
@@ -1804,8 +1805,7 @@ namespace Legion {
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                           const void *buffer, size_t size, bool is_mutable,
-                           RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
+          const void *buffer, size_t size, bool is_mutable, RtUserEvent ready);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
                             bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
@@ -2054,7 +2054,16 @@ namespace Legion {
       IndexPartNode *const parent;
       const ApEvent index_space_ready;
     protected:
+      // Must hold the node lock when accessing these data structures
+      std::map<LegionColor,IndexPartNode*> color_map;
+      std::map<LegionColor,IndexPartition> remote_colors;
+      std::set<RegionNode*> logical_nodes;
+      std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
+      std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
+    protected:
       unsigned                  send_references;
+      // An event for tracking the effects of sends
+      RtEvent                   send_effects;
       // On the owner node track when the index space is set
       RtUserEvent               realm_index_space_set;
       // Keep track of whether we've tightened these bounds
@@ -2063,14 +2072,6 @@ namespace Legion {
       bool                      tight_index_space;
       // Keep track of whether we're still valid on the owner
       bool                      tree_valid;
-      // An event for tracking the effects of sends
-      RtEvent                   send_effects;
-      // Must hold the node lock when accessing these data structures
-      std::map<LegionColor,IndexPartNode*> color_map;
-      std::map<LegionColor,IndexPartition> remote_colors;
-      std::set<RegionNode*> logical_nodes;
-      std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
-      std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
     };
 
     /**
@@ -2842,8 +2843,7 @@ namespace Legion {
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                             const void *buffer, size_t size, bool is_mutable,
-                             RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
+          const void *buffer, size_t size, bool is_mutable, RtUserEvent ready);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
                             bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
@@ -2949,15 +2949,7 @@ namespace Legion {
       const ApBarrier partial_pending;
       ShardMapping *const shard_mapping;
     protected:
-      RtEvent disjoint_ready;
-      bool disjoint;
-    protected:
-      bool has_complete, complete;
-      bool tree_valid;
-      RtEvent send_effects;
-      volatile IndexSpaceExpression *union_expr;
-    protected:
-      // Must hold the node lock when accessing
+      // Must hold the node lock when accessing these data structures
       // the remaining data structures
       std::map<LegionColor,IndexSpaceNode*> color_map;
       std::map<LegionColor,RtUserEvent> pending_child_map;
@@ -2965,13 +2957,23 @@ namespace Legion {
       std::set<std::pair<LegionColor,LegionColor> > aliased_subspaces;
       std::list<PartitionTracker*> partition_trackers;
     protected:
+      // Support for remote disjoint events being stored
+      RtUserEvent remote_disjoint_ready;
+    protected:
+      RtEvent disjoint_ready;
+      bool disjoint;
+    protected:
+      bool has_complete, complete;
+      bool tree_valid;
+      unsigned send_count;
+      RtUserEvent send_done;
+      RtEvent send_effects;
+      volatile IndexSpaceExpression *union_expr;
+    protected:
       // Members for the interference cache
       static const size_t MAX_INTERFERENCE_CACHE_SIZE = 64;
       std::map<IndexSpaceExprID,InterferenceEntry> interference_cache;
       InterferenceEntry *first_entry;
-    protected:
-      // Support for remote disjoint events being stored
-      RtUserEvent remote_disjoint_ready;
     protected:
       // Help for building distributed kd-trees with shard mappings
       RtUserEvent shard_rects_ready;
@@ -3259,8 +3261,7 @@ namespace Legion {
       bool retrieve_semantic_information(FieldID fid, SemanticTag tag,
              const void *&result, size_t &size, bool can_fail, bool wait_until);
       void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                             const void *result, size_t size, bool is_mutable,
-                             RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
+           const void *result, size_t size, bool is_mutable, RtUserEvent ready);
       void send_semantic_field_info(AddressSpaceID target, FieldID fid,
             SemanticTag tag, const void *result, size_t size, bool is_mutable,
             RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
@@ -3540,8 +3541,7 @@ namespace Legion {
       virtual void send_semantic_request(AddressSpaceID target, 
         SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                         const void *buffer, size_t size, bool is_mutable,
-                         RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT) = 0;
+       const void *buffer, size_t size, bool is_mutable, RtUserEvent ready) = 0;
     public:
       // Logical traversal operations
       void register_logical_user(ContextID ctx,
@@ -3887,8 +3887,7 @@ namespace Legion {
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                             const void *buffer, size_t size, bool is_mutable,
-                             RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
+          const void *buffer, size_t size, bool is_mutable, RtUserEvent ready);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
                             bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
@@ -4049,8 +4048,7 @@ namespace Legion {
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                             const void *buffer, size_t size, bool is_mutable,
-                             RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
+          const void *buffer, size_t size, bool is_mutable, RtUserEvent ready);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
                             bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,

@@ -69,7 +69,8 @@ def parse_args(argv):
 
 _constant_time_launches = True
 if _constant_time_launches:
-    extern_task = pygion.extern_task_wrapper
+    extern_task = pygion.extern_task
+    # extern_task = pygion.extern_task_wrapper
 else:
     extern_task = pygion.extern_task
 
@@ -199,7 +200,7 @@ def main():
     ghost_ranges = Region([num_superpieces], OrderedDict([('rect', pygion.rect1d)]))
     ghost_ranges_part = Partition.equal(ghost_ranges, launch_domain)
 
-    if _constant_time_launches:
+    if False: # _constant_time_launches:
         c = Future(conf[0], value_type=Config)
         index_launch(launch_domain, init_piece, ID, c, ghost_ranges_part[ID], private_part[ID], shared_part[ID], all_shared, wires_part[ID])
     else:

@@ -540,7 +540,7 @@ namespace Legion {
         IndexSpaceExpression *expr;
         FieldMask mask;
 
-        std::string to_string(void) const;
+        std::string to_string(TaskContext *ctx) const;
       };
     public:
       TraceViewSet(RegionTreeForest *forest, DistributedID owner_did,

@@ -57,7 +57,7 @@ function passes.compile(node, allow_pretty)
   local function ctor(environment_function)
     local env = environment_function()
     local node = profile("specialize", node, specialize.entry)(env, node)
-    if std.is_rquote(node) then return node end
+    if not node or std.is_rquote(node) then return node end
     node = profile("normalize", node, normalize.entry)(node)
     if std.config["inline"] then
       node = profile("inline_tasks", node, inline_tasks.entry)(node)
@@ -83,10 +83,14 @@ function passes.entry_expr(lex)
   return ctor
 end
 
-function passes.entry_stat(lex)
-  local node = parser:entry_stat(lex)
+function passes.entry_stat(lex, local_stat)
+  local node = parser:entry_stat(lex, local_stat)
   local ctor = passes.compile(node, true)
-  return ctor, {node.name}
+  if rawget(node, "name") then
+    return ctor, {node.name}
+  else
+    return ctor
+  end
 end
 
 return passes

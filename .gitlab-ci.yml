@@ -13,49 +13,63 @@ variables:
 
 # Local variables (included on a case-by-case basis in each job):
 .gcc48: &gcc48
+  CC:  "gcc-4.8"
   CXX: "g++-4.8"
   F90: "gfortran-4.8"
 .gcc49: &gcc49
+  CC:  "gcc-4.9"
   CXX: "g++-4.9"
   F90: "gfortran-4.9"
 .gcc5: &gcc5
+  CC:  "gcc-5"
   CXX: "g++-5"
   F90: "gfortran-5"
 .gcc6: &gcc6
+  CC:  "gcc-6"
   CXX: "g++-6"
   F90: "gfortran-6"
 .gcc7: &gcc7
+  CC:  "gcc-7"
   CXX: "g++-7"
   F90: "gfortran-7"
 .gcc8: &gcc8
+  CC:  "gcc-8"
   CXX: "g++-8"
   F90: "gfortran-8"
 .gcc9: &gcc9
+  CC:  "gcc-9"
   CXX: "g++-9"
   F90: "gfortran-9"
 .gcc10: &gcc10
+  CC:  "gcc-10"
   CXX: "g++-10"
   F90: "gfortran-10"
 
 .clang35: &clang35
+  CC:  "clang-3.5"
   CXX: "clang++-3.5"
   F90: "gfortran-5"
 .clang38: &clang38
+  CC:  "clang-3.8"
   CXX: "clang++-3.8"
   F90: "gfortran-5"
   # clang3.8 seems to generate bad code for some newer x86 cpus
   # we have some non-AVX systems in our CI runner pool, so back up to westmere
   MARCH: "westmere"
 .clang7: &clang7
+  CC:  "clang-7"
   CXX: "clang++-7"
   F90: "gfortran-5"
 .clang8: &clang8
+  CC:  "clang-8"
   CXX: "clang++-8"
   F90: "gfortran-5"
 .clang9: &clang9
+  CC:  "clang-9"
   CXX: "clang++-9"
   F90: "gfortran-9"
 .clang10: &clang10
+  CC:  "clang-10"
   CXX: "clang++-10"
   F90: "gfortran-10"
 
@@ -329,6 +343,13 @@ before_script:
         #export CUDA_TOOLKIT_ROOT_DIR=$CUDA
         #export CUDA_PATH="${CUDA}/bin"
 
+        # kokkos expects (the right) nvcc to be in the path, both for toolkit
+        #  detection as well as for nvcc_wrapper (if used)
+        PATH=$PATH:${CUDA}/bin
+
+        # libkokkoscore.so doesn't remember where libcudart.so is?
+        export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${CUDA}/lib64"
+
         if [[ "$CXX" == *clang* ]]; then
           # clang speaks cuda, so can be used as Kokkos' "C++" compiler
           export KOKKOS_CXX_COMPILER="$CXX"
@@ -337,8 +358,6 @@ before_script:
           NVCC_WRAPPER=`pwd`/../bin/nvcc_wrapper
           KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=${NVCC_WRAPPER}"
           export KOKKOS_CXX_COMPILER="${NVCC_WRAPPER}"
-          # which uses nvcc from the path, so make sure the right cuda is first
-          PATH=${CUDA}/bin:$PATH
         fi
       else
         export KOKKOS_CXX_COMPILER="$CXX"
@@ -399,9 +418,41 @@ before_script:
   tags:
     - p100
 
-.cuda_p100: &cuda_p100
+.p100_cuda80: &p100_cuda80
   IS_P100_JOB: "1"
-  CUDA: "/usr/local/cuda"
+  CUDA: "/usr/local/cuda-8.0"
+  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-8.0"
+  CUDAHOSTCXX: "g++-5"
+  USE_CUDA: "1"
+  GPU_ARCH: "60"
+  # cmake needs to know where to find libcuda.so
+  CUDA_LIB_PATH: "/usr/local/nvidia/lib64"
+  KOKKOS_CUDA_ARCH: "PASCAL60"
+  # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
+  LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
+  # cuda 8.0 does not come with thrust
+  USE_COMPLEX: "0"
+  # have to tell cudafe to expect c++11 stuff
+  NVCC_FLAGS: "-std=c++11"
+
+.p100_cuda90: &p100_cuda90
+  IS_P100_JOB: "1"
+  CUDA: "/usr/local/cuda-9.0"
+  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-9.0"
+  CUDAHOSTCXX: "g++-6"
+  USE_CUDA: "1"
+  GPU_ARCH: "60"
+  # cmake needs to know where to find libcuda.so
+  CUDA_LIB_PATH: "/usr/local/nvidia/lib64"
+  KOKKOS_CUDA_ARCH: "PASCAL60"
+  # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
+  LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
+
+.p100_cuda92: &p100_cuda92
+  IS_P100_JOB: "1"
+  CUDA: "/usr/local/cuda-9.2"
+  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-9.2"
+  CUDAHOSTCXX: "g++-7"
   USE_CUDA: "1"
   GPU_ARCH: "60"
   # cmake needs to know where to find libcuda.so
@@ -411,6 +462,19 @@ before_script:
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
   # cuda 9.2 has bugs in thrust that break complex reduction ops
   USE_COMPLEX: "0"
+
+.p100_cuda102: &p100_cuda102
+  IS_P100_JOB: "1"
+  CUDA: "/usr/local/cuda-10.2"
+  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-10.2"
+  CUDAHOSTCXX: "g++-8"
+  USE_CUDA: "1"
+  GPU_ARCH: "60"
+  # cmake needs to know where to find libcuda.so
+  CUDA_LIB_PATH: "/usr/local/nvidia/lib64"
+  KOKKOS_CUDA_ARCH: "PASCAL60"
+  # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
+  LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
 
 ###
 ### Docker Image
@@ -1088,27 +1152,38 @@ clang8_cxx17_debug_legion:
     <<: [*clang8, *terra38, *debug, *cxx17_normal, *legion]
 
 # CUDA tests:
-p100_gcc7_cxx11_release_cuda_legion:
+p100_cuda80_gcc5_cxx11_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc7, *release, *cxx11_normal, *cuda_p100, *legion]
-p100_gcc7_cxx11_debug_checks_cuda_legion:
+    <<: [*gcc5, *release, *cxx11_normal, *p100_cuda80, *legion]
+p100_cuda90_gcc6_cxx11_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc7, *debug, *cxx11_normal, *checks, *cuda_p100, *legion, *short]
-p100_gcc7_cxx11_release_cmake_cuda_legion:
+    <<: [*gcc6, *release, *cxx11_normal, *p100_cuda90, *legion]
+p100_cuda92_gcc7_cxx11_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc7, *release, *cxx11_normal, *cuda_p100, *cmake, *legion, *ctest]
-# TODO: no Regent+CUDA coverage because p100 uses cuda 9.2 !
-#p100_clang7_cxx11_release_cuda_regent:
-#  <<: [*p100, *tests]
-#  variables:
-#    <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *regent, *short]
-#p100_clang7_cxx11_release_cmake_cuda_regent:
-#  <<: [*p100, *tests]
-#  variables:
-#    <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *cmake, *regent]
+    <<: [*gcc7, *release, *cxx11_normal, *p100_cuda92, *legion]
+p100_cuda102_gcc8_cxx11_release_cuda_legion:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc8, *release, *cxx11_normal, *p100_cuda102, *legion]
+p100_cuda102_gcc8_cxx11_debug_checks_cuda_legion:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc8, *debug, *cxx11_normal, *checks, *p100_cuda102, *legion, *short]
+p100_cuda102_gcc8_cxx11_release_cmake_cuda_legion:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc8, *release, *cxx11_normal, *p100_cuda102, *cmake, *legion, *ctest]
+p100_cuda90_clang7_cxx11_release_cuda_regent:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*clang7, *terra70, *release, *cxx11_normal, *p100_cuda90, *regent, *short]
+p100_cuda90_clang7_cxx11_release_cmake_cuda_regent:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*clang7, *terra70, *release, *cxx11_normal, *p100_cuda90, *cmake, *regent]
 
 # Kokkos tests:
 clang8_cxx14_debug_kokkos_legion:
@@ -1119,22 +1194,22 @@ clang9_cxx17_debug_kokkos_openmp_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
     <<: [*clang9, *terra38, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
-p100_clang7_cxx14_debug_kokkos_cuda_legion:
+p100_cuda90_clang7_cxx14_debug_kokkos_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *debug, *cxx14_normal, *cuda_p100, *kokkos, *cmake, *legion]
-p100_clang7_cxx14_debug_kokkos_cuda_openmp_legion:
+    <<: [*clang7, *debug, *cxx14_normal, *p100_cuda90, *kokkos, *cmake, *legion]
+p100_cuda90_clang7_cxx14_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *debug, *cxx14_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
-p100_gcc7_cxx14_debug_kokkos_cuda_openmp_legion:
+    <<: [*clang7, *debug, *cxx14_normal, *p100_cuda90, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
+p100_cuda102_gcc8_cxx14_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc7, *debug, *cxx14_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest]
-p100_gcc7_cxx14_debug_shared_kokkos_cuda_openmp_legion:
+    <<: [*gcc8, *debug, *cxx14_normal, *p100_cuda102, *kokkos, *openmp, *cmake, *legion, *ctest]
+p100_cuda102_gcc8_cxx14_debug_shared_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc7, *debug, *shared, *cxx14_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
+    <<: [*gcc8, *debug, *shared, *cxx14_normal, *p100_cuda102, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
 
 # Darwin Power9 tests:
 darwin_power9_gcc8_cxx17_release_legion:
