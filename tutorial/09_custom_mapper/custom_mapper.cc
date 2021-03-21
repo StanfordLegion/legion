@@ -114,6 +114,7 @@ public:
   AdversarialMapper(Machine machine, 
       Runtime *rt, Processor local);
 public:
+  using TestMapper::report_profiling;
   virtual void select_task_options(const MapperContext    ctx,
 				   const Task&            task,
 				         TaskOptions&     output);
