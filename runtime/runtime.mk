@@ -1191,6 +1191,7 @@ $(filter %.S.o,$(APP_OBJS)) : %.S.o : %.S
 
 # special rules for per-dimension deppart source files
 #  (hopefully making the path explicit doesn't break things too badly...)
+ifneq ($(USE_PGI),1)
 $(LG_RT_DIR)/realm/deppart/image_%.cc.o : $(LG_RT_DIR)/realm/deppart/image_tmpl.cc $(LG_RT_DIR)/realm/deppart/image.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*)) $(REALM_DEFCHECK)
 
@@ -1199,12 +1200,51 @@ $(LG_RT_DIR)/realm/deppart/preimage_%.cc.o : $(LG_RT_DIR)/realm/deppart/preimage
 
 $(LG_RT_DIR)/realm/deppart/byfield_%.cc.o : $(LG_RT_DIR)/realm/deppart/byfield_tmpl.cc $(LG_RT_DIR)/realm/deppart/byfield.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*)) $(REALM_DEFCHECK)
+else
+# nvc++ names some symbols based on the source filename, so the trick above
+#  of compiling multiple things from the same template with different defines
+#  causes linker errors - work around by generating a different source file for
+#  each case, but don't leave them lying around
+$(LG_RT_DIR)/realm/deppart/image_%.cc :
+	echo '#define' INST_N1 $(word 1,$(subst _, ,$*)) > $@
+	echo '#define' INST_N2 $(word 2,$(subst _, ,$*)) >> $@
+	echo '#include' '"image_tmpl.cc"' >> $@
+
+$(LG_RT_DIR)/realm/deppart/preimage_%.cc :
+	echo '#define' INST_N1 $(word 1,$(subst _, ,$*)) > $@
+	echo '#define' INST_N2 $(word 2,$(subst _, ,$*)) >> $@
+	echo '#include' '"preimage_tmpl.cc"' >> $@
+
+$(LG_RT_DIR)/realm/deppart/byfield_%.cc :
+	echo '#define' INST_N1 $(word 1,$(subst _, ,$*)) > $@
+	echo '#define' INST_N2 $(word 2,$(subst _, ,$*)) >> $@
+	echo '#include' '"byfield_tmpl.cc"' >> $@
+
+.INTERMEDIATE: $(REALM_INST_OBJS:.o=)
+
+REALM_OBJS += $(REALM_INST_OBJS)
+endif
 
 $(REALM_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
 
+ifneq ($(USE_PGI),1)
 $(LG_RT_DIR)/legion/region_tree_%.cc.o : $(LG_RT_DIR)/legion/region_tree_tmpl.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) $(patsubst %,-DINST_N2=%,$(word 2,$(subst _, ,$*))) $(LEGION_DEFCHECK)
+else
+# nvc++ names some symbols based on the source filename, so the trick above
+#  of compiling multiple things from the same template with different defines
+#  causes linker errors - work around by generating a different source file for
+#  each case, but don't leave them lying around
+$(LG_RT_DIR)/legion/region_tree_%.cc :
+	echo '#define' INST_N1 $(word 1,$(subst _, ,$*)) > $@
+	[ -z "$(word 2,$(subst _, ,$*))" ] || echo '#define' INST_N2 $(word 2,$(subst _, ,$*)) >> $@
+	echo '#include' '"region_tree_tmpl.cc"' >> $@
+
+.INTERMEDIATE: $(LEGION_INST_OBJS:.o=)
+
+LEGION_OBJS += $(LEGION_INST_OBJS)
+endif
 
 $(filter %.cc.o,$(LEGION_OBJS)) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) $(LEGION_DEFCHECK)

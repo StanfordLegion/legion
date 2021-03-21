@@ -121,6 +121,7 @@ $(REALM_OBJS) : CC_FLAGS+=$(REALM_SYMBOL_VISIBILITY)
 	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
 
 # deppart-related stuff
+ifneq ($(USE_PGI),1)
 image_%.o : image_tmpl.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(CC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*))
 
@@ -129,4 +130,26 @@ preimage_%.o : preimage_tmpl.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 
 byfield_%.o : byfield_tmpl.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(CC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*))
+else
+# nvc++ names some symbols based on the source filename, so the trick above
+#  of compiling multiple things from the same template with different defines
+#  causes linker errors - work around by generating a different source file for
+#  each case, but don't leave them lying around
+image_%.cc :
+	echo '#define' INST_N1 $(word 1,$(subst _, ,$(notdir $*))) > $@
+	echo '#define' INST_N2 $(word 2,$(subst _, ,$(notdir $*))) >> $@
+	echo '#include' '"realm/deppart/image_tmpl.cc"' >> $@
+
+preimage_%.cc :
+	echo '#define' INST_N1 $(word 1,$(subst _, ,$(notdir $*))) > $@
+	echo '#define' INST_N2 $(word 2,$(subst _, ,$(notdir $*))) >> $@
+	echo '#include' '"realm/deppart/preimage_tmpl.cc"' >> $@
+
+byfield_%.cc :
+	echo '#define' INST_N1 $(word 1,$(subst _, ,$(notdir $*))) > $@
+	echo '#define' INST_N2 $(word 2,$(subst _, ,$(notdir $*))) >> $@
+	echo '#include' '"realm/deppart/byfield_tmpl.cc"' >> $@
+
+.INTERMEDIATE: $(patsubst %.cc.o,%.cc,$(notdir $(REALM_INST_OBJS)))
+endif
 
