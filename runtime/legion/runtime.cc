@@ -828,8 +828,22 @@ namespace Legion {
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
           (implicit_context != NULL) ? 
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/);
-      if (instance == NULL)
-        return NULL;
+      // Wait to make sure that the future is complete first
+      bool poisoned = false;
+      if (!future_complete.has_triggered_faultaware(poisoned))
+      {
+        TaskContext *context = implicit_context;
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          future_complete.wait_faultaware(poisoned);
+          context->end_task_wait();
+        }
+        else
+          future_complete.wait_faultaware(poisoned);
+      }
+      if (poisoned)
+        implicit_context->raise_poison_exception();
       if (extent_in_bytes != NULL)
       {
         if (check_extent)
@@ -839,6 +853,15 @@ namespace Legion {
                                 "Accessing empty future! (UID %lld)",
                                 (producer_op == NULL) ? 0 :
                                   producer_op->get_unique_op_id())
+          else if (instance == NULL)
+          {
+            if ((*extent_in_bytes) != 0)
+              REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
+                "Future size mismatch! Expected type of 0 bytes but "
+                "requested type is %zd bytes. (UID %lld)", 
+                *extent_in_bytes, (producer_op == NULL) ? 0 :
+                producer_op->get_unique_op_id())
+          }
           else if (instance->size != *extent_in_bytes)
             REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
                 "Future size mismatch! Expected type of %zd bytes but "
@@ -847,9 +870,10 @@ namespace Legion {
                 producer_op->get_unique_op_id())
         }
         else
-          (*extent_in_bytes) = instance->size;
+          (*extent_in_bytes) = (instance != NULL) ? instance->size : 0;
       }
-      bool poisoned = false;
+      if (instance == NULL)
+        return NULL;
       if (!instance->ready_event.has_triggered_faultaware(poisoned))
       {
         TaskContext *context = implicit_context;
