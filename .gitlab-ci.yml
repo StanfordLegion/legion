@@ -72,6 +72,12 @@ variables:
   CC:  "clang-10"
   CXX: "clang++-10"
   F90: "gfortran-10"
+.hpcsdk212: &hpcsdk212
+  CC: "/opt/nvidia/hpc_sdk/Linux_x86_64/21.2/compilers/bin/nvc"
+  CXX: "/opt/nvidia/hpc_sdk/Linux_x86_64/21.2/compilers/bin/nvc++"
+  F90: "/opt/nvidia/hpc_sdk/Linux_x86_64/21.2/compilers/bin/nvfortran"
+  # cmake gets confused and can't figure out library arch
+  EXTRA_CMAKE_ARGS: "-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu"
 
 .terra35: &terra35
   LLVM_CONFIG: "llvm-config-3.5"
@@ -487,6 +493,8 @@ before_script:
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04-clang
 .image_2004: &image_2004
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04
+.image_hpcsdk: &image_hpcsdk
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk
 
 ###
 ### Tests
@@ -1220,3 +1228,13 @@ darwin_power9_clang8_cxx17_debug_legion:
   <<: [*darwin_power9, *tests]
   variables:
     <<: [*clang8, *debug, *cxx17_normal, *legion, *darwin_power9_scheduler]
+
+# HPCSDK (nvc++) tests:
+hpcsdk212_cxx11_release_legion:
+  <<: [*linux, *image_hpcsdk, *tests]
+  variables:
+    <<: [*hpcsdk212, *release, *cxx11_normal, *legion]
+hpcsdk212_cxx11_debug_cmake_legion:
+  <<: [*linux, *image_hpcsdk, *tests]
+  variables:
+    <<: [*hpcsdk212, *debug, *cxx11_normal, *cmake, *legion, *ctest, *short]
