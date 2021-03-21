@@ -316,6 +316,7 @@ class UseDataProjectionFunctor : public ProjectionFunctor {
 public:
   UseDataProjectionFunctor(void);
 
+  using ProjectionFunctor::project;
   virtual LogicalRegion project(Context ctx, Task *task,
 				unsigned index,
 				LogicalRegion upper_bound,
