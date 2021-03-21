@@ -2184,8 +2184,15 @@ namespace Legion {
         assert(res != NULL);
 #endif
         // We've actually got data to pass back, get the memory
-        const Memory memory =
+        Memory memory =
           runtime->find_local_memory(executing_processor, result_kind);
+        if (!memory.exists())
+        {
+#ifdef DEBUG_LEGION
+          assert(result_kind == Memory::SYSTEM_MEM);
+#endif
+          memory = runtime->runtime_system_memory;
+        }
         if (owned)
           instance = new FutureInstance(res, res_size, memory,
               ApEvent::NO_AP_EVENT, runtime, false/*eager*/,
