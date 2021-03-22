@@ -1144,6 +1144,14 @@ public:
 			    input.ready_tasks.end());
   }
 
+  void premap_task(const Mapping::MapperContext ctx,
+                   const Task& task,
+                   const PremapTaskInput& input,
+                   PremapTaskOutput& output)
+  {
+    // nothin' to do
+  }
+
   void map_task(const Mapping::MapperContext ctx,
 		const Task& task,
 		const MapTaskInput& input, MapTaskOutput& output)

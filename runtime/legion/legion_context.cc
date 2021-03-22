@@ -167,6 +167,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future TaskContext::from_value(const void *value, size_t size, bool owned, 
+                                   Memory::Kind kind,void (*func)(void*,size_t))
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+      // Set the future result
+      RtEvent done;
+      FutureInstance *instance = NULL;
+      if (size > 0)
+      {
+        Memory memory = runtime->find_local_memory(executing_processor, kind);
+        if (owned)
+          instance = new FutureInstance(value, size, memory,
+              ApEvent::NO_AP_EVENT, runtime, false/*eager*/,
+              true/*external allocation*/, true/*own allocation*/,
+              PhysicalInstance::NO_INST, func, executing_processor);
+        else
+          instance = copy_to_future_inst(value, size, memory, done);
+      }
+      result.impl->set_result(instance);
+      if (done.exists() && !done.has_triggered())
+        done.wait();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     ShardID TaskContext::get_shard_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -188,7 +215,7 @@ namespace Legion {
       // No need to do a match here, there is just one shard
       memcpy(output, input, num_elements * element_size);
       Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
-      result.impl->set_result(&num_elements, sizeof(num_elements),false/*own*/);
+      result.impl->set_local(&num_elements, sizeof(num_elements));
       return result;
     }
 
@@ -2057,7 +2084,7 @@ namespace Legion {
       task_local_instances.push_back(std::make_pair(instance, ptr));
 #else
       MemoryManager *manager = runtime->find_memory_manager(memory);
-      const RtEvent wait_on(manager->create_eager_instance(instance, layout));
+      const ApEvent wait_on(manager->create_eager_instance(instance, layout));
       if (!instance.exists())
       {
         const char *mem_names[] = {
@@ -2075,8 +2102,14 @@ namespace Legion {
       }
       task_local_instances.insert(instance);
 #endif
-      if (wait_on.exists() && !wait_on.has_triggered())
-        wait_on.wait();
+      if (wait_on.exists())
+      {
+        bool poisoned = false;
+        if (!wait_on.has_triggered_faultaware(poisoned))
+          wait_on.wait_faultaware(poisoned);
+        if (poisoned)
+          raise_poison_exception();
+      }
       return instance;
     }
 
@@ -2097,6 +2130,232 @@ namespace Legion {
           instance.get_location());
       manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::end_task(const void *res, size_t res_size, bool owned,
+     PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor,
+                       Memory::Kind result_kind, void (*freefunc)(void*,size_t),
+                       const void *metadataptr, size_t metadatasize)
+    //--------------------------------------------------------------------------
+    {
+      // Finalize output regions by setting realm instances created during
+      // task execution to the output regions' physical managers
+      if (!output_regions.empty())
+        finalize_output_regions();
+      // See if we need to pull the data in from a callback in the case
+      // where we are going to be doing a reduction immediately, if we
+      // are then we're going to overwrite 'owned' so save it to callback_owned
+      bool callback_owned = false;
+      bool eager_callback = false;
+      if (callback_functor != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(res == NULL);
+        assert(metadataptr == NULL);
+        assert(metadatasize == 0);
+#endif
+        if (owner_task->is_reducing_future())
+        {
+          eager_callback = true;
+          callback_owned = owned;
+          res = callback_functor->callback_get_future(result_kind, res_size,
+                                owned, freefunc, metadataptr, metadatasize);
+        }
+      }
+      // If we have a deferred result instance we need to escape that too
+      RtEvent copy_future;
+      FutureInstance *instance = NULL;
+      if (deferred_result_instance.exists())
+      {
+#ifdef DEBUG_LEGION
+        assert(res != NULL);
+        assert(freefunc == NULL);
+#endif
+        instance = new FutureInstance(res, res_size,
+            deferred_result_instance.get_location(),
+            ApEvent(Processor::get_current_finish_event()), runtime,
+            true/*eager*/, false/*external*/, true/*own alloc*/,
+            deferred_result_instance);
+      }
+      else if (res_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(res != NULL);
+#endif
+        // We've actually got data to pass back, get the memory
+        Memory memory =
+          runtime->find_local_memory(executing_processor, result_kind);
+        if (!memory.exists())
+        {
+#ifdef DEBUG_LEGION
+          assert(result_kind == Memory::SYSTEM_MEM);
+#endif
+          memory = runtime->runtime_system_memory;
+        }
+        if (owned)
+          instance = new FutureInstance(res, res_size, memory,
+              ApEvent::NO_AP_EVENT, runtime, false/*eager*/,
+              true/*external allocation*/, true/*own allocation*/,
+              PhysicalInstance::NO_INST, freefunc, executing_processor);
+        else
+          instance = copy_to_future_inst(res, res_size, memory, copy_future);
+      }
+      // If we did an eager callback, restore whether we own it now
+      bool release_callback = false;
+      if (eager_callback)
+      {
+        // Release the callback here if we do not own the output and
+        // therefore going to make a copy of it
+        release_callback = !owned;
+        owned = callback_owned;
+      }
+      // Once there are no more escaping instances we can release the rest
+      if (!task_local_instances.empty())
+        release_task_local_instances();
+      // Mark that we are done executing this operation
+      // We're not actually done until we have registered our pending
+      // decrement of our parent task and recorded any profiling
+      if (!pending_done.has_triggered())
+        owner_task->complete_execution(pending_done);
+      else
+        owner_task->complete_execution();
+      // Grab some information before doing the next step in case it
+      // results in the deletion of 'this'
+#ifdef DEBUG_LEGION
+      assert(owner_task != NULL);
+      const TaskID owner_task_id = owner_task->task_id;
+#endif
+      Runtime *runtime_ptr = runtime;
+      // Tell the parent context that we are ready for post-end
+      InnerContext *parent_ctx = owner_task->get_context();
+      const bool internal_task = Processor::get_executing_processor().exists();
+      RtEvent effects_done(internal_task && !inline_task ?
+          Processor::get_current_finish_event() : Realm::Event::NO_EVENT);
+      if (last_registration.exists() && !last_registration.has_triggered())
+      {
+        if (copy_future.exists() && !copy_future.has_triggered())
+          effects_done = 
+            Runtime::merge_events(effects_done, last_registration, copy_future);
+        else
+          effects_done = Runtime::merge_events(effects_done, last_registration);
+      }
+      else if (copy_future.exists() && !copy_future.has_triggered())
+        effects_done = Runtime::merge_events(effects_done, copy_future);
+      if (release_callback)
+        parent_ctx->add_to_post_task_queue(this, effects_done, instance,
+              NULL/*no functor here*/, owned, metadataptr, metadatasize);
+      else
+        parent_ctx->add_to_post_task_queue(this, effects_done, instance,
+                     callback_functor, owned, metadataptr, metadatasize);
+      if (!inline_task)
+#ifdef DEBUG_LEGION
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
+#else
+        runtime_ptr->decrement_total_outstanding_tasks();
+#endif
+      // If we have a copy future, but don't own the source data we must wait
+      // before returning to ensure the copy is done before source is deleted
+      if (!owned && copy_future.exists() && !copy_future.has_triggered())
+        copy_future.wait();
+      // See if we can release our callback down
+      if (release_callback)
+      {
+        callback_functor->callback_release_future();
+        if (callback_owned)
+          delete callback_functor;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance* TaskContext::copy_to_future_inst(const void *value,
+                                      size_t size, Memory memory, RtEvent &done)
+    //--------------------------------------------------------------------------
+    {
+      // See if we need to make an eager instance for this or not
+      if ((size > LEGION_MAX_RETURN_SIZE) ||
+          !FutureInstance::check_meta_visible(runtime, memory))
+      {
+        // create an eager instance in the chosen memory
+        MemoryManager *manager = runtime->find_memory_manager(memory);
+        const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
+        FutureInstance *instance = manager->create_future_instance(owner_task,
+            owner_task->get_unique_op_id(), ready,size, true/*eager*/);
+        // create an external instance for the current allocation
+        const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
+        const std::vector<size_t> sizes(1, size);
+        const int dim_order[1] = { 0 };
+        const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
+        const Realm::IndexSpace<1,coord_t> rect_space(
+            Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
+                                   Realm::Point<1,coord_t>(0)));
+        Realm::InstanceLayoutGeneric *ilg =
+          Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
+              rect_space, constraints, dim_order);
+        PhysicalInstance source_instance;
+        const ApEvent src_ready(
+            PhysicalInstance::create_external_instance(
+              source_instance, memory, ilg, 
+              Realm::ExternalMemoryResource(
+               reinterpret_cast<uintptr_t>(value), size, true/*read only*/),
+              Realm::ProfilingRequestSet()));
+        FutureInstance source(value, size, memory, ApEvent::NO_AP_EVENT,runtime,
+           false/*eager*/,false/*external*/,false/*own alloc*/,source_instance);
+        // issue the copy between them
+        Runtime::trigger_event(NULL, ready, 
+            instance->copy_from(&source, owner_task));
+        done = Runtime::protect_event(ready);
+        // deferred delete the external instance source
+        source_instance.destroy(done);
+        return instance;
+      }
+      else
+      {
+        // Make a simple memory copy here now
+        void *buffer = malloc(size);
+        memcpy(buffer, value, size);
+        if (memory.kind() != Memory::SYSTEM_MEM)
+          memory = runtime->runtime_system_memory;
+        return new FutureInstance(buffer, size, memory, ApEvent::NO_AP_EVENT,
+            runtime, false/*eager*/, true/*external*/, true/*own allocation*/,
+            PhysicalInstance::NO_INST, NULL, executing_processor);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance* TaskContext::copy_to_future_inst(Memory memory,
+                                                     FutureInstance *source)
+    //--------------------------------------------------------------------------
+    {
+      // See if we need to make an eager instance for this or not
+      if ((source->size > LEGION_MAX_RETURN_SIZE) || !source->is_meta_visible ||
+          !FutureInstance::check_meta_visible(runtime, memory))
+      {
+        // create an eager instance in the chosen memory
+        MemoryManager *manager = runtime->find_memory_manager(memory);
+        const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
+        FutureInstance *instance = 
+          manager->create_future_instance(owner_task,
+            owner_task->get_unique_op_id(), ready, source->size, true/*eager*/);
+        // issue the copy between them
+        Runtime::trigger_event(NULL, ready, 
+            instance->copy_from(source, owner_task));
+        return instance;
+      }
+      else
+      {
+        // Make a simple memory copy here now
+        void *buffer = malloc(source->size);
+        memcpy(buffer, source->data, source->size);
+        if (memory.kind() != Memory::SYSTEM_MEM)
+          memory = runtime->runtime_system_memory;
+        return new FutureInstance(buffer, source->size, memory, 
+                                  ApEvent::NO_AP_EVENT, runtime, false/*eager*/,
+                                  true/*external*/, true/*own allocation*/,
+                                  PhysicalInstance::NO_INST, NULL,
+                                  executing_processor);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2148,7 +2407,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::end_misspeculation(const void *result, size_t result_size)
+    void TaskContext::end_misspeculation(FutureInstance *instance,
+                                         const void *metadata, size_t metasize)
     //--------------------------------------------------------------------------
     {
       // Mark that we are done executing this operation
@@ -2161,7 +2421,17 @@ namespace Legion {
 #endif
       Runtime *runtime_ptr = runtime;
       // Call post end task
-      post_end_task(result, result_size, false/*owner*/, NULL/*functor*/);
+      if (metadata != NULL)
+      {
+        // Make a copy of the metadata
+        void *metacopy = malloc(metasize);
+        memcpy(metacopy, metadata, metasize);
+        post_end_task(instance, metacopy, metasize,
+                      NULL/*functor*/, false/*owner*/);
+      }
+      else
+        post_end_task(instance, NULL/*metadata*/, 0/*metasize*/,
+                      NULL/*functor*/, false/*owner*/);
 #ifdef DEBUG_LEGION
       runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
                                                      false/*meta*/);
@@ -2276,66 +2546,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::release_task_local_instances(PhysicalInstance return_inst)
+    void TaskContext::release_task_local_instances(void)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_MALLOC_INSTANCES
       for (unsigned idx = 0; idx < task_local_instances.size(); idx++)
       {
         std::pair<PhysicalInstance,uintptr_t> inst = task_local_instances[idx];
-        if (inst.first == return_inst)
-          task_local_instances.front() = inst; // save this for clean up
-        else
-          inst.first.destroy(Processor::get_current_finish_event());
+        inst.first.destroy(Processor::get_current_finish_event());
       }
-      if (return_inst.exists())
-      {
-        task_local_instances.resize(1);
-#ifdef DEBUG_LEGION
-        assert(task_local_instances.front().first == return_inst);
-#endif
-      }
-      else
-        task_local_instances.clear();
 #else
       for (std::set<PhysicalInstance>::iterator it =
            task_local_instances.begin(); it !=
            task_local_instances.end(); ++it)
       {
         PhysicalInstance inst = *it;
-        // Don't delete the return inst for now, the cleanup code will do that
-        if (inst != return_inst)
-        {
-          MemoryManager *manager =
-            runtime->find_memory_manager(inst.get_location());
-          manager->free_eager_instance(
-              inst, RtEvent(Processor::get_current_finish_event()));
-        }
+        MemoryManager *manager =
+          runtime->find_memory_manager(inst.get_location());
+        manager->free_eager_instance(
+            inst, RtEvent(Processor::get_current_finish_event()));
       }
+#endif
       task_local_instances.clear();
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::release_future_local_instance(PhysicalInstance instance)
-    //--------------------------------------------------------------------------
-    {
-      // Get the pointer and free it
-      MemoryManager *manager =
-        runtime->find_memory_manager(instance.get_location());
-#ifdef LEGION_MALLOC_INSTANCES
-#ifdef DEBUG_LEGION
-      assert(task_local_instances.size() == 1);
-#endif
-      const std::pair<PhysicalInstance,uintptr_t> &inst =
-        task_local_instances.back();
-#ifdef DEBUG
-      assert(inst.first == instance);
-#endif
-      manager->free_legion_instance(RtEvent::NO_RT_EVENT, inst.second);
-#else
-      manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2349,9 +2581,8 @@ namespace Legion {
         runtime->get_available_distributed_id(), 
         runtime->address_space, ApEvent::NO_AP_EVENT);
       if (launcher.predicate_false_result.get_size() > 0)
-        result->set_result(launcher.predicate_false_result.get_ptr(),
-                           launcher.predicate_false_result.get_size(),
-                           false/*own*/);
+        result->set_local(launcher.predicate_false_result.get_ptr(),
+            launcher.predicate_false_result.get_size(), false/*own*/);
       else
       {
         // We need to check to make sure that the task actually
@@ -2367,7 +2598,7 @@ namespace Legion {
                         "'predicate_false_future' fields of the "
                         "TaskLauncher struct.", impl->get_name(), 
                         get_task_name(), get_unique_id())
-        result->set_result(NULL, 0, false/*own*/);
+        result->set_result(NULL);
       }
       return Future(result);
     }
@@ -2386,34 +2617,27 @@ namespace Legion {
           context_index, runtime->address_space, RtEvent::NO_RT_EVENT);
       if (launcher.predicate_false_future.impl != NULL)
       {
-        ApEvent ready_event =
-          launcher.predicate_false_future.impl->get_ready_event();
-        if (ready_event.has_triggered_faultignorant())
+        FutureInstance *canonical = 
+          launcher.predicate_false_future.impl->get_canonical_instance();
+        if (canonical != NULL)
         {
-          const void *f_result =
-            launcher.predicate_false_future.impl->get_untyped_result();
-          size_t f_result_size =
-            launcher.predicate_false_future.impl->get_untyped_size();
+          const Memory target = runtime->find_local_memory(executing_processor,
+                                                      canonical->memory.kind());
           for (Domain::DomainPointIterator itr(launcher.launch_domain);
                 itr; itr++)
           {
             Future f = result->get_future(itr.p, true/*internal*/);
-            f.impl->set_result(f_result, f_result_size, false/*own*/);
+            f.impl->set_result(copy_to_future_inst(target, canonical));
           }
         }
         else
         {
-          // Otherwise launch a task to complete the future map,
-          // add the necessary references to prevent premature
-          // garbage collection by the runtime
-          result->add_base_gc_ref(DEFERRED_TASK_REF);
-          launcher.predicate_false_future.impl->add_base_gc_ref(
-                                              FUTURE_HANDLE_REF);
-          TaskOp::DeferredFutureMapSetArgs args(result,
-              launcher.predicate_false_future.impl,
-              launcher.launch_domain, owner_task);
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                                         Runtime::protect_event(ready_event));
+          for (Domain::DomainPointIterator itr(launcher.launch_domain);
+                itr; itr++)
+          {
+            Future f = result->get_future(itr.p, true/*internal*/);
+            f.impl->set_result(NULL);
+          }
         }
         return FutureMap(result);
       }
@@ -2438,7 +2662,7 @@ namespace Legion {
               itr; itr++)
         {
           Future f = result->get_future(itr.p, true/*internal*/);
-          f.impl->set_result(NULL, 0, false/*own*/);
+          f.impl->set_result(NULL);
         }
       }
       else
@@ -2449,7 +2673,7 @@ namespace Legion {
               itr; itr++)
         {
           Future f = result->get_future(itr.p, true/*internal*/);
-          f.impl->set_result(ptr, ptr_size, false/*own*/);
+          f.impl->set_local(ptr, ptr_size, false/*own*/);
         }
       }
       return FutureMap(result);
@@ -2467,9 +2691,8 @@ namespace Legion {
         runtime->get_available_distributed_id(), 
         runtime->address_space, ApEvent::NO_AP_EVENT);
       if (launcher.predicate_false_result.get_size() > 0)
-        result->set_result(launcher.predicate_false_result.get_ptr(),
-                           launcher.predicate_false_result.get_size(),
-                           false/*own*/);
+        result->set_local(launcher.predicate_false_result.get_ptr(),
+            launcher.predicate_false_result.get_size(), false/*own*/);
       else
       {
         // We need to check to make sure that the task actually
@@ -2477,7 +2700,7 @@ namespace Legion {
         TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
         if (impl->returns_value())
           REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH,
-            "Predicated index task launch for task %s "
+                        "Predicated index task launch for task %s "
                         "in parent task %s (UID %lld) has non-void "
                         "return type but no default value for its "
                         "future if the task predicate evaluates to "
@@ -2486,7 +2709,7 @@ namespace Legion {
                         "'predicate_false_future' fields of the "
                         "IndexTaskLauncher struct.", impl->get_name(), 
                         get_task_name(), get_unique_id())
-        result->set_result(NULL, 0, false/*own*/);
+        result->set_result(NULL);
       }
       return Future(result);
     }
@@ -6069,7 +6292,8 @@ namespace Legion {
         MustEpochLauncher epoch_launcher(launcher.map_id, launcher.tag);
         epoch_launcher.add_index_task(launcher);
         FutureMap result = execute_must_epoch(epoch_launcher);
-        return reduce_future_map(result, redop, deterministic);
+        return reduce_future_map(result, redop, deterministic,
+                                 launcher.map_id, launcher.tag);
       }
       AutoRuntimeCall call(this);
       if (launcher.launch_domain.exists() &&
@@ -6104,15 +6328,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InnerContext::reduce_future_map(const FutureMap &future_map,
-                                        ReductionOpID redop, bool deterministic)
+                                        ReductionOpID redop, bool deterministic,
+                                        MapperID mapper_id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
       if (future_map.impl == NULL)
         return Future();
       AllReduceOp *all_reduce_op = runtime->get_available_all_reduce_op();
-      Future result = 
-        all_reduce_op->initialize(this, future_map, redop, deterministic);
+      Future result = all_reduce_op->initialize(this, future_map, redop, 
+                                                deterministic, mapper_id, tag);
       add_to_dependence_queue(all_reduce_op);
       return result;
     }
@@ -6146,7 +6371,7 @@ namespace Legion {
         FutureImpl *future = new FutureImpl(runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
             ApEvent::NO_AP_EVENT);
-        future->set_result(it->second.get_ptr(), it->second.get_size(), false);
+        future->set_local(it->second.get_ptr(), it->second.get_size());
         impl->set_future(it->first, future, &mutator);
       }
       return FutureMap(impl);
@@ -7121,14 +7346,14 @@ namespace Legion {
       {
         Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
         const bool value = true;
-        result.impl->set_result(&value, sizeof(value), false/*owned*/);
+        result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
         Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
         const bool value = false;
-        result.impl->set_result(&value, sizeof(value), false/*owned*/);
+        result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else
@@ -7376,12 +7601,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-                                              const void *result, size_t size, 
-                                              PhysicalInstance inst,
+                                              FutureInstance *instance,
                                               FutureFunctor *callback_functor,
-                                              bool own_functor)
+                                              bool own_callback_functor,
+                                              const void *metadataptr,
+                                              size_t metadatasize)
     //--------------------------------------------------------------------------
     {
+      void *metadatacopy = NULL;
+      if (metadataptr != NULL)
+      {
+        metadatacopy = malloc(metadatasize);
+        memcpy(metadatacopy, metadataptr, metadatasize);
+      }
       bool issue_task = false;
       RtEvent precondition;
       const size_t task_index = ctx->get_owner_task()->get_context_index();
@@ -7394,8 +7626,8 @@ namespace Legion {
           // Add a reference to the context the first time we defer this
           add_reference();
         }
-        post_task_queue.push_back(PostTaskArgs(ctx, task_index, result, size, 
-              inst, wait_on, callback_functor, own_functor));
+        post_task_queue.push_back(PostTaskArgs(ctx,task_index,wait_on,instance,
+          metadatacopy, metadatasize, callback_functor, own_callback_functor));
         // If we've already got a completion queue then use it
         if (post_task_comp_queue.exists())
           post_task_comp_queue.add_event(wait_on);
@@ -7545,21 +7777,8 @@ namespace Legion {
         std::sort(to_perform.begin(), to_perform.end());
         for (std::vector<PostTaskArgs>::const_iterator it =
               to_perform.begin(); it != to_perform.end(); it++)
-        {
-          if (it->instance.exists())
-          {
-            // Need to keep the context alive until we release the instance
-            it->context->add_reference();
-            it->context->post_end_task(it->result,it->size,false/*owned*/,NULL);
-            it->context->release_future_local_instance(it->instance);
-            if (it->context->remove_reference())
-              delete it->context;
-          }
-          else if (it->functor != NULL)
-            it->context->post_end_task(NULL, 0, it->owned, it->functor);
-          else
-            it->context->post_end_task(it->result,it->size,true/*owned*/,NULL);
-        }
+          it->context->post_end_task(it->instance, it->metadata, it->metasize,
+                                     it->functor, it->own_functor);
       }
       // If we didn't launch a next op, then we can remove the reference
       return (next_ctx == NULL);
@@ -9179,15 +9398,16 @@ namespace Legion {
       // happen during inlining of index space tasks
 #ifdef DEBUG_LEGION
       assert(owner_task != NULL);
-      SingleTask *single_task = dynamic_cast<SingleTask*>(owner_task);
-      assert(single_task != NULL);
-#else
-      SingleTask *single_task = static_cast<SingleTask*>(owner_task); 
 #endif
       const std::deque<InstanceSet> &physical_instances = 
-        single_task->get_physical_instances();
+        owner_task->get_physical_instances();
       const std::vector<bool> &no_access_regions = 
-        single_task->get_no_access_regions();
+        owner_task->get_no_access_regions();
+#ifdef DEBUG_LEGION
+      assert(regions.size() <= physical_instances.size());
+      assert(regions.size() <= virtual_mapped.size());
+      assert(regions.size() <= no_access_regions.size());
+#endif
       // Initialize all of the logical contexts no matter what
       //
       // For all of the physical contexts that were mapped, initialize them
@@ -9958,7 +10178,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::end_task(const void *res, size_t res_size, bool owned,
-     PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor)
+     PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor,
+                       Memory::Kind result_kind, void (*freefunc)(void*,size_t),
+                       const void *metadataptr, size_t metadatasize)
     //--------------------------------------------------------------------------
     {
       // See if we have any local regions or fields that need to be deallocated
@@ -10005,9 +10227,7 @@ namespace Legion {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
-      }
-      if (!task_local_instances.empty())
-        release_task_local_instances(deferred_result_instance);
+      } 
       // See if there are any runtime warnings to issue
       if (runtime->runtime_warnings)
       {
@@ -10099,9 +10319,6 @@ namespace Legion {
           add_to_dependence_queue(close_op);
         }
       }
-      // Finalize output regions by setting realm instances created during
-      // task execution to the output regions' physical managers
-      finalize_output_regions();
       // Check to see if we have any unordered operations that we need to inject
       {
         AutoLock d_lock(dependence_lock);
@@ -10115,85 +10332,22 @@ namespace Legion {
           dependence_precondition = RtEvent::NO_RT_EVENT;
         }
       }
-      // Mark that we are done executing this operation
-      // We're not actually done until we have registered our pending
-      // decrement of our parent task and recorded any profiling
-      if (!pending_done.has_triggered())
-        owner_task->complete_execution(pending_done);
-      else
-        owner_task->complete_execution();
-      // Grab some information before doing the next step in case it
-      // results in the deletion of 'this'
-#ifdef DEBUG_LEGION
-      assert(owner_task != NULL);
-      const TaskID owner_task_id = owner_task->task_id;
-#endif
-      Runtime *runtime_ptr = runtime;
-      // Tell the parent context that we are ready for post-end
-      // Make a copy of the results if necessary
-      TaskContext *parent_ctx = owner_task->get_context();
-      const bool internal_task = Processor::get_executing_processor().exists();
-      RtEvent effects_done(internal_task && !inline_task ?
-          Processor::get_current_finish_event() : Realm::Event::NO_EVENT);
-      if (last_registration.exists() && !last_registration.has_triggered())
-        effects_done = Runtime::merge_events(effects_done, last_registration);
-      if (deferred_result_instance.exists())
-        parent_ctx->add_to_post_task_queue(this, effects_done,
-                                           res, res_size, 
-                                           deferred_result_instance);
-      else if (callback_functor != NULL)
-      {
-        if (owner_task->is_reducing_future())
-        {
-          // If we're reducing this future value then just do the callback
-          // now since there is no point in deferring it to later
-          const size_t callback_size = 
-            callback_functor->callback_get_future_size();
-          void *buffer = malloc(callback_size);
-          callback_functor->callback_pack_future(buffer, callback_size);
-          callback_functor->callback_release_future();
-          if (owned)
-            delete callback_functor;
-          parent_ctx->add_to_post_task_queue(this, effects_done, 
-                                             buffer, callback_size);
-        }
-        else
-          parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size,
-                            deferred_result_instance, callback_functor, owned);
-      }
-      else if (!owned)
-      {
-        void *result_copy = malloc(res_size);
-        memcpy(result_copy, res, res_size);
-        parent_ctx->add_to_post_task_queue(this, effects_done,
-                                           result_copy, res_size);
-      }
-      else
-        parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size);
-#ifdef DEBUG_LEGION
-      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                     false/*meta*/);
-#else
-      runtime_ptr->decrement_total_outstanding_tasks();
-#endif
+      TaskContext::end_task(res, res_size, owned, deferred_result_instance,
+          callback_functor, result_kind, freefunc, metadataptr, metadatasize);
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::post_end_task(const void *res,size_t res_size,
-                                     bool owned,FutureFunctor *callback_functor)
+    void InnerContext::post_end_task(FutureInstance *instance,
+                                     void *metadata, size_t metasize,
+                                     FutureFunctor *callback_functor,
+                                     bool own_callback_functor)
     //--------------------------------------------------------------------------
     {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
-#ifdef DEBUG_LEGION
-      SingleTask *single_task = dynamic_cast<SingleTask*>(owner_task);
-      assert(single_task != NULL);
-#else
-      SingleTask *single_task = static_cast<SingleTask*>(owner_task);
-#endif
       // Handle the future result
-      single_task->handle_future(res, res_size, owned, 
-                                 callback_functor, executing_processor);
+      owner_task->handle_future(instance, metadata, metasize, callback_functor,
+                                executing_processor, own_callback_functor);
       // If we weren't a leaf task, compute the conditions for being mapped
       // which is that all of our children are now mapped
       // Also test for whether we need to trigger any of our child
@@ -10243,10 +10397,10 @@ namespace Legion {
           }
         }
         if (!preconditions.empty())
-          single_task->handle_post_mapped(false/*deferral*/,
+          owner_task->handle_post_mapped(false/*deferral*/,
               Runtime::merge_events(preconditions));
         else
-          single_task->handle_post_mapped(false/*deferral*/);
+          owner_task->handle_post_mapped(false/*deferral*/);
       }
       if (need_complete)
       {
@@ -11002,6 +11156,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future ReplicateContext::from_value(const void *value, size_t size, 
+                      bool owned, Memory::Kind kind, void (*func)(void*,size_t))
+    //--------------------------------------------------------------------------
+    {
+      Future result = TaskContext::from_value(value, size, owned, kind, func);
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_FUTURE_FROM_VALUE);
+        hash_future(hasher, runtime->safe_control_replication, result);
+        verify_replicable(hasher, "future_from_value");
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     ShardID ReplicateContext::get_shard_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -11442,8 +11613,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::hash_future(Murmur3Hasher &hasher,
-                                const unsigned safe_level, const Future &future)
+    void ReplicateContext::hash_future(Murmur3Hasher &hasher,
+                          const unsigned safe_level, const Future &future) const
     //--------------------------------------------------------------------------
     {
       if (future.impl == NULL)
@@ -11462,9 +11633,9 @@ namespace Legion {
       }
       else if (safe_level > 1)
       {
-        const void *result =
-          future.impl->get_untyped_result(true,NULL,true/*internal*/);
-        const size_t size = future.impl->get_untyped_size(true/*internal*/);
+        size_t size = 0;
+        const void *result = future.impl->get_buffer(executing_processor,
+            Memory::SYSTEM_MEM, &size, false/*check*/, true/*silence warn*/);
         hasher.hash(result, size);
       }
     }
@@ -11592,8 +11763,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::hash_task_launcher(Murmur3Hasher &hasher,
-                        const unsigned safe_level, const TaskLauncher &launcher)
+    void ReplicateContext::hash_task_launcher(Murmur3Hasher &hasher,
+                  const unsigned safe_level, const TaskLauncher &launcher) const
     //--------------------------------------------------------------------------
     {
       hasher.hash(launcher.task_id);
@@ -11693,7 +11864,7 @@ namespace Legion {
                                const void *result, size_t result_size, bool own)
     //--------------------------------------------------------------------------
     {
-      f.impl->set_result(result, result_size, own);
+      f.impl->set_local(result, result_size, own);
     }
 
     //--------------------------------------------------------------------------
@@ -16181,36 +16352,7 @@ namespace Legion {
       }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-      {
-        if (launcher.predicate_false_future.impl != NULL)
-          return launcher.predicate_false_future;
-        // Otherwise check to see if we have a value
-        FutureImpl *result = new FutureImpl(runtime, true/*register*/,
-          runtime->get_available_distributed_id(), 
-          runtime->address_space, ApEvent::NO_AP_EVENT);
-        if (launcher.predicate_false_result.get_size() > 0)
-          result->set_result(launcher.predicate_false_result.get_ptr(),
-                             launcher.predicate_false_result.get_size(),
-                             false/*own*/);
-        else
-        {
-          // We need to check to make sure that the task actually
-          // does expect to have a void return type
-          TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-          if (impl->returns_value())
-            REPORT_LEGION_ERROR(ERROR_MISSING_DEFAULT_PREDICATE_RESULT,
-                          "Predicated task launch for task %s in parent "
-                          "task %s (UID %lld) has non-void return type "
-                          "but no default value for its future if the task "
-                          "predicate evaluates to false.  Please set either "
-                          "the 'predicate_false_result' or "
-                          "'predicate_false_future' fields of the "
-                          "TaskLauncher struct.", impl->get_name(), 
-                          get_task_name(), get_unique_id())
-          result->set_result(NULL, 0, false/*own*/);
-        }
-        return Future(result);
-      }
+        return predicate_task_false(launcher);
       // If we're doing a local-function task then we can run that with just
       // a normal individual task in each shard since it is safe to duplicate
       if (launcher.local_function_task)
@@ -16276,82 +16418,8 @@ namespace Legion {
       }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-      {
-        Domain launch_domain = launcher.launch_domain;
-        if (!launch_domain.exists())
-          runtime->forest->find_launch_space_domain(launcher.launch_space,
-                                                    launch_domain);
-        FutureMapImpl *result = new FutureMapImpl(this, runtime,
-            launch_domain, runtime->get_available_distributed_id(), 
-            __sync_add_and_fetch(&outstanding_children_count, 1),
-            runtime->address_space, RtEvent::NO_RT_EVENT);
-        if (launcher.predicate_false_future.impl != NULL)
-        {
-          ApEvent ready_event = 
-            launcher.predicate_false_future.impl->get_ready_event(); 
-          if (ready_event.has_triggered())
-          {
-            const void *f_result = 
-              launcher.predicate_false_future.impl->get_untyped_result();
-            size_t f_result_size = 
-              launcher.predicate_false_future.impl->get_untyped_size();
-            for (Domain::DomainPointIterator itr(launcher.launch_domain); 
-                  itr; itr++)
-            {
-              Future f = result->get_future(itr.p, true/*internal*/);
-              f.impl->set_result(f_result, f_result_size, false/*own*/);
-            }
-          }
-          else
-          {
-            // Otherwise launch a task to complete the future map,
-            // add the necessary references to prevent premature
-            // garbage collection by the runtime
-            result->add_base_gc_ref(DEFERRED_TASK_REF);
-            launcher.predicate_false_future.impl->add_base_gc_ref(
-                                                FUTURE_HANDLE_REF);
-            TaskOp::DeferredFutureMapSetArgs args(result, 
-                launcher.predicate_false_future.impl, 
-                launcher.launch_domain, owner_task);
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                           Runtime::protect_event(ready_event));
-          }
-          return FutureMap(result);
-        }
-        if (launcher.predicate_false_result.get_size() == 0)
-        {
-          // Check to make sure the task actually does expect to
-          // have a void return type
-          TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-          if (impl->returns_value())
-            REPORT_LEGION_ERROR(ERROR_MISSING_DEFAULT_PREDICATE_RESULT,
-                          "Predicated index task launch for task %s "
-                          "in parent task %s (UID %lld) has non-void "
-                          "return type but no default value for its "
-                          "future if the task predicate evaluates to "
-                          "false.  Please set either the "
-                          "'predicate_false_result' or "
-                          "'predicate_false_future' fields of the "
-                          "IndexTaskLauncher struct.", impl->get_name(), 
-                          get_task_name(), get_unique_id())
-          // Just initialize all the futures
-          for (Domain::DomainPointIterator itr(launcher.launch_domain); 
-                itr; itr++)
-            result->get_future(itr.p, true/*internal*/);
-        }
-        else
-        {
-          const void *ptr = launcher.predicate_false_result.get_ptr();
-          size_t ptr_size = launcher.predicate_false_result.get_size();
-          for (Domain::DomainPointIterator itr(launcher.launch_domain); 
-                itr; itr++)
-          {
-            Future f = result->get_future(itr.p, true/*internal*/);
-            f.impl->set_result(ptr, ptr_size, false/*own*/);
-          }
-        }
-        return FutureMap(result);
-      } 
+        return predicate_index_task_false(
+            __sync_add_and_fetch(&outstanding_children_count,1), launcher);
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
@@ -16407,37 +16475,7 @@ namespace Legion {
       }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-      {
-        if (launcher.predicate_false_future.impl != NULL)
-          return launcher.predicate_false_future;
-        // Otherwise check to see if we have a value
-        FutureImpl *result = new FutureImpl(runtime, true/*register*/, 
-          runtime->get_available_distributed_id(), 
-          runtime->address_space, ApEvent::NO_AP_EVENT);
-        if (launcher.predicate_false_result.get_size() > 0)
-          result->set_result(launcher.predicate_false_result.get_ptr(),
-                             launcher.predicate_false_result.get_size(),
-                             false/*own*/);
-        else
-        {
-          // We need to check to make sure that the task actually
-          // does expect to have a void return type
-          TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-          if (impl->returns_value())
-            REPORT_LEGION_ERROR(ERROR_MISSING_DEFAULT_PREDICATE_RESULT,
-                          "Predicated index task launch for task %s "
-                          "in parent task %s (UID %lld) has non-void "
-                          "return type but no default value for its "
-                          "future if the task predicate evaluates to "
-                          "false.  Please set either the "
-                          "'predicate_false_result' or "
-                          "'predicate_false_future' fields of the "
-                          "IndexTaskLauncher struct.", impl->get_name(), 
-                          get_task_name(), get_unique_id())
-          result->set_result(NULL, 0, false/*own*/);
-        }
-        return Future(result);
-      }
+        return predicate_index_task_reduce_false(launcher);
       if (launcher.launch_domain.exists() &&
           (launcher.launch_domain.get_volume() == 0))
       {
@@ -16474,7 +16512,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future ReplicateContext::reduce_future_map(const FutureMap &future_map,
-                                        ReductionOpID redop, bool deterministic)
+                                        ReductionOpID redop, bool deterministic,
+                                        MapperID mapper_id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -16493,11 +16532,12 @@ namespace Legion {
       // Check to see if this is just a normal future map, if so then 
       // we can just do the standard thing here
       if (!future_map.impl->is_replicate_future_map())
-        return InnerContext::reduce_future_map(future_map,redop,deterministic);
+        return InnerContext::reduce_future_map(future_map, redop,
+                                               deterministic, mapper_id, tag);
       ReplAllReduceOp *all_reduce_op = 
         runtime->get_available_repl_all_reduce_op();
-      Future result = 
-        all_reduce_op->initialize(this, future_map, redop, deterministic);
+      Future result = all_reduce_op->initialize(this, future_map, redop, 
+                                                deterministic, mapper_id, tag);
       all_reduce_op->initialize_replication(this);
       add_to_dependence_queue(all_reduce_op);
       return result;
@@ -16592,7 +16632,7 @@ namespace Legion {
         FutureImpl *future = new FutureImpl(runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
             ApEvent::NO_AP_EVENT);
-        future->set_result(it->second.get_ptr(), it->second.get_size(), false);
+        future->set_local(it->second.get_ptr(), it->second.get_size());
         impl->set_future(it->first, future, &mutator);
       }
       return FutureMap(impl);
@@ -17678,8 +17718,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::end_task(const void *res, size_t res_size,bool owned,
-                                    PhysicalInstance deferred_result_instance,
-                                    FutureFunctor *callback_functor)
+     PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor,
+                       Memory::Kind result_kind, void (*freefunc)(void*,size_t),
+                       const void *metadataptr, size_t metadatasize)
     //--------------------------------------------------------------------------
     {
       // We have an extra one of these here to handle the case where some
@@ -17689,15 +17730,19 @@ namespace Legion {
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_END_TASK);
+        hasher.hash(res_size);
+        hasher.hash(metadatasize);
         verify_replicable(hasher, "end_task");
       }
-      InnerContext::end_task(res, res_size, owned, 
-          deferred_result_instance, callback_functor);
+      InnerContext::end_task(res, res_size, owned, deferred_result_instance, 
+         callback_functor, result_kind, freefunc, metadataptr, metadatasize);
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::post_end_task(const void *res,size_t res_size,
-                                     bool owned,FutureFunctor *callback_functor)
+    void ReplicateContext::post_end_task(FutureInstance *instance,
+                                         void *metadata, size_t metasize,
+                                         FutureFunctor *callback_functor,
+                                         bool own_callback_functor)
     //--------------------------------------------------------------------------
     {
       // Pull any pending collectives here on the stack so we can delete them
@@ -17725,7 +17770,8 @@ namespace Legion {
       // Grab this now before the context might be deleted
       const ShardID local_shard = owner_shard->shard_id;
       // Do the base call
-      InnerContext::post_end_task(res, res_size, owned, callback_functor);
+      InnerContext::post_end_task(instance, metadata, metasize,
+                                  callback_functor, own_callback_functor);
       // Then delete all the pending collectives that we had
       while (!release_index_spaces.empty())
       {
@@ -21823,7 +21869,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future LeafContext::reduce_future_map(const FutureMap &future_map,
-                                        ReductionOpID redop, bool deterministic)
+                                        ReductionOpID redop, bool deterministic,
+                                        MapperID mapper_id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -22056,12 +22103,12 @@ namespace Legion {
     {
       if (f.impl == NULL)
         return Predicate::FALSE_PRED;
+      const RtEvent ready = 
+        f.impl->request_internal_buffer(owner_task, true/*eager*/);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
       // Always eagerly evaluate predicates in leaf contexts
-      bool valid = false;
-      const bool value = f.impl->get_boolean_value(valid);
-#ifdef DEBUG_LEGION
-      assert(valid); // all futures should be ready
-#endif
+      const bool value = f.impl->get_boolean_value(this);
       if (value)
         return Predicate::TRUE_PRED;
       else
@@ -22136,14 +22183,14 @@ namespace Legion {
       {
         Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
         const bool value = true;
-        result.impl->set_result(&value, sizeof(value), false/*owned*/);
+        result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
         Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
         const bool value = false;
-        result.impl->set_result(&value, sizeof(value), false/*owned*/);
+        result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else // should never get here, all predicates should be eagerly evaluated
@@ -22271,17 +22318,6 @@ namespace Legion {
     {
       assert(false);
       return ApEvent::NO_AP_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-                                             const void *result, size_t size, 
-                                             PhysicalInstance instance,
-                                             FutureFunctor *callback_functor,
-                                             bool own_functor)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -22560,7 +22596,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::end_task(const void *res, size_t res_size, bool owned,
-     PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor)
+     PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor,
+                       Memory::Kind result_kind, void (*freefunc)(void*,size_t),
+                       const void *metadataptr, size_t metadatasize)
     //--------------------------------------------------------------------------
     {
       // No local regions or fields permitted in leaf tasks
@@ -22569,94 +22607,29 @@ namespace Legion {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
-      } 
-      if (!task_local_instances.empty())
-        release_task_local_instances(deferred_result_instance);
-      // Finalize output regions by setting realm instances created during
-      // task execution to the output regions' physical managers
-      finalize_output_regions();
+      }
+      // No need to unmap the physical regions, they never had events
       if (!execution_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(execution_events);
         wait_on.wait();
-      }
-      // Mark that we are done executing this operation
-      // We're not actually done until we have registered our pending
-      // decrement of our parent task and recorded any profiling
-      if (!pending_done.has_triggered())
-        owner_task->complete_execution(pending_done);
-      else
-        owner_task->complete_execution();
-      // Grab some information before doing the next step in case it
-      // results in the deletion of 'this'
-#ifdef DEBUG_LEGION
-      assert(owner_task != NULL);
-      const TaskID owner_task_id = owner_task->task_id;
-#endif
-      Runtime *runtime_ptr = runtime;
-      // Tell the parent context that we are ready for post-end
-      // Make a copy of the results if necessary
-      TaskContext *parent_ctx = owner_task->get_context();
-      const RtEvent effects_done(!inline_task ?
-          Processor::get_current_finish_event() : Realm::Event::NO_EVENT);
-      if (deferred_result_instance.exists())
-        parent_ctx->add_to_post_task_queue(this, effects_done,
-                                           res, res_size, 
-                                           deferred_result_instance);
-      else if (callback_functor != NULL)
-      {
-        if (owner_task->is_reducing_future())
-        {
-          // If we're reducing this future value then just do the callback
-          // now since there is no point in deferring it
-          const size_t callback_size = 
-            callback_functor->callback_get_future_size();
-          void *buffer = malloc(callback_size);
-          callback_functor->callback_pack_future(buffer, callback_size);
-          callback_functor->callback_release_future();
-          if (owned)
-            delete callback_functor;
-          parent_ctx->add_to_post_task_queue(this, effects_done, 
-                                             buffer, callback_size);
-        }
-        else
-          parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size,
-                            deferred_result_instance, callback_functor, owned);
-      }
-      else if (!owned)
-      {
-        void *result_copy = malloc(res_size);
-        memcpy(result_copy, res, res_size);
-        parent_ctx->add_to_post_task_queue(this, effects_done,
-                                           result_copy, res_size); 
-      }
-      else
-        parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size);
-      if (!inline_task)
-#ifdef DEBUG_LEGION
-        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                     false/*meta*/);
-#else
-        runtime_ptr->decrement_total_outstanding_tasks();
-#endif
+      } 
+      TaskContext::end_task(res, res_size, owned, deferred_result_instance,
+          callback_functor, result_kind, freefunc, metadataptr, metadatasize); 
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::post_end_task(const void *res, size_t res_size,
-                                    bool owned, FutureFunctor *callback_functor)
+    void LeafContext::post_end_task(FutureInstance *instance,
+                                    void *metadata, size_t metasize,
+                                    FutureFunctor *callback_functor,
+                                    bool own_callback_functor)
     //--------------------------------------------------------------------------
     {
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
-#ifdef DEBUG_LEGION
-      SingleTask *single_task = dynamic_cast<SingleTask*>(owner_task);
-      assert(single_task != NULL);
-#else
-      SingleTask *single_task = static_cast<SingleTask*>(owner_task);
-#endif
       // Handle the future result
-      single_task->handle_future(res, res_size, owned, 
-                                 callback_functor, executing_processor);
+      owner_task->handle_future(instance, metadata, metasize, callback_functor,
+                                executing_processor, own_callback_functor);
       bool need_complete = false;
       bool need_commit = false;
       {

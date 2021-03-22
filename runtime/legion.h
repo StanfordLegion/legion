@@ -1281,6 +1281,44 @@ namespace Legion {
       bool is_ready(bool subscribe = false) const;
     public:
       /**
+       * Return a span object representing the data for the future.
+       * The size of the future must be evenly divisible by sizeof(T).
+       * The resulting span object is only good as long as the application
+       * program maintains a handle to the future object that created it.
+       * At the moment the privilege mode must be read-only; no other
+       * values will be accepted. This call will not unpack data serialized
+       * with the legion_serialize method.
+       * @param memory the kind of memory for the allocation, the memory 
+       *    with the best affinity to the executing processor will be used
+       * @param silence_warnings silence any warnings for this blocking call
+       * @param warning_string a string to be reported with any warnings
+       * @return a Span object representing the data for the future
+       */
+      template<typename T, PrivilegeMode PM = LEGION_READ_ONLY>
+        Span<T,PM> get_span(Memory::Kind memory,
+                            bool silence_warnings = false,
+                            const char *warning_string = NULL) const;
+
+      /**
+       * Return a pointer and optional size for the data for the future.
+       * The pointer is only valid as long as the application program 
+       * maintains a handle to the future object that produced it. This call 
+       * will not deserialized data packed with the legion_serialize method.
+       * @param memory the kind of memory for the allocation, the memory 
+       *    with the best affinity to the executing processor will be used
+       * @param extent_in_bytes pointer to a location to write the future size
+       * @param check_extent check that the extent matches the future size
+       * @param silence_warnings silence any warnings for this blocking call
+       * @param warning_string a string to be reported with any warnings
+       * @return a const pointer to the future data in the specified memory
+       */
+      const void* get_buffer(Memory::Kind memory, 
+                             size_t *extent_in_bytes = NULL,
+                             bool check_extent = false,
+                             bool silence_warnings = false,
+                             const char *warning_string = NULL) const;
+
+      /**
        * Return a const reference to the future.
        * WARNING: these method is unsafe as the underlying
        * buffer containing the future result can be deleted
@@ -1294,6 +1332,7 @@ namespace Legion {
        * @param warning_string a string to be reported with the warning
        */
       template<typename T> 
+        LEGION_DEPRECATED("Use 'Future::get_span' instead")
         inline const T& get_reference(bool silence_warnings = false,
                                       const char *warning_string = NULL) const;
       /**
@@ -1306,12 +1345,24 @@ namespace Legion {
        * @param silence_warnings silence any warnings for this blocking call
        * @param warning_string a string to be reported with the warning
        */
+      LEGION_DEPRECATED("Use 'Future::get_buffer' instead")
       inline const void* get_untyped_pointer(bool silence_warnings = false,
-                                       const char *warning_string = NULL) const;
+                                       const char *warning_string = NULL) const; 
+
       /**
        * Return the number of bytes contained in the future.
        */
       size_t get_untyped_size(void) const;
+
+      /**
+       * Return a pointer to the metadata buffer for this future.
+       * Unlike getting a buffer for the future which can exist on
+       * any memory, the metadata is always guaranteed to be on the
+       * host memory.
+       * @param optional pointer to a place to write the size
+       * @return a pointer to the buffer containing the metadata
+       */
+      const void* get_metadata(size_t *size = NULL) const;
     public:
       // These methods provide partial support the C++ future interface
       template<typename T>
@@ -1334,12 +1385,9 @@ namespace Legion {
        * serialization is performed.
        */
       static inline Future from_untyped_pointer(Runtime *rt,
-						const void *buffer,
-						size_t bytes);
-    private:
-      void* get_untyped_result(bool silence_warnings,
-                               const char *warning_string,
-                               bool check_size, size_t future_size = 0) const;
+          const void *buffer, size_t bytes, bool take_ownership = false,
+          Memory::Kind mem = Memory::SYSTEM_MEM, 
+          void (*freefunc)(void*,size_t) = NULL);
     };
 
     /**
@@ -4117,11 +4165,17 @@ namespace Legion {
      */
     class FutureFunctor {
     public:
-      virtual ~FutureFunctor(void) { }
+      virtual ~FutureFunctor(void);
     public:
-      virtual size_t callback_get_future_size(void) = 0;
-      virtual void callback_pack_future(void *buffer, size_t size) = 0;
+      virtual void* callback_get_future(Memory::Kind &kind,
+          size_t &size, bool &owned, void (*&freefunc)(void*,size_t),
+          const void *&metadata, size_t &metasize);
       virtual void callback_release_future(void) = 0;
+    public:
+      // These two are deprecated and will be invoked only if 
+      // callback_get_future_instance is not overridden
+      virtual size_t callback_get_future_size(void);
+      virtual void callback_pack_future(void *buffer, size_t size); 
     };
 
     /**
@@ -6307,11 +6361,14 @@ namespace Legion {
        * @param redop ID for the reduction op to use for reducing values
        * @param deterministic request that the reduced future be computed
        *        in a deterministic way (more expensive than non-deterministic)
+       * @param map_id mapper to use for deciding where to map the output future
+       * @param tag pass-through value to the mapper for application context
        * @return a future result representing the the reduction of all the
        *         values in the future map
        */
-      Future reduce_future_map(Context ctx, const FutureMap &future_map, 
-                               ReductionOpID redop, bool deterministic = false);
+      Future reduce_future_map(Context ctx, const FutureMap &future_map,
+                               ReductionOpID redop, bool deterministic = false,
+                               MapperID map_id = 0, MappingTagID tag = 0);
 
       /**
        * Construct a future map from a collection of buffers. The user must
@@ -8909,13 +8966,26 @@ namespace Legion {
        * @param owned whether the runtime now owns this result
        * @param inst optional Realm instance containing the data that
        *              Legion should take ownership of
+       * @param memory the kind of memory in which the retval resides
+       * @param freefunc a callback function for freeing owned memory
+       *              if this is NULL and owned is true the runtime
+       *              will free the memory using the system 'free' function
+       * @param metadataptr a pointer to host memory that contains metadata
+       *              for the future. The runtime will always make a copy
+       *              of this data if it is not NULL.
+       * @param metadatasize the size of the metadata buffer if non-NULL
        */
       static void legion_task_postamble(Runtime *runtime, Context ctx,
                                         const void *retvalptr = NULL,
                                         size_t retvalsize = 0,
                                         bool owned = false,
                                         Realm::RegionInstance inst = 
-                                          Realm::RegionInstance::NO_INST);
+                                          Realm::RegionInstance::NO_INST,
+                                        Memory::Kind memory = 
+                                          Memory::SYSTEM_MEM,
+                                        void (*freefunc)(void*,size_t) = NULL,
+                                        const void *metadataptr = NULL,
+                                        size_t metadatasize = 0);
 
       /**
        * This variant of the Legion task postamble allows users to pass in
@@ -9108,7 +9178,9 @@ namespace Legion {
       // Methods for the wrapper functions to get information from the runtime
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
-      Future from_value(const void *value, size_t value_size, bool owned);
+      Future from_value(const void *value, size_t value_size, bool owned, 
+                        Memory::Kind memory_kind = Memory::SYSTEM_MEM,
+                        void (*freefunc)(void*,size_t) = NULL);
     private:
       template<typename T>
       friend class DeferredValue;

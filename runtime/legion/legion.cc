@@ -2304,33 +2304,32 @@ namespace Legion {
     {
       if (impl != NULL)
       {
-        const Internal::ApEvent ready = subscribe ? 
-          impl->subscribe() : impl->get_ready_event();
+        if (subscribe)
+          impl->subscribe();
+        const Internal::ApEvent ready = impl->get_ready_event();
         // Always subscribe to the Realm event to know when it triggers
         ready.subscribe();
         bool poisoned = false;
         if (ready.has_triggered_faultaware(poisoned))
-        {
-          if (poisoned)
-            Internal::implicit_context->raise_poison_exception();
           return true;
-        }
+        if (poisoned && (Internal::implicit_context != NULL))
+          Internal::implicit_context->raise_poison_exception();
         return false;
       }
       return true; // Empty futures are always ready
     }
 
     //--------------------------------------------------------------------------
-    void* Future::get_untyped_result(bool silence_warnings,
-                                     const char *warning_string,
-                                     bool check_size, size_t future_size) const
+    const void* Future::get_buffer(Memory::Kind memory, size_t *extent_in_bytes,
+       bool check_size, bool silence_warnings, const char *warning_string) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for future value from empty future")
-      return impl->get_untyped_result(silence_warnings, warning_string,
-                                    false/*internal*/, check_size, future_size);
+      Processor proc = Internal::implicit_context->get_executing_processor();
+      return impl->get_buffer(proc, memory, extent_in_bytes, check_size,
+                              silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2341,6 +2340,59 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for future size from empty future");
       return impl->get_untyped_size();
+    }
+
+    //--------------------------------------------------------------------------
+    const void* Future::get_metadata(size_t *size) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+                          "Illegal request for metadata from empty future");
+      return impl->get_metadata(size);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Future Functor
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FutureFunctor::~FutureFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void* FutureFunctor::callback_get_future(Memory::Kind &kind, size_t &size,
+                                  bool &owned, void (*&freefunc)(void*,size_t),
+                                  const void *&metadata, size_t &metasize)
+    //--------------------------------------------------------------------------
+    {
+      kind = Memory::SYSTEM_MEM;
+      size = callback_get_future_size();
+      owned = true;
+      freefunc = NULL;
+      metadata = NULL;
+      metasize = 0;
+      if (size == 0)
+        return NULL;
+      void *result = malloc(size);
+      callback_pack_future(result, size);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t FutureFunctor::callback_get_future_size(void)
+    //--------------------------------------------------------------------------
+    {
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureFunctor::callback_pack_future(void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5840,10 +5892,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::reduce_future_map(Context ctx, const FutureMap &future_map,
-                                      ReductionOpID redop, bool deterministic)
+                                      ReductionOpID redop, bool deterministic,
+                                      MapperID map, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return ctx->reduce_future_map(future_map, redop, deterministic);
+      return ctx->reduce_future_map(future_map, redop, deterministic, map, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -7040,15 +7093,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::from_value(const void *value, 
-                                        size_t value_size, bool owned)
+    Future Runtime::from_value(const void *value, size_t value_size, bool owned,
+                       Memory::Kind memory_kind, void (*freefunc)(void*,size_t))
     //--------------------------------------------------------------------------
     {
-      Future result = 
-        runtime->help_create_future(Internal::ApEvent::NO_AP_EVENT);
-      // Set the future result
-      result.impl->set_result(value, value_size, owned);
-      return result;
+      return Internal::implicit_context->from_value(value, value_size, owned,
+                                                    memory_kind, freefunc); 
     }
 
     //--------------------------------------------------------------------------
@@ -7439,13 +7489,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::legion_task_postamble(Runtime *runtime,Context ctx,
-                                                   const void *retvalptr,
-                                                   size_t retvalsize,
-                                                   bool owned,
-                                                   Realm::RegionInstance inst)
+                                                 const void *retvalptr,
+                                                 size_t retvalsize, bool owned,
+                                                 Realm::RegionInstance inst,
+                                                 Memory::Kind memory,
+                                                 void (*freefunc)(void*,size_t),
+                                                 const void *metadataptr,
+                                                 size_t metadatasize)
     //--------------------------------------------------------------------------
     {
-      ctx->end_task(retvalptr, retvalsize, owned, inst, NULL/*functor*/);
+      ctx->end_task(retvalptr, retvalsize, owned, inst, NULL/*functor*/,
+                    memory, freefunc, metadataptr, metadatasize);
     }
 
     //--------------------------------------------------------------------------
@@ -7454,7 +7508,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(NULL, 0, owned, Realm::RegionInstance::NO_INST, 
-                    callback_functor);
+                    callback_functor, Memory::SYSTEM_MEM, NULL, NULL, 0);
     }
 
     //--------------------------------------------------------------------------

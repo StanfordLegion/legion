@@ -53,9 +53,11 @@ namespace Legion {
         Runtime::legion_task_postamble(rt, ctx, result, result_size, owned);
       }
       static inline Future from_value_helper(Runtime *rt, 
-          const void *value, size_t value_size, bool owned)
+          const void *value, size_t value_size, bool owned,
+          Memory::Kind memkind = Memory::SYSTEM_MEM,
+          void (*freefunc)(void*,size_t) = NULL)
       {
-        return rt->from_value(value, value_size, owned);
+        return rt->from_value(value, value_size, owned, memkind, freefunc);
       }
 
       // WARNING: There are two levels of SFINAE (substitution failure is 
@@ -91,8 +93,9 @@ namespace Legion {
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
         {
-          const void *result = 
-            f.get_untyped_pointer(silence_warnings, warning_string);
+          size_t size = 0;
+          const void *result = f.get_buffer(Memory::SYSTEM_MEM, &size,
+                false/*check size*/, silence_warnings, warning_string);
           T derez;
           derez.legion_deserialize(result);
           return derez;
@@ -105,6 +108,9 @@ namespace Legion {
         static inline void end_task(Runtime *rt, Context ctx,
                                     DeferredReduction<REDOP,EXCLUSIVE> *result)
         {
+          static_assert(!IsSerdezType<typename REDOP::RHS>::value, 
+              "Legion does not currently support serialize/deserialize "
+              "methods on types in DefrredReductions");
           result->finalize(rt, ctx);
         }
         static inline Future from_value(Runtime *rt, 
@@ -120,7 +126,9 @@ namespace Legion {
         {
           // Should never be called
           assert(false);
-          const void *result = f.get_untyped_pointer(silence_warnings, warning);
+          size_t size = 0;
+          const void *result = f.get_buffer(Memory::SYSTEM_MEM, &size,
+                      false/*check size*/, silence_warnings, warning);
           return (*((const DeferredReduction<REDOP,EXCLUSIVE>*)result));
         }
       };
@@ -131,6 +139,9 @@ namespace Legion {
         static inline void end_task(Runtime *rt, Context ctx,
                                     DeferredValue<T> *result)
         {
+          static_assert(!IsSerdezType<T>::value,
+              "Legion does not currently support serialize/deserialize "
+              "methods on types in DeferredValues");
           result->finalize(rt, ctx);
         }
         static inline Future from_value(Runtime *rt, const DeferredValue<T> *value)
@@ -145,8 +156,9 @@ namespace Legion {
         {
           // Should never be called
           assert(false);
-          const void *result = 
-            f.get_untyped_pointer(silence_warnings, warning_string);
+          size_t size = 0;
+          const void *result = f.get_buffer(Memory::SYSTEM_MEM, &size,
+                false/*check size*/, silence_warnings, warning_string);
           return (*((const DeferredValue<T>*)result));
         }
       }; 
@@ -165,7 +177,11 @@ namespace Legion {
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
         {
-          return f.get_reference<T>(silence_warnings, warning_string);
+          size_t size = sizeof(T);
+          const T *result = static_cast<const T*>(f.get_buffer(
+                Memory::SYSTEM_MEM, &size, true/*check size*/,
+                silence_warnings, warning_string));
+          return *result;
         }
       };
 
@@ -217,7 +233,11 @@ namespace Legion {
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
         {
-          return f.get_reference<T>(silence_warnings, warning_string);
+          size_t size = sizeof(T);
+          const T* result = static_cast<const T*>(f.get_buffer(
+                Memory::SYSTEM_MEM, &size, true/*check size*/,
+                silence_warnings, warning_string));
+          return *result;
         }
       };
 
@@ -15339,7 +15359,7 @@ namespace Legion {
     {
       Runtime::legion_task_postamble(runtime, ctx,
                     accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
-                    false/*owner*/, instance);
+                    true/*owner*/, instance);
     }
 
     //--------------------------------------------------------------------------
@@ -18769,13 +18789,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<typename T, PrivilegeMode PM>
+    inline Span<T,PM> Future::get_span(Memory::Kind memory,
+                        bool silence_warnings, const char *warning_string) const
+    //--------------------------------------------------------------------------
+    {
+      // This has to be true for now
+      static_assert(PM == LEGION_READ_ONLY, 
+      "PrivilegeMode for Future:get_span must be 'LEGION_READ_ONLY' currently");
+      size_t size = 0;
+      const void *ptr = get_buffer(memory, &size, false/*check size*/, 
+                                   silence_warnings, warning_string);
+      assert((size % sizeof(T)) == 0);
+      return Span<T,PM>(ptr, size / sizeof(T));
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     inline const T& Future::get_reference(bool silence_warnings,
                                           const char *warning_string) const
     //--------------------------------------------------------------------------
     {
-      return *((const T*)get_untyped_result(silence_warnings, warning_string,
-                                            true/*check size*/, sizeof(T)));
+      size_t size = sizeof(T);
+      const void *ptr = get_buffer(Memory::SYSTEM_MEM, &size, 
+          true/*check size*/, silence_warnings, warning_string);
+      assert(size == sizeof(T));
+      return *static_cast<const T*>(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -18783,7 +18822,9 @@ namespace Legion {
                                                const char *warning_string) const
     //--------------------------------------------------------------------------
     {
-      return get_untyped_result(silence_warnings, warning_string, false);
+      size_t size = 0;
+      return get_buffer(Memory::SYSTEM_MEM, &size, false/*check size*/,
+                        silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -18818,12 +18859,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ inline Future Future::from_untyped_pointer(Runtime *rt,
-							  const void *buffer,
-							  size_t bytes)
+                           const void *buffer, size_t bytes, bool owned,
+                           Memory::Kind memkind, void (*freefunc)(void*,size_t))
     //--------------------------------------------------------------------------
     {
-      return LegionSerialization::from_value_helper(rt, buffer, bytes,
-						    false /*!owned*/);
+      return LegionSerialization::from_value_helper(rt, buffer, bytes, owned,
+                                                    memkind, freefunc);
     }
 
     //--------------------------------------------------------------------------
@@ -20845,10 +20886,6 @@ namespace Legion {
           "Future types are not permitted as return types for Legion tasks");
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value),
           "FutureMap types are not permitted as return types for Legion tasks");
-      // Assert that the return type size is within the required size
-      LEGION_STATIC_ASSERT(sizeof(T) <= LEGION_MAX_RETURN_SIZE,
-          "Task return values must be less than or equal to "
-          "LEGION_MAX_RETURN_SIZE bytes");
       const Task *task; Context ctx; Runtime *rt;
       const std::vector<PhysicalRegion> *regions;
       Runtime::legion_task_preamble(args, arglen, p, task, regions, ctx, rt);
@@ -20896,12 +20933,6 @@ namespace Legion {
           "Future types are not permitted as return types for Legion tasks");
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value),
           "FutureMap types are not permitted as return types for Legion tasks");
-      // Assert that the return type size is within the required size
-      LEGION_STATIC_ASSERT((sizeof(T) <= LEGION_MAX_RETURN_SIZE) ||
-         (std::is_class<T>::value && 
-          LegionSerialization::IsSerdezType<T>::value),
-         "Task return values must be less than or equal to "
-          "LEGION_MAX_RETURN_SIZE bytes");
 
       const Task *task; Context ctx; Runtime *rt;
       const std::vector<PhysicalRegion> *regions;

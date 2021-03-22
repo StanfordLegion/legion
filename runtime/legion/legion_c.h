@@ -2636,6 +2636,12 @@ extern "C" {
   size_t
   legion_future_get_untyped_size(legion_future_t handle);
 
+  /**
+   * @see Legion::Future::get_metadata(size_t *size)
+   */
+  const void *
+  legion_future_get_metadata(legion_future_t handle, size_t *size/*=NULL*/);
+
   // -----------------------------------------------------------------------
   // Future Map Operations
   // -----------------------------------------------------------------------

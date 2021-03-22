@@ -212,6 +212,30 @@ namespace Legion {
       public:
         FutureImpl *const impl;
       };
+      struct CallbackReleaseArgs : public LgTaskArgs<CallbackReleaseArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_CALLBACK_RELEASE_TASK_ID;
+      public:
+        CallbackReleaseArgs(FutureFunctor *functor, bool own_functor);
+      public:
+        FutureFunctor *const functor;
+        const bool own_functor;
+      };
+      struct PendingInstance {
+      public:
+        PendingInstance(void)
+          : op(NULL), uid(0), eager(false) { }
+        PendingInstance(Operation *o, UniqueID id, bool e)
+          : op(o), uid(id), eager(e) { }
+        PendingInstance(Operation *o, UniqueID id, ApUserEvent r, bool e)
+          : op(o), uid(id), inst_ready(r), eager(e) { }
+      public:
+        Operation *op;
+        UniqueID uid;
+        ApUserEvent inst_ready;
+        std::set<AddressSpaceID> remote_requests;
+        bool eager;
+      };
     public:
       FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
                  AddressSpaceID owner_space, ApEvent complete,
@@ -230,35 +254,53 @@ namespace Legion {
     public:
       // Wait without subscribing to the payload
       void wait(bool silence_warnings, const char *warning_string);
-      void* get_untyped_result(bool silence_warnings = true,
-                               const char *warning_string = NULL,
-                               bool internal = false,
-                               bool check_size = false,
-                               size_t future_size = 0);
+      const void* get_buffer(Processor proc, Memory::Kind memory,
+                             size_t *extent_in_bytes = NULL, 
+                             bool check_extent = false,
+                             bool silence_warnings = false, 
+                             const char *warning_string = NULL);
+      const void* get_buffer(Memory memory,
+                             size_t *extent_in_bytes = NULL, 
+                             bool check_extent = false,
+                             bool silence_warnings = false, 
+                             const char *warning_string = NULL);
+      RtEvent request_application_instance(Memory target, SingleTask *task,
+                       UniqueID uid, AddressSpaceID source,
+                       RtEvent pre = RtEvent::NO_RT_EVENT,
+                       ApUserEvent ready_event = ApUserEvent::NO_AP_USER_EVENT);
+      ApEvent find_application_instance_ready(Memory target, SingleTask *task);
+      RtEvent request_internal_buffer(Operation *op, bool eager);
+      const void *find_internal_buffer(TaskContext *ctx, size_t &expected_size);
+      FutureInstance* get_canonical_instance(void);
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
                     bool internal = false);
-      size_t get_untyped_size(bool internal = false);
+      size_t get_untyped_size(void);
+      const void *get_metadata(size_t *metasize);
       ApEvent get_ready_event(void) const { return future_complete; }
+      // A special function for predicates to peek
+      // at the boolean value of a future if it is set
+      // Must have called request internal buffer first and event must trigger
+      bool get_boolean_value(TaskContext *ctx);
     public:
       // This will simply save the value of the future
-      void set_result(const void *args, size_t arglen, bool own);
+      void set_result(FutureInstance *instance, 
+                      void *metadata = NULL, size_t metasize = 0);
+      void set_results(const std::vector<FutureInstance*> &instances,
+                      void *metadata = NULL, size_t metasize = 0);
       void set_result(FutureFunctor *callback_functor, bool own,
                       Processor functor_proc);
+      // This is the same as above but for data that we know is visible
+      // in the system memory and should always make a local FutureInstance
+      void set_local(const void *value, size_t size, bool own = false);
       // This will save the value of the future locally
       void unpack_future(Deserializer &derez);
+      void unpack_instances(Deserializer &derez);
       // Reset the future in case we need to restart the
       // computation for resiliency reasons
       bool reset_future(void);
-      // A special function for predicates to peek
-      // at the boolean value of a future if it is set
-      bool get_boolean_value(bool &valid);
-      // Request that the value be made ready on this node
-      ApEvent subscribe(bool need_local_data = true);
-      // Request the value be made ready on this node for
-      // internal use which means we can see the value before
-      // the future actually completes
-      RtEvent subscribe_internal(bool need_local_data = true);
+      // Request that we get meta data for the future on this node
+      RtEvent subscribe(void);
       // Set the task tree coordinates for this future
       void set_future_coordinates(
           std::vector<std::pair<size_t,DomainPoint> > &coordinates);
@@ -282,14 +324,19 @@ namespace Legion {
       void register_remote(AddressSpaceID sid, ReferenceMutator *mutator);
     protected:
       void finish_set_future(void); // must be holding lock
+      void create_pending_instances(void); // must be holding lock
+      FutureInstance* find_or_create_instance(Memory memory, Operation *op,
+                        UniqueID op_uid, bool eager, bool need_lock = true,
+                        ApUserEvent inst_ready = ApUserEvent::NO_AP_USER_EVENT);
       void mark_sampled(void);
       void broadcast_result(std::set<AddressSpaceID> &targets,
-                            ApEvent complete, const bool need_lock);
+                            const bool need_lock);
       void record_subscription(AddressSpaceID subscriber, bool need_lock);
       void notify_remote_set(AddressSpaceID remote_space);
     protected:
-      ApEvent invoke_callback(void); // must be holding lock
+      RtEvent invoke_callback(void); // must be holding lock
       void perform_callback(void);
+      void pack_future_result(Serializer &rez) const; // must be holding lock
     public:
       void record_future_registered(ReferenceMutator *mutator);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
@@ -298,10 +345,15 @@ namespace Legion {
       static void handle_future_notification(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID source);
       static void handle_future_broadcast(Deserializer &derez, Runtime *rt);
+      static void handle_future_create_instance_request(Deserializer &derez,
+                                    Runtime *runtime, AddressSpaceID source);
+      static void handle_future_create_instance_response(Deserializer &derez,
+                                                         Runtime *runtime);
     public:
       void contribute_to_collective(const DynamicCollective &dc,unsigned count);
       static void handle_contribute_to_collective(const void *args);
       static void handle_callback(const void *args);
+      static void handle_release(const void *args);
     public:
       // These three fields are only valid on the owner node
       Operation *const producer_op;
@@ -311,29 +363,123 @@ namespace Legion {
 #ifdef LEGION_SPY
       const UniqueID producer_uid;
 #endif
+      const ApEvent future_complete;
     private:
       FRIEND_ALL_RUNTIME_CLASSES
       mutable LocalLock future_lock;
-      ApEvent future_complete;
-      ApUserEvent subscription_event;
-      RtUserEvent subscription_internal;
+      RtUserEvent subscription_event;
       // On the owner node, keep track of the registered waiters
       std::set<AddressSpaceID> subscribers;
       // These are the coordinates in the task tree for the operation
       // that produced this future. Currently it is only valid if we
       // are running with -lg:safe_ctrlrepl but we could relax that
       std::vector<std::pair<size_t,DomainPoint> > coordinates;
-      void *result; 
-      size_t result_size;
       AddressSpaceID result_set_space; // space on which the result was set
+      std::map<Memory,FutureInstance*> instances;
+      FutureInstance *canonical_instance;
     private:
-      ApUserEvent callback_ready;
+      void *metadata;
+      size_t metasize;
+    private:
+      // Instances that need to be made once canonical instance is set
+      std::map<Memory,PendingInstance> pending_instances;
+      // Requests to create instances on remote nodes
+      std::map<Memory,std::pair<RtUserEvent,ApUserEvent> > pending_requests;
+      // Annoying case of having effects from pending requests
+      RtEvent pending_precondition;
+    private:
       Processor callback_proc;
       FutureFunctor *callback_functor;
       bool own_callback_functor;
     private:
       volatile bool empty;
       volatile bool sampled;
+    };
+
+    /**
+     * \class FutureInstance
+     * A future instance represents the data for a single copy of
+     * the future in a memory somewhere. It has a duality to it that
+     * is likely confusing at first. It can either be an external 
+     * allocation which may or may not have an external realm instance
+     * associated with it. Or it could be a normal realm instance for
+     * which we have extracted the pointer and size for it. Furthermore
+     * when moving these from one node to another, sometimes we pass
+     * them by-value if they can be cheaply copied, other times we
+     * will move the just the references to the instances and allocations.
+     * You'll have to look into the implementation to discover which
+     * is happening, but when you get an unpacked copy on the remote
+     * side it is a valid future instance that can you use regardless.
+     * Current future instances are immutable after they are initially 
+     * written, but are designed so that we might easily be able to relax
+     * that later so we can support mutable future values.
+     */
+    class FutureInstance {
+    public:
+      struct DeferDeleteFutureInstanceArgs :
+        public LgTaskArgs<DeferDeleteFutureInstanceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_DELETE_FUTURE_INST_TASK_ID;
+      public:
+        DeferDeleteFutureInstanceArgs(UniqueID uid, FutureInstance *inst)
+          : LgTaskArgs<DeferDeleteFutureInstanceArgs>(uid), instance(inst) { }
+      public:
+        FutureInstance *const instance;
+      };
+    public:
+      FutureInstance(const void *data, size_t size, Memory memory, 
+                     ApEvent ready_event, Runtime *runtime, bool eager, 
+                     bool external, bool own_allocation = true,
+                     PhysicalInstance inst = PhysicalInstance::NO_INST,
+                     void (*freefunc)(void*,size_t) = NULL,
+                     Processor free_proc = Processor::NO_PROC,
+                     RtEvent use_event = RtEvent::NO_RT_EVENT);
+      FutureInstance(const FutureInstance &rhs);
+      ~FutureInstance(void);
+    public:
+      FutureInstance& operator=(const FutureInstance &rhs);
+    public:
+      ApEvent initialize(const ReductionOp *redop, Operation *op);
+      ApEvent copy_from(FutureInstance *source, Operation *op,
+                        ApEvent precondition = ApEvent::NO_AP_EVENT,
+                        bool check_source_ready = true);
+      ApEvent reduce_from(FutureInstance *source, Operation *op,
+                          const ReductionOpID redop_id,
+                          const ReductionOp *redop, bool exclusive,
+                          ApEvent precondition = ApEvent::NO_AP_EVENT);
+    public:
+      bool is_ready(bool check_ready_event = true) const;
+      ApEvent get_ready(bool check_ready_event = true);
+      PhysicalInstance get_instance(void);
+      bool deferred_delete(Operation *op, ApEvent done_event);
+    public:
+      bool can_pack_by_value(void) const;
+      bool pack_instance(Serializer &rez, bool pack_ownership, 
+                         bool other_ready = false,
+                         ApEvent ready = ApEvent::NO_AP_EVENT);
+      static FutureInstance* unpack_instance(Deserializer &derez, Runtime *rt);
+    public:
+      static bool check_meta_visible(Runtime *runtime, Memory memory,
+                                     bool has_freefunc = false);
+      static FutureInstance* create_local(const void *value, size_t size, 
+                                          bool own, Runtime *runtime);
+      static void handle_deferred_delete(const void *args);
+    public:
+      Runtime *const runtime;
+      const void *const data;
+      const size_t size;
+      const Memory memory;
+      const ApEvent ready_event;
+      void (*const freefunc)(void*,size_t);
+      const Processor freeproc;
+      const bool eager_allocation;
+      const bool external_allocation;
+      const bool is_meta_visible;
+    protected:
+      bool own_allocation;
+      PhysicalInstance instance;
+      RtEvent use_event;
+      bool own_instance;
     };
 
     /**
@@ -400,7 +546,7 @@ namespace Legion {
       // Will return NULL if it does not exist
       virtual FutureImpl* find_shard_local_future(const DomainPoint &point);
       virtual void get_shard_local_futures(
-                                std::map<DomainPoint,FutureImpl*> &futures);
+                                     std::map<DomainPoint,Future> &futures);
     public:
       void register_dependence(Operation *consumer_op);
     public:
@@ -498,7 +644,7 @@ namespace Legion {
       // Will return NULL if it does not exist
       virtual FutureImpl* find_shard_local_future(const DomainPoint &point);
       virtual void get_shard_local_futures(
-                                std::map<DomainPoint,FutureImpl*> &futures);
+                                     std::map<DomainPoint,Future> &futures);
     public:
       void set_sharding_function(ShardingFunction *function);
       void handle_future_map_request(Deserializer &derez);
@@ -1042,8 +1188,8 @@ namespace Legion {
     public:
       inline bool is_visible_memory(Memory memory) const
         { return (visible_memories.find(memory) != visible_memories.end()); }
-      inline void find_visible_memories(std::set<Memory> &visible) const
-        { visible = visible_memories; }
+      void find_visible_memories(std::set<Memory> &visible) const;
+      Memory find_best_visible_memory(Memory::Kind kind) const;
     protected:
       void perform_mapping_operations(void);
       void issue_advertisements(MapperID mid);
@@ -1101,7 +1247,7 @@ namespace Legion {
       // Lock for accessing mappers
       mutable LocalLock mapper_lock;
       // The set of visible memories from this processor
-      std::set<Memory> visible_memories;
+      std::map<Memory,size_t/*bandwidth affinity*/> visible_memories;
     };
 
     /**
@@ -1160,6 +1306,25 @@ namespace Legion {
       public:
         MemoryManager *const manager;
         const PhysicalInstance inst;
+      };
+    public:
+      class FutureInstanceAllocator : public ProfilingResponseHandler {
+      public:
+        FutureInstanceAllocator(void);
+      public:
+        virtual void handle_profiling_response(
+                const ProfilingResponseBase *base,
+                const Realm::ProfilingResponse &response,
+                const void *orig, size_t orig_length);
+        inline bool succeeded(void) const
+        {
+          if (!ready.has_triggered())
+            ready.wait();
+          return success;
+        }
+      private:
+        const RtUserEvent ready;
+        volatile bool success;
       };
 #ifdef LEGION_MALLOC_INSTANCES
     public:
@@ -1278,6 +1443,10 @@ namespace Legion {
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority, bool remote,
                                     bool eager = false);
+      FutureInstance* create_future_instance(Operation *op, UniqueID creator_id,
+                                  ApEvent ready_event, size_t size, bool eager);
+      void free_future_instance(PhysicalInstance inst, size_t size, 
+                                RtEvent free_event, bool eager);
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
@@ -1332,7 +1501,7 @@ namespace Legion {
                                           LayoutConstraintKind *unsat_kind,
                                           unsigned *unsat_index,
                                           CollectiveManager *collective = NULL,
-                                          DomainPoint *collective_point = NULL);
+                                          DomainPoint *collective_point = NULL); 
     public:
       bool delete_by_size_and_state(const size_t needed_size,
                                     const InstanceState state,
@@ -2247,6 +2416,18 @@ namespace Legion {
       public:
         TopLevelContext *const ctx;
       };
+      struct FreeExternalArgs : public LgTaskArgs<FreeExternalArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FREE_EXTERNAL_TASK_ID;
+      public:
+        FreeExternalArgs(void *d, size_t s, void (*f)(void*,size_t))
+          : LgTaskArgs<FreeExternalArgs>(implicit_provenance),
+            data(d), size(s), func(f) { }
+      public:
+        void *const data;
+        const size_t size;
+        void (*const func)(void*,size_t);
+      };
       struct MapperTaskArgs : public LgTaskArgs<MapperTaskArgs> {
       public:
         static const LgTaskID TASK_ID = LG_MAPPER_TASK_ID;
@@ -2297,7 +2478,8 @@ namespace Legion {
       };
     public:
       Runtime(Machine m, const LegionConfiguration &config,
-              bool background, InputArgs input_args, AddressSpaceID space_id,
+              bool background, InputArgs input_args, 
+              AddressSpaceID space_id, Memory sysmem,
               const std::set<Processor> &local_procs,
               const std::set<Processor> &local_util_procs,
               const std::set<AddressSpaceID> &address_spaces,
@@ -2314,6 +2496,7 @@ namespace Legion {
       Legion::Mapping::MapperRuntime *const mapper_runtime;
       // The machine object for this runtime
       const Machine machine;
+      const Memory runtime_system_memory;
       const AddressSpaceID address_space; 
       const unsigned total_address_spaces;
       // stride for uniqueness, may or may not be the same depending
@@ -2750,6 +2933,8 @@ namespace Legion {
       // Memory manager functions
       MemoryManager* find_memory_manager(Memory mem);
       AddressSpaceID find_address_space(Memory handle) const;
+      void free_external_allocation(Processor proc, void *data, size_t size,
+                                    void (*freefunc)(void*,size_t));
 #ifdef LEGION_MALLOC_INSTANCES
       uintptr_t allocate_deferred_instance(Memory memory,size_t size,bool free);
       void free_deferred_instance(Memory memory, uintptr_t ptr);
@@ -2924,6 +3109,10 @@ namespace Legion {
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_future_notification(AddressSpaceID target, Serializer &rez);
       void send_future_broadcast(AddressSpaceID target, Serializer &rez);
+      void send_future_create_instance_request(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_future_create_instance_response(AddressSpaceID target,
+                                                Serializer &rez);
       void send_future_map_request_future(AddressSpaceID target, 
                                           Serializer &rez);
       void send_future_map_response_future(AddressSpaceID target,
@@ -3085,6 +3274,12 @@ namespace Legion {
                                                  Serializer &rez);
       void send_remote_trace_update(AddressSpaceID target, Serializer &rez);
       void send_remote_trace_response(AddressSpaceID target, Serializer &rez);
+      void send_free_external_allocation(AddressSpaceID target,Serializer &rez);
+      void send_create_future_instance_request(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_create_future_instance_response(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_free_future_instance(AddressSpaceID target, Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -3235,6 +3430,9 @@ namespace Legion {
       void handle_future_notification(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_future_broadcast(Deserializer &derez);
+      void handle_future_create_instance_request(Deserializer &derez,
+                                                 AddressSpaceID source);
+      void handle_future_create_instance_response(Deserializer &derez);
       void handle_future_map_future_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_future_map_future_response(Deserializer &derez);
@@ -3387,6 +3585,11 @@ namespace Legion {
       void handle_remote_tracing_update(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_remote_tracing_response(Deserializer &derez);
+      void handle_free_external_allocation(Deserializer &derez);
+      void handle_create_future_instance_request(Deserializer &derez,
+                                                 AddressSpaceID source);
+      void handle_create_future_instance_response(Deserializer &derez);
+      void handle_free_future_instance(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
@@ -3710,6 +3913,7 @@ namespace Legion {
       bool is_local(Processor proc) const;
       bool is_visible_memory(Processor proc, Memory mem);
       void find_visible_memories(Processor proc, std::set<Memory> &visible);
+      Memory find_local_memory(Processor proc, Memory::Kind mem_kind);
     public:
       IndexSpaceID       get_unique_index_space_id(void);
       IndexPartitionID   get_unique_index_partition_id(void);

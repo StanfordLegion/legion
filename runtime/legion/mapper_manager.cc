@@ -1184,6 +1184,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_map_future_map_reduction(AllReduceOp *op,
+                                       Mapper::FutureMapReductionInput *input,
+                                       Mapper::FutureMapReductionOutput *output,
+                                       MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(MAP_FUTURE_MAP_REDUCTION_CALL, op, 
+                                 continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<AllReduceOp, 
+            Mapper::FutureMapReductionInput,
+            Mapper::FutureMapReductionOutput,
+            &MapperManager::invoke_map_future_map_reduction>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->map_future_map_reduction(info, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_configure_context(TaskOp *task,
                                          Mapper::ContextConfigOutput *output,
                                          MappingCallInfo *info)

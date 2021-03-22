@@ -236,6 +236,11 @@ namespace Legion {
                               Mapper::SelectShardingFunctorInput *input,
                               Mapper::SelectShardingFunctorOutput *output,
                               MappingCallInfo *info = NULL);
+    public: // All reduce 
+      void invoke_map_future_map_reduction(AllReduceOp *op,
+                              Mapper::FutureMapReductionInput *input,
+                              Mapper::FutureMapReductionOutput *output,
+                              MappingCallInfo *info = NULL);
     public: // Task execution mapper calls
       void invoke_configure_context(TaskOp *task,
                                     Mapper::ContextConfigOutput *output,
