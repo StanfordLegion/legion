@@ -25165,6 +25165,12 @@ namespace Legion {
                                                             runtime, args);
             break;
           }
+        case LG_DEFER_REMOTE_UNREGISTER_TASK_ID:
+          {
+            DistributedCollectable::handle_defer_remote_unregister(runtime,
+                                                                   args);
+            break;
+          }
         case LG_COPY_FILL_AGGREGATION_TASK_ID:
           {
             CopyFillAggregator::handle_aggregation(args);

@@ -1500,6 +1500,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DistributedCollectable::DeferRemoteUnregisterArgs::
+      DeferRemoteUnregisterArgs(DistributedID id, VirtualChannelKind c, 
+                                const NodeSet &n)
+      : LgTaskArgs<DeferRemoteUnregisterArgs>(implicit_provenance),
+        done(Runtime::create_rt_user_event()), did(id), vc(c),
+        nodes(new NodeSet(n))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent DistributedCollectable::send_unregister_messages(
                                                     VirtualChannelKind vc) const
     //--------------------------------------------------------------------------
@@ -1508,6 +1519,17 @@ namespace Legion {
       assert(is_owner());
       assert(!remote_instances.empty());
 #endif
+      // handle the unusual case where the derived type has some precondition
+      // on sending out any unregsiter messages, see the comment on the
+      // 'reentrant_event' member for why we are using it here to detect
+      // this particular event precondition
+      if (reentrant_event.exists() && !reentrant_event.has_triggered())
+      {
+        DeferRemoteUnregisterArgs args(did, vc, remote_instances);
+        runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_MESSAGE_PRIORITY, reentrant_event);
+        return args.done;
+      }
       std::set<RtEvent> done_events;
       UnregisterFunctor functor(runtime, did, vc, done_events); 
       // No need for the lock since we're being destroyed
@@ -1907,6 +1929,23 @@ namespace Legion {
         runtime->send_did_remote_valid_update(dargs->target, rez);
       else
         runtime->send_did_remote_gc_update(dargs->target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::handle_defer_remote_unregister(
+                                             Runtime *runtime, const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferRemoteUnregisterArgs *dargs = 
+        (const DeferRemoteUnregisterArgs*)args;
+      std::set<RtEvent> done_events;
+      UnregisterFunctor functor(runtime, dargs->did, dargs->vc, done_events);
+      dargs->nodes->map(functor);
+      if (!done_events.empty())
+        Runtime::trigger_event(dargs->done, Runtime::merge_events(done_events));
+      else
+        Runtime::trigger_event(dargs->done);
+      delete dargs->nodes;
     }
 
     //--------------------------------------------------------------------------

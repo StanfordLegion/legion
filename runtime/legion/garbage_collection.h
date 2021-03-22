@@ -289,6 +289,19 @@ namespace Legion {
         const bool owner;
         const bool valid;
       };
+      struct DeferRemoteUnregisterArgs :
+        public LgTaskArgs<DeferRemoteUnregisterArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_REMOTE_UNREGISTER_TASK_ID;
+      public:
+        DeferRemoteUnregisterArgs(DistributedID id, VirtualChannelKind c,
+                                  const NodeSet &nodes);
+      public:
+        const RtUserEvent done;
+        const DistributedID did;
+        const VirtualChannelKind vc;
+        NodeSet *const nodes;
+      };
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
                              AddressSpaceID owner_space,
@@ -425,6 +438,8 @@ namespace Legion {
                                               Deserializer &derez);
       static void handle_defer_remote_reference_update(Runtime *runtime,
                                                       const void *args);
+      static void handle_defer_remote_unregister(Runtime *runtime,
+                                                 const void *args);
     public:
       static void handle_did_add_create(Runtime *runtime, 
                                         Deserializer &derez);
@@ -446,7 +461,16 @@ namespace Legion {
     private: // derived users can't see the state information
       State current_state;
       RtUserEvent transition_event;
+    protected:
+      // We make a special exception here for the reentrant event
+      // because we're going to give this a dual purpose: if dervied
+      // types want to delay the issuing of unregister operations in
+      // the destructor of a DistributedCollectable then they can set
+      // this event as a precondition. This is hacky, but it saves space
+      // on distributed collectables of which there are regularly many
+      // so we want to save space on this structure as much as possible
       RtEvent reentrant_event;
+    private:
       bool has_gc_references;
       bool has_valid_references;
       bool has_resource_references;
