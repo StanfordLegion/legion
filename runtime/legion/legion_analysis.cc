@@ -9338,7 +9338,8 @@ namespace Legion {
       if (!is_owner())
         add_base_gc_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
-      log_garbage.info("GC Equivalence Set %lld %d", id, local_space);
+      log_garbage.info("GC Equivalence Set %lld %d",
+          LEGION_DISTRIBUTED_ID_FILTER(id), local_space);
 #endif
     }
 

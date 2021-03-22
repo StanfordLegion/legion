@@ -3829,10 +3829,7 @@ namespace Legion {
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
         else
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        if (shard_mapping != NULL)
-          result->register_with_runtime(&mutator, false/*notify remote*/);
-        else
-          result->register_with_runtime(&mutator);
+        result->register_with_runtime(&mutator, false/*notify remote*/);
         parent->add_child(result);
       }
       if (local_initialized.exists())
@@ -3909,10 +3906,7 @@ namespace Legion {
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
         else
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        if (shard_mapping != NULL)
-          result->register_with_runtime(&mutator, false/*notify remote*/);
-        else
-          result->register_with_runtime(&mutator);
+        result->register_with_runtime(&mutator, false/*notify remote*/);
         parent->add_child(result);
       }
       if (local_initialized.exists())
@@ -8645,7 +8639,7 @@ namespace Legion {
             true/*can fail*/, true/*first*/, true/*local only*/);
       IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
           false/*is domain*/, parent_node, color, did, initialized, ready_event,
-          expr_id, true/*notify remote*/, NULL/*applied*/, is_remote_valid);
+          expr_id, false/*notify remote*/, NULL/*applied*/, is_remote_valid);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
