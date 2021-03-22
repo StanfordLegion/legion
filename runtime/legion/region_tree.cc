@@ -7723,8 +7723,11 @@ namespace Legion {
       if (!tight_index_space_set.has_triggered())
         Runtime::trigger_event(tight_index_space_set);
       // make sure all our gc updates are on the wire before sending unregisters
-      if (send_effects.exists() && !send_effects.has_triggered())
-        send_effects.wait();
+      // we do this in a hacky way by setting the reentrant_event, see the
+      // comment on the reentrant_event member of DistributedCollectable to
+      // see why we do it this way
+      if (send_effects.exists())
+        reentrant_event = send_effects;
     }
 
     //--------------------------------------------------------------------------
@@ -9270,8 +9273,11 @@ namespace Legion {
       if (collective_mapping != NULL)
         delete collective_mapping;
       // make sure all our gc updates are on the wire before sending unregisters
-      if (send_effects.exists() && !send_effects.has_triggered())
-        send_effects.wait();
+      // we do this in a hacky way by setting the reentrant_event, see the
+      // comment on the reentrant_event member of DistributedCollectable to
+      // see why we do it this way
+      if (send_effects.exists())
+        reentrant_event = send_effects;
     }
 
     //--------------------------------------------------------------------------

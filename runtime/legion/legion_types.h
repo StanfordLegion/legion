@@ -371,6 +371,7 @@ namespace Legion {
       LG_DEFER_APPLY_STATE_TASK_ID,
       LG_DEFER_RELEASE_REF_TASK_ID,
       LG_DEFER_REMOTE_REF_UPDATE_TASK_ID,
+      LG_DEFER_REMOTE_UNREGISTER_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
       LG_FINALIZE_EQ_SETS_TASK_ID,
@@ -496,6 +497,7 @@ namespace Legion {
         "Defer Equivalence Set Apply State",                      \
         "Defer Equivalence Set Remove References",                \
         "Defer Remote Reference Update",                          \
+        "Defer Remote Unregister",                                \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \
         "Finalize Equivalence Sets",                              \
