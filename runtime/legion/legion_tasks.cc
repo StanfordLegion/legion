@@ -2727,9 +2727,9 @@ namespace Legion {
         target_processors.push_back(this->target_proc);
       }
       // If we had any future mapping outputs, we can grab them
-      if (!output.future_targets.empty())
+      if (!output.future_locations.empty())
       {
-        future_memories.swap(output.future_targets);
+        future_memories.swap(output.future_locations);
         if (futures.size() < future_memories.size())
           future_memories.resize(futures.size());
         // Check to make sure that they are all on the same address

@@ -562,7 +562,7 @@ namespace Legion {
         std::vector<Memory>                         output_targets;
         std::vector<LayoutConstraintSet>            output_constraints;
         std::set<unsigned>                          untracked_valid_regions;
-        std::vector<Memory>                         future_targets;
+        std::vector<Memory>                         future_locations;
         std::vector<Processor>                      target_procs;
         VariantID                                   chosen_variant; // = 0 
         TaskPriority                                task_priority;  // = 0
