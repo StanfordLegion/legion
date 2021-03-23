@@ -4039,6 +4039,10 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
         { return false; }
+      // AllReduceOps should never actually need this but it might get
+      // called in the process of doing a mapping call
+      virtual std::map<PhysicalManager*,unsigned>*
+                   get_acquired_instances_ref(void) { return NULL; }
     protected:
       void activate_all_reduce(void);
       void deactivate_all_reduce(void);
