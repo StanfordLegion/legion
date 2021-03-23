@@ -795,7 +795,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Figure out which memory we are looking for
-      const Memory memory = runtime->find_local_memory(proc, memkind);
+      Memory memory = runtime->find_local_memory(proc, memkind);
+      if (!memory.exists())
+      {
+        if (memkind != Memory::SYSTEM_MEM)
+        {
+          const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+            REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+          };
+          REPORT_LEGION_ERROR(ERROR_INVALID_FUTURE_MEMORY_KIND,
+              "Unable to find a %s memory associated with processor " IDFMT
+              " in which to create a future buffer.", 
+              mem_names[memkind], proc.id)
+        }
+        else
+          memory = runtime->runtime_system_memory;
+      }
       return get_buffer(memory, extent_in_bytes, check_extent,
                         silence_warnings, warning_string);
     }
