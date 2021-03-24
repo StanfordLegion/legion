@@ -17,6 +17,7 @@
 #define __HALF_H__
 
 #include <stdint.h>
+#include <string.h> // memcpy
 #include <cmath>
 
 #ifndef __CUDA_HD__
@@ -30,7 +31,9 @@
 // Still need this for doing conversions from floats
 inline uint16_t __convert_float_to_halfint(float a)
 {
-  uint32_t ia = *reinterpret_cast<uint32_t*>(&a);
+  uint32_t ia = 0;
+  static_assert(sizeof(ia) == sizeof(a));
+  memcpy(&ia, &a, sizeof(a));
   uint16_t ir;
 
   ir = (ia >> 16) & 0x8000;
@@ -122,7 +125,10 @@ inline float __convert_halfint_to_float(uint16_t __x)
       f = (0xff << 23) | (sign << 31);    //  inf
     }
   }
-  return *reinterpret_cast<float const *>(&f);
+  float result = 0.f;
+  static_assert(sizeof(float) == sizeof(f));
+  memcpy(&result, &f, sizeof(f));
+  return result;
 }
 
 #ifdef __CUDACC__
@@ -626,8 +632,11 @@ inline bool operator>=(const __half &one, const __half &two)
 
 inline __half __convert_float_to_half(const float &a)
 {
-  uint16_t result = __convert_float_to_halfint(a);
-  return *reinterpret_cast<__half*>(&result);
+  uint16_t temp = __convert_float_to_halfint(a);
+  __half result(0, true/*raw*/);
+  static_assert(sizeof(temp) == sizeof(__half));
+  memcpy(&result, &temp, sizeof(temp));
+  return result;
 }
 
 inline __half floor(const __half &a)
