@@ -234,7 +234,7 @@ void response_task(const void *args, size_t arglen,
   } else
     printf("no user data\n");
 
-  if(__sync_add_and_fetch(&expected_responses_remaining, -1) < 0) {
+  if(__sync_sub_and_fetch(&expected_responses_remaining, 1) < 0) {
     printf("HELP!  Too many responses received!\n");
     exit(1);
   }

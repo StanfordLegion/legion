@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, datetime, glob, json, multiprocessing, os, platform, shutil, subprocess, sys, traceback, tempfile
+import argparse, datetime, glob, json, multiprocessing, os, platform, shlex, shutil, subprocess, sys, traceback, tempfile
 import signal
 
 make_exe = os.environ.get('MAKE', 'make')
@@ -751,6 +751,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     # cmake before 3.16 doesn't know how to look for CUDAHOSTCXX
     if 'CUDAHOSTCXX' in env:
         cmdline.append('-DCMAKE_CUDA_HOST_COMPILER=' + env['CUDAHOSTCXX'])
+    # add any extra cmake args requested in the environment
+    if 'EXTRA_CMAKE_ARGS' in env:
+        cmdline.extend(shlex.split(env['EXTRA_CMAKE_ARGS']))
     # last argument to cmake is the root of the tree
     cmdline.append(root_dir)
 

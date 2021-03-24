@@ -4402,7 +4402,8 @@ namespace Realm {
       static const Memory::Kind cpu_mem_kinds[] = { Memory::SYSTEM_MEM,
 						    Memory::REGDMA_MEM,
 						    Memory::Z_COPY_MEM,
-                                                    Memory::SOCKET_MEM };
+                                                    Memory::SOCKET_MEM,
+                                                    Memory::GPU_MANAGED_MEM };
       static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
 
 

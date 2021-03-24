@@ -56,6 +56,7 @@ namespace Realm {
 
     bool parse_command_line(std::vector<std::string>& cmdline);
     bool parse_command_line(int argc, const char *argv[]);
+    bool parse_command_line(int argc, char *argv[]);
 
   protected:
     std::vector<CommandLineOption *> options;

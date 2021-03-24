@@ -600,6 +600,9 @@ namespace Realm {
       // which system memories have been registered and can be used for cuMemcpyAsync
       std::set<Memory> pinned_sysmems;
 
+      // managed memories we can concurrently access
+      std::set<Memory> managed_mems;
+
       // which other FBs we have peer access to
       std::set<Memory> peer_fbs;
 
@@ -735,7 +738,9 @@ namespace Realm {
 
     class GPUZCMemory : public LocalManagedMemory {
     public:
-      GPUZCMemory(Memory _me, CUdeviceptr _gpu_base, void *_cpu_base, size_t _size);
+      GPUZCMemory(Memory _me, CUdeviceptr _gpu_base,
+                  void *_cpu_base, size_t _size,
+                  MemoryKind _kind, Memory::Kind _lowlevel_kind);
 
       virtual ~GPUZCMemory(void);
 

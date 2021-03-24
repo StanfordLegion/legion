@@ -76,6 +76,7 @@ public:
     //printf("cpu size = %lu\n", worker_cpu_procs.size());
   }
 
+  using ShimMapper::select_task_options;
   virtual void select_task_options(Task *task)
   {
     ShimMapper::select_task_options(task);
@@ -93,6 +94,7 @@ public:
     }
   }
 
+  using ShimMapper::map_task;
   virtual bool map_task(Task *task)
   {
     bool ret = ShimMapper::map_task(task);

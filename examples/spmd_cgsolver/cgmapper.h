@@ -27,6 +27,7 @@ public:
 
   static MappingTagID SHARD_TAG(int shard) { return TAG_SHARD_BASE + shard; }
 
+  using ShimMapper::select_task_options;
   virtual void select_task_options(Task *task);
 
   virtual bool pre_map_task(Task *task);
