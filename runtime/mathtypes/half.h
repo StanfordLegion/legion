@@ -634,8 +634,7 @@ inline __half __convert_float_to_half(const float &a)
 {
   uint16_t temp = __convert_float_to_halfint(a);
   __half result(0, true/*raw*/);
-  static_assert(sizeof(temp) == sizeof(__half));
-  memcpy(&result, &temp, sizeof(temp));
+  result.set_raw(temp);
   return result;
 }
 
