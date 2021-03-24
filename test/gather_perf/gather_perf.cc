@@ -1344,7 +1344,7 @@ public:
     // let the runtime decide (this is just used for constructing large
     //  images for the O(1) and O(N) copies)
   }
-
+  using Mapping::NullMapper::select_sharding_functor;
   void select_sharding_functor(const Mapping::MapperContext ctx,
 			       const Task& task,
 			       const SelectShardingFunctorInput& input,
