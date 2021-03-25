@@ -416,6 +416,13 @@ namespace Realm {
     // single-call version of the above three calls
     bool Runtime::init(int *argc, char ***argv)
     {
+      // if we get null pointers for argc and argv, use a local version so
+      //  any changes from network_init are seen in configure_from_command_line
+      int my_argc = 0;
+      char **my_argv = 0;
+      if(!argc) argc = &my_argc;
+      if(!argv) argv = &my_argv;
+
       if(!network_init(argc, argv)) return false;
       if(!configure_from_command_line(*argc, *argv)) return false;
       start();
@@ -905,9 +912,25 @@ namespace Realm {
     {
       DetailedTimer::init_timers();
 
+      // if we're given empty or non-existent argc/argv, start from a
+      //  dummy command line with a single string (which is supposed to be
+      //  the name of the binary) so that the network module and/or the
+      //  REALM_DEFAULT_ARGS code below can safely modify it - (we can only
+      //  copy it back if the pointers are not null
+      int local_argc;
+      const char **local_argv;
+      if(argc && *argc && argv) {
+        local_argc = *argc;
+        local_argv = *const_cast<const char ***>(argv);
+      } else {
+        static const char *dummy_cmdline_args[] = { "unknown-binary", 0 };
+
+        local_argc = 1;
+        local_argv = dummy_cmdline_args;
+      }
+
       module_registrar.create_network_modules(network_modules,
-					      argc,
-					      const_cast<const char ***>(argv));
+					      &local_argc, &local_argv);
       
       // TODO: this is here to match old behavior, but it'd probably be
       //  better to have REALM_DEFAULT_ARGS only be visible to Realm...
@@ -948,28 +971,31 @@ namespace Realm {
 	    ends.push_back(e);
 	  }
 	  if(!starts.empty()) {
-	    int new_argc = *argc + starts.size();
-	    char **new_argv = (char **)(malloc((new_argc + 1) * sizeof(char *)));
+	    int new_argc = local_argc + starts.size();
+	    const char **new_argv = (const char **)(malloc((new_argc + 1) * sizeof(char *)));
 	    // new args go after argv[0] and anything that looks like a
 	    //  positional argument (i.e. doesn't start with -)
 	    int before_new = 0;
-	    while(before_new < *argc) {
-	      if((before_new > 0) && ((*argv)[before_new][0] == '-'))
+	    while(before_new < local_argc) {
+	      if((before_new > 0) && (local_argv[before_new][0] == '-'))
 		break;
-	      new_argv[before_new] = (*argv)[before_new];
+	      new_argv[before_new] = local_argv[before_new];
 	      before_new++;
 	    }
 	    for(size_t i = 0; i < starts.size(); i++)
 	      new_argv[i + before_new] = strndup(starts[i], ends[i] - starts[i]);
-	    for(int i = before_new; i < *argc; i++)
-	      new_argv[i + starts.size()] = (*argv)[i];
+	    for(int i = before_new; i < local_argc; i++)
+	      new_argv[i + starts.size()] = local_argv[i];
 	    new_argv[new_argc] = 0;
 
-	    *argc = new_argc;
-	    *argv = new_argv;
+	    local_argc = new_argc;
+	    local_argv = new_argv;
 	  }
 	}
       }
+
+      if(argc) *argc = local_argc;
+      if(argv) *argv = const_cast<char **>(local_argv);
 
       return true;
     }
