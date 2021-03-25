@@ -28,6 +28,25 @@ Version 21.03.0 (March ??, 2021)
         used with Bishop and requires one of either parallel or
         incremental compilation if `regentlib.start` is used (does not
         apply to `regentlib.saveobj` or `regentlib.save_tasks`).
+  * Legion
+    - In the control replication branch users will find a new implementaiton
+      of Legion's physical analysis that uses heuristics to select which
+      sub-trees should be used for performing the analysis. Disjoint and
+      complete partitions are especially helpful in aiding the runtime.
+    - There is a new implementation of the index space math inside of the
+      runtime that now soundly and precisely detect congruences between 
+      index space math operations. This fixes a long-running class of bugs
+      that would cause memory explosions in the physical analysis.
+    - In the control replication branch users can now map future values into
+      memories the same as they do with regions. This means that future
+      payloads can be placed directly on devices like GPUs. Similarly, the
+      runtime now accepts future data from tasks that also reside in any
+      memory in the machine including device memories.
+    - Both the master and control replication branches have support for
+      index space attach operations.
+    - Expensive transitive reductions on traces are now computed in the
+      background allowing trace replays to begin replaying immediately
+      with only partial optimizations.
   * Realm
     - Custom reduction operations (including Legion's built-in ones) can
         provide CUDA implementations, permitting in-place reductions in
