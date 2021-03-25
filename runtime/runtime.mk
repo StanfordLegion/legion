@@ -1031,6 +1031,9 @@ INSTALL_HEADERS += legion.h \
 		   realm/utils.h \
 		   realm/utils.inl
 
+ifeq ($(strip $(USE_CUDA)),1)
+INSTALL_HEADERS += realm/cuda/cuda_redop.h
+endif
 ifeq ($(strip $(USE_HALF)),1)
 INSTALL_HEADERS += mathtypes/half.h
 endif
@@ -1137,6 +1140,7 @@ install: $(OUTFILE)
 	@echo "Installing into $(PREFIX)..."
 	@mkdir -p $(PREFIX)/bin
 	@mkdir -p $(PREFIX)/include/realm
+	@mkdir -p $(PREFIX)/include/realm/cuda
 	@mkdir -p $(PREFIX)/include/realm/hdf5
 	@mkdir -p $(PREFIX)/include/realm/llvm
 	@mkdir -p $(PREFIX)/include/realm/python
