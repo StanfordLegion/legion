@@ -1538,6 +1538,18 @@ extern "C" {
                                  legion_index_partition_t handle);
 
   /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Runtime::destroy_index_space()
+   */
+  void
+  legion_index_partition_destroy_unordered(legion_runtime_t runtime,
+                                           legion_context_t ctx,
+                                           legion_index_partition_t handle,
+                                           bool unordered /* = false */,
+                                           bool recurse /* = true */);
+
+  /**
    * @see Legion::Runtime::attach_semantic_information()
    */
   void
