@@ -1731,6 +1731,19 @@ legion_index_partition_destroy(legion_runtime_t runtime_,
 }
 
 void
+legion_index_partition_destroy_unordered(legion_runtime_t runtime_,
+                                         legion_context_t ctx_,
+                                         legion_index_partition_t handle_,
+                                         bool unordered, bool recurse)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->destroy_index_partition(ctx, handle, unordered, recurse);
+}
+
+void
 legion_index_partition_attach_semantic_information(
                                               legion_runtime_t runtime_,
                                               legion_index_partition_t handle_,
