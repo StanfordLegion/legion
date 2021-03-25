@@ -3267,13 +3267,13 @@ namespace Realm {
                 void *out_ptr = reinterpret_cast<void *>(out_base + out_offset);
                 const void *in_ptr = reinterpret_cast<const void *>(in_base + in_offset);
                 if(redop_info.is_fold)
-                  redop->fold_strided(out_ptr, in_ptr,
-                                      ostride, istride,
-                                      elems, false /*!exclusive*/);
+                  (redop->cpu_fold_nonexcl_fn)(out_ptr, ostride,
+                                               in_ptr, istride,
+                                               elems, redop->userdata);
                 else
-                  redop->apply_strided(out_ptr, in_ptr,
-                                       ostride, istride,
-                                       elems, false /*!exclusive*/);
+                  (redop->cpu_apply_nonexcl_fn)(out_ptr, ostride,
+                                                in_ptr, istride,
+                                                elems, redop->userdata);
 
                 in_alc.advance(in_dim-1,
                                elems * ((in_dim == 1) ? in_elem_size : 1));
@@ -3946,6 +3946,13 @@ namespace Realm {
 	return os;
       }
 	  
+      RemoteChannelInfo *Channel::construct_remote_info() const
+      {
+        return new SimpleRemoteChannelInfo(node, kind,
+                                           reinterpret_cast<uintptr_t>(this),
+                                           paths);
+      }
+
       void Channel::print(std::ostream& os) const
       {
 	os << "channel{ node=" << node << " kind=" << kind << " paths=[";
@@ -4342,6 +4349,37 @@ namespace Realm {
   {
     return &factory_singleton;
   }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SimpleRemoteChannelInfo
+  //
+
+  SimpleRemoteChannelInfo::SimpleRemoteChannelInfo()
+  {}
+
+  SimpleRemoteChannelInfo::SimpleRemoteChannelInfo(NodeID _owner,
+                                                   XferDesKind _kind,
+                                                   uintptr_t _remote_ptr,
+                                                   const std::vector<Channel::SupportedPath>& _paths)
+    : owner(_owner)
+    , kind(_kind)
+    , remote_ptr(_remote_ptr)
+    , paths(_paths)
+  {}
+
+  RemoteChannel *SimpleRemoteChannelInfo::create_remote_channel()
+  {
+    RemoteChannel *rc = new RemoteChannel(remote_ptr);
+    rc->node = owner;
+    rc->kind = kind;
+    rc->paths.swap(paths);
+    return rc;
+  }
+
+  /*static*/ Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
+                                                      SimpleRemoteChannelInfo> SimpleRemoteChannelInfo::serdez_subclass;
 
 
   ////////////////////////////////////////////////////////////////////////

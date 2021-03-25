@@ -36,7 +36,7 @@ endif
 
 # List all the application source files here
 GEN_SRC		?= regent.cc regent_partitions.cc bishop_mapper.cc bishop_c.cc murmur_hash3.cc # .cc files
-GEN_GPU_SRC	?=		# .cu files
+GEN_GPU_SRC	?= regent_cuda.cu		# .cu files
 
 ifeq ($(strip $(USE_CUDA)),1)
 GEN_SRC += regent_cudart_hijack.cc

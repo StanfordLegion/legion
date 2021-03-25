@@ -5377,7 +5377,6 @@ namespace Legion {
       // Apply the reduction operation
 #ifdef DEBUG_LEGION
       assert(reduction_op != NULL);
-      assert(reduction_op->is_foldable);
 #endif
       // Perform the reduction, see if we have to do serdez reductions
       if (serdez_redop_fns != NULL)
@@ -8271,7 +8270,7 @@ namespace Legion {
       reduction_op = Runtime::get_reduction_op(redop);
       deterministic_redop = deterministic;
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
-      if (!reduction_op->is_foldable)
+      if (!reduction_op->identity)
         REPORT_LEGION_ERROR(ERROR_REDUCTION_OPERATION_INDEX,
                       "Reduction operation %d for index task launch %s "
                       "(ID %lld) is not foldable.",

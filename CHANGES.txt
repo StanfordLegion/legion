@@ -1,7 +1,10 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version ??.??.? (???? ??, ????)
+Version 21.03.0 (March ??, 2021)
+  * Build
+    - Cmake can build an embedded copy of GASNet as part of the Legion build
+        with `-DLegion_EMBED_GASNet=ON`
   * Regent
     - Contains three breaking changes to the Regent calling convention:
       - Reductions are now aggregated into region requirements and
@@ -25,6 +28,19 @@ Version ??.??.? (???? ??, ????)
         used with Bishop and requires one of either parallel or
         incremental compilation if `regentlib.start` is used (does not
         apply to `regentlib.saveobj` or `regentlib.save_tasks`).
+  * Realm
+    - Custom reduction operations (including Legion's built-in ones) can
+        provide CUDA implementations, permitting in-place reductions in
+        CUDA device memory
+    - Support for CUDA managed memory (via `-ll:msize`) that is coherent for
+        both host and device access.  Includes support for `__managed__`
+        variables (only single-GPU if using CUDA runtime hijack mode)
+    - `Event::wait` may be called outside of Realm tasks, having the same
+        thread-blocking behavior as `Event::external_wait`
+    - Experimental support for AMD HIP.  Note that testing coverage is
+        incomplete, and breakages may occur in between releases.  For more
+        details, see:
+        https://github.com/StanfordLegion/legion/issues/1028
 
 version 20.12.0 (December 28, 2020)
   * Build

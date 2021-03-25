@@ -629,7 +629,10 @@ namespace Realm {
       void *ptr = mem->get_inst_ptr(r_impl, offset,
 				    redop->sizeof_lhs);
       if(ptr) {
-	redop->apply(ptr, data, 1, exclusive);
+        if(exclusive)
+          (redop->cpu_apply_excl_fn)(ptr, 0, data, 0, 1, redop->userdata);
+        else
+          (redop->cpu_apply_nonexcl_fn)(ptr, 0, data, 0, 1, redop->userdata);
       } else {
 	// we have to do separate get/put, which means we cannot supply
 	//  atomicity in the !exclusive case
@@ -637,7 +640,7 @@ namespace Realm {
 	void *lhs_copy = alloca(redop->sizeof_lhs);
 	mem->get_bytes(r_impl->metadata.inst_offset + offset,
 		       lhs_copy, redop->sizeof_lhs);
-	redop->apply(lhs_copy, data, 1, true /*always exclusive*/);
+        (redop->cpu_apply_excl_fn)(lhs_copy, 0, data, 0, 1, redop->userdata);
 	mem->put_bytes(r_impl->metadata.inst_offset + offset,
 		       lhs_copy, redop->sizeof_lhs);
       }
@@ -664,7 +667,10 @@ namespace Realm {
       void *ptr = mem->get_inst_ptr(r_impl, offset,
 				    redop->sizeof_rhs);
       if(ptr) {
-	redop->fold(ptr, data, 1, exclusive);
+        if(exclusive)
+          (redop->cpu_fold_excl_fn)(ptr, 0, data, 0, 1, redop->userdata);
+        else
+          (redop->cpu_fold_nonexcl_fn)(ptr, 0, data, 0, 1, redop->userdata);
       } else {
 	// we have to do separate get/put, which means we cannot supply
 	//  atomicity in the !exclusive case
@@ -672,7 +678,7 @@ namespace Realm {
 	void *rhs1_copy = alloca(redop->sizeof_rhs);
 	mem->get_bytes(r_impl->metadata.inst_offset + offset,
 		       rhs1_copy, redop->sizeof_rhs);
-	redop->fold(rhs1_copy, data, 1, true /*always exclusive*/);
+        (redop->cpu_fold_excl_fn)(rhs1_copy, 0, data, 0, 1, redop->userdata);
 	mem->put_bytes(r_impl->metadata.inst_offset + offset,
 		       rhs1_copy, redop->sizeof_rhs);
       }

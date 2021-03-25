@@ -105,8 +105,10 @@ $(REALM_LIB) : $(REALM_OBJS)
 
 ifeq ($(strip $(USE_CUDA)),1)
 EXTRAOBJS_memspeed := memspeed_gpu.o
-TEST_OBJS += $(EXTRAOBJS_memspeed)
+EXTRAOBJS_simple_reduce := simple_reduce_gpu.o
+TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce)
 memspeed : memspeed_gpu.o
+simple_reduce : simple_reduce_gpu.o
 
 %.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)

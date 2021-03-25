@@ -22,7 +22,9 @@
 #include "realm/transfer/transfer.h"
 
 TYPE_IS_SERIALIZABLE(Realm::Memory);
+TYPE_IS_SERIALIZABLE(Realm::XferDesKind);
 TYPE_IS_SERIALIZABLE(Realm::XferDesRedopInfo);
+TYPE_IS_SERIALIZABLE(Realm::Channel::SupportedPath);
 
 namespace Realm {
 
@@ -215,40 +217,54 @@ namespace Realm {
     return os;
   }
 
-  template <typename S>
-  inline bool Channel::serialize_remote_info(S& serializer) const
-  {
-    return ((serializer << node) &&
-	    (serializer << kind) &&
-	    (serializer << reinterpret_cast<uintptr_t>(this)) &&
-	    (serializer << paths));
-  }
 
-  
   ////////////////////////////////////////////////////////////////////////
   //
-  // class RemoteChannel
+  // class RemoteChannelInfo
   //
 
   template <typename S>
-  /*static*/ RemoteChannel *RemoteChannel::deserialize_new(S& serializer)
+  inline bool serialize(S& serializer, const RemoteChannelInfo& rci)
   {
-    NodeID node;
+    return Serialization::PolymorphicSerdezHelper<RemoteChannelInfo>::serialize(serializer, rci);
+  }
+
+  template <typename S>
+  /*static*/ RemoteChannelInfo *RemoteChannelInfo::deserialize_new(S& deserializer)
+  {
+    return Serialization::PolymorphicSerdezHelper<RemoteChannelInfo>::deserialize_new(deserializer);
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RemoteChannelInfo
+  //
+
+  template <typename S>
+  bool SimpleRemoteChannelInfo::serialize(S& serializer) const
+  {
+    return ((serializer << owner) &&
+            (serializer << kind) &&
+            (serializer << remote_ptr) &&
+            (serializer << paths));
+  }
+
+  template <typename S>
+  /*static*/ RemoteChannelInfo *SimpleRemoteChannelInfo::deserialize_new(S& deserializer)
+  {
+    NodeID owner;
     XferDesKind kind;
     uintptr_t remote_ptr;
-    std::vector<SupportedPath> paths;
-    bool ok = ((serializer >> node) &&
-	       (serializer >> kind) &&
-	       (serializer >> remote_ptr) &&
-	       (serializer >> paths));
-    if(!ok)
-      return 0;
+    std::vector<Channel::SupportedPath> paths;
 
-    RemoteChannel *rc = new RemoteChannel(remote_ptr);
-    rc->node = node;
-    rc->kind = kind;
-    rc->paths.swap(paths);
-    return rc;
+    if((deserializer >> owner) &&
+       (deserializer >> kind) &&
+       (deserializer >> remote_ptr) &&
+       (deserializer >> paths)) {
+      return new SimpleRemoteChannelInfo(owner, kind, remote_ptr, paths);
+    } else {
+      return 0;
+    }
   }
 
 

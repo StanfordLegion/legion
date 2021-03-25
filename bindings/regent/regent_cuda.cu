@@ -31,16 +31,6 @@
 
 using namespace Legion;
 
-typedef Realm::Point<1,coord_t> Point1D;
-typedef Realm::Point<2,coord_t> Point2D;
-typedef Realm::Point<3,coord_t> Point3D;
-typedef CObjectWrapper::ArrayAccessor1D ArrayAccessor1D;
-typedef CObjectWrapper::ArrayAccessor2D ArrayAccessor2D;
-typedef CObjectWrapper::ArrayAccessor3D ArrayAccessor3D;
-
-#ifndef LEGION_USE_CUDA
-// declare (CPU-only) reductions here
-
 #define DECLARE_ARRAY_REDUCTION(REG, CLASS)                             \
   extern "C"                                                                 \
   {                                                                          \
@@ -53,9 +43,8 @@ typedef CObjectWrapper::ArrayAccessor3D ArrayAccessor3D;
     }                                                                        \
   }
 
+// declare CPU+GPU reductions here
 REGENT_ARRAY_REDUCE_LIST(DECLARE_ARRAY_REDUCTION)
 
 #undef DECLARE_ARRAY_REDUCTION
-
-#endif
 

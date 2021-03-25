@@ -992,6 +992,7 @@ namespace Realm {
 
       r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
       r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
+      r->add_dma_channel(new GPUreduceChannel(this, &r->bgwork));
 
       // treat managed mem like pinned sysmem on the assumption that most data
       //  is usually in system memory

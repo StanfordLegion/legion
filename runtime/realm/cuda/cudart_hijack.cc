@@ -927,6 +927,17 @@ extern "C" {
     return cudaSuccess;
   }
 
+#if CUDA_VERSION >= 11000
+  REALM_PUBLIC_API
+  cudaError_t cudaGetFuncBySymbol(cudaFunction_t *funcPtr, const void *symbolPtr)
+  {
+    GPUProcessor *p = get_gpu_or_die("cudaGetFuncBySymbol");
+    CUfunction handle = p->gpu->lookup_function(symbolPtr);
+    *funcPtr = handle;
+    return cudaSuccess;
+  }
+#endif
+
   REALM_PUBLIC_API
   cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessor(int *numBlocks,
 							    const void *func,

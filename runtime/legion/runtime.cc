@@ -2326,7 +2326,7 @@ namespace Legion {
           (use_event.exists() && !use_event.has_triggered()))
       {
         void *buffer = malloc(size); 
-        redop->init(buffer, 1/*count*/);
+        memcpy(buffer, redop->identity, redop->sizeof_rhs);
         Realm::CopySrcDstField src, dst;
         src.set_fill(buffer, size);
         dst.set_field(get_instance(), 0/*field id*/, size);
@@ -2343,7 +2343,7 @@ namespace Legion {
       }
       else
       {
-        redop->init(const_cast<void*>(data), 1/*count*/);
+        memcpy(const_cast<void*>(data), redop->identity, redop->sizeof_rhs);
         return ApEvent::NO_AP_EVENT;
       }
     }
@@ -2431,7 +2431,22 @@ namespace Legion {
       else
       {
         // We can do this as a straight fold, no need to offload to realm
-        redop->fold(const_cast<void*>(data),source->data,1/*count*/,exclusive);
+        if (exclusive)
+        {
+#ifdef DEBUG_LEGION
+          assert(redop->cpu_fold_excl_fn);
+#endif
+          (redop->cpu_fold_excl_fn)(const_cast<void*>(data), 0/*stride*/,
+                  source->data, 0/*stride*/, 1/*count*/, redop->userdata);
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(redop->cpu_fold_nonexcl_fn);
+#endif
+          (redop->cpu_fold_nonexcl_fn)(const_cast<void*>(data), 0/*stride*/,
+              source->data, 0/*stride*/, 1/*count*/, redop->userdata);
+        }
         return ApEvent::NO_AP_EVENT;
       }
     }
@@ -29827,7 +29842,7 @@ namespace Legion {
       const ReductionOp *reduction_op = 
         get_reduction_op(redop, true/*has lock*/);
       void *fill_buffer = malloc(reduction_op->sizeof_rhs);
-      reduction_op->init(fill_buffer, 1);
+      memcpy(fill_buffer, reduction_op->identity, reduction_op->sizeof_rhs);
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(fill_buffer, reduction_op->sizeof_rhs);
       FillView *fill_view = new FillView(forest, get_available_distributed_id(),
@@ -30012,6 +30027,23 @@ namespace Legion {
         assert(false);
       return table;
     }
+
+#if defined(LEGION_USE_CUDA) && !defined(LEGION_GPU_REDUCTIONS)
+    // Define a free function for Runtime::register_reduction_op because
+    //  legion_redop.cu cannot include runtime.h
+    //--------------------------------------------------------------------------
+    void runtime_register_reduction_op(ReductionOpID redop_id,
+                                       ReductionOp *redop,
+                                       SerdezInitFnptr init_fnptr,
+                                       SerdezFoldFnptr fold_fnptr,
+                                       bool permit_duplicates,
+                                       bool has_lock = false)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::register_reduction_op(redop_id, redop, init_fnptr, fold_fnptr,
+                                     permit_duplicates, has_lock);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::register_reduction_op(ReductionOpID redop_id,

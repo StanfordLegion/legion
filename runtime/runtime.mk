@@ -411,12 +411,9 @@ endif
 MK_HIP_TARGET = 
 ifeq ($(strip $(USE_HIP)),1)
   HIP_TARGET ?= ROCM
-  USE_GPU_REDOP ?= 1
+  USE_GPU_REDUCTIONS ?= 1
   ifndef HIP_PATH
     $(error HIP_PATH variable is not defined, aborting build)
-  endif
-  ifeq ($(strip $(USE_GPU_REDOP)), 1)
-    LEGION_CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
   endif
   ifeq ($(strip $(HIP_TARGET)),ROCM)
     #HIP on AMD
@@ -513,7 +510,7 @@ SLIB_REALM_DEPS	+= -L$(CUDA)/lib -lcuda
 else
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcudart -lcuda
 SLIB_LEGION_DEPS += -L$(CUDA)/lib -lcudart -lcuda
-SLIB_REALM_DEPS	+= -L$(CUDA)/lib -lcuda
+SLIB_REALM_DEPS	+= -L$(CUDA)/lib -lcudart -lcuda
 endif
 else
 ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
@@ -523,11 +520,9 @@ SLIB_REALM_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda
 else
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcudart -lcuda -Xlinker -rpath=$(CUDA)/lib64
 SLIB_LEGION_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcudart -lcuda
-SLIB_REALM_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda
+SLIB_REALM_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcudart -lcuda
 endif
 endif
-# Add support for Legion GPU reductions
-LEGION_CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
 # Convert CXXFLAGS and CPPFLAGS to NVCC_FLAGS
 # Need to detect whether nvcc supports them directly or to use -Xcompiler
 NVCC_FLAGS	+= ${shell                                                              \
@@ -596,6 +591,11 @@ COMMA=,
 NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gencode arch=compute_$(X)$(COMMA)code=sm_$(X))
 
 NVCC_FLAGS += -Xcudafe --diag_suppress=boolean_controlling_expr_is_constant
+endif
+
+# Add support for Legion GPU reduction tasks if requested
+ifeq ($(strip $(USE_GPU_REDUCTIONS)),1)
+LEGION_CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
 endif
 
 # Realm uses GASNet if requested (detect both gasnet1 and gasnetex here)
@@ -934,7 +934,7 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \
 		    $(LG_RT_DIR)/legion/mapper_manager.cc
 LEGION_CUDA_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
-ifeq ($(strip $(USE_GPU_REDOP)),1)
+ifeq ($(strip $(USE_GPU_REDUCTIONS)),1)
   ifeq ($(strip $(MK_HIP_TARGET)),ROCM)
     LEGION_HIP_SRC  += $(LG_RT_DIR)/legion/legion_redop.cpp
     LEGION_HIP_GENERATED_SRC  += $(LG_RT_DIR)/legion/legion_redop.cpp

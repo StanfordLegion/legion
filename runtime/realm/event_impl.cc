@@ -2454,7 +2454,7 @@ static void *bytedup(const void *data, size_t datalen)
 	    }
 	  }
 
-	  redop->apply(final_values + ((rel_gen - 1) * redop->sizeof_lhs), reduce_value, 1, true);
+	  (redop->cpu_apply_excl_fn)(final_values + ((rel_gen - 1) * redop->sizeof_lhs), 0, reduce_value, 0, 1, redop->userdata);
 	}
 
 	// do this AFTER we actually update the reduction value above :)
