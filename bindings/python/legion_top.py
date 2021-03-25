@@ -358,7 +358,8 @@ def legion_python_main(raw_args, user_data, proc):
 
     if local_cleanup:
         # If we were control replicated then we just need to do our cleanup
-        for cleanup in cleanup_items:
+        # Do it in reverse order so modules get FILO properties
+        for cleanup in reversed(cleanup_items):
             cleanup()
     else:
         # Otherwise, run a task on every node to perform the cleanup
@@ -423,7 +424,8 @@ def legion_python_cleanup(raw_args, user_data, proc):
 
     top_level.runtime, top_level.context, top_level.task = runtime, context, task
 
-    for cleanup in cleanup_items:
+    # Do it in reverse order so modules get FILO properties
+    for cleanup in reversed(cleanup_items):
         cleanup()
 
     del top_level.runtime
