@@ -32,7 +32,7 @@
 inline uint16_t __convert_float_to_halfint(float a)
 {
   uint32_t ia = 0;
-  static_assert(sizeof(ia) == sizeof(a));
+  static_assert(sizeof(ia) == sizeof(a), "half size mismatch");
   memcpy(&ia, &a, sizeof(a));
   uint16_t ir;
 
@@ -126,7 +126,7 @@ inline float __convert_halfint_to_float(uint16_t __x)
     }
   }
   float result = 0.f;
-  static_assert(sizeof(float) == sizeof(f));
+  static_assert(sizeof(float) == sizeof(f), "half size mismatch");
   memcpy(&result, &f, sizeof(f));
   return result;
 }
