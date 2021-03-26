@@ -2932,8 +2932,36 @@ namespace Realm {
       CUmodule module = it->second;
 
       CUfunction f;
-      CHECK_CU( cuModuleGetFunction(&f, module, func->device_fun) );
-      device_functions[func->host_fun] = f;
+      // the cuda runtime apparently permits calls to __cudaRegisterFunction
+      //  that name a symbol that does not actually exist in the module - since
+      //  we are doing eager lookup, we need to tolerate CUDA_ERROR_NOT_FOUND
+      //  results here
+      CUresult res = cuModuleGetFunction(&f, module, func->device_fun);
+      switch(res) {
+      case CUDA_SUCCESS:
+        {
+          device_functions[func->host_fun] = f;
+          break;
+        }
+      case CUDA_ERROR_NOT_FOUND:
+        {
+          // just an informational message here - an actual attempt to invoke
+          //  this kernel will be a fatal error at the call site
+          log_gpu.info() << "symbol '" << func->device_fun
+                         << "' not found in module " << module;
+          break;
+        }
+      default:
+        {
+          const char *name, *str;
+          cuGetErrorName(res, &name);
+          cuGetErrorString(res, &str);
+          log_gpu.fatal() << "unexpected error when looking up device function '"
+                          << func->device_fun << "' in module " << module
+                          << ": " << str << " (" << name << ")";
+          abort();
+        }
+      }
     }
 
     CUfunction GPU::lookup_function(const void *func)
