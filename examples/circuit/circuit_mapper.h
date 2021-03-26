@@ -43,8 +43,8 @@ public:
                           const MapInlineInput&  input,
                                 MapInlineOutput& output);
 protected:
-  void map_circuit_region(const MapperContext ctx,
-                          LogicalRegion region, Memory target,
+  void map_circuit_region(const MapperContext ctx, LogicalRegion region,
+                          Processor target_proc, Memory target,
                           std::vector<PhysicalInstance> &instanes,
                           const std::set<FieldID> &privilege_fields,
                           ReductionOpID redop);

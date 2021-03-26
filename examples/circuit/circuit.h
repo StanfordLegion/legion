@@ -142,6 +142,7 @@ public:
   static const bool CPU_BASE_LEAF = true;
   static const bool GPU_BASE_LEAF = true;
   static const int MAPPER_ID = 0;
+  static const int REGIONS = 4;
 public:
   static void cpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions,
@@ -170,6 +171,7 @@ public:
   static const bool CPU_BASE_LEAF = true;
   static const bool GPU_BASE_LEAF = true;
   static const int MAPPER_ID = 0;
+  static const int REGIONS = 4;
 public:
   static void cpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions,
@@ -197,6 +199,7 @@ public:
   static const bool CPU_BASE_LEAF = true;
   static const bool GPU_BASE_LEAF = true;
   static const int MAPPER_ID = 0;
+  static const int REGIONS = 5;
 public:
   static void cpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions,
@@ -348,12 +351,18 @@ namespace TaskHelper {
 #endif
 
   template<typename T>
-  void register_hybrid_variants(void)
+  void register_hybrid_variants(LayoutConstraintID id)
   {
     {
       TaskVariantRegistrar registrar(T::TASK_ID, T::TASK_NAME);
       registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
       registrar.set_leaf(T::CPU_BASE_LEAF);
+      // Add alignment constraints for any vector architectures
+      if (id > 0)
+      {
+        for (int i = 0; i < T::REGIONS; i++)
+          registrar.add_layout_constraint_set(i, id);
+      }
       Runtime::preregister_task_variant<base_cpu_wrapper<T> >(registrar, T::TASK_NAME);
     }
 
