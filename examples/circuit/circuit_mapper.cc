@@ -66,8 +66,8 @@ void CircuitMapper::map_task(const MapperContext      ctx,
       else
         target_memory = fbmem;
       const RegionRequirement &req = task.regions[idx];
-      map_circuit_region(ctx, req.region, target_memory,
-                         output.chosen_instances[idx], 
+      map_circuit_region(ctx, req.region, task.target_proc, 
+                         target_memory, output.chosen_instances[idx], 
                          req.privilege_fields, req.redop);
     }
     runtime->acquire_instances(ctx, output.chosen_instances);
@@ -117,8 +117,8 @@ void CircuitMapper::map_inline(const MapperContext    ctx,
   }
 }
 
-void CircuitMapper::map_circuit_region(const MapperContext ctx,
-                                       LogicalRegion region, Memory target,
+void CircuitMapper::map_circuit_region(const MapperContext ctx, LogicalRegion region,
+                                       Processor target_proc, Memory target,
                                        std::vector<PhysicalInstance> &instances,
                                        const std::set<FieldID> &privilege_fields,
                                        ReductionOpID redop)
@@ -167,6 +167,19 @@ void CircuitMapper::map_circuit_region(const MapperContext ctx,
     runtime->get_field_space_fields(ctx, region.get_field_space(), all_fields);
   layout_constraints.add_constraint(FieldConstraint(all_fields, false/*contiguous*/,
                                                     false/*inorder*/));
+#if defined(__AVX512F__) || defined(__AVX__) || defined(__SSE__)
+  if (target_proc.kind() == Processor::LOC_PROC) {
+    for (std::vector<FieldID>::const_iterator it =
+          all_fields.begin(); it != all_fields.end(); it++)
+#if defined(__AVX512F__)
+      layout_constraints.add_constraint(AlignmentConstraint(*it, LEGION_EQ_EK, 64/*bytes*/));
+#elif defined(__AVX__)
+      layout_constraints.add_constraint(AlignmentConstraint(*it, LEGION_EQ_EK, 32/*bytes*/));
+#else
+      layout_constraints.add_constraint(AlignmentConstraint(*it, LEGION_EQ_EK, 16/*bytes*/));
+#endif
+  }
+#endif
 
   PhysicalInstance result; bool created;
   if (!runtime->find_or_create_physical_instance(ctx, target, layout_constraints,
