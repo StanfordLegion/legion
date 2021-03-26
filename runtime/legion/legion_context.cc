@@ -2172,6 +2172,8 @@ namespace Legion {
         assert(res != NULL);
         assert(freefunc == NULL);
 #endif
+        // escape this task local instance
+        escape_task_local_instance(deferred_result_instance);
         instance = new FutureInstance(res, res_size,
             deferred_result_instance.get_location(),
             ApEvent(Processor::get_current_finish_event()), runtime,
