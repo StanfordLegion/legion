@@ -429,11 +429,13 @@ namespace Legion {
       bool acquire_instances(       MappingCallInfo *ctx,
                                     const std::vector<MappingInstance> &insts);
       bool acquire_and_filter_instances(MappingCallInfo *ctx,
-                                    std::vector<MappingInstance> &instances);
+                                    std::vector<MappingInstance> &instances,
+                                    const bool filter_acquired_instances);
       bool acquire_instances(       MappingCallInfo *ctx, const std::vector<
                                     std::vector<MappingInstance> > &instances);
       bool acquire_and_filter_instances(MappingCallInfo *ctx, std::vector<
-                                    std::vector<MappingInstance> > &instances);
+                                    std::vector<MappingInstance> > &instances,
+                                    const bool filter_acquired_instances);
       void release_instance(        MappingCallInfo *ctx, 
                                     const MappingInstance &instance);
       void release_instances(       MappingCallInfo *ctx,
@@ -450,7 +452,8 @@ namespace Legion {
       bool perform_local_acquires(MappingCallInfo *info,
                                   const std::vector<MappingInstance> &instances,
                        std::map<MemoryManager*,AcquireStatus> &acquire_requests,
-                                  std::vector<unsigned> *to_erase); 
+                                  std::vector<unsigned> *to_erase,
+                                  const bool filter_acquired_instances = false);
       bool perform_remote_acquires(MappingCallInfo *info,
                       std::map<MemoryManager*,AcquireStatus> &acquire_requests);
     public:

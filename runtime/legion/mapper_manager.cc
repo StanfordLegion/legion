@@ -2685,7 +2685,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_and_filter_instances(MappingCallInfo *ctx,
-                                        std::vector<MappingInstance> &instances)
+                                        std::vector<MappingInstance> &instances,
+                                        const bool filter_acquired_instances)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -2709,7 +2710,7 @@ namespace Legion {
       std::map<MemoryManager*,AcquireStatus> acquire_requests;
       std::vector<unsigned> to_erase;
       bool local_acquired = perform_local_acquires(ctx, instances,
-                                                  acquire_requests, &to_erase);
+          acquire_requests, &to_erase, filter_acquired_instances);
       // Filter any invalid local instances
       if (!to_erase.empty())
       {
@@ -2737,7 +2738,15 @@ namespace Legion {
             continue;
           if (already_acquired.find(manager->as_instance_manager()) ==
               already_acquired.end())
-            to_erase.push_back(idx);
+          {
+            if (!filter_acquired_instances)
+              to_erase.push_back(idx);
+          }
+          else
+          {
+            if (filter_acquired_instances)
+              to_erase.push_back(idx);
+          }
         }
         if (!to_erase.empty())
         {
@@ -2786,7 +2795,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_and_filter_instances(MappingCallInfo *ctx,
-                          std::vector<std::vector<MappingInstance> > &instances)
+                          std::vector<std::vector<MappingInstance> > &instances,
+                          const bool filter_acquired_instances)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -2805,7 +2815,8 @@ namespace Legion {
       for (std::vector<std::vector<MappingInstance> >::iterator it = 
             instances.begin(); it != instances.end(); it++)
       {
-        if (!perform_local_acquires(ctx, *it, acquire_requests, &to_erase))
+        if (!perform_local_acquires(ctx, *it, acquire_requests, 
+                          &to_erase, filter_acquired_instances))
         {
           local_acquired = false;
           // Erase from the back
@@ -2837,7 +2848,15 @@ namespace Legion {
               continue;
             if (already_acquired.find(manager->as_instance_manager()) ==
                 already_acquired.end())
-              to_erase.push_back(idx);
+            {
+              if (!filter_acquired_instances)
+                to_erase.push_back(idx);
+            }
+            else
+            {
+              if (filter_acquired_instances)
+                to_erase.push_back(idx);
+            }
           }
           if (!to_erase.empty())
           {
@@ -2857,7 +2876,8 @@ namespace Legion {
     bool MapperManager::perform_local_acquires(MappingCallInfo *info,
                       const std::vector<MappingInstance> &instances,
                       std::map<MemoryManager*,AcquireStatus> &acquire_requests,
-                      std::vector<unsigned> *to_erase)
+                      std::vector<unsigned> *to_erase,
+                      const bool filter_acquired_instances)
     //--------------------------------------------------------------------------
     {
       std::map<PhysicalManager*,unsigned> &already_acquired = 
@@ -2873,7 +2893,11 @@ namespace Legion {
           continue;
         PhysicalManager *manager = man->as_instance_manager();
         if (already_acquired.find(manager) != already_acquired.end())
+        {
+          if ((to_erase != NULL) && filter_acquired_instances)
+            to_erase->push_back(idx);
           continue;
+        }
         // Try to add an acquired reference immediately
         // If we're remote it has to be valid already to be sound, but if
         // we're local whatever works
@@ -2881,12 +2905,14 @@ namespace Legion {
         {
           // We already know it wasn't there before
           already_acquired[manager] = 1;
+          if ((to_erase != NULL) && filter_acquired_instances)
+            to_erase->push_back(idx);
           continue;
         }
         // if we failed on the owner node, it will never work
         else if (manager->is_collective_manager() || manager->is_owner()) 
         {
-          if (to_erase != NULL)
+          if ((to_erase != NULL) && !filter_acquired_instances)
             to_erase->push_back(idx);
           local_acquired = false;
           continue; 
