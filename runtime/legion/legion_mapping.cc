@@ -146,6 +146,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RegionTreeID PhysicalInstance::get_tree_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      if ((impl == NULL) || !impl->is_instance_manager())
+        return 0;
+      return impl->tree_id;
+    }
+
+    //--------------------------------------------------------------------------
     LayoutConstraintID PhysicalInstance::get_layout_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -776,10 +785,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_and_filter_instances(MapperContext ctx,
-                                std::vector<PhysicalInstance> &instances) const
+           std::vector<PhysicalInstance> &instances, bool filter_acquired) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->acquire_and_filter_instances(ctx, instances);
+      return ctx->manager->acquire_and_filter_instances(ctx, instances,
+                                                        filter_acquired);
     }
 
     //--------------------------------------------------------------------------
@@ -792,10 +802,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_and_filter_instances(MapperContext ctx,
-                  std::vector<std::vector<PhysicalInstance> > &instances) const
+                  std::vector<std::vector<PhysicalInstance> > &instances,
+                  bool filter_acquired_instances) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->acquire_and_filter_instances(ctx, instances);
+      return ctx->manager->acquire_and_filter_instances(ctx, instances,
+                                            filter_acquired_instances);
     }
 
     //--------------------------------------------------------------------------

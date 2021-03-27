@@ -61,6 +61,7 @@ namespace Legion {
       void get_fields(std::set<FieldID> &fields) const;
     public:
       FieldSpace get_field_space(void) const;
+      RegionTreeID get_tree_id(void) const;
       LayoutConstraintID get_layout_id(void) const;
     public:
       // See if our instance still exists or if it has been
@@ -1908,11 +1909,13 @@ namespace Legion {
       bool acquire_instances(MapperContext ctx,
                           const std::vector<PhysicalInstance> &instances) const;
       bool acquire_and_filter_instances(MapperContext ctx,
-                                std::vector<PhysicalInstance> &instances) const;
+                                std::vector<PhysicalInstance> &instances,
+                                bool filter_acquired_instance = false) const;
       bool acquire_instances(MapperContext ctx,
             const std::vector<std::vector<PhysicalInstance> > &instances) const;
       bool acquire_and_filter_instances(MapperContext ctx,
-                  std::vector<std::vector<PhysicalInstance> > &instances) const;
+                  std::vector<std::vector<PhysicalInstance> > &instances,
+                  bool filter_acquired_instances = false) const;
       void release_instance(MapperContext ctx, 
                                         const PhysicalInstance &instance) const;
       void release_instances(MapperContext ctx,
