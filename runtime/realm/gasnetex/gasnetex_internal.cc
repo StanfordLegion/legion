@@ -1447,7 +1447,7 @@ namespace Realm {
 
       // do we need to resize the queue?
       if(cur_count == comp_reply_capacity) {
-	log_gex_comp.warning() << "comp reply resize " << comp_reply_capacity;
+	log_gex_comp.info() << "comp reply resize " << comp_reply_capacity;
 	gex_AM_Arg_t *new_data = new gex_AM_Arg_t[comp_reply_capacity * 2];
 	for(unsigned i = 0; i < cur_count; i++) {
 	  new_data[i] = comp_reply_data[comp_reply_rdptr];
@@ -2628,7 +2628,9 @@ namespace Realm {
 				&args,
 				0 /*flags*/);
 	if(ret != GASNET_OK) {
-	  log_gex.warning() << "mk_create failed?  ret=" << ret << " mtype=" << memtype << " extra=" << memextra << " gpu_index=" << gpu->info->index;
+	  log_gex_bind.info() << "mk_create failed?  ret=" << ret
+                              << " mtype=" << memtype << " extra=" << memextra
+                              << " gpu_index=" << gpu->info->index;
 	  return false;
 	}
 	break;
@@ -2649,9 +2651,9 @@ namespace Realm {
       int ret = gex_Segment_Create(&segment, client, base, size,
 				   mk, 0 /*flags*/);
       if(ret != GASNET_OK) {
-	log_gex_bind.warning() << "segment_create failed?  ret=" << ret
-			       << " mtype=" << memtype << " base=" << base
-			       << " size=" << size << " extra=" << memextra;
+	log_gex_bind.info() << "segment_create failed?  ret=" << ret
+                            << " mtype=" << memtype << " base=" << base
+                            << " size=" << size << " extra=" << memextra;
 	return false;
       }
     }
@@ -2664,8 +2666,8 @@ namespace Realm {
     {
       int ret = gex_EP_Create(&ep, client, caps, 0 /*flags*/);
       if(ret != GASNET_OK) {
-	log_gex_bind.warning() << "ep_create failed?  ret=" << ret
-			       << " caps=" << caps;
+	log_gex_bind.info() << "ep_create failed?  ret=" << ret
+                            << " caps=" << caps;
 	// TODO: destroy the segment we created?
 	return false;
       }
