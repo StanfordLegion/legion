@@ -2420,8 +2420,16 @@ namespace Legion {
       if (instances.size() == 1)
       {
         bool result = acquire_instance(ctx, instances[0]);
-        if (!result)
-          instances.clear();
+        if (result)
+        {
+          if (filter_acquired_instances)
+            instances.clear();
+        }
+        else
+        {
+          if (!filter_acquired_instances)
+            instances.clear();
+        }
         return result;
       }
       pause_mapper_call(ctx); 
