@@ -3863,7 +3863,7 @@ namespace Legion {
                         "%s. Reentrant calls were already enabled and we do "
                         "not support nested calls to enable them.",
                         get_mapper_name())
-      // No need to hold the lock since we know we are exclusive 
+      AutoLock m_lock(mapper_lock);
       permit_reentrant = true;
     }
 
@@ -3886,7 +3886,7 @@ namespace Legion {
                         "%s. Reentrant calls were already disabled and we do "
                         "not support nested calls to disable them.",
                         get_mapper_name())
-      // No need to hold the lock since we know we are exclusive
+      AutoLock m_lock(mapper_lock);
       permit_reentrant = false;
     }
 
