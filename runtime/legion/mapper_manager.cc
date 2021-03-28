@@ -4047,16 +4047,16 @@ namespace Legion {
       paused_calls++;
       if (permit_reentrant)
       {
-        if (!ready_calls.empty())
-        {
-          executing_call = ready_calls.front();
-          ready_calls.pop_front();
-          return executing_call->resume;
-        }
-        else if (!pending_calls.empty())
+        if (!pending_calls.empty())
         {
           executing_call = pending_calls.front();
           pending_calls.pop_front();
+          return executing_call->resume;
+        }
+        else if (!ready_calls.empty())
+        {
+          executing_call = ready_calls.front();
+          ready_calls.pop_front();
           return executing_call->resume;
         }
         // If we are allowing reentrant calls then clear the executing
@@ -4080,16 +4080,16 @@ namespace Legion {
       // reentrant calls in case the user forgot to do it at the end of call
       if (allow_reentrant && !permit_reentrant)
         permit_reentrant = true;
-      if (!ready_calls.empty())
-      {
-        executing_call = ready_calls.front();
-        ready_calls.pop_front();
-        return executing_call->resume;
-      }
-      else if (!pending_calls.empty())
+      if (!pending_calls.empty())
       {
         executing_call = pending_calls.front();
         pending_calls.pop_front();
+        return executing_call->resume;
+      }
+      else if (!ready_calls.empty())
+      {
+        executing_call = ready_calls.front();
+        ready_calls.pop_front();
         return executing_call->resume;
       }
       else
