@@ -463,6 +463,12 @@ extern "C" {
   // -----------------------------------------------------------------------
   // Domain Operations
   // -----------------------------------------------------------------------
+  
+  /**
+   * @see Legion::Domain::Domain()
+   */
+  legion_domain_t
+  legion_domain_empty(unsigned dim);
 
   /**
    * @see Legion::Domain::from_rect()
@@ -516,12 +522,18 @@ extern "C" {
   // -----------------------------------------------------------------------
   // Domain Transform Operations
   // -----------------------------------------------------------------------
+  
+  legion_domain_transform_t
+  legion_domain_transform_identity(unsigned m, unsigned n);
 
 #define FROM_TRANSFORM(D1,D2) \
   legion_domain_transform_t \
   legion_domain_transform_from_##D1##x##D2(legion_transform_##D1##x##D2##_t t);
   LEGION_FOREACH_NN(FROM_TRANSFORM)
 #undef FROM_TRANSFORM
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_identity_t(unsigned m, unsigned n);
 
 #define FROM_AFFINE(D1,D2) \
   legion_domain_affine_transform_t \
@@ -2727,6 +2739,20 @@ extern "C" {
     legion_mapping_tag_id_t tag /* = 0 */);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::TaskLauncher::TaskLauncher()
+   */
+  legion_task_launcher_t
+  legion_task_launcher_create_from_buffer(
+    legion_task_id_t tid,
+    const void *buffer,
+    size_t buffer_size,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t tag /* = 0 */);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see Legion::TaskLauncher::~TaskLauncher()
@@ -2945,6 +2971,23 @@ extern "C" {
     legion_task_id_t tid,
     legion_domain_t domain,
     legion_task_argument_t global_arg,
+    legion_argument_map_t map,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    bool must /* = false */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t tag /* = 0 */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::IndexTaskLauncher::IndexTaskLauncher()
+   */
+  legion_index_launcher_t
+  legion_index_launcher_create_from_buffer(
+    legion_task_id_t tid,
+    legion_domain_t domain,
+    const void *buffer,
+    size_t buffer_size,
     legion_argument_map_t map,
     legion_predicate_t pred /* = legion_predicate_true() */,
     bool must /* = false */,

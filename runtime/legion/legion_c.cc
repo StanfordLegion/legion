@@ -100,6 +100,21 @@ legion_ptr_safe_cast(legion_runtime_t runtime_,
 // Domain Operations
 // -----------------------------------------------------------------------
 
+legion_domain_t
+legion_domain_empty(unsigned dim)
+{
+  legion_domain_t domain;
+  domain.dim = dim;
+  domain.is_id = 0;
+  for (int i = 0; i < dim; i++)
+    domain.rect_data[i] = 1;
+  for (int i = 0; i < dim; i++)
+    domain.rect_data[dim+i] = 0;
+  for (int i = 2*dim; i < (2*LEGION_MAX_DIM); i++)
+    domain.rect_data[i] = 0;
+  return domain;
+}
+
 #define FROM_RECT(DIM) \
 legion_domain_t \
 legion_domain_from_rect_##DIM##d(legion_rect_##DIM##d_t r_) \
@@ -173,6 +188,23 @@ legion_domain_get_volume(legion_domain_t d_)
 // Domain Transform Operations
 // -----------------------------------------------------------------------
 
+legion_domain_transform_t
+legion_domain_transform_identity(unsigned m, unsigned n)
+{
+  legion_domain_transform_t result;
+  result.m = m;
+  result.n = n;
+  for (int i = 0; i < m; i++)
+    for (int j = 0; j < n; j++)
+      if (i == j)
+        result.matrix[i*n+j] = 1;
+      else
+        result.matrix[i*n+j] = 0;
+  for (int i = m*n; i < (LEGION_MAX_DIM * LEGION_MAX_DIM); i++)
+    result.matrix[i] = 0;
+  return result;
+}
+
 #define FROM_TRANSFORM(D1,D2) \
 legion_domain_transform_t \
 legion_domain_transform_from_##D1##x##D2(legion_transform_##D1##x##D2##_t t_) \
@@ -183,6 +215,26 @@ legion_domain_transform_from_##D1##x##D2(legion_transform_##D1##x##D2##_t t_) \
 }
 LEGION_FOREACH_NN(FROM_TRANSFORM)
 #undef FROM_TRANSFORM
+
+legion_domain_affine_transform_t
+legion_domain_affine_transform_identity(unsigned m, unsigned n)
+{
+  legion_domain_affine_transform_t result;
+  result.transform.m = m;
+  result.transform.n = n;
+  for (int i = 0; i < m; i++)
+    for (int j = 0; j < n; j++)
+      if (i == j)
+        result.transform.matrix[i*n+j] = 1;
+      else
+        result.transform.matrix[i*n+j] = 0;
+  for (int i = 0; i < (LEGION_MAX_DIM * LEGION_MAX_DIM); i++)
+    result.transform.matrix[i] = 0;
+  result.offset.dim = m;
+  for (int i = 0; i < LEGION_MAX_DIM; i++)
+    result.offset.point_data[i] = 0;
+  return result;
+}
 
 #define FROM_AFFINE(D1,D2) \
 legion_domain_affine_transform_t \
@@ -3195,6 +3247,22 @@ legion_task_launcher_create(
   return CObjectWrapper::wrap(launcher);
 }
 
+legion_task_launcher_t
+legion_task_launcher_create_from_buffer(
+  legion_task_id_t tid,
+  const void *buffer,
+  size_t buffer_size,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
+{
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  TaskLauncher *launcher = new TaskLauncher(tid, 
+      TaskArgument(buffer, buffer_size), *pred, id, tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
 void
 legion_task_launcher_destroy(legion_task_launcher_t launcher_)
 {
@@ -3503,6 +3571,27 @@ legion_index_launcher_create(
 
   IndexTaskLauncher *launcher =
     new IndexTaskLauncher(tid, domain, global_arg, *map, *pred, must, id, tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
+legion_index_launcher_t
+legion_index_launcher_create_from_buffer(
+  legion_task_id_t tid,
+  legion_domain_t domain_,
+  const void *buffer,
+  size_t buffer_size,
+  legion_argument_map_t map_,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  bool must /* = false */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
+{
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  ArgumentMap *map = CObjectWrapper::unwrap(map_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexTaskLauncher *launcher = new IndexTaskLauncher(tid, domain,
+      TaskArgument(buffer, buffer_size), *map, *pred, must, id, tag);
   return CObjectWrapper::wrap(launcher);
 }
 
