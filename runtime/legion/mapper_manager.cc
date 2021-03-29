@@ -36,7 +36,7 @@ namespace Legion {
       : manager(man), resume(RtUserEvent::NO_RT_USER_EVENT), 
         kind(k), operation(op), acquired_instances((op == NULL) ? NULL :
             operation->get_acquired_instances_ref()), 
-        start_time(0), collective_count(0)
+        start_time(0), collective_count(0), reentrant_disabled(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3971,6 +3971,7 @@ namespace Legion {
       info->start_time = 0;
       info->stop_time = 0;
       info->collective_count = 0;
+      info->reentrant_disabled = false;
       available_infos.push_back(info);
     }
 
@@ -4168,12 +4169,13 @@ namespace Legion {
                         "%s with the SERIALIZED_NON_REENTRANT_MAPPER_MODEL. "
                         "Reentrant calls are never allowed with this model.", 
                         get_mapper_name())
-      else if (permit_reentrant)
+      else if (!info->reentrant_disabled)
         REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
                         "Illegal 'disable_reentrant' call performed in mapper "
                         "%s. Reentrant calls were already enabled and we do "
                         "not support nested calls to enable them.",
                         get_mapper_name())
+      info->reentrant_disabled = false;
       AutoLock m_lock(mapper_lock);
       permit_reentrant = true;
     }
@@ -4191,12 +4193,13 @@ namespace Legion {
                         "%s with the SERIALIZED_NON_REENTRANT_MAPPER_MODEL. "
                         "Reentrant calls are already disallowed with this "
                         "model.", get_mapper_name())
-      else if (!permit_reentrant)
+      else if (info->reentrant_disabled)
         REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
                         "Illegal 'disable_reentrant' call performed in mapper "
                         "%s. Reentrant calls were already disabled and we do "
                         "not support nested calls to disable them.",
                         get_mapper_name())
+      info->reentrant_disabled = true;
       AutoLock m_lock(mapper_lock);
       permit_reentrant = false;
     }
@@ -4385,12 +4388,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!pending_pause_call);
       assert(pending_finish_call);
+      assert(executing_call != NULL);
 #endif
       pending_finish_call = false;
       // If we allow reentrant calls then reset whether we are permitting
       // reentrant calls in case the user forgot to do it at the end of call
-      if (allow_reentrant && !permit_reentrant)
+      if (allow_reentrant && executing_call->reentrant_disabled)
+      {
+#ifdef DEBUG_LEGION
+        assert(!permit_reentrant);
+#endif
         permit_reentrant = true;
+      }
       if (!pending_calls.empty())
       {
         executing_call = pending_calls.front();
