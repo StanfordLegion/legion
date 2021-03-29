@@ -564,6 +564,9 @@ extern "C" {
   LEGION_FOREACH_N(GET_POINT)
 #undef GET_POINT
 
+  legion_domain_point_t
+  legion_domain_point_origin(unsigned dim);
+
   /**
    * @see Legion::DomainPoint::nil()
    */

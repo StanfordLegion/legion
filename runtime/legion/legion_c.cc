@@ -106,11 +106,11 @@ legion_domain_empty(unsigned dim)
   legion_domain_t domain;
   domain.dim = dim;
   domain.is_id = 0;
-  for (int i = 0; i < dim; i++)
+  for (unsigned i = 0; i < dim; i++)
     domain.rect_data[i] = 1;
-  for (int i = 0; i < dim; i++)
+  for (unsigned i = 0; i < dim; i++)
     domain.rect_data[dim+i] = 0;
-  for (int i = 2*dim; i < (2*LEGION_MAX_DIM); i++)
+  for (unsigned i = 2*dim; i < (2*LEGION_MAX_DIM); i++)
     domain.rect_data[i] = 0;
   return domain;
 }
@@ -194,13 +194,13 @@ legion_domain_transform_identity(unsigned m, unsigned n)
   legion_domain_transform_t result;
   result.m = m;
   result.n = n;
-  for (int i = 0; i < m; i++)
-    for (int j = 0; j < n; j++)
+  for (unsigned i = 0; i < m; i++)
+    for (unsigned j = 0; j < n; j++)
       if (i == j)
         result.matrix[i*n+j] = 1;
       else
         result.matrix[i*n+j] = 0;
-  for (int i = m*n; i < (LEGION_MAX_DIM * LEGION_MAX_DIM); i++)
+  for (unsigned i = m*n; i < (LEGION_MAX_DIM * LEGION_MAX_DIM); i++)
     result.matrix[i] = 0;
   return result;
 }
@@ -222,16 +222,16 @@ legion_domain_affine_transform_identity(unsigned m, unsigned n)
   legion_domain_affine_transform_t result;
   result.transform.m = m;
   result.transform.n = n;
-  for (int i = 0; i < m; i++)
-    for (int j = 0; j < n; j++)
+  for (unsigned i = 0; i < m; i++)
+    for (unsigned j = 0; j < n; j++)
       if (i == j)
         result.transform.matrix[i*n+j] = 1;
       else
         result.transform.matrix[i*n+j] = 0;
-  for (int i = 0; i < (LEGION_MAX_DIM * LEGION_MAX_DIM); i++)
+  for (unsigned i = 0; i < (LEGION_MAX_DIM * LEGION_MAX_DIM); i++)
     result.transform.matrix[i] = 0;
   result.offset.dim = m;
-  for (int i = 0; i < LEGION_MAX_DIM; i++)
+  for (unsigned i = 0; i < LEGION_MAX_DIM; i++)
     result.offset.point_data[i] = 0;
   return result;
 }
@@ -273,6 +273,16 @@ legion_domain_point_get_point_##DIM##d(legion_domain_point_t p_) \
 }
 LEGION_FOREACH_N(GET_POINT)
 #undef GET_POINT
+
+legion_domain_point_t
+legion_domain_point_origin(unsigned dim)
+{
+  legion_domain_point_t result;
+  result.dim = dim;
+  for (unsigned i = 0; i < LEGION_MAX_DIM; i++)
+    result.point_data[i] = 0;
+  return result;
+}
 
 legion_domain_point_t
 legion_domain_point_nil()
