@@ -534,7 +534,7 @@ extern "C" {
 #undef FROM_TRANSFORM
 
   legion_domain_affine_transform_t
-  legion_domain_affine_transform_identity_t(unsigned m, unsigned n);
+  legion_domain_affine_transform_identity(unsigned m, unsigned n);
 
 #define FROM_AFFINE(D1,D2) \
   legion_domain_affine_transform_t \
