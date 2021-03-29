@@ -1890,6 +1890,7 @@ function specialize.stat_rescape(cx, node)
   local result = terralib.newlist()
 
   -- We're going to use a special symbol to track the rescape/remit context.
+  local cx = cx:new_local_scope()
   cx.env:insert(node, rescape_remit_key, result)
 
   -- Now run the escape code. It will populate the result by looking

@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 21.03.0 (March ??, 2021)
+Version 21.03.0 (March 30, 2021)
   * Build
     - Cmake can build an embedded copy of GASNet as part of the Legion build
         with `-DLegion_EMBED_GASNet=ON`
