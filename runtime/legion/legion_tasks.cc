@@ -2764,7 +2764,7 @@ namespace Legion {
         {
           if (!target_memory.exists())
           {
-            if (target_proc.address_space() != runtime->address_space)
+            if (target_space != runtime->address_space)
               target_memory = runtime->find_local_memory(this->target_proc,
                                                         Memory::SYSTEM_MEM);
             else
@@ -2773,7 +2773,7 @@ namespace Legion {
           future_memories.push_back(target_memory);
           const RtEvent future_mapped =
             futures[idx].impl->request_application_instance(
-                target_memory, this, unique_op_id, runtime->address_space);
+              target_memory, this, unique_op_id, target_space);
           if (future_mapped.exists())
             map_applied_conditions.insert(future_mapped);
         }

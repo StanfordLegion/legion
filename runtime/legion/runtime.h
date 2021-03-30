@@ -346,7 +346,7 @@ namespace Legion {
                                              AddressSpaceID source);
       static void handle_future_broadcast(Deserializer &derez, Runtime *rt);
       static void handle_future_create_instance_request(Deserializer &derez,
-                                    Runtime *runtime, AddressSpaceID source);
+                                                        Runtime *runtime);
       static void handle_future_create_instance_response(Deserializer &derez,
                                                          Runtime *runtime);
     public:
@@ -3430,8 +3430,7 @@ namespace Legion {
       void handle_future_notification(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_future_broadcast(Deserializer &derez);
-      void handle_future_create_instance_request(Deserializer &derez,
-                                                 AddressSpaceID source);
+      void handle_future_create_instance_request(Deserializer &derez);
       void handle_future_create_instance_response(Deserializer &derez);
       void handle_future_map_future_request(Deserializer &derez,
                                             AddressSpaceID source);

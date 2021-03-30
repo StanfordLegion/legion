@@ -1025,6 +1025,7 @@ namespace Legion {
           pack_future(rez);
           rez.serialize(target);
           rez.serialize(task_uid);
+          rez.serialize(source);
         }
         runtime->send_future_create_instance_request(target_space, rez);
         return send_event;
@@ -2146,7 +2147,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void FutureImpl::handle_future_create_instance_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -2156,6 +2157,8 @@ namespace Legion {
       derez.deserialize(target);
       UniqueID creator_uid;
       derez.deserialize(creator_uid);
+      AddressSpaceID source;
+      derez.deserialize(source);
       impl->request_application_instance(target, NULL, creator_uid, source, 
                                          mutator.get_done_event());
     }
@@ -11791,8 +11794,7 @@ namespace Legion {
             }
           case SEND_FUTURE_CREATE_INSTANCE_REQUEST:
             {
-              runtime->handle_future_create_instance_request(derez,
-                                              remote_address_space);
+              runtime->handle_future_create_instance_request(derez);
               break;
             }
           case SEND_FUTURE_CREATE_INSTANCE_RESPONSE:
@@ -23729,11 +23731,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_future_create_instance_request(Deserializer &derez,
-                                                        AddressSpaceID source)
+    void Runtime::handle_future_create_instance_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      FutureImpl::handle_future_create_instance_request(derez, this, source);
+      FutureImpl::handle_future_create_instance_request(derez, this);
     }
 
     //--------------------------------------------------------------------------
