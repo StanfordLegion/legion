@@ -632,6 +632,15 @@ function parser.expr_prefix(p)
       has_parens = false,
     }
 
+  elseif p:nextif("__line") then
+    return ast.unspecialized.expr.Constant {
+      value = start.line,
+      expr_type = int,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+      has_parens = false,
+    }
+
   elseif p:nextif("isnull") then
     p:expect("(")
     local pointer = p:expr()
@@ -2484,6 +2493,12 @@ function parser.top_quote_stat(p, annotations)
   }
 end
 
+function parser.top_line(p, annotations)
+  local start = ast.save(p)
+  p:expect("__line")
+  return start.line
+end
+
 function parser.top_expr(p)
   local annotations = p:annotations(false, true)
 
@@ -2493,8 +2508,11 @@ function parser.top_expr(p)
   elseif p:matches("rquote") then
     return p:top_quote_stat(annotations)
 
+  elseif p:matches("__line") then
+    return p:top_line(annotations)
+
   else
-    p:error("unexpected token in top-level statement")
+    p:error("unexpected token in top-level expression")
   end
 end
 
