@@ -5631,6 +5631,7 @@ namespace Legion {
       AutoLock t_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
+      assert(!output.reduction_futures.empty());
       assert(cached_premappings.find(op_key) == cached_premappings.end());
 #endif
       CachedPremapping &premapping = cached_premappings[op_key];

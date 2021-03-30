@@ -2727,7 +2727,7 @@ namespace Legion {
         target_processors.push_back(this->target_proc);
       }
       // If we had any future mapping outputs, we can grab them
-      if (!output.future_locations.empty())
+      if (!futures.empty())
       {
         future_memories.swap(output.future_locations);
         if (futures.size() < future_memories.size())
@@ -2770,6 +2770,7 @@ namespace Legion {
             else
               target_memory = runtime->runtime_system_memory;
           }
+          future_memories.push_back(target_memory);
           const RtEvent future_mapped =
             futures[idx].impl->request_application_instance(
                 target_memory, this, unique_op_id, runtime->address_space);
@@ -3421,13 +3422,16 @@ namespace Legion {
         tpl->get_mapper_output(this, selected_variant, task_priority,
           perform_postmap,target_processors,future_memories,physical_instances);
       // Then request any future mappings in advance
-      for (unsigned idx = 0; idx < futures.size(); idx++)
+      if (!futures.empty())
       {
-        const RtEvent future_mapped =
+        for (unsigned idx = 0; idx < futures.size(); idx++)
+        {
+          const RtEvent future_mapped =
             futures[idx].impl->request_application_instance(
               future_memories[idx], this, unique_op_id, runtime->address_space);
-        if (future_mapped.exists())
-          map_applied_conditions.insert(future_mapped);
+          if (future_mapped.exists())
+            map_applied_conditions.insert(future_mapped);
+        }
       }
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -3569,7 +3573,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(((tpl != NULL) && tpl->is_recording()) ||
                ((remote_trace_info != NULL) && remote_trace_info->recording));
+        assert(futures.size() == future_memories.size());
 #endif
+        // We swapped this in finalize output so we need to restore it 
+        // here if we're going to record it
+        if (!futures.empty())
+          output.future_locations = future_memories;
         if (tpl != NULL)
           tpl->record_mapper_output(this, output, 
               physical_instances, map_applied_conditions);
@@ -8767,6 +8776,10 @@ namespace Legion {
         if (mapper == NULL)
           mapper = runtime->find_mapper(current_proc, map_id);
         mapper->invoke_premap_task(this, &input, &output);
+        // See if we need to update the new target processor
+        if (output.new_target_proc.exists())
+          this->target_proc = output.new_target_proc;
+        create_future_instances(output.reduction_futures);
         // If we're recording this trace then we need to remember this
         if (is_recording())
         {
@@ -8775,10 +8788,6 @@ namespace Legion {
 #endif
           tpl->record_premap_output(this, output, map_applied_conditions);
         }
-        // See if we need to update the new target processor
-        if (output.new_target_proc.exists())
-          this->target_proc = output.new_target_proc;
-        create_future_instances(output.reduction_futures);
       }
     }
 
@@ -8916,6 +8925,7 @@ namespace Legion {
         this->target_proc = output.new_target_proc;
       if (redop > 0)
       {
+        create_future_instances(output.reduction_futures);
         // If we're recording this trace then we need to remember this
         if (is_recording())
         {
@@ -8924,7 +8934,6 @@ namespace Legion {
 #endif
           tpl->record_premap_output(this, output, applied_conditions);
         }
-        create_future_instances(output.reduction_futures);
       }
       // See if we have any profiling requests to handle
       if (!output.copy_prof_requests.empty())
