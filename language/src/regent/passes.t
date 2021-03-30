@@ -56,6 +56,7 @@ end
 function passes.compile(node, allow_pretty)
   local function ctor(environment_function)
     local env = environment_function()
+    if not ast.is_node(node) then return node end
     local node = profile("specialize", node, specialize.entry)(env, node)
     if not node or std.is_rquote(node) then return node end
     node = profile("normalize", node, normalize.entry)(node)
