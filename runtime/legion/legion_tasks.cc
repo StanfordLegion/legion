@@ -2754,7 +2754,7 @@ namespace Legion {
           // Request the future memories be created
           const RtEvent future_mapped =
             futures[idx].impl->request_application_instance(
-              future_memories[idx], this, unique_op_id, runtime->address_space);
+              future_memories[idx], this, unique_op_id, target_space);
           if (future_mapped.exists())
             map_applied_conditions.insert(future_mapped); 
         }
@@ -3426,9 +3426,10 @@ namespace Legion {
       {
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
+          const Memory memory = future_memories[idx];
           const RtEvent future_mapped =
             futures[idx].impl->request_application_instance(
-              future_memories[idx], this, unique_op_id, runtime->address_space);
+              memory, this, unique_op_id, memory.address_space());
           if (future_mapped.exists())
             map_applied_conditions.insert(future_mapped);
         }

@@ -266,7 +266,6 @@ namespace Legion {
                              const char *warning_string = NULL);
       RtEvent request_application_instance(Memory target, SingleTask *task,
                        UniqueID uid, AddressSpaceID source,
-                       RtEvent pre = RtEvent::NO_RT_EVENT,
                        ApUserEvent ready_event = ApUserEvent::NO_AP_USER_EVENT);
       ApEvent find_application_instance_ready(Memory target, SingleTask *task);
       RtEvent request_internal_buffer(Operation *op, bool eager);
@@ -384,9 +383,8 @@ namespace Legion {
       // Instances that need to be made once canonical instance is set
       std::map<Memory,PendingInstance> pending_instances;
       // Requests to create instances on remote nodes
+      // First event is the mapped event, second is ready event
       std::map<Memory,std::pair<RtUserEvent,ApUserEvent> > pending_requests;
-      // Annoying case of having effects from pending requests
-      RtEvent pending_precondition;
     private:
       Processor callback_proc;
       FutureFunctor *callback_functor;

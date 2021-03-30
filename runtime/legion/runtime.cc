@@ -910,13 +910,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent FutureImpl::request_application_instance(Memory target,
-                     SingleTask *task, UniqueID task_uid, AddressSpaceID source,
-                     RtEvent pre, ApUserEvent inst_ready)
+                                  SingleTask *task, UniqueID task_uid,
+                                  AddressSpaceID source, ApUserEvent inst_ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(target.exists());
-      assert(!pre.exists() || (source != runtime->address_space));
 #endif
       RtEvent ready_event;
       RtUserEvent send_event;
@@ -939,7 +938,6 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
-              rez.serialize(pre);
               rez.serialize<size_t>(1);
               inst_finder->second->pack_instance(rez, false/*move ownership*/);
             }
@@ -966,7 +964,9 @@ namespace Legion {
             return finder->second.first;
           }
           send_event = Runtime::create_rt_user_event();
-          pending_requests[target] = std::make_pair(send_event, inst_ready);
+          // Only need to save this if we are the requester
+          if (source == runtime->address_space)
+            pending_requests[target] = std::make_pair(send_event, inst_ready);
         }
         else
         {
@@ -997,13 +997,6 @@ namespace Legion {
                 finder->second.remote_requests.insert(source);
             }
             ready_event = subscription_event;
-            if (pre.exists())
-            {
-#ifdef DEBUG_LEGION
-              assert(!pending_precondition.exists());
-#endif
-              pending_precondition = pre;
-            }
           }
           else
           {
@@ -1025,6 +1018,7 @@ namespace Legion {
           pack_future(rez);
           rez.serialize(target);
           rez.serialize(task_uid);
+          rez.serialize(send_event);
           rez.serialize(source);
         }
         runtime->send_future_create_instance_request(target_space, rez);
@@ -1103,7 +1097,7 @@ namespace Legion {
       // Make an event and request it
       const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
       request_application_instance(target, task, task->get_unique_op_id(),
-                      runtime->address_space, RtEvent::NO_RT_EVENT, ready);
+                                   runtime->address_space, ready);
       return ready;
     }
 
@@ -1372,11 +1366,6 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(did);
-            if (pending_precondition.exists() &&
-                !pending_precondition.has_triggered())
-              rez.serialize(pending_precondition);
-            else
-              rez.serialize(RtEvent::NO_RT_EVENT);
             rez.serialize<size_t>(it->second.size());
             for (unsigned idx = 0; idx < it->second.size(); idx++)
               it->second[idx]->pack_instance(rez, false/*move ownership*/);
@@ -1642,8 +1631,6 @@ namespace Legion {
     void FutureImpl::unpack_instances(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      RtEvent precondition;
-      derez.deserialize(precondition);
       size_t num_instances;
       derez.deserialize(num_instances);
       std::vector<FutureInstance*> new_instances(num_instances);
@@ -1662,7 +1649,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != pending_requests.end());
 #endif
-        Runtime::trigger_event(finder->second.first, precondition);
         if (finder->second.second.exists())
           Runtime::trigger_event(NULL,finder->second.second,(*it)->ready_event);
         pending_requests.erase(finder);
@@ -2157,10 +2143,15 @@ namespace Legion {
       derez.deserialize(target);
       UniqueID creator_uid;
       derez.deserialize(creator_uid);
+      RtUserEvent mapped_event;
+      derez.deserialize(mapped_event);
       AddressSpaceID source;
       derez.deserialize(source);
-      impl->request_application_instance(target, NULL, creator_uid, source, 
-                                         mutator.get_done_event());
+      RtEvent mapped = 
+        impl->request_application_instance(target, NULL, creator_uid, source);
+      if (mapped.exists())
+        mutator.record_reference_mutation_effect(mapped);
+      Runtime::trigger_event(mapped_event, mutator.get_done_event());
     }
 
     //--------------------------------------------------------------------------
