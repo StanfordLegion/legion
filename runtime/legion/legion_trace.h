@@ -765,12 +765,18 @@ namespace Legion {
         const ShardID shard;
       };
     private:
+      struct CachedPremapping
+      {
+        std::vector<Memory>     future_locations;
+      };
+      typedef std::map<TraceLocalID,CachedPremapping> CachedPremappings;
       struct CachedMapping
       {
         VariantID               chosen_variant;
         TaskPriority            task_priority;
         bool                    postmap_task;
         std::vector<Processor>  target_procs;
+        std::vector<Memory>     future_locations;
         std::deque<InstanceSet> physical_instances;
       };
       typedef LegionMap<TraceLocalID,CachedMapping>::aligned CachedMappings;
@@ -877,6 +883,11 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target);
     public:
+      void record_premap_output(Memoizable *memo,
+                                const Mapper::PremapTaskOutput &output,
+                                std::set<RtEvent> &applied_events);
+      void get_premap_output(IndexTask *task,
+                             std::vector<Memory> &future_locations);     
       virtual void record_mapper_output(Memoizable *memo,
                              const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances,
@@ -886,6 +897,7 @@ namespace Legion {
                              TaskPriority &task_priority,
                              bool &postmap_task,
                              std::vector<Processor> &target_proc,
+                             std::vector<Memory> &future_locations,
                              std::deque<InstanceSet> &physical_instances) const;
     public:
       virtual void record_get_term_event(Memoizable *memo);
@@ -1053,6 +1065,7 @@ namespace Legion {
       // Remote memoizable objects that we have ownership for
       std::vector<Memoizable*> remote_memos;
     private:
+      CachedPremappings cached_premappings;
       CachedMappings cached_mappings;
       bool has_virtual_mapping;
     protected:

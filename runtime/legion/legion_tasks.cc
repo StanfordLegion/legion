@@ -3402,24 +3402,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::trigger_replay(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
+      tpl->register_operation(this);
+      if (runtime->separate_runtime_instances)
+      {
+        std::vector<Processor> procs;
+        tpl->get_mapper_output(this, selected_variant, task_priority,
+          perform_postmap, procs, future_memories, physical_instances);
+        target_processors.resize(1);
+        target_processors[0] = this->target_proc;
+      }
+      else
+        tpl->get_mapper_output(this, selected_variant, task_priority,
+          perform_postmap,target_processors,future_memories,physical_instances);
+      // Then request any future mappings in advance
+      for (unsigned idx = 0; idx < futures.size(); idx++)
+      {
+        const RtEvent future_mapped =
+            futures[idx].impl->request_application_instance(
+              future_memories[idx], this, unique_op_id, runtime->address_space);
+        if (future_mapped.exists())
+          map_applied_conditions.insert(future_mapped);
+      }
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::replay_map_task_output(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(output_regions.empty());
 #endif
-      std::vector<Processor> procs;
-      tpl->get_mapper_output(this, selected_variant,
-          task_priority, perform_postmap, procs, physical_instances);
-
-      if (runtime->separate_runtime_instances)
-      {
-        target_processors.resize(1);
-        target_processors[0] = this->target_proc;
-      }
-      else // the common case
-        target_processors = procs;
-
       virtual_mapped.resize(regions.size(), false);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -6435,16 +6457,12 @@ namespace Legion {
     void IndividualTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_SPY
-      LegionSpy::log_replay_operation(unique_op_id);
-#endif
       if (runtime->legion_spy_enabled)
       {
         for (unsigned idx = 0; idx < regions.size(); idx++)
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
       }
-      tpl->register_operation(this);
-      complete_mapping();
+      SingleTask::trigger_replay();
       resolve_speculation();
     }
 
@@ -7105,17 +7123,6 @@ namespace Legion {
       // of tracing (e.g. those with control replication) don't work otherwise
       if ((remote_trace_info != NULL) && (remote_trace_info->recording))
         remote_trace_info->request_term_event(single_task_termination);
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::trigger_replay(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef LEGION_SPY
-      LegionSpy::log_replay_operation(unique_op_id);
-#endif
-      tpl->register_operation(this);
-      complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -8760,6 +8767,14 @@ namespace Legion {
         if (mapper == NULL)
           mapper = runtime->find_mapper(current_proc, map_id);
         mapper->invoke_premap_task(this, &input, &output);
+        // If we're recording this trace then we need to remember this
+        if (is_recording())
+        {
+#ifdef DEBUG_LEGION
+          assert((tpl != NULL) && tpl->is_recording());
+#endif
+          tpl->record_premap_output(this, output, map_applied_conditions);
+        }
         // See if we need to update the new target processor
         if (output.new_target_proc.exists())
           this->target_proc = output.new_target_proc;
@@ -8900,7 +8915,17 @@ namespace Legion {
       if (output.new_target_proc.exists())
         this->target_proc = output.new_target_proc;
       if (redop > 0)
+      {
+        // If we're recording this trace then we need to remember this
+        if (is_recording())
+        {
+#ifdef DEBUG_LEGION
+          assert((tpl != NULL) && tpl->is_recording());
+#endif
+          tpl->record_premap_output(this, output, applied_conditions);
+        }
         create_future_instances(output.reduction_futures);
+      }
       // See if we have any profiling requests to handle
       if (!output.copy_prof_requests.empty())
       {
@@ -10008,6 +10033,13 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
+      }
+      // If we're going to be doing an output reduction do that now
+      if (redop > 0)
+      {
+        std::vector<Memory> reduction_futures;
+        tpl->get_premap_output(this, reduction_futures);
+        create_future_instances(reduction_futures); 
       }
       // Mark that this is origin mapped effectively in case we
       // have any remote tasks, do this before we clone it

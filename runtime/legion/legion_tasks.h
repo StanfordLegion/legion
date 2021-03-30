@@ -493,6 +493,7 @@ namespace Legion {
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL) = 0;
+      virtual void trigger_replay(void);
       // For tasks that are sharded off by control replication
       virtual void shard_off(RtEvent mapped_precondition);
       virtual bool is_stealable(void) const = 0;
@@ -901,7 +902,6 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       // From MemoizableOp
-      virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent completion_event);
     public:
       // From Memoizable

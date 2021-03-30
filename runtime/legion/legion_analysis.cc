@@ -912,6 +912,9 @@ namespace Legion {
           rez.serialize<size_t>(output.target_procs.size());
           for (unsigned idx = 0; idx < output.target_procs.size(); idx++)
             rez.serialize(output.target_procs[idx]);
+          rez.serialize<size_t>(output.future_locations.size());
+          for (unsigned idx = 0; idx < output.future_locations.size(); idx++)
+            rez.serialize(output.future_locations[idx]);
           rez.serialize(output.chosen_variant);
           rez.serialize(output.task_priority);
           rez.serialize<bool>(output.postmap_task);
@@ -1553,6 +1556,14 @@ namespace Legion {
             output.target_procs.resize(num_target_processors);
             for (unsigned idx = 0; idx < num_target_processors; idx++)
               derez.deserialize(output.target_procs[idx]);
+            size_t num_future_locations;
+            derez.deserialize(num_future_locations);
+            if (num_future_locations > 0)
+            {
+              output.future_locations.resize(num_future_locations);
+              for (unsigned idx = 0; idx < num_future_locations; idx++)
+                derez.deserialize(output.future_locations[idx]);
+            }
             derez.deserialize(output.chosen_variant);
             derez.deserialize(output.task_priority);
             derez.deserialize<bool>(output.postmap_task);

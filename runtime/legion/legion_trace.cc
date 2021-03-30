@@ -5622,6 +5622,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_premap_output(Memoizable *memo,
+                                         const Mapper::PremapTaskOutput &output,
+                                         std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      const TraceLocalID op_key = memo->get_trace_local_id();
+      AutoLock t_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+      assert(cached_premappings.find(op_key) == cached_premappings.end());
+#endif
+      CachedPremapping &premapping = cached_premappings[op_key];
+      premapping.future_locations = output.reduction_futures;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::get_premap_output(IndexTask *task,
+                                          std::vector<Memory> &future_locations)
+    //--------------------------------------------------------------------------
+    {
+      TraceLocalID op_key = task->get_trace_local_id();
+      AutoLock t_lock(template_lock, 1, false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(is_replaying());
+#endif
+      CachedPremappings::const_iterator finder = 
+        cached_premappings.find(op_key);
+#ifdef DEBUG_LEGION
+      assert(finder != cached_premappings.end());
+#endif
+      future_locations = finder->second.future_locations;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_mapper_output(Memoizable *memo,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
@@ -5641,6 +5675,7 @@ namespace Legion {
       mapping.chosen_variant = output.chosen_variant;
       mapping.task_priority = output.task_priority;
       mapping.postmap_task = output.postmap_task;
+      mapping.future_locations = output.future_locations;
       mapping.physical_instances = physical_instances;
       WrapperReferenceMutator mutator(applied_events);
       for (std::deque<InstanceSet>::iterator it =
@@ -5664,15 +5699,15 @@ namespace Legion {
                                              TaskPriority &task_priority,
                                              bool &postmap_task,
                               std::vector<Processor> &target_procs,
+                              std::vector<Memory> &future_locations,
                               std::deque<InstanceSet> &physical_instances) const
     //--------------------------------------------------------------------------
     {
+      TraceLocalID op_key = task->get_trace_local_id();
       AutoLock t_lock(template_lock, 1, false/*exclusive*/);
 #ifdef DEBUG_LEGION
       assert(is_replaying());
 #endif
-
-      TraceLocalID op_key = task->get_trace_local_id();
       CachedMappings::const_iterator finder = cached_mappings.find(op_key);
 #ifdef DEBUG_LEGION
       assert(finder != cached_mappings.end());
@@ -5681,6 +5716,7 @@ namespace Legion {
       task_priority = finder->second.task_priority;
       postmap_task = finder->second.postmap_task;
       target_procs = finder->second.target_procs;
+      future_locations = finder->second.future_locations;
       physical_instances = finder->second.physical_instances;
     }
 
