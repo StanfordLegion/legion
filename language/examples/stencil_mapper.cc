@@ -30,14 +30,6 @@ public:
   StencilMapper(MapperRuntime *rt, Machine machine, Processor local,
                 const char *mapper_name,
                 std::vector<Processor>* procs_list);
-  virtual void select_task_options(const MapperContext    ctx,
-                                   const Task&            task,
-                                         TaskOptions&     output);
-  virtual void default_policy_rank_processor_kinds(
-                                    MapperContext ctx, const Task &task,
-                                    std::vector<Processor::Kind> &ranking);
-  virtual Processor default_policy_select_initial_processor(
-                                    MapperContext ctx, const Task &task);
   virtual void default_policy_select_target_processors(
                                     MapperContext ctx,
                                     const Task &task,
@@ -48,10 +40,6 @@ public:
                                 const LayoutConstraintSet &constraints,
                                 bool force_new_instances,
                                 bool meets_constraints);
-  virtual void map_task(const MapperContext ctx,
-                        const Task &task,
-                        const MapTaskInput &input,
-                        MapTaskOutput &output);
   virtual void map_copy(const MapperContext ctx,
                         const Copy &copy,
                         const MapCopyInput &input,
@@ -72,53 +60,6 @@ StencilMapper::StencilMapper(MapperRuntime *rt, Machine machine, Processor local
 {
 }
 
-void StencilMapper::select_task_options(const MapperContext    ctx,
-                                        const Task&            task,
-                                              TaskOptions&     output)
-{
-  output.initial_proc = default_policy_select_initial_processor(ctx, task);
-  output.inline_task = false;
-  output.stealable = stealing_enabled;
-#ifdef MAP_LOCALLY
-  output.map_locally = true;
-#else
-  output.map_locally = false;
-#endif
-}
-
-void StencilMapper::default_policy_rank_processor_kinds(MapperContext ctx,
-                        const Task &task, std::vector<Processor::Kind> &ranking)
-{
-#if SPMD_SHARD_USE_IO_PROC
-  const char* task_name = task.get_task_name();
-  const char* prefix = "shard_";
-  if (strncmp(task_name, prefix, strlen(prefix)) == 0) {
-    // Put shard tasks on IO processors.
-    ranking.resize(5);
-    ranking[0] = Processor::TOC_PROC;
-    ranking[1] = Processor::PROC_SET;
-    ranking[2] = Processor::IO_PROC;
-    ranking[3] = Processor::LOC_PROC;
-    ranking[4] = Processor::PY_PROC;
-  } else {
-#endif
-    ranking.resize(5);
-    ranking[0] = Processor::TOC_PROC;
-    ranking[1] = Processor::PROC_SET;
-    ranking[2] = Processor::LOC_PROC;
-    ranking[3] = Processor::IO_PROC;
-    ranking[4] = Processor::PY_PROC;
-#if SPMD_SHARD_USE_IO_PROC
-  }
-#endif
-}
-
-Processor StencilMapper::default_policy_select_initial_processor(
-                                    MapperContext ctx, const Task &task)
-{
-  return DefaultMapper::default_policy_select_initial_processor(ctx, task);
-}
-
 void StencilMapper::default_policy_select_target_processors(
                                     MapperContext ctx,
                                     const Task &task,
@@ -135,59 +76,6 @@ LogicalRegion StencilMapper::default_policy_select_instance_region(
                               bool meets_constraints)
 {
   return req.region;
-}
-
-void StencilMapper::map_task(const MapperContext      ctx,
-                             const Task&              task,
-                             const MapTaskInput&      input,
-                                   MapTaskOutput&     output)
-{
-  if (task.parent_task != NULL && task.parent_task->must_epoch_task) {
-    Processor::Kind target_kind = task.target_proc.kind();
-    // Get the variant that we are going to use to map this task
-    VariantInfo chosen = default_find_preferred_variant(task, ctx,
-                                                        true/*needs tight bound*/, true/*cache*/, target_kind);
-    output.chosen_variant = chosen.variant;
-    // TODO: some criticality analysis to assign priorities
-    output.task_priority = 0;
-    output.postmap_task = false;
-    // Figure out our target processors
-    output.target_procs.push_back(task.target_proc);
-
-    for (unsigned idx = 0; idx < task.regions.size(); idx++) {
-      const RegionRequirement &req = task.regions[idx];
-
-      // Skip any empty regions
-      if ((req.privilege == NO_ACCESS) || (req.privilege_fields.empty()))
-        continue;
-
-      if (input.valid_instances[idx].empty()) {
-        // happens when the region is empty
-        output.chosen_instances[idx].resize(1);
-        const LayoutConstraintSet empty_constraints;
-        const std::vector<LogicalRegion> empty_regions(1, req.region);
-        bool created = false;
-        bool ok = runtime->find_or_create_physical_instance(ctx, 
-            default_policy_select_target_memory(ctx, task.target_proc, req),
-            empty_constraints, empty_regions, output.chosen_instances[idx].back(), 
-            created, true/*acquire*/);
-        if (!ok) {
-          log_stencil.error("failed to find or create empty instance");
-          assert(false);
-        }
-        continue;
-      }
-      output.chosen_instances[idx] = input.valid_instances[idx];
-      bool ok = runtime->acquire_and_filter_instances(ctx, output.chosen_instances);
-      if (!ok) {
-        log_stencil.error("failed to acquire instances");
-        assert(false);
-      }
-    }
-    return;
-  }
-
-  DefaultMapper::map_task(ctx, task, input, output);
 }
 
 void StencilMapper::map_copy(const MapperContext ctx,
@@ -295,7 +183,7 @@ static void create_mappers(Machine machine, Runtime *runtime, const std::set<Pro
   std::vector<Processor>* procs_list = new std::vector<Processor>();
 
   Machine::ProcessorQuery procs_query(machine);
-  procs_query.only_kind(Processor::LOC_PROC);
+  procs_query.only_kind(Processor::TOC_PROC);
   for (Machine::ProcessorQuery::iterator it = procs_query.begin();
         it != procs_query.end(); it++)
     procs_list->push_back(*it);

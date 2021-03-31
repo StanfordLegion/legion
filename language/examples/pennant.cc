@@ -993,6 +993,11 @@ public:
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
+  virtual Memory default_policy_select_target_memory(
+                                MapperContext ctx,
+                                Processor target_proc,
+                                const RegionRequirement &req,
+                                MemoryConstraint mc = MemoryConstraint());
   virtual LogicalRegion default_policy_select_instance_region(
                                     MapperContext ctx, Memory target_memory,
                                     const RegionRequirement &req,
@@ -1105,6 +1110,31 @@ void PennantMapper::default_policy_select_target_processors(
                                     std::vector<Processor> &target_procs)
 {
   target_procs.push_back(task.target_proc);
+}
+
+Memory PennantMapper::default_policy_select_target_memory(MapperContext ctx,
+                                                          Processor target_proc,
+                                                          const RegionRequirement &req,
+                                                          MemoryConstraint mc)
+{
+  if (target_proc.kind() != Processor::TOC_PROC ||
+      !runtime->has_parent_logical_partition(ctx, req.region))
+    return DefaultMapper::default_policy_select_target_memory(ctx, target_proc, req);
+  LogicalRegion parent = runtime->get_parent_logical_region(ctx,
+      runtime->get_parent_logical_partition(ctx, req.region));
+  if (!runtime->has_parent_logical_partition(ctx, parent))
+    return DefaultMapper::default_policy_select_target_memory(ctx, target_proc, req);
+  DomainPoint color = runtime->get_logical_region_color_point(ctx, parent);
+  if (color[0] > 0)
+  {
+    Machine::MemoryQuery visible_memories(machine);
+    visible_memories.has_affinity_to(target_proc);
+    visible_memories.only_kind(Memory::Z_COPY_MEM);
+    assert(visible_memories.count() > 0);
+    return *visible_memories.begin();
+  }
+  else
+    return DefaultMapper::default_policy_select_target_memory(ctx, target_proc, req, mc);
 }
 
 LogicalRegion PennantMapper::default_policy_select_instance_region(
