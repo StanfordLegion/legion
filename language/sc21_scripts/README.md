@@ -7,7 +7,8 @@ if [[ $(hostname) == daint* ]]; then
     module load daint-gpu
 
     module unload PrgEnv-cray
-    module load PrgEnv-gnu/6.0.4
+    module load PrgEnv-gnu/6.0.9
+    module swap gcc/10.1.0 gcc/8.3.0 # CUDA 11 doesn't support GCC 10
 
     module load cudatoolkit
 
