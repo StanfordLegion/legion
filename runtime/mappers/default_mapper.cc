@@ -107,7 +107,7 @@ namespace Legion {
           BOOL_ARG("-dm:memoize", memoize);
           BOOL_ARG("-dm:map_locally", map_locally);
           BOOL_ARG("-dm:exact_region", exact_region);
-          BOOL_ARG("-dm:replicate", replication_enabled);
+          INT_ARG("-dm:replicate", replication_enabled);
           BOOL_ARG("-dm:same_address_space", same_address_space);
 #undef BOOL_ARG
 #undef INT_ARG
