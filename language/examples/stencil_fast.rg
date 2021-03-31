@@ -13,11 +13,11 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2"],
---  ["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2", "-ffuture", "0"],
---  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-ftrace", "0"],
---  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-tsteps", "2", "-tprune", "2", "-dm:memoize"],
---  ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "8", "-map_locally", "-ftrace", "0"]]
+-- [["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2", "-foverride-demand-cuda", "1"],
+--  ["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2", "-ffuture", "0", "-foverride-demand-cuda", "1"],
+--  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-ftrace", "0", "-foverride-demand-cuda", "1"],
+--  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-tsteps", "2", "-tprune", "2", "-dm:memoize", "-foverride-demand-cuda", "1"],
+--  ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "8", "-map_locally", "-ftrace", "0", "-foverride-demand-cuda", "1"]]
 
 -- Inspired by https://github.com/ParRes/Kernels/tree/master/LEGION/Stencil
 
@@ -27,7 +27,7 @@ local common = require("stencil_common")
 
 local DTYPE = double
 local RADIUS = 2
-local USE_FOREIGN = (os.getenv('USE_FOREIGN') or '1') == '1'
+local USE_FOREIGN = (os.getenv('USE_FOREIGN') or '0') == '1'
 
 local use_python_main = rawget(_G, "stencil_use_python_main") == true
 
@@ -369,7 +369,7 @@ local function make_stencil_interior(private, interior, radius)
 end
 
 local function make_stencil(radius)
-  local --__demand(__cuda)
+  local __demand(__cuda)
         task stencil(private : region(ispace(int2d), point),
                      interior : region(ispace(int2d), point),
                      xm : region(ispace(int2d), point),

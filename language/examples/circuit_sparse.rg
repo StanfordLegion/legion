@@ -365,7 +365,7 @@ do
   c.free(alread_picked)
 end
 
-task init_piece(spiece_id   : int,
+task init_piece(-- spiece_id   : int,
                 conf        : Config,
                 rgr         : region(ghost_range),
                 rpn         : region(node),
@@ -375,6 +375,7 @@ task init_piece(spiece_id   : int,
 where
   reads writes(rgr, rpn, rsn, rw)
 do
+  var spiece_id = regentlib.c.legion_logical_region_get_color(__runtime(), __raw(rpn))
   init_nodes(rpn)
   init_nodes(rsn)
   init_wires(spiece_id, conf, rgr, rpn, rsn, all_shared, rw)
@@ -395,6 +396,7 @@ do
   end
 end
 
+__demand(__cuda)
 task calculate_new_currents(print_ts : bool,
                             steps : uint,
                             rpn : region(node),
@@ -494,13 +496,15 @@ do
   end
 end
 
+__demand(__cuda)
 task distribute_charge(rpn : region(node),
                        rsn : region(node),
                        rgn : region(node),
                        rw : region(wire(rpn, rsn, rgn)))
 where
   reads(rw.{in_ptr, out_ptr, current._0, current._9}),
-  reduces +(rpn.charge, rsn.charge, rgn.charge)
+  reads writes(rpn.charge),
+  reduces +(rsn.charge, rgn.charge)
 do
   var dt = DELTAT
   for w in rw do
@@ -511,6 +515,7 @@ do
   end
 end
 
+__demand(__cuda)
 task update_voltages(print_ts : bool,
                      rpn : region(node),
                      rsn : region(node),
@@ -741,7 +746,7 @@ task toplevel()
   for j = 0, 1 do
     __demand(__index_launch)
     for i = 0, num_superpieces do
-      init_piece(i, conf, rp_ghost_ranges[i],
+      init_piece(conf, rp_ghost_ranges[i],
                  rp_private[i], rp_shared[i], all_shared, rp_wires[i])
     end
   end

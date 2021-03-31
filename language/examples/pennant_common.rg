@@ -82,7 +82,7 @@ local cstring = terralib.includec("string.h")
 -- Hack: Make everything global for now, so it's available unqualified
 -- in the caller.
 
-sqrt = terralib.intrinsic("llvm.sqrt.f64", double -> double)
+sqrt = regentlib.sqrt(double)
 
 -- #####################################
 -- ## Data Structures
@@ -92,54 +92,53 @@ sqrt = terralib.intrinsic("llvm.sqrt.f64", double -> double)
 max = regentlib.fmax
 min = regentlib.fmin
 
-terra abs(a : double) : double
-  if a < 0 then
-    return -a
-  else
-    return a
-  end
-end
+abs = regentlib.fabs(double)
 
 struct vec2 {
   x : double,
   y : double,
 }
 
-terra vec2.metamethods.__add(a : vec2, b : vec2) : vec2
-  return vec2 { x = a.x + b.x, y = a.y + b.y }
-end
+vec2.metamethods.__add = macro(function(a, b)
+  return `vec2 { x = a.x + b.x, y = a.y + b.y }
+end)
 
-terra vec2.metamethods.__sub(a : vec2, b : vec2) : vec2
-  return vec2 { x = a.x - b.x, y = a.y - b.y }
-end
+vec2.metamethods.__sub = macro(function(a, b)
+  return `vec2 { x = a.x - b.x, y = a.y - b.y }
+end)
 
-vec2.metamethods.__mul = terralib.overloadedfunction(
-  "__mul", {
-    terra(a : double, b : vec2) : vec2
-      return vec2 { x = a * b.x, y = a * b.y }
-    end,
-    terra(a : vec2, b : double) : vec2
-      return vec2 { x = a.x * b, y = a.y * b }
-    end
-  })
+vec2.metamethods.__mul = macro(function(a, b)
+  if a:gettype() == double and b:gettype() == vec2 then
+    return `vec2 { x = a * b.x, y = a * b.y }
+  end
+  if a:gettype() == vec2 and b:gettype() == double then
+    return `vec2 { x = a.x * b, y = a.y * b }
+  end
+  assert(false)
+end)
 
-terra dot(a : vec2, b : vec2) : double
+__demand(__inline)
+task dot(a : vec2, b : vec2) : double
   return a.x*b.x + a.y*b.y
 end
 
-terra cross(a : vec2, b : vec2) : double
+__demand(__inline)
+task cross(a : vec2, b : vec2) : double
   return a.x*b.y - a.y*b.x
 end
 
-terra length(a : vec2) : double
+__demand(__inline)
+task length(a : vec2) : double
   return sqrt(dot(a, a))
 end
 
-terra rotateCCW(a : vec2) : vec2
+__demand(__inline)
+task rotateCCW(a : vec2) : vec2
   return vec2 { x = -a.y, y = a.x }
 end
 
-terra project(a : vec2, b : vec2)
+__demand(__inline)
+task project(a : vec2, b : vec2)
   return a - b*dot(a, b)
 end
 
@@ -454,7 +453,7 @@ local terra get_submesh_config(conf : &config)
   var nx : double, ny : double = conf.nzx, conf.nzy
   var swapflag = nx > ny
   if swapflag then nx, ny = ny, nx end
-  var n = sqrt(conf.npieces * nx / ny)
+  var n = cmath.sqrt(conf.npieces * nx / ny)
   var n1 : int64 = max(cmath.floor(n + 1e-12), 1)
   while conf.npieces % n1 ~= 0 do n1 = n1 - 1 end
   var n2 : int64 = cmath.ceil(n - 1e-12)
@@ -1612,7 +1611,7 @@ do
 end
 
 task initialize_topology(conf : config,
-                         piece : int64,
+                         -- piece : int64,
                          rz : region(zone),
                          rpp : region(point),
                          rps : region(point),
@@ -1627,6 +1626,8 @@ do
     conf.meshtype == MESH_RECT,
     "distributed initialization only works on rectangular meshes")
   var znump = 4
+
+  var piece = regentlib.c.legion_logical_region_get_color(__runtime(), __raw(rz))
 
   var pcx, pcy = piece % conf.numpcx, piece / conf.numpcx
 
