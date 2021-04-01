@@ -986,7 +986,6 @@ extern "C" {
   REALM_PUBLIC_API
   const char* cudaGetErrorName(cudaError_t error)
   {
-    get_gpu_or_die("cudaGetErrorName");
     const char *result = NULL;
     // It wasn't always the case the cuda runtime errors
     // and cuda driver errors had the same enum scheme
@@ -998,7 +997,6 @@ extern "C" {
   REALM_PUBLIC_API
   const char* cudaGetErrorString(cudaError_t error)
   {
-    get_gpu_or_die("cudaGetErrorString");
     const char *result = NULL;
     // It wasn't always the case the cuda runtime errors
     // and cuda driver errors had the same enum scheme

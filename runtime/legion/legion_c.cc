@@ -4238,6 +4238,101 @@ legion_runtime_fill_field_future(
   runtime->fill_field(ctx, handle, parent, fid, *f, *pred);
 }
 
+legion_fill_launcher_t
+legion_fill_launcher_create(
+  legion_logical_region_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  const void *value,
+  size_t value_size,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
+{
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+  
+  FillLauncher *launcher = new FillLauncher(handle, parent,
+      TaskArgument(value, value_size), *pred, id, tag); 
+  launcher->add_field(fid);
+  return CObjectWrapper::wrap(launcher);
+}
+
+legion_fill_launcher_t
+legion_fill_launcher_create_from_future(
+    legion_logical_region_t handle_,
+    legion_logical_region_t parent_,
+    legion_field_id_t fid,
+    legion_future_t future_,
+    legion_predicate_t pred_ /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t tag /* = 0 */)
+{
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Future *future = CObjectWrapper::unwrap(future_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  FillLauncher *launcher = 
+    new FillLauncher(handle, parent, *future, *pred, id, tag);
+  launcher->add_field(fid);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_fill_launcher_destroy(legion_fill_launcher_t handle_)
+{
+  FillLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+void
+legion_fill_launcher_add_field(legion_fill_launcher_t launcher_,
+                               legion_field_id_t fid)
+{
+  FillLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->add_field(fid);
+}
+
+void
+legion_fill_launcher_execute(legion_runtime_t runtime_,
+                             legion_context_t ctx_,
+                             legion_fill_launcher_t launcher_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  FillLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  runtime->fill_fields(ctx, *launcher);
+}
+
+void
+legion_fill_launcher_set_point(legion_fill_launcher_t launcher_,
+                               legion_domain_point_t point_)
+{
+  FillLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+
+  launcher->point = point;
+}
+
+void
+legion_fill_launcher_set_sharding_space(legion_fill_launcher_t launcher_,
+                                        legion_index_space_t space_)
+{
+  FillLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexSpace is = CObjectWrapper::unwrap(space_);
+
+  launcher->sharding_space = is;
+}
+
+// -----------------------------------------------------------------------
+// Index Fill Field Operations
+// -----------------------------------------------------------------------
+
 void
 legion_runtime_index_fill_field(
   legion_runtime_t runtime_,
@@ -4405,6 +4500,137 @@ legion_runtime_index_fill_field_future_with_domain(
       domain, handle, parent, *f, proj, *pred, id, launcher_tag);
   launcher.add_field(fid);
   runtime->fill_fields(ctx, launcher);
+}
+
+legion_index_fill_launcher_t
+legion_index_fill_launcher_create_with_space(
+    legion_index_space_t space_,
+    legion_logical_partition_t handle_,
+    legion_logical_region_t parent_,
+    legion_field_id_t fid,
+    const void *value,
+    size_t value_size,
+    legion_projection_id_t proj /* = 0 */,
+    legion_predicate_t pred_ /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  IndexSpace space = CObjectWrapper::unwrap(space_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher *launcher = new IndexFillLauncher(space, handle, parent,
+      TaskArgument(value, value_size), proj, *pred, id, launcher_tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
+legion_index_fill_launcher_t
+legion_index_fill_launcher_create_with_domain(
+    legion_domain_t domain_,
+    legion_logical_partition_t handle_,
+    legion_logical_region_t parent_,
+    legion_field_id_t fid,
+    const void *value,
+    size_t value_size,
+    legion_projection_id_t proj /* = 0 */,
+    legion_predicate_t pred_ /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher *launcher = new IndexFillLauncher(domain, handle, parent,
+      TaskArgument(value, value_size), proj, *pred, id, launcher_tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
+legion_index_fill_launcher_t
+legion_index_fill_launcher_create_from_future_with_space(
+    legion_index_space_t space_,
+    legion_logical_partition_t handle_,
+    legion_logical_region_t parent_,
+    legion_field_id_t fid,
+    legion_future_t future_,
+    legion_projection_id_t proj /* = 0 */,
+    legion_predicate_t pred_ /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  IndexSpace space = CObjectWrapper::unwrap(space_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Future *future = CObjectWrapper::unwrap(future_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher *launcher = new IndexFillLauncher(space, handle,
+      parent, *future, proj, *pred, id, launcher_tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
+legion_index_fill_launcher_t
+legion_index_fill_launcher_create_from_future_with_domain(
+    legion_domain_t domain_,
+    legion_logical_partition_t handle_,
+    legion_logical_region_t parent_,
+    legion_field_id_t fid,
+    legion_future_t future_,
+    legion_projection_id_t proj /* = 0 */,
+    legion_predicate_t pred_ /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Future *future = CObjectWrapper::unwrap(future_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher *launcher = new IndexFillLauncher(domain,
+      handle, parent, *future, proj, *pred, id, launcher_tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_index_fill_launcher_destroy(legion_index_fill_launcher_t handle_)
+{
+  IndexFillLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+void
+legion_index_fill_launcher_add_field(legion_index_fill_launcher_t launcher_,
+                                     legion_field_id_t fid)
+{
+  IndexFillLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->add_field(fid);
+}
+
+void
+legion_index_fill_launcher_execute(legion_runtime_t runtime_,
+                                   legion_context_t ctx_,
+                                   legion_index_fill_launcher_t launcher_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexFillLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  runtime->fill_fields(ctx, *launcher);
+}
+
+void
+legion_index_fill_launcher_set_sharding_space(legion_index_fill_launcher_t launcher_,
+                                              legion_index_space_t space_)
+{
+  IndexFillLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexSpace is = CObjectWrapper::unwrap(space_);
+
+  launcher->sharding_space = is;
 }
 
 legion_region_requirement_t
@@ -4680,6 +4906,26 @@ legion_copy_launcher_set_possible_dst_indirect_out_of_range(
 {
   CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
   launcher->possible_dst_indirect_out_of_range = flag;
+}
+
+void
+legion_copy_launcher_set_point(legion_copy_launcher_t launcher_,
+                               legion_domain_point_t point_)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+
+  launcher->point = point;
+}
+
+void
+legion_copy_launcher_set_sharding_space(legion_copy_launcher_t launcher_,
+                                        legion_index_space_t space_)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexSpace is = CObjectWrapper::unwrap(space_);
+
+  launcher->sharding_space = is;
 }
 
 legion_region_requirement_t
@@ -5015,6 +5261,16 @@ legion_index_copy_launcher_set_possible_dst_indirect_out_of_range(
 {
   IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
   launcher->possible_dst_indirect_out_of_range = flag;
+}
+
+void
+legion_index_copy_launcher_set_sharding_space(legion_index_copy_launcher_t launcher_,
+                                              legion_index_space_t space_)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexSpace is = CObjectWrapper::unwrap(space_);
+
+  launcher->sharding_space = is;
 }
 
 // -----------------------------------------------------------------------
