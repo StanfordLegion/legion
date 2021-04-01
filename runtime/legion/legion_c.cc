@@ -4522,6 +4522,7 @@ legion_index_fill_launcher_create_with_space(
 
   IndexFillLauncher *launcher = new IndexFillLauncher(space, handle, parent,
       TaskArgument(value, value_size), proj, *pred, id, launcher_tag);
+  launcher->add_field(fid);
   return CObjectWrapper::wrap(launcher);
 }
 
@@ -4545,6 +4546,7 @@ legion_index_fill_launcher_create_with_domain(
 
   IndexFillLauncher *launcher = new IndexFillLauncher(domain, handle, parent,
       TaskArgument(value, value_size), proj, *pred, id, launcher_tag);
+  launcher->add_field(fid);
   return CObjectWrapper::wrap(launcher);
 }
 
@@ -4568,6 +4570,7 @@ legion_index_fill_launcher_create_from_future_with_space(
 
   IndexFillLauncher *launcher = new IndexFillLauncher(space, handle,
       parent, *future, proj, *pred, id, launcher_tag);
+  launcher->add_field(fid);
   return CObjectWrapper::wrap(launcher);
 }
 
@@ -4591,6 +4594,7 @@ legion_index_fill_launcher_create_from_future_with_domain(
 
   IndexFillLauncher *launcher = new IndexFillLauncher(domain,
       handle, parent, *future, proj, *pred, id, launcher_tag);
+  launcher->add_field(fid);
   return CObjectWrapper::wrap(launcher);
 }
 
