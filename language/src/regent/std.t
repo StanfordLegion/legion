@@ -33,6 +33,7 @@ local std = {}
 
 std.config, std.args = base.config, base.args
 std.linklibrary = base.linklibrary
+std.binding_library = base.binding_library
 
 local c = base.c
 std.c = c
