@@ -3610,8 +3610,8 @@ extern "C" {
    * @see Legion::IndexFillLauncher::add_field()
    */
   void
-  legion_fill_launcher_add_field(legion_fill_launcher_t handle,
-                                 legion_field_id_t fid);
+  legion_index_fill_launcher_add_field(legion_fill_launcher_t handle,
+                                       legion_field_id_t fid);
 
   /**
    * @see Legion::Runtime::fill_fields()
