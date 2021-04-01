@@ -3140,16 +3140,14 @@ legion_future_map_reduce(legion_runtime_t runtime_,
                          legion_context_t ctx_,
                          legion_future_map_t fm_,
                          legion_reduction_op_id_t redop,
-                         bool deterministic,
-                         legion_mapper_id_t map_id,
-                         legion_mapping_tag_id_t tag)
+                         bool deterministic)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   FutureMap *fm = CObjectWrapper::unwrap(fm_);
 
   return CObjectWrapper::wrap(new Future(
-      runtime->reduce_future_map(ctx, *fm, redop, deterministic, map_id, tag)));
+        runtime->reduce_future_map(ctx, *fm, redop, deterministic)));
 }
 
 legion_future_map_t
