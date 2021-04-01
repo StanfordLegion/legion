@@ -2657,7 +2657,9 @@ extern "C" {
                            legion_context_t ctx,
                            legion_future_map_t handle,
                            legion_reduction_op_id_t redop,
-                           bool deterministic);
+                           bool deterministic,
+                           legion_mapper_id_t map_id,
+                           legion_mapping_tag_id_t tag);
 
   /**
    * @return Caller takes ownership of return value
