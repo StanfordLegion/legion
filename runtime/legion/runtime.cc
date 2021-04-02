@@ -15523,9 +15523,6 @@ namespace Legion {
                                          const Domain &sharding_space)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(sharding_space.contains(point));
-#endif
       ShardID result = functor->shard(point, sharding_space, total_shards);
       if (total_shards <= result)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
