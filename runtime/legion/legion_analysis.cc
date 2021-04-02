@@ -18283,120 +18283,130 @@ namespace Legion {
       // If we have deferral events then save this traversal for another time
       if (!deferral_events.empty())
         return;
-      // Do the local analysis on our owned equivalence sets
-      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-      if (!downward_only)
+      FieldMaskSet<EquivalenceSet> to_record;
       {
-        if (!disjoint_complete)
+        // Do the local analysis on our owned equivalence sets
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        if (!downward_only)
         {
-          parent_traversal = mask;
-          return;
-        }
-        parent_traversal = mask - disjoint_complete;
-        if (!!parent_traversal)
-        {
-          mask -= parent_traversal;
-          if (!mask)
-            return;
-        }
-      }
-      if (!disjoint_complete_children.empty())
-      {
-        const FieldMask children_overlap = mask & 
-          disjoint_complete_children.get_valid_mask();
-        if (!!children_overlap)
-        {
-          for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-                disjoint_complete_children.begin(); it !=
-                disjoint_complete_children.end(); it++)
+          if (!disjoint_complete)
           {
-            const FieldMask overlap = mask & it->second;
-            if (!overlap)
-              continue;
-#ifdef DEBUG_LEGION
-            assert(!it->first->is_region());
-#endif
-            children.insert(it->first->as_partition_node(), overlap);
-            mask -= overlap;
+            parent_traversal = mask;
+            return;
+          }
+          parent_traversal = mask - disjoint_complete;
+          if (!!parent_traversal)
+          {
+            mask -= parent_traversal;
             if (!mask)
               return;
           }
         }
-      }
-      // At this point we're done with the symbolic analysis so we
-      // can actually test the expression for emptiness
-      if ((expr != node->as_region_node()->row_source) && expr->is_empty())
-        return;
-      // If we make it here then we should have equivalence sets for
-      // all these remaining fields
-#ifdef DEBUG_LEGION
-      assert(!equivalence_sets.empty() || region_node->row_source->is_empty());
-      assert(!(mask - equivalence_sets.get_valid_mask()) ||
-              region_node->row_source->is_empty());
-#endif
-      // If we have any pending disjoint complete ready events then 
-      // we need to record dependences on them as well
-      if (!disjoint_complete_ready.empty())
-      {
-        for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
-              disjoint_complete_ready.begin(); it !=
-              disjoint_complete_ready.end(); it++)
-          if (!(mask * it->second))
-            ready_events.insert(it->first); 
-      }
-      if (target_space != runtime->address_space)
-      {
-        FieldMaskSet<EquivalenceSet> to_send;
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+        if (!disjoint_complete_children.empty())
         {
-          const FieldMask overlap = mask & it->second;
-          if (!overlap)
-            continue;
-          to_send.insert(it->first, overlap);
-          mask -= overlap;
-          if (!mask)
-            break;
-        }
-        if (!to_send.empty())
-        {
-          const RtUserEvent done = Runtime::create_rt_user_event();
-          Serializer rez;
+          const FieldMask children_overlap = mask & 
+            disjoint_complete_children.get_valid_mask();
+          if (!!children_overlap)
           {
-            RezCheck z(rez);
-            rez.serialize(target);
-            rez.serialize<size_t>(to_send.size());
-            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                  to_send.begin(); it != to_send.end(); it++)
+            for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+                  disjoint_complete_children.begin(); it !=
+                  disjoint_complete_children.end(); it++)
             {
-              rez.serialize(it->first->did);
-              rez.serialize(it->second);
+              const FieldMask overlap = mask & it->second;
+              if (!overlap)
+                continue;
+#ifdef DEBUG_LEGION
+              assert(!it->first->is_region());
+#endif
+              children.insert(it->first->as_partition_node(), overlap);
+              mask -= overlap;
+              if (!mask)
+                return;
             }
-            rez.serialize(done);
           }
-          runtime->send_compute_equivalence_sets_response(target_space, rez);
-          ready_events.insert(done);
         }
+        // At this point we're done with the symbolic analysis so we
+        // can actually test the expression for emptiness
+        if ((expr != node->as_region_node()->row_source) && expr->is_empty())
+          return;
+        // If we make it here then we should have equivalence sets for
+        // all these remaining fields
+#ifdef DEBUG_LEGION
+        assert(!equivalence_sets.empty() ||
+                region_node->row_source->is_empty());
+        assert(!(mask - equivalence_sets.get_valid_mask()) ||
+                region_node->row_source->is_empty());
+#endif
+        // If we have any pending disjoint complete ready events then 
+        // we need to record dependences on them as well
+        if (!disjoint_complete_ready.empty())
+        {
+          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
+                disjoint_complete_ready.begin(); it !=
+                disjoint_complete_ready.end(); it++)
+            if (!(mask * it->second))
+              ready_events.insert(it->first); 
+        }
+        if (target_space != runtime->address_space)
+        {
+          FieldMaskSet<EquivalenceSet> to_send;
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            to_send.insert(it->first, overlap);
+            mask -= overlap;
+            if (!mask)
+              break;
+          }
+          if (!to_send.empty())
+          {
+            const RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(target);
+              rez.serialize<size_t>(to_send.size());
+              for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                    to_send.begin(); it != to_send.end(); it++)
+              {
+                rez.serialize(it->first->did);
+                rez.serialize(it->second);
+              }
+              rez.serialize(done);
+            }
+            runtime->send_compute_equivalence_sets_response(target_space, rez);
+            ready_events.insert(done);
+          }
+        }
+        else if (target != this)
+        {
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            to_record.insert(it->first, overlap);
+            mask -= overlap;
+            if (!mask)
+              break;
+          }
+        }
+#ifdef DEBUG_LEGION
+        else
+          mask.clear();
+        assert(!mask);
+#endif
       }
-      else if (target != this)
+      if (!to_record.empty())
       {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        {
-          const FieldMask overlap = mask & it->second;
-          if (!overlap)
-            continue;
-          target->record_equivalence_set(it->first, overlap);
-          mask -= overlap;
-          if (!mask)
-            break;
-        }
+          target->record_equivalence_set(it->first, it->second);
       }
-#ifdef DEBUG_LEGION
-      else
-        mask.clear();
-      assert(!mask);
-#endif
     }
 
     //--------------------------------------------------------------------------
