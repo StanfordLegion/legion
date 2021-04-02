@@ -101,3 +101,7 @@ if((NOT @BUILD_SHARED_LIBS@) AND Legion_USE_ZLIB)
   set(ZLIB_LIBRARIES @ZLIB_LIBRARIES@)
   find_package(ZLIB REQUIRED)
 endif()
+
+# task registration across nodes often relies on being able to map function
+#  pointers back to symbol names, so ask cmake to export symbols in binaries
+set(CMAKE_ENABLE_EXPORTS ON)
