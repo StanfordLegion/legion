@@ -33,7 +33,7 @@ namespace Realm {
   class RuntimeImpl;
   class NetworkModule;
 
-  class Module {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE Module {
   protected:
     // can only construct subclasses of Module
     Module(const std::string& _name);
