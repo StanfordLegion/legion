@@ -18356,6 +18356,11 @@ namespace Legion {
             const FieldMask overlap = mask & it->second;
             if (!overlap)
               continue;
+#ifdef DEBUG_LEGION
+            // We should only be sending equivalence sets that we
+            // know we are the owners of
+            assert(it->first->region_node == node);
+#endif
             to_send.insert(it->first, overlap);
             mask -= overlap;
             if (!mask)
@@ -18389,6 +18394,11 @@ namespace Legion {
             const FieldMask overlap = mask & it->second;
             if (!overlap)
               continue;
+#ifdef DEBUG_LEGION
+            // We should only be sending equivalence sets that we
+            // know we are the owners of
+            assert(it->first->region_node == node);
+#endif
             to_record.insert(it->first, overlap);
             mask -= overlap;
             if (!mask)
@@ -18404,7 +18414,7 @@ namespace Legion {
       if (!to_record.empty())
       {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+              to_record.begin(); it != to_record.end(); it++)
           target->record_equivalence_set(it->first, it->second);
       }
     }
@@ -18604,6 +18614,9 @@ namespace Legion {
 #endif
         disjoint_complete -= mask;
       }
+      FieldMask children_overlap;
+      if (!disjoint_complete_children.empty())
+        children_overlap = mask & disjoint_complete_children.get_valid_mask();
       // Always invalidate any equivalence sets that we might have
       if (!equivalence_sets.empty() && 
           !(mask * equivalence_sets.get_valid_mask()))
@@ -18649,9 +18662,18 @@ namespace Legion {
             if ((it->first->region_node != node) && 
                 !nonexclusive_virtual_mapping_root)
               continue;
-            const FieldMask overlap = it->second & mask;
+            FieldMask overlap = it->second & mask;
             if (!overlap)
               continue;
+            // If we have disjoint complete children then we do not actually
+            // own these equivalence sets (we're just another observer) so
+            // we can't actually remove them, just ignore them
+            if (!!children_overlap)
+            {
+              overlap -= children_overlap;
+              if (!overlap)
+                continue;
+            }
             to_untrack.insert(it->first, overlap);
             it.filter(overlap);
             if (!it->second)
@@ -18673,7 +18695,7 @@ namespace Legion {
         }
         equivalence_sets.tighten_valid_mask();
       }
-      if (!(mask * disjoint_complete_children.get_valid_mask()))
+      if (!!children_overlap)
       {
         std::vector<RegionTreeNode*> to_delete;
         for (FieldMaskSet<RegionTreeNode>::iterator it = 
