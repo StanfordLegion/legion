@@ -1100,11 +1100,13 @@ do
     --            cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
     --   last_time = current_time
     -- end
-    -- if cycle == prune then
-    --   ts_start = c.legion_get_current_time_in_micros()
-    -- elseif cycle == cstop - prune then
-    --   ts_end = c.legion_get_current_time_in_micros()
-    -- end
+    if cycle == prune then
+      __fence(__execution, __block)
+      ts_start = c.legion_get_current_time_in_micros()
+    elseif cycle == cstop - prune then
+      __fence(__execution, __block)
+      ts_end = c.legion_get_current_time_in_micros()
+    end
 
     __demand(__index_launch)
     for i = 0, conf.npieces do
