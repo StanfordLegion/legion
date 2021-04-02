@@ -7517,7 +7517,7 @@ namespace Legion {
       ApEvent term_event;
       // We disable program order execution when we are replaying a
       // fixed trace since it might not be sound to block
-      if (runtime->program_order_execution && !unordered && outermost &&
+      if (runtime->program_order_execution && !unordered &&
           ((current_trace == NULL) || !current_trace->is_fixed()))
         term_event = op->get_program_order_event();
       {
@@ -7545,7 +7545,7 @@ namespace Legion {
         DependenceArgs args(op, this);
         runtime->issue_runtime_meta_task(args, priority, precondition); 
       }
-      if (term_event.exists()) 
+      if (term_event.exists() && outermost) 
       {
         begin_task_wait(true/*from runtime*/);
         bool poisoned = false;
