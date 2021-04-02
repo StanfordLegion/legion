@@ -10,6 +10,8 @@ export LD_LIBRARY_PATH="$PWD"
 
 ulimit -S -c 0 # disable core dumps
 
+export GASNET_PHYSMEM_MAX=16G # hack for some reason this seems to be necessary on Piz Daint now
+
 nodes=$SLURM_JOB_NUM_NODES
 power=$(echo "l($nodes)/l(2)" | bc -l | xargs printf '%.0f\n')
 

@@ -10,6 +10,8 @@ export LD_LIBRARY_PATH="$PWD"
 
 ulimit -S -c 0 # disable core dumps
 
+export GASNET_PHYSMEM_MAX=16G # hack for some reason this seems to be necessary on Piz Daint now
+
 if [[ ! -d dcr_idx ]]; then mkdir dcr_idx; fi
 pushd dcr_idx
 
