@@ -26,6 +26,13 @@ set(Legion_USE_CUDA @Legion_USE_CUDA@)
 if(Legion_USE_CUDA)
   set(CUDA_USE_STATIC_CUDA_RUNTIME @CUDA_USE_STATIC_CUDA_RUNTIME@)
   find_package(CUDA REQUIRED)
+  if(@REALM_USE_CUDART_HIJACK@)
+    # Realm is providing entry points for the CUDA runtime API, so
+    # filter anything referring to *cudart* out of the CUDA_LIBRARIES
+    #  making sure our changes are visible to the scope above
+    list(FILTER CUDA_LIBRARIES EXCLUDE REGEX cudart)
+    set(CUDA_LIBRARIES ${CUDA_LIBRARIES} PARENT_SCOPE)
+  endif()
 endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/LegionTargets.cmake)
