@@ -64,8 +64,6 @@ namespace Realm {
       LLVMJitInternal *internal;
     };
 
-    REGISTER_REALM_MODULE(LLVMJitModule);
-
   }; // namespace LLVMJit
 
 }; // namespace Realm

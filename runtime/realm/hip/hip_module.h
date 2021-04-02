@@ -91,8 +91,6 @@ namespace Realm {
       std::vector<void *> registered_host_ptrs;
     };
 
-    REGISTER_REALM_MODULE(HipModule);
-
   }; // namespace Hip
 
 }; // namespace Realm 

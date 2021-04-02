@@ -64,8 +64,6 @@ namespace Realm {
      size_t cfg_stack_size;
     };
 
-    REGISTER_REALM_MODULE(ProcSetModule);
-
   }; // namespace ProcSet
 
 }; // namespace Realm

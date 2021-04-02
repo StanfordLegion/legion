@@ -17,6 +17,11 @@
 
 #include "realm/network.h"
 #include "realm/cmdline.h"
+#include "realm/logging.h"
+
+#ifdef REALM_USE_DLFCN
+#include <dlfcn.h>
+#endif
 
 static void *aligned_malloc(size_t bytes, size_t alignment)
 {
@@ -462,6 +467,98 @@ namespace Realm {
     ModuleRegistrar::NetworkRegistrationBase **network_modules_tail = &network_modules_head;
   };
 
+#ifdef REALM_USE_DLFCN
+  // accepts a colon-separated list of so files to try to load
+  static int load_network_module_list(const char *sonames,
+                                      RuntimeImpl *runtime,
+                                      int *argc, const char ***argv,
+                                      std::vector<void *>& handles,
+                                      std::vector<NetworkModule *>& modules)
+  {
+    // null/empty strings are nops
+    if(!sonames || !*sonames) return 0;
+
+    int count = 0;
+    const char *p1 = sonames;
+    while(true) {
+      // skip leading colons
+      while(*p1 == ':') p1++;
+      if(!*p1) break;
+
+      const char *p2 = p1 + 1;
+      while(*p2 && (*p2 != ':')) p2++;
+
+      char filename[1024];
+      strncpy(filename, p1, p2 - p1);
+      filename[p2 - p1] = 0;
+
+      // skip the color after the filename (if it exists)
+      p1 = p2 + (*p2 ? 1 : 0);
+
+      // no leftover errors from anybody else please...
+      assert(dlerror() == 0);
+
+      // open so file, resolving all symbols but not polluting global namespace
+      void *handle = dlopen(filename, RTLD_NOW | RTLD_LOCAL);
+      if(handle == 0) {
+        std::cerr << "ERROR: could not load " << filename << ": " << dlerror() << "\n";
+        continue;
+      }
+
+      {
+        // this file should have a "realm_module_version" symbol
+        void *sym = dlsym(handle, "realm_module_version");
+        if(!sym) {
+          std::cerr << "ERROR: symbol 'realm_module_version' not found in '" << filename << "'\n";
+          dlclose(handle);
+          continue;
+        }
+        const char *module_version = static_cast<const char *>(sym);
+
+        // a module version mismatch can lead to crashes/hangs/etc.
+        if(strcmp(REALM_VERSION, module_version)) {
+          const char *e = getenv("REALM_PERMIT_MODULE_VERSION_MISMATCH");
+          if(e && (atoi(e) > 0)) {
+            std::cerr << "WARNING: module version mismatch in '" << filename
+                      << "': realm='" << REALM_VERSION
+                      << "' module='" << module_version << "'\n";
+          } else {
+            std::cerr << "ERROR: module version mismatch in '" << filename
+                      << "': realm='" << REALM_VERSION
+                      << "' module='" << module_version
+                      << "' - set REALM_PERMIT_MODULE_VERSION_MISMATCH to load anyway\n";
+            dlclose(handle);
+            continue;
+          }
+        }
+      }
+
+      // this file should also have a "create_realm_network_module" symbol
+      void *sym = dlsym(handle, "create_realm_network_module");
+      if(!sym) {
+        std::cerr << "ERROR: symbol 'create_realm_network_module' not found in '" << filename << "'\n";
+        dlclose(handle);
+        continue;
+      }
+
+      // TODO: hold onto the handle even if it doesn't create a module?
+      handles.push_back(handle);
+
+      NetworkModule *m = ((NetworkModule *(*)(RuntimeImpl *, int *, const char ***))sym)(runtime, argc, argv);
+      if(m) {
+        modules.push_back(m);
+#ifndef REALM_USE_MULTIPLE_NETWORKS
+        assert(Network::single_network == 0);
+#endif
+        Network::single_network = m;
+        count++;
+      }
+    }
+
+    return count;
+  }
+#endif
+
   // called by the runtime during init - these may change the command line!
   void ModuleRegistrar::create_network_modules(std::vector<NetworkModule *>& modules,
 					       int *argc, const char ***argv)
@@ -479,6 +576,28 @@ namespace Realm {
 #endif
 	Network::single_network = m;
 	need_loopback = false;
+      }
+    }
+
+    {
+      const char *e = getenv("REALM_DYNAMIC_NETWORK_MODULES");
+      if(e) {
+#ifdef REALM_USE_DLFCN
+        if(!check_symbol_visibility()) {
+          // no loggers yet - use stderr
+          std::cerr << "FATAL: symbols for Realm internal API are not visible - dynamic modules will not work";
+          abort();
+        }
+
+        int count = load_network_module_list(e, runtime, argc, argv,
+                                             sofile_handles, modules);
+        if(count > 0)
+          need_loopback = false;
+#else
+        // no loggers yet - use stderr
+        std::cerr >> "FATAL: loading of dynamic Realm modules requested, but REALM_USE_DLFCN=0!";
+        abort();
+#endif
       }
     }
 
