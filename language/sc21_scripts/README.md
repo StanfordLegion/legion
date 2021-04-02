@@ -29,12 +29,12 @@ cd legion/language
 cp -r stencil.run1 stencil.run1_strong
 cp -r circuit.run1 circuit.run1_strong
 cp -r pennant.run1 pennant.run1_strong
-(cd stencil.run1 && for n in 1 2 4 16; do sbatch --nodes $n sbatch_stencil.sh; done)
-(cd circuit.run1 && for n in 1 2 4 16; do sbatch --nodes $n sbatch_circuit.sh; done)
-(cd pennant.run1 && for n in 1 2 4 16; do sbatch --nodes $n sbatch_pennant.sh; done)
-(cd stencil.run1_strong && for n in 1 2 4 16; do sbatch --nodes $n sbatch_stencil_strong.sh; done)
-(cd circuit.run1_strong && for n in 1 2 4 16; do sbatch --nodes $n sbatch_circuit_strong.sh; done)
-(cd pennant.run1_strong && for n in 1 2 4 16; do sbatch --nodes $n sbatch_pennant_strong.sh; done)
+(cd stencil.run1 && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_stencil.sh; done)
+(cd circuit.run1 && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_circuit.sh; done)
+(cd pennant.run1 && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_pennant.sh; done)
+(cd stencil.run1_strong && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_stencil_strong.sh; done)
+(cd circuit.run1_strong && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_circuit_strong.sh; done)
+(cd pennant.run1_strong && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_pennant_strong.sh; done)
 ```
 
 Feel free to run larger node counts after the small node count results
