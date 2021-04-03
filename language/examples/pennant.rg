@@ -1075,7 +1075,8 @@ do
   var dthydro = dtmax
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
-  while true do
+  var cont = true
+  while cont do
     if cycle == prune then
       __fence(__execution, __block)
       ts_start = c.legion_get_current_time_in_micros()
@@ -1302,7 +1303,7 @@ do
     cycle += 1
     time += dt
 
-    if not continue_simulation(cycle, cstop, time, tstop) then break end
+    cont = continue_simulation(cycle, cstop, time, tstop)
   end
   end
   if prune == 0 then
