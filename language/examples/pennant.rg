@@ -1075,8 +1075,18 @@ do
   var dthydro = dtmax
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
+  while true do
+    if cycle == prune then
+      __fence(__execution, __block)
+      ts_start = c.legion_get_current_time_in_micros()
+    elseif cycle == cstop - prune then
+      __fence(__execution, __block)
+      ts_end = c.legion_get_current_time_in_micros()
+    end
+
   __demand(__trace)
-  while continue_simulation(cycle, cstop, time, tstop) do
+  do
+    if not continue_simulation(cycle, cstop, time, tstop) then break end
     __demand(__index_launch)
     for i = 0, conf.npieces do
       init_step_points(rp_all_private_p[i], enable)
@@ -1100,13 +1110,6 @@ do
     --            cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
     --   last_time = current_time
     -- end
-    if cycle == prune then
-      __fence(__execution, __block)
-      ts_start = c.legion_get_current_time_in_micros()
-    elseif cycle == cstop - prune then
-      __fence(__execution, __block)
-      ts_end = c.legion_get_current_time_in_micros()
-    end
 
     __demand(__index_launch)
     for i = 0, conf.npieces do
@@ -1298,6 +1301,7 @@ do
 
     cycle += 1
     time += dt
+  end
   end
   if prune == 0 then
     ts_end = c.legion_get_current_time_in_micros()
