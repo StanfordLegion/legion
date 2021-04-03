@@ -1084,9 +1084,9 @@ do
       ts_end = c.legion_get_current_time_in_micros()
     end
 
+  if not continue_simulation(cycle, cstop, time, tstop) then break end
   __demand(__trace)
   do
-    if not continue_simulation(cycle, cstop, time, tstop) then break end
     __demand(__index_launch)
     for i = 0, conf.npieces do
       init_step_points(rp_all_private_p[i], enable)
@@ -1301,6 +1301,8 @@ do
 
     cycle += 1
     time += dt
+
+    if not continue_simulation(cycle, cstop, time, tstop) then break end
   end
   end
   if prune == 0 then
