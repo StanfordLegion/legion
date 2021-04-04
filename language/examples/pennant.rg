@@ -1437,7 +1437,7 @@ __demand(__inner, __replicable)
 task toplevel()
   output1("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
-  var conf : config = read_config_task()
+  var conf : config = read_config()
 
   var rz_all = region(ispace(ptr, conf.nz), zone)
   var rp_all = region(ispace(ptr, conf.np), point)

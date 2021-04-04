@@ -718,6 +718,7 @@ terra read_config()
 
   return conf
 end
+read_config.replicable = true
 
 -- This is in a task so that it can be called from Python.
 task read_config_task()
