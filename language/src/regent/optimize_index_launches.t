@@ -1196,7 +1196,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   }
 end
 
-function init_bitmask_false(bitmask, volume)
+local function init_bitmask(bitmask, volume)
   local stats = terralib.newlist()
 
   local idx = std.newsymbol(int32, "i")
@@ -1211,7 +1211,7 @@ function init_bitmask_false(bitmask, volume)
   return util.mk_stat_for_num(idx, values, util.mk_block(stats))
 end
 
-function get_check_stats(preamble, value, index_expr, bitmask, conflict, pos, loop_var, volume)
+local function get_check_stats(preamble, value, index_expr, bitmask, conflict, verdict, pos, loop_var, volume)
   local stats = terralib.newlist()
 
   -- Compute value = index_expr(i)
@@ -1228,7 +1228,8 @@ function get_check_stats(preamble, value, index_expr, bitmask, conflict, pos, lo
   then_block:insert(bitmask_assign_true)
 
   local save_pos = util.mk_stat_assignment(util.mk_expr_id_rawref(pos), util.mk_expr_id(loop_var))
-  local check_conflict = util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { save_pos, util.mk_stat_break() })
+  local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict), util.mk_expr_constant(true, bool))
+  local check_conflict = util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { save_pos, set_verdict, util.mk_stat_break() })
   then_block:insert(check_conflict)
 
   local cond = util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume))
@@ -1238,62 +1239,63 @@ function get_check_stats(preamble, value, index_expr, bitmask, conflict, pos, lo
   return stats
 end
 
-function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
+local function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
   local stats = terralib.newlist()
 
-  -- Optimize only if we are indexing into a partition
-  local proceed, p_symbol = pcall(function() return index_launch_ast.call.args[1].value.value end)
-  if not proceed then
-    return unoptimized_loop_ast
+  local verdict = std.newsymbol(bool, "verdict")
+  stats:insert(util.mk_stat_var(verdict, bool, util.mk_expr_constant(false, bool)))
+
+  for _, arg in pairs(index_launch_ast.call.args) do
+    if pcall (function() std.is_partition(std.as_read(arg.value.expr_type)) end) and (arg.expr_type:ispace().dim == 1) then
+      -- Generate the AST for var volume = p.colors.bounds:volume()
+      local p_colors = util.mk_expr_field_access(util.mk_expr_id(arg.value.value), "colors", std.ispace(std.int1d))
+      local p_bounds = util.mk_expr_field_access(p_colors, "bounds", std.rect1d)
+      local p_volume = util.mk_expr_method_call(p_bounds, int32, "volume", terralib.newlist())
+      local volume = std.newsymbol(int32, "volume")
+      stats:insert(util.mk_stat_var(volume, int32, p_volume))
+  
+      -- Malloc a bitmask of size volume and initialize it
+      local bitmask_raw = std.newsymbol(&opaque, "bitmask_raw")
+      local bitmask = std.newsymbol(&bool, "bitmask")
+      local malloc_call = util.mk_expr_call(std.c.malloc, util.mk_expr_cast(uint64, util.mk_expr_id(volume)))
+      stats:insert(util.mk_stat_var(bitmask_raw, &opaque, malloc_call))
+      stats:insert(util.mk_stat_var(bitmask, &bool, util.mk_expr_cast(&bool, util.mk_expr_id(bitmask_raw))))
+      stats:insert(init_bitmask(bitmask, volume))
+  
+      local value = std.newsymbol(int64, "value")
+      stats:insert(util.mk_stat_var(value, int64))
+  
+      local conflict = std.newsymbol(bool, "conflict")
+      stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
+
+      local pos = std.newsymbol(int64, "pos")
+      stats:insert(util.mk_stat_var(pos, int64))
+  
+      local index_expr
+      -- Figure out what type of loop we've got and get its index expr
+      if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
+        index_expr = arg.index.arg
+      else
+        index_expr = arg.index
+      end
+  
+      local i = index_launch_ast.symbol
+      local check_stats = get_check_stats(index_launch_ast.preamble, value, index_expr, bitmask, conflict, verdict, pos, i, volume)
+  
+      local bounds
+      -- Generate the AST based on loop type
+      if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
+        bounds = index_launch_ast.values
+        stats:insert(util.mk_stat_for_num(i, bounds, util.mk_block(check_stats)))
+      else
+        bounds = index_launch_ast.value
+        stats:insert(util.mk_stat_for_list(i, bounds, util.mk_block(check_stats)))
+      end
+    end
   end
 
-  -- Generate the AST for var volume = p.colors.bounds:volume()
-  local p_colors = util.mk_expr_field_access(util.mk_expr_id(p_symbol), "colors", std.ispace(std.int1d))
-  local p_bounds = util.mk_expr_field_access(p_colors, "bounds", std.rect1d)
-  local p_volume = util.mk_expr_method_call(p_bounds, int32, "volume", terralib.newlist())
-  local volume = std.newsymbol(int32, "volume")
-  stats:insert(util.mk_stat_var(volume, int32, p_volume))
-
-  -- Malloc a bitmask of size volume and initialize it
-  local bitmask_raw = std.newsymbol(&opaque, "bitmask_raw")
-  local bitmask = std.newsymbol(&bool, "bitmask")
-  local malloc_call = util.mk_expr_call(std.c.malloc, util.mk_expr_cast(uint64, util.mk_expr_id(volume)))
-  stats:insert(util.mk_stat_var(bitmask_raw, &opaque, malloc_call))
-  stats:insert(util.mk_stat_var(bitmask, &bool, util.mk_expr_cast(&bool, util.mk_expr_id(bitmask_raw))))
-  stats:insert(init_bitmask_false(bitmask, volume))
-
-  local value = std.newsymbol(int64, "value")
-  stats:insert(util.mk_stat_var(value, int64))
-
-  local conflict = std.newsymbol(bool, "conflict")
-  stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
-
-  local pos = std.newsymbol(int64, "pos")
-  stats:insert(util.mk_stat_var(pos, int64))
-
-  local index_expr
-  -- Figure out what type of loop we've got and get its index expr
-  if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
-    index_expr = index_launch_ast.call.args[1].index.arg
-  else
-    index_expr = index_launch_ast.call.args[1].index
-  end
-
-  local i = index_launch_ast.symbol
-  local check_stats = get_check_stats(index_launch_ast.preamble, value, index_expr, bitmask, conflict, pos, i, volume)
-
-  local bounds
-  -- Generate the AST based on loop type
-  if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
-    bounds = index_launch_ast.values
-    stats:insert(util.mk_stat_for_num(i, bounds, util.mk_block(check_stats)))
-  else
-    bounds = index_launch_ast.value
-    stats:insert(util.mk_stat_for_list(i, bounds, util.mk_block(check_stats)))
-  end
-
-  -- Finally check conflict outside the loop to decide if it's safe to launch or not
-  local final_check = util.mk_stat_if_else(util.mk_expr_id(conflict), unoptimized_loop_ast, index_launch_ast)
+  -- Finally check verdict outside the loop to decide if it's safe to launch or not
+  local final_check = util.mk_stat_if_else(util.mk_expr_id(verdict), unoptimized_loop_ast, index_launch_ast)
   stats:insert(final_check)
 
   return util.mk_stat_block(util.mk_block(stats))
