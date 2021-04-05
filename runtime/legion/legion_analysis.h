@@ -2477,7 +2477,8 @@ namespace Legion {
       bool record_partial_valid_instance(LogicalView *instance,
                                          IndexSpaceExpression *expr,
                                          FieldMask valid_mask,
-                                         ReferenceMutator &mutator);
+                                         ReferenceMutator &mutator,
+                                         bool check_total_valid = true);
       void filter_valid_instances(IndexSpaceExpression *expr, 
                                   const bool expr_covers, 
                                   const FieldMask &filter_mask,

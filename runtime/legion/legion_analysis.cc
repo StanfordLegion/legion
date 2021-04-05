@@ -11785,14 +11785,67 @@ namespace Legion {
                                           ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
+      bool rebuild_partial = false;
       if (expr_covers)
       {
         if (!(target_insts.get_valid_mask() - record_mask))
         {
           for (typename FieldMaskSet<T>::const_iterator it =
                 target_insts.begin(); it != target_insts.end(); it++)
+          {
             if (total_valid_instances.insert(it->first, it->second))
               it->first->add_nested_valid_ref(did, &mutator);
+            // Check to see if there are any copies of this to filter
+            // from the partially valid instances
+            LegionMap<LogicalView*,
+              FieldMaskSet<IndexSpaceExpression> >::aligned::iterator
+                finder = partial_valid_instances.find(it->first);
+            if ((finder != partial_valid_instances.end()) &&
+                !(finder->second.get_valid_mask() * it->second))
+            {
+              rebuild_partial = true;
+              if (!(finder->second.get_valid_mask() - it->second))
+              {
+                // Filter out the ones we now subsume
+                std::vector<IndexSpaceExpression*> to_delete;    
+                for (FieldMaskSet<IndexSpaceExpression>::iterator eit =
+                     finder->second.begin(); eit != finder->second.end(); eit++)
+                {
+                  eit.filter(it->second);
+                  if (!eit->second)
+                    to_delete.push_back(eit->first);
+                }
+                for (std::vector<IndexSpaceExpression*>::const_iterator eit =
+                      to_delete.begin(); eit != to_delete.end(); eit++)
+                {
+                  finder->second.erase(*eit);
+                  if ((*eit)->remove_expression_reference())
+                    delete (*eit);
+                }
+                if (finder->second.empty())
+                {
+                  // Remove the reference, no need to check for deletion
+                  // since we know we added the same reference above
+                  finder->first->remove_nested_valid_ref(did);
+                  partial_valid_instances.erase(finder);
+                }
+                else
+                  finder->second.tighten_valid_mask();
+              }
+              else
+              {
+                // We're pruning everything so remove them all now
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+                     finder->second.begin(); eit != finder->second.end(); eit++)
+                  if (eit->first->remove_expression_reference())
+                    delete eit->first;
+                // Remove the reference, no need to check for deletion
+                // since we know we added the same reference above
+                finder->first->remove_nested_valid_ref(did);
+                partial_valid_instances.erase(finder);
+              }
+            }
+          } 
         }
         else
         {
@@ -11805,19 +11858,68 @@ namespace Legion {
             // Add it to the set
             if (total_valid_instances.insert(it->first, valid_mask))
               it->first->add_nested_valid_ref(did, &mutator);
+            // Check to see if there are any copies of this to filter
+            // from the partially valid instances
+            LegionMap<LogicalView*,
+              FieldMaskSet<IndexSpaceExpression> >::aligned::iterator
+                finder = partial_valid_instances.find(it->first);
+            if ((finder != partial_valid_instances.end()) &&
+                !(finder->second.get_valid_mask() * valid_mask))
+            {
+              rebuild_partial = true;
+              if (!(finder->second.get_valid_mask() - valid_mask))
+              {
+                // Filter out the ones we now subsume
+                std::vector<IndexSpaceExpression*> to_delete;    
+                for (FieldMaskSet<IndexSpaceExpression>::iterator eit =
+                     finder->second.begin(); eit != finder->second.end(); eit++)
+                {
+                  eit.filter(valid_mask);
+                  if (!eit->second)
+                    to_delete.push_back(eit->first);
+                }
+                for (std::vector<IndexSpaceExpression*>::const_iterator eit =
+                      to_delete.begin(); eit != to_delete.end(); eit++)
+                {
+                  finder->second.erase(*eit);
+                  if ((*eit)->remove_expression_reference())
+                    delete (*eit);
+                }
+                if (finder->second.empty())
+                {
+                  // Remove the reference, no need to check for deletion
+                  // since we know we added the same reference above
+                  finder->first->remove_nested_valid_ref(did);
+                  partial_valid_instances.erase(finder);
+                }
+                else
+                  finder->second.tighten_valid_mask();
+              }
+              else
+              {
+                // We're pruning everything so remove them all now
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+                     finder->second.begin(); eit != finder->second.end(); eit++)
+                  if (eit->first->remove_expression_reference())
+                    delete eit->first;
+                // Remove the reference, no need to check for deletion
+                // since we know we added the same reference above
+                finder->first->remove_nested_valid_ref(did);
+                partial_valid_instances.erase(finder);
+              }
+            }
           }
         }
       }
       else
       {
-        bool need_rebuild = false;
         if (!(target_insts.get_valid_mask() - record_mask))
         {
           for (typename FieldMaskSet<T>::const_iterator it =
                 target_insts.begin(); it != target_insts.end(); it++)
             if (record_partial_valid_instance(it->first, expr,
                                               it->second, mutator))
-              need_rebuild = true;
+              rebuild_partial = true;
         }
         else
         {
@@ -11829,18 +11931,17 @@ namespace Legion {
               continue;
             if (record_partial_valid_instance(it->first, expr,
                                               valid_mask, mutator))
-              need_rebuild = true;
+              rebuild_partial = true;
           }
         }
-        if (need_rebuild)
-        {
-          partial_valid_fields.clear();
-          for (LegionMap<LogicalView*,
-                FieldMaskSet<IndexSpaceExpression> >::aligned::const_iterator 
-                it = partial_valid_instances.begin(); 
-                it != partial_valid_instances.end(); it++)
-            partial_valid_fields |= it->second.get_valid_mask();
-        }
+      }
+      if (rebuild_partial)
+      {
+        partial_valid_fields.clear();
+        for (LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> >::
+              aligned::const_iterator it = partial_valid_instances.begin();
+              it != partial_valid_instances.end(); it++)
+          partial_valid_fields |= it->second.get_valid_mask();
       }
     }
 
@@ -11939,10 +12040,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool EquivalenceSet::record_partial_valid_instance(LogicalView *target,
-    IndexSpaceExpression *expr, FieldMask valid_mask, ReferenceMutator &mutator)
+                              IndexSpaceExpression *expr, FieldMask valid_mask, 
+                              ReferenceMutator &mutator, bool check_total_valid)
     //--------------------------------------------------------------------------
     {
       bool need_rebuild = false;
+      if (check_total_valid)
+      {
+        FieldMaskSet<LogicalView>::const_iterator finder = 
+          total_valid_instances.find(target);
+        if (finder != total_valid_instances.end())
+        {
+          valid_mask -= finder->second;
+          if (!valid_mask)
+            return need_rebuild;
+        }
+      }
       partial_valid_fields |= valid_mask;
       LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> >::aligned
         ::iterator finder = partial_valid_instances.find(target);
@@ -12234,6 +12347,9 @@ namespace Legion {
             for (std::vector<IndexSpaceExpression*>::const_iterator it =
                   to_erase.begin(); it != to_erase.end(); it++)
             {
+              // Don't delete if we just added it
+              if (to_add.find(*it) != to_add.end())
+                continue;
               FieldMaskSet<IndexSpaceExpression>::iterator finder =
                 pit->second.find(*it);
 #ifdef DEBUG_LEGION
@@ -12302,7 +12418,7 @@ namespace Legion {
 #endif
             }
             if (record_partial_valid_instance(it->first, diff_expr, 
-                                              overlap, mutator)) 
+                      overlap, mutator, false/*check total valid*/)) 
               need_partial_rebuild = true;
             it.filter(overlap);
             if (!it->second)
@@ -15166,7 +15282,7 @@ namespace Legion {
             assert(!diff_expr->is_empty());
 #endif
             if (record_partial_valid_instance(analysis.inst_view, diff_expr,
-                                              total_overlap, mutator))
+                        total_overlap, mutator, false/*check total valid*/))
             {
               // Need to rebuild the partial valid fields
               partial_valid_fields.clear();
