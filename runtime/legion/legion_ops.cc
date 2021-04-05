@@ -7725,6 +7725,7 @@ namespace Legion {
       index_domain = own->index_domain;
       sharding_space = own->sharding_space;
       owner = own;
+      context_index = own->get_ctx_index();
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
       trace_local_id            = owner->get_trace_local_id().first;
@@ -17141,6 +17142,7 @@ namespace Legion {
       initialize_operation(own->get_context(), false/*track*/, 1/*size*/);
       index_point = p;
       owner = own;
+      context_index = owner->get_ctx_index();
       index_domain = owner->index_domain;
       requirement  = owner->requirement;
       parent_task  = owner->parent_task;
@@ -18529,6 +18531,7 @@ namespace Legion {
       index_domain = own->index_domain;
       sharding_space = own->sharding_space;
       owner = own;
+      context_index = own->get_ctx_index();
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
       trace_local_id     = owner->get_trace_local_id().first;
@@ -20055,6 +20058,7 @@ namespace Legion {
       initialize_operation(ctx, false/*track*/, 1/*regions*/); 
       owner = own;
       index_point = point;
+      context_index = own->get_ctx_index();
       resource = launcher.resource;
       if (index < launcher.footprint.size())
         footprint = launcher.footprint[index];
@@ -20918,6 +20922,7 @@ namespace Legion {
       index_point = point;
       owner = own;
       flush = flsh;
+      context_index = own->get_ctx_index();
       // Get a reference to the region to keep it alive
       this->region = region; 
       requirement = region.impl->get_requirement();
