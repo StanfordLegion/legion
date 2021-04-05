@@ -4822,27 +4822,25 @@ namespace Legion {
           // Always use the source index for selecting sources
           op->select_sources(src_index, dst, sources, ranking);
           // Check to make sure that the ranking has sound output
-          std::set<unsigned> unique_indexes;
+          unsigned count = 0;
+          std::vector<bool> unique_indexes(instances.size(), false);
           for (std::vector<unsigned>::iterator it =
                 ranking.begin(); it != ranking.end(); /*nothing*/)
           {
-            if ((unique_indexes.find(*it) == unique_indexes.end()) &&
-                ((*it) < instances.size()))
+            if (((*it) < unique_indexes.size()) && !unique_indexes[*it])
             {
-              unique_indexes.insert(*it);
+              unique_indexes[*it] = true;
+              count++;
               it++;
             }
-            else // remove duplicates
+            else // remove duplicates and out of bound entries
               it = ranking.erase(it);
           }
-          if (unique_indexes.size() < ranking.size()) 
+          if (count < unique_indexes.size())
           {
-            for (unsigned idx = 0; idx < instances.size(); idx++)
-              if (unique_indexes.find(idx) == unique_indexes.end())
+            for (unsigned idx = 0; idx < unique_indexes.size(); idx++)
+              if (!unique_indexes[idx])
                 ranking.push_back(idx);
-#ifdef DEBUG_LEGION
-            assert(ranking.size() == unique_indexes.size());
-#endif
           }
         }
         else
