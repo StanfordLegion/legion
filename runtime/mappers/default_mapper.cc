@@ -451,7 +451,7 @@ namespace Legion {
 	    // told not to
             // TODO: Fix this when we implement a good stealing algorithm
             // to instead encourage locality
-	    if (same_address_space || (task.tag & SAME_ADDRESS_SPACE) == 0)
+	    if (!same_address_space && (task.tag & SAME_ADDRESS_SPACE) == 0)
             {
 	      switch (info.proc_kind)
               {
