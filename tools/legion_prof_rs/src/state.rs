@@ -9,6 +9,7 @@ use crate::serialize::Record;
 
 const TASK_GRANULARITY_THRESHOLD: u64 = 10;
 
+
 // Make sure this is up to date with lowlevel.h
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
 #[repr(i32)]
@@ -128,6 +129,9 @@ pub struct ProcID(pub u64);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeID(pub u64);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct EventID(pub u64);
 
 #[derive(Debug)]
 pub struct Proc {
@@ -1380,6 +1384,17 @@ impl ProfTask {
 }
 
 #[derive(Debug)]
+pub struct CopyInfo {
+    src_inst: InstID,
+    dst_inst: InstID,
+    fevent: EventID,
+    num_fields: u32,
+    request_type: u32,
+    num_hops: u32
+}
+
+
+#[derive(Debug)]
 pub struct Copy {
     base: Base,
     src: MemID,
@@ -1387,6 +1402,9 @@ pub struct Copy {
     size: u64,
     time_range: TimeRange,
     deps: InitiationDependencies,
+    fevent: EventID,
+    num_requests: u32,
+    copy_info: Vec<CopyInfo>
 }
 
 impl Copy {
@@ -1397,6 +1415,9 @@ impl Copy {
         size: u64,
         op_id: OpID,
         time_range: TimeRange,
+        fevent: EventID,
+        num_requests: u32,
+        copy_info: Vec<CopyInfo>
     ) -> Self {
         Copy {
             base,
@@ -1405,6 +1426,9 @@ impl Copy {
             size,
             time_range,
             deps: InitiationDependencies::new(op_id),
+            fevent,
+            num_requests,
+            copy_info
         }
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
@@ -1574,6 +1598,7 @@ pub struct State {
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
     field_spaces: BTreeMap<FSpaceID, FSpace>,
     fields: BTreeMap<(FSpaceID, FieldID), Field>,
+    copy_map: BTreeMap<EventID, (ChanID, usize)>,
     has_spy_data: bool,
     spy_state: (), // TODO
 }
@@ -1694,12 +1719,14 @@ impl State {
         dst: MemID,
         size: u64,
         time_range: TimeRange,
+        fevent: EventID,
+        num_requests: u32
     ) {
         let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
         let channel = self.find_copy_channel(src, dst);
         channel
             .copies
-            .push(Copy::new(base, src, dst, size, op_id, time_range));
+            .push(Copy::new(base, src, dst, size, op_id, time_range, fevent, num_requests, Vec::new()));
     }
 
     fn create_fill(&mut self, op_id: OpID, dst: MemID, time_range: TimeRange) {
@@ -1714,6 +1741,12 @@ impl State {
         channel
             .depparts
             .push(DepPart::new(base, part_op, op_id, time_range));
+    }
+
+    fn find_channel(&mut self, channel_id: ChanID) -> &mut Chan {
+        self.channels
+            .entry(channel_id)
+            .or_insert_with(|| Chan::new(channel_id))
     }
 
     fn find_copy_channel(&mut self, src: MemID, dst: MemID) -> &mut Chan {
@@ -2159,10 +2192,39 @@ fn process_record(record: &Record, state: &mut State) {
             ready,
             start,
             stop,
+            fevent,
+            num_requests
         } => {
+            let channel_id = ChanID::new_copy(*src, *dst);
+            let copy_id = state.find_copy_channel(*src, *dst).copies.len();
+            state.copy_map.entry(*fevent).or_insert_with(|| (channel_id, copy_id));
+
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_copy(*op_id, *src, *dst, *size, time_range);
+            state.create_copy(*op_id, *src, *dst, *size, time_range, *fevent, *num_requests);
             state.update_last_time(*stop);
+        }
+        Record::CopyInstInfo {
+            op_id,
+            src_inst,
+            dst_inst,
+            fevent,
+            num_fields,
+            request_type,
+            num_hops
+        } => {
+            let copy_info = CopyInfo {
+                src_inst: *src_inst,
+                dst_inst: *dst_inst,
+                fevent: *fevent,
+                num_fields: *num_fields,
+                request_type: *request_type,
+                num_hops: *num_hops
+            };
+            let (channel_id, channel_idx) = *state.copy_map.get(fevent).unwrap();
+            state.find_channel(channel_id)
+                .copies[channel_idx]
+                .copy_info
+                .push(copy_info);
         }
         Record::FillInfo {
             op_id,
@@ -2175,6 +2237,7 @@ fn process_record(record: &Record, state: &mut State) {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_fill(*op_id, *dst, time_range);
             state.update_last_time(*stop);
+            // TODO add entry to copy map here
         }
         Record::InstCreateInfo {
             op_id,
@@ -2220,6 +2283,7 @@ fn process_record(record: &Record, state: &mut State) {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_deppart(*op_id, part_op, time_range);
             state.update_last_time(*stop);
+            // TODO add copy map entry here
         }
         Record::MapperCallInfo {
             kind,

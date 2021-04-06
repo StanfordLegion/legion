@@ -17,7 +17,7 @@ use nom::{
 };
 
 use crate::state::{
-    IPartID, ISpaceID, InstID, MapperCallKindID, MemID, OpID, ProcID, RuntimeCallKindID, TaskID,
+    EventID, IPartID, ISpaceID, InstID, MapperCallKindID, MemID, OpID, ProcID, RuntimeCallKindID, TaskID,
     Timestamp, VariantID,
 };
 
@@ -109,7 +109,8 @@ pub enum Record {
     TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
     GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp },
     MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
-    CopyInfo { op_id: OpID, src: MemID, dst: MemID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
+    CopyInfo { op_id: OpID, src: MemID, dst: MemID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, fevent: EventID, num_requests: u32 },
+    CopyInstInfo { op_id: OpID, src_inst: InstID, dst_inst: InstID, fevent: EventID, num_fields: u32, request_type: u32, num_hops: u32 },
     FillInfo { op_id: OpID, dst: MemID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
     InstCreateInfo { op_id: OpID, inst_id: InstID, create: Timestamp },
     InstUsageInfo { op_id: OpID, inst_id: InstID, mem_id: MemID, size: u64 },
@@ -282,6 +283,10 @@ fn parse_string(input: &[u8]) -> IResult<&[u8], String> {
 ///
 /// Binary parsers for type aliases
 ///
+
+fn parse_event_id(input: &[u8]) -> IResult<&[u8], EventID> {
+    map(le_u64, |x| EventID(x))(input)
+}
 
 fn parse_inst_id(input: &[u8]) -> IResult<&[u8], InstID> {
     map(le_u64, |x| InstID(x))(input)
@@ -694,6 +699,8 @@ fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, num_requests) = le_u32(input)?;
     Ok((
         input,
         Record::CopyInfo {
@@ -705,8 +712,31 @@ fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             ready,
             start,
             stop,
+            fevent,
+            num_requests
         },
     ))
+}
+fn parse_copy_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, op_id) = parse_op_id(input)?;
+    let (input, src_inst) = parse_inst_id(input)?;
+    let (input, dst_inst) = parse_inst_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, num_fields) = le_u32(input)?;
+    let (input, request_type) = le_u32(input)?;
+    let (input, num_hops) = le_u32(input)?;
+    Ok((
+            input,
+            Record::CopyInstInfo {
+                op_id,
+                src_inst,
+                dst_inst,
+                fevent,
+                num_fields,
+                request_type,
+                num_hops
+            }
+       ))
 }
 fn parse_fill_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
@@ -900,6 +930,7 @@ fn parse(input: &[u8]) -> IResult<&[u8], Vec<Record>> {
     parsers.insert(ids["GPUTaskInfo"], parse_gpu_task_info);
     parsers.insert(ids["MetaInfo"], parse_meta_info);
     parsers.insert(ids["CopyInfo"], parse_copy_info);
+    parsers.insert(ids["CopyInstInfo"], parse_copy_inst_info);
     parsers.insert(ids["FillInfo"], parse_fill_info);
     parsers.insert(ids["InstCreateInfo"], parse_inst_create);
     parsers.insert(ids["InstUsageInfo"], parse_inst_usage);
