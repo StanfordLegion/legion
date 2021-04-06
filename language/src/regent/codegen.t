@@ -100,9 +100,9 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, loop_
   divergence = self.divergence or divergence or false
   must_epoch = self.must_epoch or must_epoch or false
   must_epoch_point = self.must_epoch_point or must_epoch_point or false
-  loop_point = self.loop_point or loop_point or false
-  loop_domain = self.loop_domain or loop_domain or false
-  loop_domain_type = self.loop_domain_type or loop_domain_type or false
+  loop_point = loop_point or self.loop_point or false
+  loop_domain = loop_domain or self.loop_domain or false
+  loop_domain_type = loop_domain_type or self.loop_domain_type or false
   if not break_label then
     break_label = self.break_label or false
   end
