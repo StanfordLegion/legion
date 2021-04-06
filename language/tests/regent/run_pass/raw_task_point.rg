@@ -20,15 +20,17 @@ task f(i : int)
 end
 
 task main()
-  __forbid(__index_launch)
-  for i = 1, 2 do
-    f(i)
-  end
+  for t = 0, 3 do
+    __forbid(__index_launch)
+    for i = 1, 2 do
+      f(i)
+    end
 
-  var is = ispace(int1d, 1, 2)
-  __forbid(__index_launch)
-  for i in is do
-    f(i)
+    var is = ispace(int1d, 1, 2)
+    __forbid(__index_launch)
+    for i in is do
+      f(i)
+    end
   end
 end
 regentlib.start(main)
