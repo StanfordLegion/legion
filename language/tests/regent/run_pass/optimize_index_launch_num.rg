@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ffuture", "1"], ["-ffuture", "0"]]
+-- [["-ffuture", "1"], ["-ffuture", "0"], ["-findex-launch", "0"]]
 
 import "regent"
 
