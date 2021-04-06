@@ -3464,54 +3464,44 @@ local function expr_call_setup_partition_arg(
   end
 end
 
--- TODO: Would be good to unify the next two function, but for now
--- they're different enough that they should stay separate.
-local function loop_bounds_to_domain(cx, values, value_type)
+local function loop_bounds_to_domain_or_index_space(cx, values, value_type)
   if terralib.islist(values) then
     return `((rect1d {
                 lo = int1d([values[1]]),
                 hi = int1d([values[2]]) - 1,
-             }):to_domain())
+             }):to_domain()), false
   else
     assert(value_type)
     if std.is_ispace(value_type) then
-      return `c.legion_index_space_get_domain(
-        [cx.runtime], [values].impl)
+      return `[values].impl, true
     elseif std.is_region(value_type) then
-      return `c.legion_index_space_get_domain(
-        [cx.runtime], [values].impl.index_space)
+      return `[values].impl.index_space, true
     elseif std.is_rect_type(value_type) then
-      return `([values]:to_domain())
+      return `([values]:to_domain()), false
     else
       assert(false)
     end
   end
 end
 
-local function loop_bounds_to_index_space(cx, values, value_type)
-  if terralib.islist(values) then
-    return `c.legion_index_space_create_domain(
-      cx.runtime,
-      cx.context,
-      (rect1d {
-        lo = int1d([values[1]]),
-        hi = int1d([values[2]] - 1),
-      }):to_domain())
-  else
-    assert(value_type)
-    if std.is_ispace(value_type) then
-      return `[values].impl
-    elseif std.is_region(value_type) then
-      return `[values].impl.index_space
-    elseif std.is_rect_type(value_type) then
-      return `c.legion_index_space_create_domain(
-        cx.runtime,
-        cx.context,
-        [values]:to_domain())
-    else
-      assert(false)
-    end
+
+local function loop_bounds_to_domain(cx, values, value_type)
+  local value, is_index_space = loop_bounds_to_domain_or_index_space(
+    cx, values, value_type)
+  if is_index_space then
+    return `c.legion_index_space_get_domain(value)
   end
+  return value
+end
+
+local function loop_bounds_to_index_space(cx, values, value_type)
+  local value, is_index_space = loop_bounds_to_domain_or_index_space(
+    cx, values, value_type)
+  if not is_index_space then
+    return `c.legion_index_space_create_domain(
+      [cx.runtime], [cx.context], value)
+  end
+  return value
 end
 
 function codegen.expr_call(cx, node)
