@@ -3489,7 +3489,7 @@ local function loop_bounds_to_domain(cx, values, value_type)
   local value, is_index_space = loop_bounds_to_domain_or_index_space(
     cx, values, value_type)
   if is_index_space then
-    return `c.legion_index_space_get_domain(value)
+    return `c.legion_index_space_get_domain([cx.runtime], value)
   end
   return value
 end
