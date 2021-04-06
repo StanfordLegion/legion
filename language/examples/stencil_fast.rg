@@ -599,11 +599,11 @@ task main()
     __demand(__trace)
     for t = 0, tsteps do
       -- __demand(__index_launch)
-      for i = 0, nt2 do
+      for i in tiles do
         stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], p_times[i], t == tprune)
       end
       -- __demand(__index_launch)
-      for i = 0, nt2 do
+      for i in tiles do
         increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], p_times[i], t == tsteps - tprune - 1)
       end
     end

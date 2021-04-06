@@ -1045,6 +1045,7 @@ where
   reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
+  var pieces = ispace(int1d, conf.npieces)
   var prune = conf.prune
 
   var alfa = conf.alfa
@@ -1089,16 +1090,16 @@ do
   __demand(__trace)
   do
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       init_step_points(rp_all_private_p[i], enable)
     end
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       init_step_points(rp_all_shared_p[i], enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       init_step_zones(rz_all_p[i], enable)
     end
 
@@ -1113,16 +1114,16 @@ do
     -- end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       adv_pos_half(rp_all_private_p[i], dt, enable)
     end
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       adv_pos_half(rp_all_shared_p[i], dt, enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_centers(rz_all_p[i],
                    rp_all_private_p[i],
                    rp_all_ghost_p[i],
@@ -1132,7 +1133,7 @@ do
 
     -- var num_negatives = 0
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       -- num_negatives +=
         calc_volumes(rz_all_p[i],
                      rp_all_private_p[i],
@@ -1143,7 +1144,7 @@ do
     -- verify_calc_volumes(num_negatives)
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_char_len(rz_all_p[i],
                     rp_all_private_p[i],
                     rp_all_ghost_p[i],
@@ -1152,12 +1153,12 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_rho_half(rz_all_p[i], enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       sum_point_mass(rz_all_p[i],
                      rp_all_private_p[i],
                      rp_all_ghost_p[i],
@@ -1166,12 +1167,12 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_state_at_half(rz_all_p[i], gamma, ssmin, dt, enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_force_pgas_tts(rz_all_p[i],
                           rp_all_private_p[i],
                           rp_all_ghost_p[i],
@@ -1181,7 +1182,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       qcs_zone_center_velocity(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1191,7 +1192,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       qcs_corner_divergence(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1201,7 +1202,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       qcs_qcn_force(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1212,7 +1213,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       qcs_force(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1222,7 +1223,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       qcs_vel_diff(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1233,7 +1234,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       sum_point_force(rz_all_p[i],
                       rp_all_private_p[i],
                       rp_all_ghost_p[i],
@@ -1242,25 +1243,25 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       apply_boundary_conditions(rp_all_private_p[i], enable)
     end
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       apply_boundary_conditions(rp_all_shared_p[i], enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       adv_pos_full(rp_all_private_p[i], dt, enable)
     end
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       adv_pos_full(rp_all_shared_p[i], dt, enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_centers_full(rz_all_p[i],
                         rp_all_private_p[i],
                         rp_all_ghost_p[i],
@@ -1270,7 +1271,7 @@ do
 
     -- var num_negatives_full = 0
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       -- num_negatives_full +=
         calc_volumes_full(rz_all_p[i],
                           rp_all_private_p[i],
@@ -1281,7 +1282,7 @@ do
     -- verify_calc_volumes_full(num_negatives_full)
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_work(rz_all_p[i],
                 rp_all_private_p[i],
                 rp_all_ghost_p[i],
@@ -1290,13 +1291,13 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_work_rate_energy_rho_full(rz_all_p[i], dt, enable)
     end
 
     dthydro = dtmax
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       dthydro min= calc_dt_hydro(rz_all_p[i], dt, dtmax, cfl, cflv, enable)
     end
 

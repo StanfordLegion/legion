@@ -768,13 +768,13 @@ task toplevel()
   __fence(__execution, __block)
   __demand(__spmd, __trace)
   for j = 0, num_loops do
-    for i = 0, num_superpieces do
+    for i in launch_domain do
       calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i], rp_times[i])
     end
-    for i = 0, num_superpieces do
+    for i in launch_domain do
       distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
-    for i = 0, num_superpieces do
+    for i in launch_domain do
       update_voltages(j == num_loops - prune - 1, rp_private[i], rp_shared[i], rp_times[i])
     end
   end
