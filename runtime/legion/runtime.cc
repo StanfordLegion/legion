@@ -30992,7 +30992,7 @@ namespace Legion {
           }
         case LG_TRANSITIVE_REDUCTION_TASK_ID:
           {
-            PhysicalTemplate::handle_transitive_reduction(args, runtime);
+            PhysicalTemplate::handle_transitive_reduction(args);
             break;
           }
         case LG_DELETE_TEMPLATE_TASK_ID:

@@ -1004,7 +1004,7 @@ namespace Legion {
                                    std::set<RtEvent> &applied_events);
     public:
       static void handle_replay_slice(const void *args);
-      static void handle_transitive_reduction(const void *args, Runtime *rt);
+      static void handle_transitive_reduction(const void *args);
       static void handle_delete_template(const void *args);
     public:
       RtEvent get_recording_done(void) const

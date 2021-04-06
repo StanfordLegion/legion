@@ -6302,6 +6302,9 @@ namespace Legion {
         // We also need to rerun the propagate copies analysis to
         // remove any mergers which contain only a single input
         propagate_copies(NULL/*don't need the gen out*/);
+        // If it was requested that we dump the traces do that now
+        if (runtime->dump_physical_traces)
+          dump_template();
       }
       fence_completion = completion;
       if (recurrent)
@@ -6395,14 +6398,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void PhysicalTemplate::handle_transitive_reduction(
-                                             const void *args, Runtime *runtime)
+                                                               const void *args)
     //--------------------------------------------------------------------------
     {
-      const TransitiveReductionArgs *targs = 
+      const TransitiveReductionArgs *targs =
         (const TransitiveReductionArgs*)args;
-      targs->tpl->transitive_reduction(true/*deferred*/);
-      if (runtime->dump_physical_traces)
-        targs->tpl->dump_template();
+      targs->tpl->transitive_reduction(true/*deferred*/); 
     }
 
     //--------------------------------------------------------------------------
