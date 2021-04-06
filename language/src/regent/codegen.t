@@ -95,15 +95,21 @@ function context:__newindex(field, value)
   error("context has no field '" .. field .. "' (in assignment)", 2)
 end
 
-function context:new_local_scope(divergence, must_epoch, must_epoch_point, break_label)
+function context:new_local_scope(divergence, must_epoch, must_epoch_point, loop_point, loop_domain, loop_domain_type, break_label)
   assert(not (self.must_epoch and must_epoch))
   divergence = self.divergence or divergence or false
   must_epoch = self.must_epoch or must_epoch or false
   must_epoch_point = self.must_epoch_point or must_epoch_point or false
+  loop_point = self.loop_point or loop_point or false
+  loop_domain = self.loop_domain or loop_domain or false
+  loop_domain_type = self.loop_domain_type or loop_domain_type or false
   if not break_label then
     break_label = self.break_label or false
   end
   assert((must_epoch == false) == (must_epoch_point == false))
+  assert((loop_point == false) == (loop_domain == false))
+  -- FIXME: we have both loop_point and loop_symbol below, they seem
+  -- to mean the same thing but are used by different parts of the compiler.
   return setmetatable({
     variant = self.variant,
     expected_return_type = self.expected_return_type,
@@ -117,6 +123,9 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
     divergence = divergence,
     must_epoch = must_epoch,
     must_epoch_point = must_epoch_point,
+    loop_point = loop_point,
+    loop_domain = loop_domain,
+    loop_domain_type = loop_domain_type,
     break_label = break_label,
     context = self.context,
     runtime = self.runtime,
@@ -148,6 +157,9 @@ function context:new_task_scope(expected_return_type, constraints, orderings, re
     divergence = false,
     must_epoch = false,
     must_epoch_point = false,
+    loop_point = false,
+    loop_domain = false,
+    loop_domain_type = false,
     break_label = false,
     context = ctx,
     runtime = runtime,
@@ -3452,6 +3464,56 @@ local function expr_call_setup_partition_arg(
   end
 end
 
+-- TODO: Would be good to unify the next two function, but for now
+-- they're different enough that they should stay separate.
+local function loop_bounds_to_domain(cx, values, value_type)
+  if terralib.islist(values) then
+    return `((rect1d {
+                lo = int1d([values[1]]),
+                hi = int1d([values[2]]) - 1,
+             }):to_domain())
+  else
+    assert(value_type)
+    if std.is_ispace(value_type) then
+      return `c.legion_index_space_get_domain(
+        [cx.runtime], [values].impl)
+    elseif std.is_region(value_type) then
+      return `c.legion_index_space_get_domain(
+        [cx.runtime], [values].impl.index_space)
+    elseif std.is_rect_type(value_type) then
+      return `([values]:to_domain())
+    else
+      assert(false)
+    end
+  end
+end
+
+local function loop_bounds_to_index_space(cx, values, value_type)
+  if terralib.islist(values) then
+    return `c.legion_index_space_create_domain(
+      cx.runtime,
+      cx.context,
+      (rect1d {
+        lo = int1d([values[1]]),
+        hi = int1d([values[2]] - 1),
+      }):to_domain())
+  else
+    assert(value_type)
+    if std.is_ispace(value_type) then
+      return `[values].impl
+    elseif std.is_region(value_type) then
+      return `[values].impl.index_space
+    elseif std.is_rect_type(value_type) then
+      return `c.legion_index_space_create_domain(
+        cx.runtime,
+        cx.context,
+        [values]:to_domain())
+    else
+      assert(false)
+    end
+  end
+end
+
 function codegen.expr_call(cx, node)
   local fn = codegen.expr(cx, node.fn):read(cx)
   local args = node.args:map(
@@ -3595,6 +3657,35 @@ function codegen.expr_call(cx, node)
     local future
     if not cx.must_epoch then
       future = terralib.newsymbol(c.legion_future_t, "future")
+    end
+
+    if cx.loop_point then
+      local point
+      if cx.loop_point.type:isintegral() then
+        point = `(int1d([cx.loop_point]):to_domain_point())
+      else
+        point = `([cx.loop_point]:to_domain_point())
+      end
+
+      args_setup:insert(
+        quote
+          c.legion_task_launcher_set_point(
+            [launcher], [point])
+        end)
+    end
+
+    if cx.loop_domain and
+      -- Skip doing this if we have a stride in the loop.
+      (not terralib.islist(cx.loop_domain) or #cx.loop_domain == 2)
+    then
+      local domain = loop_bounds_to_index_space(
+        cx, cx.loop_domain, cx.loop_domain_type)
+
+      args_setup:insert(
+        quote
+          c.legion_task_launcher_set_sharding_space(
+            [launcher], [domain])
+        end)
     end
 
     local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
@@ -8132,7 +8223,7 @@ end
 function codegen.stat_while(cx, node)
   local cond = codegen.expr(cx, node.cond):read(cx)
   local break_label = terralib.newlabel()
-  local body_cx = cx:new_local_scope(nil, nil, nil, break_label)
+  local body_cx = cx:new_local_scope(nil, nil, nil, nil, nil, nil, break_label)
   local block = cleanup_after(body_cx, codegen.block(body_cx, node.block))
   return quote
     while [quote [cond.actions] in [cond.value] end] do
@@ -8147,7 +8238,7 @@ function codegen.stat_for_num(cx, node)
   local cx = cx:new_local_scope()
   local bounds = codegen.expr_list(cx, node.values):map(function(value) return value:read(cx) end)
   local break_label = terralib.newlabel()
-  local cx = cx:new_local_scope(nil, nil, nil, break_label)
+  local cx = cx:new_local_scope(nil, nil, nil, symbol, bounds:map(function(b) return b.value end), nil, break_label)
   local block = cleanup_after(cx, codegen.block(cx, node.block))
 
   local v1, v2, v3 = unpack(bounds)
@@ -8306,7 +8397,7 @@ function codegen.stat_for_list(cx, node)
   local value = codegen.expr(cx, node.value):read(cx)
   local value_type = std.as_read(node.value.expr_type)
   local break_label = terralib.newlabel()
-  local cx = cx:new_local_scope(nil, nil, nil, break_label)
+  local cx = cx:new_local_scope(nil, nil, nil, symbol, value.value, value_type, break_label)
 
   -- Exit early when the iteration space is a regent list
   if std.is_list(value_type) then
@@ -9351,11 +9442,7 @@ function codegen.stat_index_launch_num(cx, node)
   local domain = terralib.newsymbol(c.legion_domain_t, "domain")
   local actions = quote
     [values:map(function(value) return value.actions end)]
-    var [domain] = c.legion_domain_from_rect_1d(
-      c.legion_rect_1d_t {
-        lo = c.legion_point_1d_t { x = arrayof(c.coord_t, [values[1].value]) },
-        hi = c.legion_point_1d_t { x = arrayof(c.coord_t, c.coord_t([values[2].value]) - 1) },
-      })
+    var [domain] = [loop_bounds_to_domain(cx, values:map(function(value) return value.value end))]
   end
 
   if node.call:is(ast.typed.expr.Call) then
@@ -9372,26 +9459,9 @@ function codegen.stat_index_launch_list(cx, node)
   local value_type = std.as_read(node.value.expr_type)
 
   local domain = terralib.newsymbol(c.legion_domain_t, "domain")
-  local actions
-  if std.is_ispace(value_type) then
-    actions = quote
-      [value.actions]
-      var [domain] = c.legion_index_space_get_domain(
-        [cx.runtime], [value.value].impl)
-    end
-  elseif std.is_region(value_type) then
-    actions = quote
-      [value.actions]
-      var [domain] = c.legion_index_space_get_domain(
-        [cx.runtime], [value.value].impl.index_space)
-    end
-  elseif std.is_rect_type(value_type) then
-    actions = quote
-      [value.actions]
-      var [domain] = [value.value]:to_domain()
-    end
-  else
-    assert(false)
+  local actions = quote
+    [value.actions]
+    var [domain] = [loop_bounds_to_domain(cx, value.value, value_type)]
   end
 
   if node.call:is(ast.typed.expr.Call) then
