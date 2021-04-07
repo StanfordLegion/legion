@@ -68,6 +68,15 @@ rm -f dom_host.o && REGENT_FLAGS="-findex-launch 1 -findex-launch-dynamic 1" mak
 rm -f dom_host.o && REGENT_FLAGS="-findex-launch 0" make dom_host.exec && mv dom_host.exec dom_host.exec.noidx
 ```
 
+Setting up weak scaling problem sizes:
+
+```bash
+cd soleil-x/testcases/ws-pizdaint/dom
+for n in 0 1 2 3 4 5 6 7 8 9 10; do
+    ../../../scripts/scale_up.py -n $n base.json
+done
+```
+
 Running:
 
 ```bash
