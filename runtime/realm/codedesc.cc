@@ -222,8 +222,8 @@ namespace Realm {
 
 #ifdef REALM_USE_DLADDR
   namespace {
-    // pgcc doesn't let us declare a weak 'main'
-#ifndef __PGI
+    // neither pgcc nor icpc lets us declare a weak 'main'
+#if !defined(__PGI) && !defined(__ICC)
     extern "C" { int main(int argc, const char *argv[]) __attribute__((weak)); };
 #endif
 
@@ -248,7 +248,7 @@ namespace Realm {
       // try to detect symbols that are in the base executable and change the filename to ""
       // only do this if the weak 'main' reference found an actual main
       const char *fname = inf.dli_fname;
-#ifndef __PGI
+#if !defined(__PGI) && !defined(__ICC)
       if(((void *)main) != 0) {
 	static std::string local_fname;
 	if(local_fname.empty()) {
