@@ -728,6 +728,10 @@ task toplevel()
   var all_wires = region(ispace(ptr, num_circuit_wires), wire(wild, wild, wild))
   var all_times = region(ispace(ptr, num_superpieces), timestamp)
 
+  fill(all_nodes.{node_cap, leakage, charge, node_voltage}, 0.0)
+  fill(all_wires.{inductance, resistance, wire_cap, current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9}, voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8}}, 0.0)
+  fill(all_times.{start, stop}, 0)
+
   var colorings = create_colorings(conf)
   var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map, ispace(ptr, 2))
   var all_private = rp_all_nodes[0]
@@ -740,6 +744,8 @@ task toplevel()
 
   var ghost_ranges = region(ispace(ptr, num_superpieces), ghost_range)
   var rp_ghost_ranges = partition(equal, ghost_ranges, launch_domain)
+
+  fill(ghost_ranges.rect, rect1d { 0, 0 })
 
   var rp_times = partition(equal, all_times, launch_domain)
 
