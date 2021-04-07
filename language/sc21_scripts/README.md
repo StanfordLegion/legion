@@ -44,3 +44,36 @@ Run directories are designed to be self-contained, so you can rebuild
 Legion and prepare new runs while the old ones are in the queue. Note
 that if you do rebuild Legion (and want those changes to propagate to
 the runs), you will need to rebuild the run directories as well.
+
+### Pennant SIGILL Workaround
+
+Pennant gets miscompiled if you don't build it on a compute node:
+
+```bash
+salloc --nodes 1 --constraint=gpu --time=01:00:00 --mail-type=ALL -A d108
+srun --cpu-bind none --pty bash
+```
+
+And then build as normal.
+
+### Soleil-X DOM Instructions
+
+Building:
+
+```bash
+source soleil-x/env.sh
+cd soleil-x/src
+rm -f dom_host.o && REGENT_FLAGS="-findex-launch 1 -findex-launch-dynamic 0 -foverride-demand-index-launch 1" make dom_host.exec && mv dom_host.exec dom_host.exec.idx-no-check
+rm -f dom_host.o && REGENT_FLAGS="-findex-launch 1 -findex-launch-dynamic 1" make dom_host.exec && mv dom_host.exec dom_host.exec.idx-dyn-check
+rm -f dom_host.o && REGENT_FLAGS="-findex-launch 0" make dom_host.exec && mv dom_host.exec dom_host.exec.noidx
+```
+
+Running:
+
+```bash
+source soleil-x/env.sh
+cd soleil-x/src
+EXECUTABLE=dom_host.exec.idx-no-check SCRATCH=$SCRATCH/dom.idx-no-check ./run.sh -i ../testcases/ws-pizdaint/dom/1.json
+EXECUTABLE=dom_host.exec.idx-dyn-check SCRATCH=$SCRATCH/dom.idx-dyn-check ./run.sh -i ../testcases/ws-pizdaint/dom/1.json
+EXECUTABLE=dom_host.exec.noidx SCRATCH=$SCRATCH/dom.noidx ./run.sh -i ../testcases/ws-pizdaint/dom/1.json
+```
