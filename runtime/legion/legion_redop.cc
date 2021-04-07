@@ -57,7 +57,7 @@ namespace Legion {
   /*static*/ const complex<float> ProdReduction<complex<float> >::identity = complex<float>(1.f, 0.f);
   /*static*/ const complex<float> DivReduction<complex<float> >::identity = complex<float>(1.f, 0.f);
   /*static*/ const complex<float> MaxReduction<complex<float> >::identity = complex<float>(MaxReduction<float>::identity, MaxReduction<float>::identity);
-  /*static*/ const complex<float> MinReduction<complex<float> >::identity = complex<float>(MinReduction<double>::identity, MinReduction<double>::identity);
+  /*static*/ const complex<float> MinReduction<complex<float> >::identity = complex<float>(MinReduction<float>::identity, MinReduction<float>::identity);
 
   /*static*/ const complex<double> SumReduction<complex<double> >::identity = complex<double>(0.f, 0.f);
 #endif
