@@ -170,6 +170,12 @@ namespace Realm {
       }
     }
 
+    inline void DynamicBufferSerializer::reset(void)
+    {
+      // rewind position back to start of buffer
+      pos = base;
+    }
+
     inline size_t DynamicBufferSerializer::bytes_used(void) const
     {
       return pos - base;
