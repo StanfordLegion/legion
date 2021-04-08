@@ -78,6 +78,10 @@ variables:
   F90: "/opt/nvidia/hpc_sdk/Linux_x86_64/21.2/compilers/bin/nvfortran"
   # cmake gets confused and can't figure out library arch
   EXTRA_CMAKE_ARGS: "-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu"
+.icc212: &icc212
+  CC: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/icc"
+  CXX: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/icpc"
+  F90: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/ifort"
 
 .terra35: &terra35
   LLVM_CONFIG: "llvm-config-3.5"
@@ -495,6 +499,8 @@ before_script:
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04
 .image_hpcsdk: &image_hpcsdk
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk
+.image_icc: &image_icc
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc
 
 ###
 ### Tests
@@ -1238,3 +1244,13 @@ hpcsdk212_cxx11_debug_cmake_legion:
   <<: [*linux, *image_hpcsdk, *tests]
   variables:
     <<: [*hpcsdk212, *debug, *cxx11_normal, *cmake, *legion, *ctest, *short]
+
+# Intel compiler (icc/icpc) tests:
+icc212_cxx11_release_legion:
+  <<: [*linux, *image_icc, *tests]
+  variables:
+    <<: [*icc212, *release, *cxx11_normal, *legion]
+icc212_cxx11_debug_cmake_legion:
+  <<: [*linux, *image_icc, *tests]
+  variables:
+    <<: [*icc212, *debug, *cxx11_normal, *cmake, *legion, *ctest, *short]
