@@ -785,6 +785,7 @@ namespace Realm {
     {
       // make sure we write a fresh MemPathInfo
       info.path.clear();
+      info.xd_channels.clear();
       //info.xd_kinds.clear();
       //info.xd_target_nodes.clear();
 
