@@ -19875,19 +19875,6 @@ namespace Legion {
       if (next_refinement_ready_bar_index == refinement_ready_barriers.size())
         next_refinement_ready_bar_index = 0;
       RtBarrier &refinement_bar = refinement_ready_barriers[refinement_index];
-#ifdef DEBUG_LEGION_COLLECTIVES
-      CloseCheckReduction::RHS barrier(user, refinement_bar,
-                                       node, false/*read only*/);
-      Runtime::phase_barrier_arrive(refinement_check_barrier, 1/*count*/,
-                              RtEvent::NO_RT_EVENT, &barrier, sizeof(barrier));
-      refinement_check_barrier.wait();
-      CloseCheckReduction::RHS actual_barrier;
-      bool ready = Runtime::get_barrier_result(refinement_check_barrier,
-                                      &actual_barrier, sizeof(actual_barrier));
-      assert(ready);
-      assert(actual_barrier == barrier);
-      advance_logical_barrier(refinement_check_barrier, total_shards);
-#endif
       const RtBarrier result = refinement_bar;
       advance_logical_barrier(refinement_bar, total_shards);
       return result;
