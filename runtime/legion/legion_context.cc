@@ -7529,9 +7529,10 @@ namespace Legion {
           unordered_ops.push_back(op);
           return term_event;
         }
+        // Put this in first to maintain context order
+        dependence_queue.push_back(op);
         // Insert any unordered operations into the stream
         insert_unordered_ops(d_lock, false/*end task*/, false/*progress*/);
-        dependence_queue.push_back(op);
         if (!outstanding_dependence)
         {
           issue_task = true;
@@ -16288,16 +16289,32 @@ namespace Legion {
       std::vector<Operation*> ready_ops;
       const bool any_unordered_ops = 
         exchange.exchange_unordered_ops(local_unordered, ready_ops);
+      // We can do this part before we reacquire the d_lock
+      if (!ready_ops.empty())
+      {
+        // We need the child op lock here so we can add these to this
+        // list of executing children as well
+        AutoLock child_lock(child_op_lock);
+        for (std::vector<Operation*>::const_iterator it = 
+              ready_ops.begin(); it != ready_ops.end(); it++)
+        {
+          (*it)->set_tracking_parent(total_children_count++);
+#ifdef DEBUG_LEGION
+          assert(executing_children.find(*it) == executing_children.end());
+          assert(executed_children.find(*it) == executed_children.end());
+          assert(complete_children.find(*it) == complete_children.end());
+          outstanding_children[(*it)->get_ctx_index()] = (*it);
+#endif       
+          executing_children[*it] = (*it)->get_generation();
+        }
+      }
       // Reacquire the lock and handle the operations
       d_lock.reacquire();
       if (!ready_ops.empty())
       {
         for (std::vector<Operation*>::const_iterator it = 
               ready_ops.begin(); it != ready_ops.end(); it++)
-        {
-          (*it)->set_tracking_parent(total_children_count++);
           dependence_queue.push_back(*it);
-        }
         __sync_fetch_and_add(&outstanding_children_count, ready_ops.size());
         if (ready_ops.size() != local_unordered.size())
         {
