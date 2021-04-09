@@ -36,7 +36,8 @@ namespace Legion {
       : manager(man), resume(RtUserEvent::NO_RT_USER_EVENT), 
         kind(k), operation(op), acquired_instances((op == NULL) ? NULL :
             operation->get_acquired_instances_ref()), 
-        start_time(0), collective_count(0), reentrant_disabled(false)
+        start_time(0), collective_count(0), reentrant_disabled(false),
+        supports_collectives(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -115,6 +116,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(PREMAP_TASK_CALL,
                                  task, continuation_precondition);
+        info->supports_collectives = true;
         // Build a continuation if necessary
         if (continuation_precondition.exists())
         {
@@ -167,6 +169,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_TASK_CALL,
                                  task, continuation_precondition);
+        info->supports_collectives = true;
         // Build a continuation if necessary
         if (continuation_precondition.exists())
         {
@@ -219,6 +222,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(POSTMAP_TASK_CALL,
                                  task, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<TaskOp,Mapper::PostMapInput,Mapper::PostMapOutput,
@@ -344,6 +348,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_INLINE_CALL,
                                  op, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<MapOp, 
@@ -446,6 +451,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_COPY_CALL,
                                  op, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<CopyOp,Mapper::MapCopyInput,Mapper::MapCopyOutput,
@@ -647,6 +653,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_ACQUIRE_CALL,
                                  op, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<AcquireOp, Mapper::MapAcquireInput,
@@ -720,6 +727,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_RELEASE_CALL,
                                  op, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<ReleaseOp, Mapper::MapReleaseInput,
@@ -873,6 +881,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_PARTITION_CALL,
                                  op, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<DependentPartitionOp, 
@@ -1031,6 +1040,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_MUST_EPOCH_CALL,
                                  op, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<MustEpochOp, Mapper::MapMustEpochInput, 
@@ -1057,6 +1067,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_DATAFLOW_GRAPH_CALL,
                                  NULL, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation2<Mapper::MapDataflowGraphInput, 
@@ -1776,11 +1787,23 @@ namespace Legion {
       DomainPoint point;
       if (constraints.specialized_constraint.is_collective())
       {
+        if (!ctx->supports_collectives)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not support the "
+                "creation of collective instances in this kind of mapper call.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+          resume_mapper_call(ctx);
+          return false;
+        }
         if (ctx->operation == NULL)
           REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
                 "Ignoring call to create a collective instance for the %d-"
                 "st/nd/rd/th call to create instance in mapper call %s in "
-                "mapper %s because the mapper call does not have an assoicated "
+                "mapper %s because the mapper call does not have an associated "
                 "mappable. Legion will still attempt to make an instance.",
                 ctx->collective_count++, get_mapper_call_name(ctx->kind),
                 get_mapper_name())
@@ -1873,6 +1896,18 @@ namespace Legion {
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
       if (cons->specialized_constraint.is_collective())
       {
+        if (!ctx->supports_collectives)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not support the "
+                "creation of collective instances in this kind of mapper call.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+          resume_mapper_call(ctx);
+          return false;
+        }
         if (ctx->operation == NULL)
           REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
                 "Ignoring call to create a collective instance for the %d-"
@@ -1971,6 +2006,18 @@ namespace Legion {
       if (constraints.specialized_constraint.is_collective() &&
           (ctx->operation != NULL))
       {
+        if (!ctx->supports_collectives)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not support the "
+                "creation of collective instances in this kind of mapper call.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+          resume_mapper_call(ctx);
+          return false;
+        }
         REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
               "Ignoring request to find a collective instance for the %d-"
               "st/nd/rd/th  call to find-or-create-instance in mapper call %s "
@@ -2036,6 +2083,19 @@ namespace Legion {
       else
       {
         if (constraints.specialized_constraint.is_collective())
+        {
+          if (!ctx->supports_collectives)
+          {
+            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not support the "
+                "creation of collective instances in this kind of mapper call.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+            resume_mapper_call(ctx);
+            return false;
+          }
           REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
                 "Ignoring call to create a collective instance for the %d-"
                 "st/nd/rd/th call to create instance in mapper call %s in "
@@ -2043,6 +2103,7 @@ namespace Legion {
                 "mappable. Legion will still attempt to make an instance.",
                 ctx->collective_count++, get_mapper_call_name(ctx->kind),
                 get_mapper_name())
+        }
         success = runtime->find_or_create_physical_instance(target_memory,
                   constraints, regions, result, created, mapper_id, processor, 
                   acquire, priority, tight_region_bounds, unsat, footprint,
@@ -2088,6 +2149,18 @@ namespace Legion {
       if (cons->specialized_constraint.is_collective() && 
           (ctx->operation != NULL))
       {
+        if (!ctx->supports_collectives)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not support the "
+                "creation of collective instances in this kind of mapper call.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+          resume_mapper_call(ctx);
+          return false;
+        }
         REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
               "Ignoring request to find a collective instance for the %d-"
               "st/nd/rd/th call to find-or-create-instance in mapper call %s "
@@ -2153,6 +2226,19 @@ namespace Legion {
       else
       {
         if (cons->specialized_constraint.is_collective())
+        {
+          if (!ctx->supports_collectives)
+          {
+            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not support the "
+                "creation of collective instances in this kind of mapper call.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+            resume_mapper_call(ctx);
+            return false;
+          }
           REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
                 "Ignoring call to create a collective instance for the %d-"
                 "st/nd/rd/th call to create instance in mapper call %s in "
@@ -2160,6 +2246,7 @@ namespace Legion {
                 "mappable. Legion will still attempt to make an instance.",
                 ctx->collective_count++, get_mapper_call_name(ctx->kind),
                 get_mapper_name())
+        }
         success = runtime->find_or_create_physical_instance(target_memory,
                    cons, regions, result, created, mapper_id, processor,
                    acquire, priority, tight_region_bounds, unsat, footprint,
@@ -3651,7 +3738,7 @@ namespace Legion {
         runtime->profiler->record_mapper_call(info->kind, 
             (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
             info->start_time, info->stop_time); 
-      if ((info->operation != NULL) && !runtime->unsafe_mapper)
+      if (info->supports_collectives && !runtime->unsafe_mapper)
         info->operation->report_total_collective_instance_calls(
                               info->kind, info->collective_count);
       info->resume = RtUserEvent::NO_RT_USER_EVENT;
@@ -3661,6 +3748,7 @@ namespace Legion {
       info->stop_time = 0;
       info->collective_count = 0;
       info->reentrant_disabled = false;
+      info->supports_collectives = false;
       available_infos.push_back(info);
     }
 
