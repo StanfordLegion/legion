@@ -678,15 +678,21 @@ SKIP_MACHINES= titan% daint% excalibur% cori%
 ifeq ($(strip $(USE_MPI)),1)
   # Skip any machines on this list list
   ifeq ($(filter-out $(SKIP_MACHINES),$(shell uname -n)),$(shell uname -n))
-    export OMPI_CC  := $(CC)
-    export OMPI_CXX := $(CXX)
-    export OMPI_FC  := $(FC)
-    export MPICH_CC  := $(CC)
-    export MPICH_CXX := $(CXX)
-    export MPICH_FC  := $(FC)
-    CC		:= mpicc
-    CXX		:= mpicxx
-    FC		:= mpif90
+    ifneq ($(strip $(shell $(CC) -showme:compile 2>&1 > /dev/null; echo $$?)),0)
+      export OMPI_CC  	:= $(CC)
+      export MPICH_CC  	:= $(CC)
+      CC		:= mpicc
+    endif
+    ifneq ($(strip $(shell $(CXX) -showme:compile 2>&1 > /dev/null; echo $$?)),0)
+      export OMPI_CXX 	:= $(CXX)
+      export MPICH_CXX 	:= $(CXX)
+      CXX		:= mpicxx
+    endif
+    ifneq ($(strip $(shell $(FC) -showme:compile 2>&1 > /dev/null; echo $$?)),0) 
+      export OMPI_FC  	:= $(FC)
+      export MPICH_FC  	:= $(FC)
+      FC		:= mpif90
+    endif
     # Summit/Summitdev are strange and link this automatically (but still uses mpicxx).
     # FIXME: Unfortunately you can't match against the Summit hostname right now...
     ifneq ($(findstring ppc64le,$(shell uname -p)),ppc64le)

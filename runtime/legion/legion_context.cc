@@ -7496,7 +7496,7 @@ namespace Legion {
         add_to_prepipeline_queue(op);
       LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY; 
       // If this is tracking, add it to our data structure first
-      if (op->is_tracking_parent() || unordered)
+      if (op->is_tracking_parent())
       {
         AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
@@ -7937,10 +7937,20 @@ namespace Legion {
       // If we're still in the middle of a trace then don't do any insertions
       if (current_trace != NULL)
         return;
+      // We need the child op lock here so we can add these to this
+      // list of executing children as well
+      AutoLock child_lock(child_op_lock);
       for (std::list<Operation*>::const_iterator it = 
             unordered_ops.begin(); it != unordered_ops.end(); it++)
       {
         (*it)->set_tracking_parent(total_children_count++);
+#ifdef DEBUG_LEGION
+        assert(executing_children.find(*it) == executing_children.end());
+        assert(executed_children.find(*it) == executed_children.end());
+        assert(complete_children.find(*it) == complete_children.end());
+        outstanding_children[(*it)->get_ctx_index()] = (*it);
+#endif       
+        executing_children[*it] = (*it)->get_generation();
         dependence_queue.push_back(*it);
       }
       __sync_fetch_and_add(&outstanding_children_count, unordered_ops.size());

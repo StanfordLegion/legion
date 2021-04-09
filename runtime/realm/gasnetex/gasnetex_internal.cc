@@ -1696,7 +1696,7 @@ namespace Realm {
 						 tgt_ep_index,
 						 sizeof(gex_AM_Arg_t), /*header_size*/
 						 lc_opt,
-						 GEX_FLAG_AM_PREPARE_LEAST_ALLOC);
+						 GEX_FLAG_AM_PREPARE_LEAST_CLIENT);
 	  if(min_size <= max_payload) {
 	    sd = GASNetEXHandlers::prepare_request_batch(internal->eps[src_ep_index],
 							 tgt_rank,
@@ -1792,6 +1792,25 @@ namespace Realm {
 		gex_Event_t done = GEX_EVENT_INVALID;
 		gex_Event_t *lc_opt = &done;
 
+#ifdef DEBUG_REALM
+                {
+                  size_t max_payload =
+                    GASNetEXHandlers::max_request_medium(internal->eps[src_ep_index],
+                                                         tgt_rank,
+                                                         tgt_ep_index,
+                                                         hdr_bytes,
+                                                         lc_opt,
+                                                         flags);
+                  if(payload_bytes > max_payload) {
+                    log_gex_xpair.fatal() << "medium payload too large!  src="
+                                          << Network::my_node_id << "/" << src_ep_index
+                                          << " tgt=" << tgt_rank << "/" << tgt_ep_index
+                                          << " max=" << max_payload << " act=" << payload_bytes;
+                    abort();
+                  }
+                }
+#endif
+
 		int ret = GASNetEXHandlers::send_request_medium(internal->eps[src_ep_index],
 								tgt_rank,
 								tgt_ep_index,
@@ -1851,6 +1870,25 @@ namespace Realm {
 		lc_opt = &done;
 	      else
 		lc_opt = GEX_EVENT_GROUP; // don't care
+
+#ifdef DEBUG_REALM
+              {
+                size_t max_payload =
+                  GASNetEXHandlers::max_request_long(internal->eps[src_ep_index],
+                                                     tgt_rank,
+                                                     tgt_ep_index,
+                                                     hdr_bytes,
+                                                     lc_opt,
+                                                     flags);
+                if(extra->payload_bytes > max_payload) {
+                  log_gex_xpair.fatal() << "long payload too large!  src="
+                                        << Network::my_node_id << "/" << src_ep_index
+                                        << " tgt=" << tgt_rank << "/" << tgt_ep_index
+                                        << " max=" << max_payload << " act=" << extra->payload_bytes;
+                  abort();
+                }
+              }
+#endif
 
 	      int ret = GASNetEXHandlers::send_request_long(internal->eps[src_ep_index],
 							    tgt_rank,
@@ -3351,6 +3389,26 @@ namespace Realm {
 	gex_Event_t *lc_opt = GEX_EVENT_NOW;
 	gex_Flags_t flags = GEX_FLAG_IMMEDIATE;
 
+#ifdef DEBUG_REALM
+        {
+          size_t max_payload =
+            GASNetEXHandlers::max_request_medium(eps[0],
+                                                 msg->target,
+                                                 msg->target_ep_index,
+                                                 header_size,
+                                                 lc_opt,
+                                                 flags);
+          if(payload_size > max_payload) {
+            log_gex_xpair.fatal() << "medium payload too large!  src="
+                                  << Network::my_node_id << "/0"
+                                  << " tgt=" << msg->target
+                                  << "/" << msg->target_ep_index
+                                  << " max=" << max_payload << " act=" << payload_size;
+            abort();
+          }
+        }
+#endif
+
 	int ret = GASNetEXHandlers::send_request_medium(eps[0],
 							msg->target,
 							msg->target_ep_index,
@@ -3549,6 +3607,26 @@ namespace Realm {
 	if(module->cfg_do_checksums)
 	  insert_packet_crc(arg0, header_base, header_size,
 			    nullptr, payload_size);
+
+#ifdef DEBUG_REALM
+        {
+          size_t max_payload =
+            GASNetEXHandlers::max_request_long(eps[0],
+                                               msg->target,
+                                               msg->target_ep_index,
+                                               header_size,
+                                               lc_opt,
+                                               flags);
+          if(payload_size > max_payload) {
+            log_gex_xpair.fatal() << "long payload too large!  src="
+                                  << Network::my_node_id << "/0"
+                                  << " tgt=" << msg->target
+                                  << "/" << msg->target_ep_index
+                                  << " max=" << max_payload << " act=" << payload_size;
+            abort();
+          }
+        }
+#endif
 
 	int ret = GASNetEXHandlers::send_request_long(eps[0],
 						      msg->target,

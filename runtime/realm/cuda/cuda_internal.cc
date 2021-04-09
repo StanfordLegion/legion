@@ -552,10 +552,12 @@ namespace Realm {
             switch(reduced_fill_size) {
             case 1: {
               // memset8
+              uint8_t fill_u8;
+              memcpy(&fill_u8, fill_data, 1);
               if(out_dim == 1) {
                 size_t bytes = out_alc.remaining(0);
                 CHECK_CU( cuMemsetD8Async(CUdeviceptr(out_base + out_offset),
-                                          *reinterpret_cast<const uint8_t *>(fill_data),
+                                          fill_u8,
                                           bytes,
                                           stream->get_stream()) );
                 out_alc.advance(0, bytes);
@@ -565,7 +567,7 @@ namespace Realm {
                 size_t lines = out_alc.remaining(1);
                 CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(out_base + out_offset),
                                             out_alc.get_stride(1),
-                                            *reinterpret_cast<const uint8_t *>(fill_data),
+                                            fill_u8,
                                             bytes, lines,
                                             stream->get_stream()) );
                 out_alc.advance(1, lines);
@@ -576,13 +578,15 @@ namespace Realm {
 
             case 2: {
               // memset16
+              uint16_t fill_u16;
+              memcpy(&fill_u16, fill_data, 2);
               if(out_dim == 1) {
                 size_t bytes = out_alc.remaining(0);
 #ifdef DEBUG_REALM
                 assert((bytes & 1) == 0);
 #endif
                 CHECK_CU( cuMemsetD16Async(CUdeviceptr(out_base + out_offset),
-                                           *reinterpret_cast<const uint16_t *>(fill_data),
+                                           fill_u16,
                                            bytes >> 1,
                                            stream->get_stream()) );
                 out_alc.advance(0, bytes);
@@ -596,7 +600,7 @@ namespace Realm {
 #endif
                 CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(out_base + out_offset),
                                              out_alc.get_stride(1),
-                                             *reinterpret_cast<const uint16_t *>(fill_data),
+                                             fill_u16,
                                              bytes >> 1, lines,
                                              stream->get_stream()) );
                 out_alc.advance(1, lines);
@@ -607,13 +611,15 @@ namespace Realm {
 
             case 4: {
               // memset32
+              uint32_t fill_u32;
+              memcpy(&fill_u32, fill_data, 4);
               if(out_dim == 1) {
                 size_t bytes = out_alc.remaining(0);
 #ifdef DEBUG_REALM
                 assert((bytes & 3) == 0);
 #endif
                 CHECK_CU( cuMemsetD32Async(CUdeviceptr(out_base + out_offset),
-                                           *reinterpret_cast<const uint32_t *>(fill_data),
+                                           fill_u32,
                                            bytes >> 2,
                                            stream->get_stream()) );
                 out_alc.advance(0, bytes);
@@ -627,7 +633,7 @@ namespace Realm {
 #endif
                 CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(out_base + out_offset),
                                              out_alc.get_stride(1),
-                                             *reinterpret_cast<const uint32_t *>(fill_data),
+                                             fill_u32,
                                              bytes >> 2, lines,
                                              stream->get_stream()) );
                 out_alc.advance(1, lines);
@@ -645,14 +651,25 @@ namespace Realm {
 #ifdef DEBUG_REALM
               assert((bytes % reduced_fill_size) == 0);
 #endif
+              // these strided 2d copies have very poor performance, so don't
+              //  do more than ~32kb worth of them and switch to the repeated
+              //  doubling of them for very long lines
+              size_t fill_elems = ((bytes <= 32768)            ? elems :
+                                   (reduced_fill_size > 32768) ? 1 :
+                                                                 (32768 / reduced_fill_size));
+
               size_t partial_bytes = 0;
               if((reduced_fill_size & 3) == 0) {
                 // 32-bit partial fills allowed
                 while(partial_bytes <= (reduced_fill_size - 4)) {
+                  uint32_t fill_u32;
+                  memcpy(&fill_u32,
+                         reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
+                         4);
                   CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(out_base + out_offset + partial_bytes),
                                                reduced_fill_size,
-                                               reinterpret_cast<const uint32_t *>(fill_data)[partial_bytes >> 2],
-                                               1 /*"width"*/, elems /*"height"*/,
+                                               fill_u32,
+                                               1 /*"width"*/, fill_elems /*"height"*/,
                                                stream->get_stream()) );
                   partial_bytes += 4;
                 }
@@ -660,22 +677,40 @@ namespace Realm {
               if((reduced_fill_size & 1) == 0) {
                 // 16-bit partial fills allowed
                 while(partial_bytes <= (reduced_fill_size - 2)) {
+                  uint16_t fill_u16;
+                  memcpy(&fill_u16,
+                         reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
+                         2);
                   CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(out_base + out_offset + partial_bytes),
                                                reduced_fill_size,
-                                               reinterpret_cast<const uint16_t *>(fill_data)[partial_bytes >> 1],
-                                               1 /*"width"*/, elems /*"height"*/,
+                                               fill_u16,
+                                               1 /*"width"*/, fill_elems /*"height"*/,
                                                stream->get_stream()) );
                   partial_bytes += 2;
                 }
               }
               // leftover or unaligned bytes are done 8 bits at a time
               while(partial_bytes < reduced_fill_size) {
-                CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(out_base + out_offset + partial_bytes),
-                                             reduced_fill_size,
-                                             reinterpret_cast<const uint16_t *>(fill_data)[partial_bytes],
-                                             1 /*"width"*/, elems /*"height"*/,
-                                             stream->get_stream()) );
+                uint8_t fill_u8;
+                memcpy(&fill_u8,
+                       reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
+                       1);
+                CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(out_base + out_offset + partial_bytes),
+                                            reduced_fill_size,
+                                            fill_u8,
+                                            1 /*"width"*/, fill_elems /*"height"*/,
+                                            stream->get_stream()) );
                 partial_bytes += 1;
+              }
+
+              while(fill_elems < elems) {
+                size_t todo = std::min(fill_elems, elems - fill_elems);
+                CHECK_CU( cuMemcpyAsync(CUdeviceptr(out_base + out_offset +
+                                                    (fill_elems * reduced_fill_size)),
+                                        CUdeviceptr(out_base + out_offset),
+                                        todo * reduced_fill_size,
+                                        stream->get_stream()) );
+                fill_elems += todo;
               }
 
               if(out_dim == 1) {

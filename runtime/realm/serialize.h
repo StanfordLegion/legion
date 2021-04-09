@@ -127,6 +127,8 @@ namespace Realm {
       DynamicBufferSerializer(size_t initial_size);
       ~DynamicBufferSerializer(void);
 
+      void reset(void);
+
       size_t bytes_used(void) const;
       const void *get_buffer(void) const;
       void *detach_buffer(ptrdiff_t max_wasted_bytes = 0);

@@ -421,6 +421,19 @@ namespace Realm {
     // do not comment about on-demand-paging, which we are uninterested in
     setenv("GASNET_ODP_VERBOSE", "0", 0 /*no overwrite*/);
 
+    // if we are using the ibv conduit with multiple-hca support, we need
+    //  to enable fenced puts to work around gasnet bug 3447
+    //  (https://gasnet-bugs.lbl.gov/bugzilla/show_bug.cgi?id=3447), but
+    //  we can't set the flag if gasnet does NOT have multiple-hca support
+    //  because it'll print warnings
+    // there are no supported ways to detect this, and we can't even see the
+    //  internal GASNETC_HAVE_FENCED_PUTS define, so we use the same condition
+    //  that's used to set that in gasnet_core_internal.h and hope it doesn't
+    //  change
+#if GASNETC_IBV_MAX_HCAS_CONFIGURE
+    setenv("GASNET_USE_FENCED_PUTS", "1", 0 /*no overwrite*/);
+#endif
+
     // GASNetEX no longer modifies argc/argv, but we've got it here, so share
     //  with gasnet anyway
     mod->internal->init(argc, argv);
