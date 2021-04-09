@@ -1338,7 +1338,7 @@ namespace Realm {
         // On the first dimension we find, see if there are any other 
         // dimensions of extent 1 that we can also include now
         if (!used_mask) {
-          for (int k = j+1; j < N; k++) {
+          for (int k = j+1; k < N; k++) {
             if ((bounds.lo[k] == bounds.hi[k]) && (strides[k] == exp_offset)) {
               used_mask |= (1 << k);
               i++;
