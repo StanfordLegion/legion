@@ -2251,24 +2251,34 @@ namespace Legion {
       {
         ptrdiff_t exp_offset = field_size;
         int used_mask = 0; // keep track of the dimensions we've already matched
+        static_assert((N <= (8*sizeof(used_mask))), "Mask dim exceeded");
         for (int i = 0; i < N; i++) {
           bool found = false;
           for (int j = 0; j < N; j++) {
             if ((used_mask >> j) & 1) continue;
             if (strides[j] != exp_offset) continue;
             found = true;
-            // Handle the case where we have multiple dimensions of extent 1
-            if (!used_mask) {
-              for (int k = j+1; k < N; k++) {
-                if ((bounds.lo[k] == bounds.hi[k]) && 
-                    (strides[k] == exp_offset)) {
-                  used_mask |= (1 << k);
-                  ++i;
+            // It's possible other dimensions can have the same strides if
+            // there are multiple dimensions with extents of size 1. At most
+            // one dimension can have an extent >1 though
+            int nontrivial = (bounds.lo[j] < bounds.hi[j]) ? j : -1;
+            for (int k = j+1; k < N; k++) {
+              if ((used_mask >> k) & 1) continue;
+              if (strides[k] == exp_offset) {
+                if (bounds.lo[k] < bounds.hi[k]) {
+                  // if we already saw a non-trivial dimension this is bad
+                  if (nontrivial >= 0)
+                    return false;
+                  else
+                    nontrivial = k;
                 }
+                used_mask |= (1 << k);
+                i++;
               }
             }
             used_mask |= (1 << j);
-            exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
+            if (nontrivial >= 0)
+              exp_offset *= (bounds.hi[nontrivial] - bounds.lo[nontrivial] + 1);
             break;
           }
           if (!found)
@@ -2284,24 +2294,34 @@ namespace Legion {
       {
         size_t exp_offset = field_size;
         int used_mask = 0; // keep track of the dimensions we've already matched
+        static_assert((N <= (8*sizeof(used_mask))), "Mask dim exceeded");
         for (int i = 0; i < N; i++) {
           bool found = false;
           for (int j = 0; j < N; j++) {
             if ((used_mask >> j) & 1) continue;
             if (strides[j] != exp_offset) continue;
             found = true;
-            // Handle the case where we have multiple dimensions of extent 1
-            if (!used_mask) {
-              for (int k = j+1; k < N; k++) {
-                if ((bounds.lo[k] == bounds.hi[k]) && 
-                    (strides[k] == exp_offset)) {
-                  used_mask |= (1 << k);
-                  ++i;
+            // It's possible other dimensions can have the same strides if
+            // there are multiple dimensions with extents of size 1. At most
+            // one dimension can have an extent >1 though
+            int nontrivial = (bounds.lo[j] < bounds.hi[j]) ? j : -1;
+            for (int k = j+1; k < N; k++) {
+              if ((used_mask >> k) & 1) continue;
+              if (strides[k] == exp_offset) {
+                if (bounds.lo[k] < bounds.hi[k]) {
+                  // if we already saw a non-trivial dimension this is bad
+                  if (nontrivial >= 0)
+                    return false;
+                  else
+                    nontrivial = k;
                 }
+                used_mask |= (1 << k);
+                i++;
               }
             }
             used_mask |= (1 << j);
-            exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
+            if (nontrivial >= 0)
+              exp_offset *= (bounds.hi[nontrivial] - bounds.lo[nontrivial] + 1);
             break;
           }
           if (!found)
