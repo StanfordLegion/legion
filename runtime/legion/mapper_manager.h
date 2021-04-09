@@ -36,6 +36,7 @@ namespace Legion {
       unsigned long long                stop_time;
       unsigned                          collective_count;
       bool                              reentrant_disabled;
+      bool                              supports_collectives;
     };
 
     /**
