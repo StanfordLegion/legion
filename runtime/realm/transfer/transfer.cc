@@ -2456,13 +2456,16 @@ namespace Realm {
       //  (i.e. the merging should not be done via rdma)
       Channel *last_channel = path_infos[0].xd_channels[path_infos[0].xd_channels.size() - 1];
       bool same_last_channel = true;
-      for(size_t i = 0; i < path_infos.size(); i++) {
-	if(path_infos[i].xd_channels[path_infos[i].xd_channels.size() - 1] !=
-	   last_channel) {
-	  same_last_channel = false;
-	  break;
-	}
-      }
+      if(last_channel->node == dst_node) {
+        for(size_t i = 1; i < path_infos.size(); i++) {
+          if(path_infos[i].xd_channels[path_infos[i].xd_channels.size() - 1] !=
+             last_channel) {
+            same_last_channel = false;
+            break;
+          }
+        }
+      } else
+        same_last_channel = false;
       if(!same_last_channel) {
 	// figure out what the final kind will be (might not be the same as
 	//  any of the current paths)
