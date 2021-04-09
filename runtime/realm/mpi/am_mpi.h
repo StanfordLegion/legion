@@ -28,7 +28,7 @@
 
 // size of posted receives (i.e. header+payload limit that can be sent
 //  eagerly)
-#define AM_BUF_SIZE  1024
+#define AM_BUF_SIZE  4096
 
 #define CHECK_MPI(cmd) do { \
   int ret = (cmd); \
