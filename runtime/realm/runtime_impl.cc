@@ -1048,6 +1048,126 @@ namespace Realm {
       return true;
     }
 
+    template <typename T>
+    static bool serialize_announce(T& serializer, ProcessorImpl *impl,
+                                   NetworkModule *net)
+    {
+      Processor p = impl->me;
+      Processor::Kind k = impl->me.kind();
+      int num_cores = impl->num_cores;
+
+      bool ok = ((serializer << NODE_ANNOUNCE_PROC) &&
+                 (serializer << p) &&
+                 (serializer << k) &&
+                 (serializer << num_cores));
+      return ok;
+    }
+
+    template <typename T>
+    static bool serialize_announce(T& serializer, MemoryImpl *impl,
+                                   NetworkModule *net)
+    {
+      Memory m = impl->me;
+      Memory::Kind k = impl->me.kind();
+      size_t size = impl->size;
+      const ByteArray *rdma_info = impl->get_rdma_info(net);
+
+      bool ok = ((serializer << NODE_ANNOUNCE_MEM) &&
+                 (serializer << m) &&
+                 (serializer << k) &&
+                 (serializer << size) &&
+                 (serializer << (rdma_info != 0)));
+      if(rdma_info != 0)
+        ok = ok && (serializer << *rdma_info);
+      return ok;
+    }
+
+    template <typename T>
+    static bool serialize_announce(T& serializer, IBMemory *ibmem,
+                                   NetworkModule *net)
+    {
+      Memory m = ibmem->me;
+      Memory::Kind k = ibmem->me.kind();
+      size_t size = ibmem->size;
+      const ByteArray *rdma_info = ibmem->get_rdma_info(net);
+
+      bool ok = ((serializer << NODE_ANNOUNCE_IB_MEM) &&
+                 (serializer << m) &&
+                 (serializer << k) &&
+                 (serializer << size) &&
+                 (serializer << (rdma_info != 0)));
+      if(rdma_info != 0)
+        ok = ok && (serializer << *rdma_info);
+      return ok;
+    }
+
+    template <typename T>
+    static bool serialize_announce(T& serializer,
+                                   const Machine::ProcessorMemoryAffinity& pma,
+                                   NetworkModule *net)
+    {
+      bool ok = ((serializer << NODE_ANNOUNCE_PMA) &&
+                 (serializer << pma.p) &&
+                 (serializer << pma.m) &&
+                 (serializer << pma.bandwidth) &&
+                 (serializer << pma.latency));
+      return ok;
+    }
+
+    template <typename T>
+    static bool serialize_announce(T& serializer,
+                                   const Machine::MemoryMemoryAffinity& mma,
+                                   NetworkModule *net)
+    {
+      bool ok = ((serializer << NODE_ANNOUNCE_MMA) &&
+                 (serializer << mma.m1) &&
+                 (serializer << mma.m2) &&
+                 (serializer << mma.bandwidth) &&
+                 (serializer << mma.latency));
+      return ok;
+    }
+
+    template <typename T>
+    static bool serialize_announce(T& serializer, Channel *ch,
+                                   NetworkModule *net)
+    {
+      RemoteChannelInfo *rci = ch->construct_remote_info();
+      bool ok = ((serializer << NODE_ANNOUNCE_DMA_CHANNEL) &&
+                 (serializer << *rci));
+      delete rci;
+      return ok;
+    }
+
+    template <typename T>
+    static int fragmented_announce(const NodeSet& targets,
+                                   NetworkModule *net,
+                                   Serialization::DynamicBufferSerializer& dbs,
+                                   size_t max_frag_size,
+                                   T thing)
+    {
+      size_t prev_size = dbs.bytes_used();
+      bool ok = serialize_announce(dbs, thing, net);
+      assert(ok);
+
+      size_t size = dbs.bytes_used();
+      if(size > max_frag_size) {
+        // send the data that we had before this object
+        assert(prev_size > 0);
+        ActiveMessage<NodeAnnounceMessage> amsg(targets, dbs.get_buffer(), prev_size);
+        amsg->num_fragments = 0; // count not known yet
+        amsg.commit();
+        dbs.reset();
+        // re-serialize this object
+        bool ok = serialize_announce(dbs, thing, net);
+        assert(ok);
+#ifdef DEBUG_REALM
+        assert(dbs.bytes_used() <= max_frag_size);
+#endif
+        return 1;
+      } else
+        return 0;
+    }
+
     bool RuntimeImpl::configure_from_command_line(std::vector<std::string> &cmdline)
     {
       // very first thing - let the logger initialization happen
@@ -1607,68 +1727,40 @@ namespace Realm {
 	
 	Serialization::DynamicBufferSerializer dbs(4096);
 
-	unsigned num_procs = 0;
-	unsigned num_memories = 0;
-	unsigned num_ib_memories = 0;
-	bool ok = true;
+        // when the preferred message size is small, we'll send multiple
+        //  fragments
+        size_t max_frag_size = ActiveMessage<NodeAnnounceMessage>::recommended_max_payload(targets, false /*!with_congestion*/);
+        int num_fragments = 0;
+
+#ifdef DEBUG_REALM_STARTUP
+	if(Network::my_node_id == 0) {
+	  TimeStamp ts("sending announcements", false);
+	  fflush(stdout);
+	}
+#endif
 
 	// announce each processor
 	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
 	    it != n->processors.end();
 	    it++)
-	  if(*it) {
-	    Processor p = (*it)->me;
-	    Processor::Kind k = (*it)->me.kind();
-	    int num_cores = (*it)->num_cores;
-
-	    num_procs++;
-	    ok = (ok &&
-		  (dbs << NODE_ANNOUNCE_PROC) &&
-		  (dbs << p) &&
-		  (dbs << k) &&
-		  (dbs << num_cores));
-	  }
+	  if(*it)
+            num_fragments += fragmented_announce(targets, *nit,
+                                                 dbs, max_frag_size, *it);
 
 	// now each memory
 	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
 	    it != n->memories.end();
 	    it++)
-	  if(*it) {
-	    Memory m = (*it)->me;
-	    Memory::Kind k = (*it)->me.kind();
-	    size_t size = (*it)->size;
-	    const ByteArray *rdma_info = (*it)->get_rdma_info(*nit);
-
-	    num_memories++;
-	    ok = (ok &&
-		  (dbs << NODE_ANNOUNCE_MEM) &&
-		  (dbs << m) &&
-		  (dbs << k) &&
-		  (dbs << size) &&
-		  (dbs << (rdma_info != 0)));
-	    if(rdma_info != 0)
-	      ok = ok && (dbs << *rdma_info);
-	  }
+	  if(*it)
+            num_fragments += fragmented_announce(targets, *nit,
+                                                 dbs, max_frag_size, *it);
 
         for (std::vector<IBMemory *>::const_iterator it = n->ib_memories.begin();
              it != n->ib_memories.end();
              it++)
-          if(*it) {
-            Memory m = (*it)->me;
-            Memory::Kind k = (*it)->me.kind();
-	    size_t size = (*it)->size;
-	    const ByteArray *rdma_info = (*it)->get_rdma_info(*nit);
-
-            num_ib_memories++;
-	    ok = (ok &&
-		  (dbs << NODE_ANNOUNCE_IB_MEM) &&
-		  (dbs << m) &&
-		  (dbs << k) &&
-		  (dbs << size) &&
-		  (dbs << (rdma_info != 0)));
-	    if(rdma_info != 0)
-	      ok = ok && (dbs << *rdma_info);
-          }
+          if(*it)
+            num_fragments += fragmented_announce(targets, *nit,
+                                                 dbs, max_frag_size, *it);
 
 	// announce each processor's affinities
 	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
@@ -1681,14 +1773,9 @@ namespace Realm {
 
 	    for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it2 = pmas.begin();
 		it2 != pmas.end();
-		it2++) {
-	      ok = (ok &&
-		    (dbs << NODE_ANNOUNCE_PMA) &&
-		    (dbs << it2->p) &&
-		    (dbs << it2->m) &&
-		    (dbs << it2->bandwidth) &&
-		    (dbs << it2->latency));
-	    }
+		it2++)
+              num_fragments += fragmented_announce(targets, *nit,
+                                                   dbs, max_frag_size, *it2);
 	  }
 
 	// now each memory's affinities with other memories
@@ -1708,41 +1795,22 @@ namespace Realm {
 	      if((it2->m1 != m) || ((NodeID)(it2->m2.address_space()) != Network::my_node_id))
 		continue;
 
-	      ok = (ok &&
-		    (dbs << NODE_ANNOUNCE_MMA) &&
-		    (dbs << it2->m1) &&
-		    (dbs << it2->m2) &&
-		    (dbs << it2->bandwidth) &&
-		    (dbs << it2->latency));
+              num_fragments += fragmented_announce(targets, *nit,
+                                                   dbs, max_frag_size, *it2);
 	    }
 	  }
 
 	for(std::vector<Channel *>::const_iterator it = n->dma_channels.begin();
 	    it != n->dma_channels.end();
 	    ++it)
-	  if(*it) {
-            RemoteChannelInfo *rci = (*it)->construct_remote_info();
-	    ok = (ok &&
-		  (dbs << NODE_ANNOUNCE_DMA_CHANNEL) &&
-                  (dbs << *rci));
-            delete rci;
-	  }
+	  if(*it)
+            num_fragments += fragmented_announce(targets, *nit,
+                                                 dbs, max_frag_size, *it);
 
-	ok = (ok && (dbs << NODE_ANNOUNCE_DONE));
-	assert(ok);
-
-#ifdef DEBUG_REALM_STARTUP
-	if(Network::my_node_id == 0) {
-	  TimeStamp ts("sending announcements", false);
-	  fflush(stdout);
-	}
-#endif
-
-	ActiveMessage<NodeAnnounceMessage> amsg(targets, dbs.bytes_used());
-	amsg->num_procs = num_procs;
-	amsg->num_memories = num_memories;
-	amsg->num_ib_memories = num_ib_memories;
-	amsg.add_payload(dbs.get_buffer(), dbs.bytes_used());
+        // have to send one final message with the remaining data and a valid
+        //  fragment count
+	ActiveMessage<NodeAnnounceMessage> amsg(targets, dbs.get_buffer(), dbs.bytes_used());
+        amsg->num_fragments = num_fragments + 1;
 	amsg.commit();
       }
 

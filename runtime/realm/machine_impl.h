@@ -116,8 +116,7 @@ namespace Realm {
 			       Memory restrict_mem2 = Memory::NO_MEMORY,
 			       bool local_only = true) const;
       
-      void parse_node_announce_data(int node_id, unsigned num_procs,
-				    unsigned num_memories, unsigned num_ib_memories,
+      void parse_node_announce_data(int node_id,
 				    const void *args, size_t arglen,
 				    bool remote);
 
@@ -366,7 +365,7 @@ namespace Realm {
   // active messages
 
   enum NodeAnnounceTag {
-    NODE_ANNOUNCE_DONE = 0,
+    NODE_ANNOUNCE_INVALID = 0,
     NODE_ANNOUNCE_PROC, // PROC id kind
     NODE_ANNOUNCE_MEM,  // MEM id size
     NODE_ANNOUNCE_IB_MEM, // IB_MEM id size
@@ -376,9 +375,7 @@ namespace Realm {
   };
 
   struct NodeAnnounceMessage {
-    unsigned num_procs;
-    unsigned num_memories;
-    unsigned num_ib_memories;
+    int num_fragments;
 
     static void handle_message(NodeID sender, const NodeAnnounceMessage &msg,
 			       const void *data, size_t datalen);
