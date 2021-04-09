@@ -2237,6 +2237,16 @@ namespace Legion {
             if ((used_mask >> j) & 1) continue;
             if (strides[j] != exp_offset) continue;
             found = true;
+            // Handle the case where we have multiple dimensions of extent 1
+            if (!used_mask) {
+              for (int k = j+1; k < N; k++) {
+                if ((bounds.lo[k] == bounds.hi[k]) && 
+                    (strides[k] == exp_offset)) {
+                  used_mask |= (1 << k);
+                  ++i;
+                }
+              }
+            }
             used_mask |= (1 << j);
             exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
             break;
@@ -2260,6 +2270,16 @@ namespace Legion {
             if ((used_mask >> j) & 1) continue;
             if (strides[j] != exp_offset) continue;
             found = true;
+            // Handle the case where we have multiple dimensions of extent 1
+            if (!used_mask) {
+              for (int k = j+1; k < N; k++) {
+                if ((bounds.lo[k] == bounds.hi[k]) && 
+                    (strides[k] == exp_offset)) {
+                  used_mask |= (1 << k);
+                  ++i;
+                }
+              }
+            }
             used_mask |= (1 << j);
             exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
             break;
