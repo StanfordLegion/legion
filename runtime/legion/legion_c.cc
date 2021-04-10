@@ -845,6 +845,12 @@ legion_index_space_retrieve_name(legion_runtime_t runtime_,
   runtime->retrieve_name(handle, *result);
 }
 
+int
+legion_index_space_get_dim(legion_index_space_t handle_)
+{
+  return CObjectWrapper::unwrap(handle_).get_dim();
+}
+
 //------------------------------------------------------------------------
 // Index Partition Operations
 //------------------------------------------------------------------------

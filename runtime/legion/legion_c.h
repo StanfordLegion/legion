@@ -1042,6 +1042,14 @@ extern "C" {
                                    legion_index_space_t handle,
                                    const char **result);
 
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::IndexSpace::get_dim()
+   */
+  int
+  legion_index_space_get_dim(legion_index_space_t handle);
+
   // -----------------------------------------------------------------------
   // Index Partition Operations
   // -----------------------------------------------------------------------
