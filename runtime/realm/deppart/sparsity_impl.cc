@@ -794,6 +794,8 @@ namespace Realm {
       ActiveMessage<RemoteSparsityContrib> amsg(owner);
       amsg->sparsity = me;
       amsg->piece_count = 1;
+      amsg->disjoint = false;
+      amsg->total_count = 0;
       amsg.commit();
 
       return;
@@ -821,7 +823,9 @@ namespace Realm {
 
     if(owner != Network::my_node_id) {
       // send the data to the owner to collect
-      const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
+      size_t max_bytes_per_packet = ActiveMessage<RemoteSparsityContrib>::recommended_max_payload(owner, false /*!with_congestion*/);
+      const size_t max_to_send = max_bytes_per_packet / sizeof(Rect<N,T>);
+      assert(max_to_send > 0);
       const Rect<N,T> *rdata = (rects.empty() ? 0 : &rects[0]);
       size_t num_pieces = 0;
       size_t remaining = rects.size();
@@ -831,6 +835,8 @@ namespace Realm {
 	ActiveMessage<RemoteSparsityContrib> amsg(owner, bytes);
 	amsg->sparsity = me;
 	amsg->piece_count = 0;
+        amsg->disjoint = false;
+        amsg->total_count = 0;
 	amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
 	amsg.commit();
 
@@ -844,6 +850,8 @@ namespace Realm {
       ActiveMessage<RemoteSparsityContrib> amsg(owner, bytes);
       amsg->sparsity = me;
       amsg->piece_count = num_pieces + 1;
+      amsg->disjoint = false;
+      amsg->total_count = 0;
       amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
       amsg.commit();
 
@@ -851,18 +859,35 @@ namespace Realm {
     }
 
     // local contribution is done as a single piece
-    contribute_raw_rects((rects.empty() ? 0 : &rects[0]), rects.size(), 1);
+    contribute_raw_rects((rects.empty() ? 0 : &rects[0]), rects.size(), 1,
+                         false, 0);
   }
 
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_raw_rects(const Rect<N,T>* rects,
 						  size_t count,
-						  size_t piece_count)
+						  size_t piece_count,
+                                                  bool disjoint,
+                                                  size_t total_count)
   {
     if(count > 0) {
       AutoLock<> al(mutex);
 
-      if(N == 1) {
+      if(total_count > 0)
+        this->entries.reserve(total_count);
+
+      if(disjoint) {
+        // provider promises that all the pieces we will see are disjoint, so
+        //  just stick them on the end of the list and we'll sort in finalize()
+        size_t cur_size = this->entries.size();
+        this->entries.resize(cur_size + count);
+        for(unsigned i = 0; i < count; i++) {
+          this->entries[cur_size + i].bounds = rects[i];
+          this->entries[cur_size + i].sparsity.id = 0;
+          this->entries[cur_size + i].bitmap = 0;
+        }
+      }
+      else if(N == 1) {
 	// demand that our input data is sorted
 	for(size_t i = 1; i < count; i++)
 	  assert(rects[i-1].hi.x < (rects[i].lo.x - 1));
@@ -1160,16 +1185,20 @@ namespace Realm {
       }
 	
       const Rect<N,T> *rdata = &rects[0];
-      size_t remaining = rects.size();
-      const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
+      size_t total_count = rects.size();
+      size_t remaining = total_count;
+      size_t max_bytes_per_packet = ActiveMessage<RemoteSparsityContrib>::recommended_max_payload(requestor, false /*!with_congestion*/);
+      const size_t max_to_send = max_bytes_per_packet / sizeof(Rect<N,T>);
+      assert(max_to_send > 0);
       size_t num_pieces = 0;
       // send partial messages first
       while(remaining > max_to_send) {
 	size_t bytes = max_to_send * sizeof(Rect<N,T>);
-	ActiveMessage<RemoteSparsityContrib> amsg(requestor, bytes);
+	ActiveMessage<RemoteSparsityContrib> amsg(requestor, rdata, bytes);
 	amsg->sparsity = me;
 	amsg->piece_count = 0;
-	amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
+        amsg->disjoint = true; // we've already de-overlapped everything
+        amsg->total_count = total_count;
 	amsg.commit();
 
 	num_pieces++;
@@ -1179,19 +1208,24 @@ namespace Realm {
 
       // final message includes the count of all messages (including this one!)
       size_t bytes = remaining * sizeof(Rect<N,T>);
-      ActiveMessage<RemoteSparsityContrib> amsg(requestor, bytes);
+      ActiveMessage<RemoteSparsityContrib> amsg(requestor, rdata, bytes);
       amsg->sparsity = me;
       amsg->piece_count = num_pieces + 1;
-      amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
+      amsg->disjoint = true; // we've already de-overlapped everything
+      amsg->total_count = total_count;
       amsg.commit();
     }
   }
   
   template <int N, typename T>
-  static inline bool non_overlapping_bounds_1d_comp(const SparsityMapEntry<N,T>& lhs,
-						    const SparsityMapEntry<N,T>& rhs)
+  static inline bool compare_bounds_lo(const SparsityMapEntry<N,T>& lhs,
+                                       const SparsityMapEntry<N,T>& rhs)
   {
-    return lhs.bounds.lo.x < rhs.bounds.lo.x;
+    for(int i = 0; i < N; i++) {
+      if(lhs.bounds.lo[i] < rhs.bounds.lo[i]) return true;
+      if(lhs.bounds.lo[i] > rhs.bounds.lo[i]) return false;
+    }
+    return false;
   }
 
   template <int N, typename T>
@@ -1283,13 +1317,16 @@ namespace Realm {
       }
     }
 
-    // first step is to organize the data a little better - for N=1, this means sorting
+    // first step is to organize the data a little better - for now, this means
+    //  sorting the entries lexicographically by their lo coordinates
     //  the entries list
+    std::sort(this->entries.begin(), this->entries.end(), compare_bounds_lo<N,T>);
+#ifdef DEBUG_REALM
     if(N == 1) {
-      std::sort(this->entries.begin(), this->entries.end(), non_overlapping_bounds_1d_comp<N,T>);
       for(size_t i = 1; i < this->entries.size(); i++)
 	assert(this->entries[i-1].bounds.hi.x < (this->entries[i].bounds.lo.x - 1));
     }
+#endif
 
     // now that we've got our entries nice and tidy, build a bounded approximation of them
     if(true /*ID(me).sparsity_creator_node() == Network::my_node_id*/) {
@@ -1404,7 +1441,9 @@ namespace Realm {
     assert((datalen % sizeof(Rect<N,T>)) == 0);
     SparsityMapImpl<N,T>::lookup(msg.sparsity)->contribute_raw_rects((const Rect<N,T> *)data,
 								     count,
-								     msg.piece_count);
+								     msg.piece_count,
+                                                                     msg.disjoint,
+                                                                     msg.total_count);
   }
 
 

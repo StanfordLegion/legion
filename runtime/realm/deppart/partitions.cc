@@ -42,7 +42,6 @@ namespace Realm {
     int cfg_num_partitioning_workers = 0; // use bgwork by default
     bool cfg_disable_intersection_optimization = false;
     int cfg_max_rects_in_approximation = 32;
-    size_t cfg_max_bytes_per_packet = 2048;//32768;
     bool cfg_worker_threads_sleep = true;
     bool cfg_allow_inline_operations = false;
   };

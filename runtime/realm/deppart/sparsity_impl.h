@@ -51,7 +51,8 @@ namespace Realm {
     void contribute_nothing(void);
     void contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects);
     void contribute_raw_rects(const Rect<N,T>* rects, size_t count,
-			      size_t piece_count);
+			      size_t piece_count, bool disjoint,
+                              size_t total_count);
 
     // adds a microop as a waiter for valid sparsity map data - returns true
     //  if the uop is added to the list (i.e. will be getting a callback at some point),
@@ -76,6 +77,10 @@ namespace Realm {
     struct RemoteSparsityContrib {
       SparsityMap<N,T> sparsity;
       size_t piece_count; // non-zero only on last piece of contribution
+      bool disjoint; // if set, all rectangles (from this source and any other)
+                     //   are known to be disjoint
+      size_t total_count; // if non-zero, advertises the known total number of
+                          //  recangles in the sparsity map
 
       static void handle_message(NodeID sender,
 				 const RemoteSparsityContrib &msg,
