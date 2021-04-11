@@ -11055,7 +11055,7 @@ namespace Legion {
                 // do this in-place without support from Realm
                 if (shadow_instance == NULL)
                   create_shadow_instance();
-                // Copy to the shadown instance, make sure to incorporate 
+                // Copy to the shadow instance, make sure to incorporate 
                 // any of the shadow postconditions from the previous stage
                 // so we know it's safe to write here
                 if (!shadow_postconditions.empty())
@@ -11065,10 +11065,12 @@ namespace Legion {
                   shadow_ready = shadow_instance->copy_from(instance, op,
                       Runtime::merge_events(NULL, shadow_postconditions),
                       false/*check source ready*/);
+                  shadow_postconditions.clear();
                 }
                 else
                   shadow_ready =
-                    shadow_instance->copy_from(instance,op,new_instance_ready);
+                    shadow_instance->copy_from(instance, op,
+                        new_instance_ready, false/*check source ready*/);
                 instance_ready = shadow_ready;
                 pack_shadow = true;
               }
@@ -11105,13 +11107,6 @@ namespace Legion {
 #endif
             // Have to make a copy in this case
             create_shadow_instance();
-#if 0
-            MemoryManager *manager =
-              context->runtime->find_memory_manager(instance->memory);
-            shadow = manager->create_future_instance(op,
-                op->get_unique_op_id(), ApEvent::NO_AP_EVENT,
-                instance->size, true/*eager*/);
-#endif
             shadow_ready = shadow_instance->copy_from(instance, op,
                           instance_ready, false/*check src ready*/);
             instance_ready = shadow_ready;
