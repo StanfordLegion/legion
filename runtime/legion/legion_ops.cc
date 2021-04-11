@@ -21374,15 +21374,7 @@ namespace Legion {
       assert(!target_memories.empty());
 #endif
       // Make the instances for the target memories
-      targets.reserve(target_memories.size());
-      for (std::vector<Memory>::const_iterator it =
-            target_memories.begin(); it != target_memories.end(); it++)
-      {
-        MemoryManager *manager = runtime->find_memory_manager(*it);
-        FutureInstance *instance = manager->create_future_instance(this, 
-          unique_op_id, completion_event, future_result_size, false/*eager*/);
-        targets.push_back(instance);
-      }
+      create_future_instances(target_memories); 
       // We're done with our mapping at the point we've made all the instances
       complete_mapping();
       if (serdez_redop_fns != NULL)
@@ -21493,6 +21485,21 @@ namespace Legion {
       }
       else
         target_memories.push_back(runtime->runtime_system_memory);
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::create_future_instances(std::vector<Memory> &target_mems)
+    //--------------------------------------------------------------------------
+    {
+      targets.reserve(target_mems.size());
+      for (std::vector<Memory>::const_iterator it =
+            target_mems.begin(); it != target_mems.end(); it++)
+      {
+        MemoryManager *manager = runtime->find_memory_manager(*it);
+        FutureInstance *instance = manager->create_future_instance(this, 
+          unique_op_id, completion_event, future_result_size, false/*eager*/);
+        targets.push_back(instance);
+      }
     }
 
     //--------------------------------------------------------------------------

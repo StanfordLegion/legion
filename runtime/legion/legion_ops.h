@@ -4055,6 +4055,7 @@ namespace Legion {
     protected:
       // These are virtual methods to override for control replication
       virtual void populate_sources(void);
+      virtual void create_future_instances(std::vector<Memory> &target_mems);
       virtual void all_reduce_serdez(void);
       virtual RtEvent all_reduce_redop(void);
     protected:

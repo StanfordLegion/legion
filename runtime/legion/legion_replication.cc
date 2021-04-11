@@ -792,6 +792,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplIndexTask::create_future_instances(
+                                           std::vector<Memory> &target_memories)
+    //--------------------------------------------------------------------------
+    {
+      // Do the base call first
+      IndexTask::create_future_instances(target_memories);
+      // Now check to see if we need to make a shadow instance for our
+      // future all reduce collective
+      if (all_reduce_collective != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(!reduction_instances.empty());
+        assert(reduction_instance != NULL);
+#endif
+        // If the instance is in a memory we cannot see or is "too big"
+        // then we need to make the shadow instance for the future
+        // all-reduce collective to use now while still in the mapping stage
+        if ((!reduction_instance->is_meta_visible) ||
+            (reduction_instance->size > LEGION_MAX_RETURN_SIZE))
+        {
+          MemoryManager *manager = 
+            runtime->find_memory_manager(reduction_instance->memory);
+          FutureInstance *shadow_instance = 
+            manager->create_future_instance(this, unique_op_id,
+                completion_event, reduction_op->sizeof_rhs, false/*eager*/);
+          all_reduce_collective->set_shadow_instance(shadow_instance);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndexTask::finish_index_task_reduction(void)
     //--------------------------------------------------------------------------
     {
@@ -5285,6 +5316,36 @@ namespace Legion {
       assert(sources.empty());
 #endif
       future_map.impl->get_shard_local_futures(sources);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAllReduceOp::create_future_instances(
+                                           std::vector<Memory> &target_memories)
+    //--------------------------------------------------------------------------
+    {
+      // Do the base call first
+      AllReduceOp::create_future_instances(target_memories);
+      // Now check to see if we need to make a shadow instance for
+      // the all-reduce future collective
+      if (all_reduce_collective != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(!targets.empty());
+#endif
+        FutureInstance *target = targets.front();
+        // If the instance is in a memory we cannot see or is "too big"
+        // then we need to make the shadow instance for the future
+        // all-reduce collective to use now while still in the mapping stage
+        if ((!target->is_meta_visible) ||
+            (target->size > LEGION_MAX_RETURN_SIZE))
+        {
+          MemoryManager *manager = runtime->find_memory_manager(target->memory);
+          FutureInstance *shadow_instance = 
+            manager->create_future_instance(this, unique_op_id,
+                completion_event, redop->sizeof_rhs, false/*eager*/);
+          all_reduce_collective->set_shadow_instance(shadow_instance);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10925,8 +10986,8 @@ namespace Legion {
                          ReductionOpID id, const ReductionOp *op, bool determin)
       : AllGatherCollective(loc, ctx), op(o), redop(op), redop_id(id),
         deterministic(determin), finished(Runtime::create_ap_user_event(NULL)),
-        instance(NULL), shadow(NULL), last_stage_sends(0), current_stage(-1),
-        pack_shadow(false)
+        instance(NULL), shadow_instance(NULL), last_stage_sends(0),
+        current_stage(-1), pack_shadow(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -10937,8 +10998,8 @@ namespace Legion {
         const ReductionOp* op, bool determin)
       : AllGatherCollective(ctx, id), op(o), redop(op), redop_id(rid),
         deterministic(determin), finished(Runtime::create_ap_user_event(NULL)),
-        instance(NULL), shadow(NULL), last_stage_sends(0), current_stage(-1),
-        pack_shadow(false)
+        instance(NULL), shadow_instance(NULL), last_stage_sends(0),
+        current_stage(-1), pack_shadow(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -10947,13 +11008,13 @@ namespace Legion {
     FutureAllReduceCollective::~FutureAllReduceCollective(void)
     //--------------------------------------------------------------------------
     {
-      if (shadow != NULL)
+      if (shadow_instance != NULL)
       {
         ApEvent free_shadow;
         if (!shadow_postconditions.empty())
           free_shadow = Runtime::merge_events(NULL, shadow_postconditions);
-        if (shadow->deferred_delete(op, free_shadow))
-          delete shadow;
+        if (shadow_instance->deferred_delete(op, free_shadow))
+          delete shadow_instance;
       }
     }
 
@@ -10992,14 +11053,8 @@ namespace Legion {
               {
                 // Have to copy this to the shadow instance because we can't
                 // do this in-place without support from Realm
-                if (shadow == NULL)
-                {
-                  MemoryManager *manager =
-                    context->runtime->find_memory_manager(instance->memory);
-                  shadow = manager->create_future_instance(op,
-                      op->get_unique_op_id(), ApEvent::NO_AP_EVENT,
-                      instance->size, true/*eager*/);
-                }
+                if (shadow_instance == NULL)
+                  create_shadow_instance();
                 // Copy to the shadown instance, make sure to incorporate 
                 // any of the shadow postconditions from the previous stage
                 // so we know it's safe to write here
@@ -11007,13 +11062,13 @@ namespace Legion {
                 {
                   if (new_instance_ready.exists())
                     shadow_postconditions.insert(new_instance_ready);
-                  shadow_ready = shadow->copy_from(instance, op,
+                  shadow_ready = shadow_instance->copy_from(instance, op,
                       Runtime::merge_events(NULL, shadow_postconditions),
                       false/*check source ready*/);
                 }
                 else
                   shadow_ready =
-                    shadow->copy_from(instance, op, new_instance_ready);
+                    shadow_instance->copy_from(instance,op,new_instance_ready);
                 instance_ready = shadow_ready;
                 pack_shadow = true;
               }
@@ -11046,16 +11101,19 @@ namespace Legion {
           {
 #ifdef DEBUG_LEGION
             assert(current_stage == -1);
-            assert(shadow == NULL);
+            assert(shadow_instance == NULL);
 #endif
             // Have to make a copy in this case
+            create_shadow_instance();
+#if 0
             MemoryManager *manager =
               context->runtime->find_memory_manager(instance->memory);
             shadow = manager->create_future_instance(op,
                 op->get_unique_op_id(), ApEvent::NO_AP_EVENT,
                 instance->size, true/*eager*/);
-            shadow_ready = shadow->copy_from(instance, op, instance_ready,
-                                             false/*check src ready*/);
+#endif
+            shadow_ready = shadow_instance->copy_from(instance, op,
+                          instance_ready, false/*check src ready*/);
             instance_ready = shadow_ready;
             pack_shadow = true;
           }
@@ -11065,8 +11123,8 @@ namespace Legion {
       rez.serialize(local_shard);
       if (pack_shadow)
       {
-        if (!shadow->pack_instance(rez, false/*pack ownership*/,
-                                   true/*other ready*/, shadow_ready))
+        if (!shadow_instance->pack_instance(rez, false/*pack ownership*/,
+                                       true/*other ready*/, shadow_ready))
         {
           ApUserEvent applied = Runtime::create_ap_user_event(NULL);
           rez.serialize(applied);
@@ -11135,12 +11193,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FutureAllReduceCollective::set_shadow_instance(FutureInstance *shadow)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shadow != NULL);
+      assert(shadow_instance == NULL);
+#endif
+      shadow_instance = shadow;
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent FutureAllReduceCollective::async_reduce(FutureInstance *inst,
                                                     ApEvent &ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(instance == NULL);
+      // We should either have a shadow instance at this point or the nature
+      // of the instance is that it is small enough and on system memory so
+      // we will be able to do everything ourselves locally.
+      assert((shadow_instance != NULL) ||
+          ((inst->is_meta_visible) && (inst->size <= LEGION_MAX_RETURN_SIZE)));
 #endif
       instance = inst;
       instance_ready = ready;
@@ -11148,6 +11222,25 @@ namespace Legion {
       ready = finished;
       perform_collective_async();
       return perform_collective_wait(false/*block*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureAllReduceCollective::create_shadow_instance(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shadow_instance == NULL);
+      assert(instance->is_meta_visible);
+      assert(instance->size <= LEGION_MAX_RETURN_SIZE);
+#endif
+      // We're past the mapping stage of the pipeline at this point so
+      // it is too late to be making instances the normal way through
+      // eager allocation, so we need to just call malloc and make an
+      // external allocation. This should only be happening for small 
+      // instances in system memory so it should not be a problem.
+      void *buffer = malloc(instance->size);
+      shadow_instance = FutureInstance::create_local(buffer,
+              instance->size, true/*own*/, context->runtime);
     }
     
     //--------------------------------------------------------------------------

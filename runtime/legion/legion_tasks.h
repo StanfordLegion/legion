@@ -1143,11 +1143,12 @@ namespace Legion {
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
-      void create_future_instances(std::vector<Memory> &target_memories);
       void early_map_regions(std::set<RtEvent> &applied_conditions,
                              const std::vector<unsigned> &must_premap);
       void record_origin_mapped_slice(SliceTask *local_slice);
     protected:
+      // Virtual so can be overridden by ReplIndexTask
+      virtual void create_future_instances(std::vector<Memory> &target_mems);
       // Callback for control replication to perform reduction for sizes
       // and provide an event for when the result is ready
       virtual void finish_index_task_reduction(void);

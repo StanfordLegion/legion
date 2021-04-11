@@ -2302,7 +2302,7 @@ namespace Legion {
               Realm::ExternalMemoryResource(
                reinterpret_cast<uintptr_t>(value), size, true/*read only*/),
               Realm::ProfilingRequestSet()));
-        FutureInstance source(value, size, memory, ApEvent::NO_AP_EVENT,runtime,
+        FutureInstance source(value, size, memory, src_ready, runtime,
            false/*eager*/,false/*external*/,false/*own alloc*/,source_instance);
         // issue the copy between them
         Runtime::trigger_event(NULL, ready, 

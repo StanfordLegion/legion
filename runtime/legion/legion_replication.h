@@ -256,9 +256,11 @@ namespace Legion {
       virtual void pack_collective_stage(Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
+      void set_shadow_instance(FutureInstance *shadow);
       RtEvent async_reduce(FutureInstance *instance, ApEvent &ready_event);
     protected:
       ApEvent perform_reductions(const std::map<ShardID,PendingReduce> &pend);
+      void create_shadow_instance(void);
       void finalize(void);
     public:
       Operation *const op;
@@ -270,7 +272,7 @@ namespace Legion {
       std::map<int,std::map<ShardID,PendingReduce> > pending_reductions;
       std::set<ApEvent> shadow_postconditions;
       FutureInstance *instance;
-      FutureInstance *shadow;
+      FutureInstance *shadow_instance;
       ApEvent instance_ready;
       ApEvent shadow_ready;
       int last_stage_sends;
@@ -1247,6 +1249,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
     protected:
+      virtual void create_future_instances(std::vector<Memory> &target_mems);
       virtual void finish_index_task_reduction(void);
       virtual RtEvent finish_index_task_complete(void);
     public:
@@ -1850,6 +1853,7 @@ namespace Legion {
       virtual void deactivate(void);
     protected:
       virtual void populate_sources(void);
+      virtual void create_future_instances(std::vector<Memory> &target_mems);
       virtual void all_reduce_serdez(void);
       virtual RtEvent all_reduce_redop(void);
     protected:
