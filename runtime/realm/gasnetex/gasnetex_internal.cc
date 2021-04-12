@@ -1142,6 +1142,29 @@ namespace Realm {
 					    OutbufMetadata *&pktbuf, int& pktidx,
 					    void *&hdr_base, void *&payload_base)
   {
+#ifdef DEBUG_REALM
+    if(payload_bytes > 0) {
+      gex_Event_t dummy;
+      gex_Event_t *lc_opt = &dummy;
+      gex_Flags_t flags = 0;
+      size_t max_payload =
+        GASNetEXHandlers::max_request_medium(internal->eps[src_ep_index],
+                                             tgt_rank,
+                                             tgt_ep_index,
+                                             hdr_bytes,
+                                             lc_opt,
+                                             flags);
+      if(payload_bytes > max_payload) {
+        log_gex_xpair.fatal() << "medium payload too large!  src="
+                              << Network::my_node_id << "/" << src_ep_index
+                              << " tgt=" << tgt_rank
+                              << "/" << tgt_ep_index
+                              << " max=" << max_payload << " act=" << payload_bytes;
+        abort();
+      }
+    }
+#endif
+
     // a packet needs 8 bytes (arg0 + hdr/payload size), the header,
     // and then the payload aligned to 16 bytes (start and end)
     size_t pad_hdr_bytes = roundup_pow2(hdr_bytes + 2*sizeof(gex_AM_Arg_t), 16);
