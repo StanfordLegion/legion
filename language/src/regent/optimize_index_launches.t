@@ -473,7 +473,7 @@ local function analyze_noninterference_self(
       (arg:is(ast.typed.expr.Projection) and arg.region.index) or arg.index
     if analyze_index_noninterference_self(index, cx, loop_vars)
     then
-      return true
+      return true, false
     else
       local needs_dynamic_check = true
       return false, needs_dynamic_check
@@ -1201,8 +1201,7 @@ local function init_bitmask(bitmask, volume)
 
   local idx = std.newsymbol(int32, "i")
   local bitmask_i = util.mk_expr_index_access(util.mk_expr_id_rawref(bitmask), util.mk_expr_id(idx), std.rawref(&bool))
-  local assign = util.mk_stat_assignment(bitmask_i, util.mk_expr_constant(false, bool))
-  stats:insert(assign)
+  stats:insert(util.mk_stat_assignment(bitmask_i, util.mk_expr_constant(false, bool)))
 
   local values = terralib.newlist()
   values:insert(util.mk_expr_constant(0, int32))
@@ -1211,7 +1210,7 @@ local function init_bitmask(bitmask, volume)
   return util.mk_stat_for_num(idx, values, util.mk_block(stats))
 end
 
-local function get_check_stats(preamble, value, index_expr, bitmask, conflict, verdict, pos, loop_var, volume)
+local function mk_duplicates_check(preamble, value, index_expr, bitmask, conflict, verdict, loop_var, volume)
   local stats = terralib.newlist()
 
   -- Compute value = index_expr(i)
@@ -1221,19 +1220,16 @@ local function get_check_stats(preamble, value, index_expr, bitmask, conflict, v
   local then_block = terralib.newlist()
 
   local bitmask_value = util.mk_expr_index_access(util.mk_expr_id(bitmask), util.mk_expr_id(value), std.rawref(&bool))
-  local conflict_assign = util.mk_stat_assignment(util.mk_expr_id_rawref(conflict), bitmask_value)
-  then_block:insert(conflict_assign)
+  then_block:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(conflict), bitmask_value))
 
-  local bitmask_assign_true = util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(true, bool)) 
-  then_block:insert(bitmask_assign_true)
+  then_block:insert(util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(true, bool)) )
 
   local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict), util.mk_expr_constant(true, bool))
-  local check_conflict = util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { set_verdict, util.mk_stat_break() })
-  then_block:insert(check_conflict)
+  then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { set_verdict, util.mk_stat_break() }))
 
+  -- Bounds check
   local cond = util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume))
-  local bounds_check = util.mk_stat_if(cond, then_block)
-  stats:insert(bounds_check)
+  stats:insert(util.mk_stat_if(cond, then_block))
 
   return stats
 end
@@ -1245,7 +1241,12 @@ local function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
   stats:insert(util.mk_stat_var(verdict, bool, util.mk_expr_constant(false, bool)))
 
   for _, arg in pairs(index_launch_ast.call.args) do
-    if pcall (function() std.is_partition(std.as_read(arg.value.expr_type)) end) and (arg.expr_type:ispace().dim == 1) then
+    -- Skip non-partition args
+    if arg:is(ast.typed.expr.IndexAccess) and
+       std.is_region(arg.expr_type) and
+       std.is_partition(std.as_read(arg.value.expr_type)) and
+       (arg.expr_type:ispace().dim == 1) then
+
       -- Generate the AST for var volume = p.colors.bounds:volume()
       local p_colors = util.mk_expr_field_access(util.mk_expr_id(arg.value.value), "colors", std.ispace(std.int1d))
       local p_bounds = util.mk_expr_field_access(p_colors, "bounds", std.rect1d)
@@ -1267,9 +1268,6 @@ local function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
       local conflict = std.newsymbol(bool, "conflict")
       stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
 
-      local pos = std.newsymbol(int64, "pos")
-      stats:insert(util.mk_stat_var(pos, int64))
-  
       local index_expr
       -- Figure out what type of loop we've got and get its index expr
       if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
@@ -1279,16 +1277,16 @@ local function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
       end
   
       local i = index_launch_ast.symbol
-      local check_stats = get_check_stats(index_launch_ast.preamble, value, index_expr, bitmask, conflict, verdict, pos, i, volume)
+      local duplicates_check = mk_duplicates_check(index_launch_ast.preamble, value, index_expr, bitmask, conflict, verdict, i, volume)
   
       local bounds
       -- Generate the AST based on loop type
       if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
         bounds = index_launch_ast.values
-        stats:insert(util.mk_stat_for_num(i, bounds, util.mk_block(check_stats)))
+        stats:insert(util.mk_stat_for_num(i, bounds, util.mk_block(duplicates_check)))
       else
         bounds = index_launch_ast.value
-        stats:insert(util.mk_stat_for_list(i, bounds, util.mk_block(check_stats)))
+        stats:insert(util.mk_stat_for_list(i, bounds, util.mk_block(duplicates_check)))
       end
     end
   end
