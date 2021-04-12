@@ -112,6 +112,7 @@ terra get_raw_ptr(y : int, x : int, bn : int,
   rect.hi.x[0] = (y + 1) * bn - 1
   rect.hi.x[1] = (x + 1) * bn - 1
   var ptr = c.legion_accessor_array_2d_raw_rect_ptr(fa, rect, &subrect, offsets)
+  c.legion_accessor_array_2d_destroy(fa)
   return raw_ptr { ptr = [&double](ptr), offset = offsets[1].offset / sizeof(double) }
 end
 
