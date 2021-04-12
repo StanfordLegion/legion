@@ -1212,9 +1212,8 @@ local function get_check_stats(preamble, value, index_expr, bitmask, conflict, v
   local bitmask_assign_true = util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(true, bool)) 
   then_block:insert(bitmask_assign_true)
 
-  local save_pos = util.mk_stat_assignment(util.mk_expr_id_rawref(pos), util.mk_expr_id(loop_var))
   local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict), util.mk_expr_constant(true, bool))
-  local check_conflict = util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { save_pos, set_verdict, util.mk_stat_break() })
+  local check_conflict = util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { set_verdict, util.mk_stat_break() })
   then_block:insert(check_conflict)
 
   local cond = util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume))
