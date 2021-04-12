@@ -225,9 +225,7 @@ namespace Realm {
       if(_r.lo.x > (lr.hi.x + 1)) {
 	rects.push_back(_r);
 	if((max_rects > 0) && (rects.size() > (size_t)max_rects)) {
-	  std::cout << "need better compression\n";
-	  rects[max_rects-1].hi = rects[max_rects].hi;
-	  rects.resize(max_rects);
+          merge_rects(max_rects);
 	}
 	return;
       }
@@ -273,13 +271,54 @@ namespace Realm {
       return;
     }
 
-    //std::cout << "slow path!\n";
-    // our rectangle may break into multiple pieces that we have to 
-    //  iteratively add
+    // for 2+ dimensions, there's no easy way to keep the data sorted, so we
+    //  don't bother - we'll try to extend the most-recently-added rectangle
+    //  if that works
 #ifdef __PGI
     // suppress "dynamic initialization in unreachable code" warning
 #pragma diag_suppress initialization_not_reachable
 #endif
+
+    {
+      Rect<N,T>& last = rects[rects.size() - 1];
+      if(can_merge(last, _r)) {
+        last = last.union_bbox(_r);
+        return;
+      }
+    }
+
+    // if we can't extend, just add another rectangle if we're not at the
+    //  limit
+    if((max_rects == 0) || (rects.size() < max_rects)) {
+      rects.push_back(_r);
+      return;
+    }
+
+    // as a last resort, scan the (hopefully short, since it's bounded) list of
+    //  current rectangles, and see which one suffers the least from being
+    //  union'd with this new rectangle
+    {
+      size_t best_idx = 0;
+      Rect<N,T> best_bbox = rects[0].union_bbox(_r);
+      size_t best_volume = best_bbox.volume();
+      for(size_t i = 1; i < rects.size(); i++) {
+        Rect<N,T> bbox = rects[i].union_bbox(_r);
+        size_t volume = bbox.volume();
+        if(volume < best_volume) {
+          best_idx = i;
+          best_bbox = bbox;
+          best_volume = volume;
+        }
+      }
+      // swap the union'd bbox to the end if it's not already there
+      if(best_idx < (rects.size() - 1))
+        rects[best_idx] = rects[rects.size() - 1];
+      rects[rects.size() - 1] = best_bbox;
+    }
+#if 0
+    //std::cout << "slow path!\n";
+    // our rectangle may break into multiple pieces that we have to 
+    //  iteratively add
     std::vector<Rect<N,T> > to_add(1, _r);
 #ifdef REALM_DEBUG_RECT_MERGING
     std::vector<Rect<N,T> > orig_rects(rects);
@@ -376,6 +415,7 @@ namespace Realm {
 	assert(!rects[i].overlaps(rects[j]));
 	assert(!can_merge(rects[i], rects[j]));
       }
+#endif
 #endif
   }
 

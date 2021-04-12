@@ -49,7 +49,8 @@ namespace Realm {
     void set_contributor_count(int count);
 
     void contribute_nothing(void);
-    void contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects);
+    void contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects,
+                                    bool disjoint);
     void contribute_raw_rects(const Rect<N,T>* rects, size_t count,
 			      size_t piece_count, bool disjoint,
                               size_t total_count);

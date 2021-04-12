@@ -42,6 +42,9 @@ namespace Realm {
     size_t count;
   };
 
+  // NOTE: the DenseRectangleList does NOT guarantee to remove all duplicate
+  //  entries - some merging is done opportunistically to keep the list size
+  //  down, but we don't pay for perfect de-duplication here
   template <int N, typename T>
   class DenseRectangleList {
   public:
