@@ -1200,12 +1200,39 @@ local function init_bitmask(bitmask, volume)
   return util.mk_stat_for_num(idx, values, util.mk_block(stats))
 end
 
-local function mk_duplicates_check(preamble, value, index_expr, bitmask, conflict, verdict, loop_var, volume)
+-- Computes: pf.z + pf.y * (bounds.hi.z - bounds.lo.z) + pf.x * (bounds.hi.z - bounds.lo.z) * (bounds.hi.y - bounds.lo.y)
+local function collapse_projection_functor(pf, dim, bounds)
+  local index_types = { std.int1d, std.int2d, std.int3d }
+
+  if dim == 1 then
+    return pf
+  else
+    local x = util.mk_expr_field_access(pf, "x", int32)
+    local y = util.mk_expr_field_access(pf, "y", int32)
+  
+    local y_extent = util.mk_expr_binary("-", util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "y", int32), util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "y", int32))
+  
+    if dim == 2 then
+      return util.mk_expr_binary("+", util.mk_expr_binary("*", x, y_extent), y)
+
+    elseif dim == 3 then
+      local z = util.mk_expr_field_access(pf, "z", int32)
+      local z_extent = util.mk_expr_binary("-", util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "z", int32), util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "z", int32))
+
+      return util.mk_expr_binary("+", util.mk_expr_binary("*", x, util.mk_expr_binary("*", y_extent, z_extent)), util.mk_expr_binary("+", util.mk_expr_binary("*", y, z_extent), z))
+
+    else
+      assert(false)
+    end
+  end
+end
+
+local function mk_duplicates_check(preamble, value, index_expr, bitmask, conflict, verdict, loop_var, bounds, dim, volume)
   local stats = terralib.newlist()
 
   -- Compute value = index_expr(i)
   preamble:map(function(stat) stats:insert(stat) end)
-  stats:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(value), index_expr))
+  stats:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(value), collapse_projection_functor(index_expr, dim, bounds)))
 
   local then_block = terralib.newlist()
 
@@ -1226,7 +1253,6 @@ end
 
 local function insert_dynamic_check(index_launch_ast, unopt_loop_ast)
   local stats = terralib.newlist()
-  --stats:insert(util.mk_block(util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist { util.mk_expr_constant(false, bool), util.mk_expr_constant("F", rawstring) }))))
 
   local verdict = std.newsymbol(bool, "verdict")
   stats:insert(util.mk_stat_var(verdict, bool, util.mk_expr_constant(false, bool)))
@@ -1235,12 +1261,15 @@ local function insert_dynamic_check(index_launch_ast, unopt_loop_ast)
     -- Skip non-partition args
     if arg:is(ast.typed.expr.IndexAccess) and
        std.is_region(arg.expr_type) and
-       std.is_partition(std.as_read(arg.value.expr_type)) and
-       (arg.expr_type:ispace().dim == 1) then
+       std.is_partition(std.as_read(arg.value.expr_type)) then
+
+      local dim = arg.expr_type:ispace().dim
+      local index_types = { std.int1d, std.int2d, std.int3d }
+      local rect_types = { std.rect1d, std.rect2d, std.rect3d }
 
       -- Generate the AST for var volume = p.colors.bounds:volume()
-      local p_colors = util.mk_expr_field_access(util.mk_expr_id(arg.value.value), "colors", std.ispace(std.int1d))
-      local p_bounds = util.mk_expr_field_access(p_colors, "bounds", std.rect1d)
+      local p_colors = util.mk_expr_field_access(util.mk_expr_id(arg.value.value), "colors", std.ispace(index_types[dim]))
+      local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
       local p_volume = util.mk_expr_method_call(p_bounds, int32, "volume", terralib.newlist())
       local volume = std.newsymbol(int32, "volume")
       stats:insert(util.mk_stat_var(volume, int32, p_volume))
@@ -1268,7 +1297,7 @@ local function insert_dynamic_check(index_launch_ast, unopt_loop_ast)
       end
   
       local i = index_launch_ast.symbol
-      local duplicates_check = mk_duplicates_check(index_launch_ast.preamble, value, index_expr, bitmask, conflict, verdict, i, volume)
+      local duplicates_check = mk_duplicates_check(index_launch_ast.preamble, value, index_expr, bitmask, conflict, verdict, i, p_bounds, dim, volume)
   
       local bounds
       -- Generate the AST based on loop type
