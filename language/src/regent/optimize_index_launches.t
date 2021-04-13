@@ -29,6 +29,11 @@ local emit_dynamic_check = std.config["index-launch-dynamic"]
 
 local context = {}
 
+local function get_source_location(node)
+  assert(node.span.source and node.span.start.line)
+  return tostring(node.span.source) .. ":" .. tostring(node.span.start.line)
+end
+
 function context:__index (field)
   local value = context [field]
   if value ~= nil then
@@ -1234,8 +1239,9 @@ local function mk_duplicates_check(preamble, value, index_expr, bitmask, conflic
   return stats
 end
 
-local function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
+local function insert_dynamic_check(index_launch_ast, unopt_loop_ast)
   local stats = terralib.newlist()
+  --stats:insert(util.mk_block(util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist { util.mk_expr_constant(false, bool), util.mk_expr_constant("F", rawstring) }))))
 
   local verdict = std.newsymbol(bool, "verdict")
   stats:insert(util.mk_stat_var(verdict, bool, util.mk_expr_constant(false, bool)))
@@ -1268,9 +1274,9 @@ local function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
       local conflict = std.newsymbol(bool, "conflict")
       stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
 
-      local index_expr
       -- Figure out what type of loop we've got and get its index expr
-      if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
+      local index_expr
+      if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
         index_expr = arg.index.arg
       else
         index_expr = arg.index
@@ -1281,7 +1287,7 @@ local function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
   
       local bounds
       -- Generate the AST based on loop type
-      if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
+      if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
         bounds = index_launch_ast.values
         stats:insert(util.mk_stat_for_num(i, bounds, util.mk_block(duplicates_check)))
       else
@@ -1292,9 +1298,9 @@ local function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
   end
 
   -- Finally check verdict outside the loop to decide if it's safe to launch or not
-  local final_check = util.mk_stat_if_else(util.mk_expr_id(verdict), unoptimized_loop_ast, index_launch_ast)
-  stats:insert(final_check)
-
+  local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist { util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) .. ": loop ineligible for index launch due to non-injective projection functor", rawstring) }))
+  stats:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), util.mk_stat_block(util.mk_block(abort)), index_launch_ast))
+  
   return util.mk_stat_block(util.mk_block(stats))
 end
 
