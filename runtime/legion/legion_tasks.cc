@@ -379,9 +379,12 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
         pack_region_requirement(regions[idx], rez);
       rez.serialize(futures.size());
-      // If we are remote we can just do the normal pack
-      for (unsigned idx = 0; idx < futures.size(); idx++)
-        rez.serialize(futures[idx].impl->did);
+      for (std::vector<Future>::const_iterator it =
+            futures.begin(); it != futures.end(); it++) 
+        if (it->impl != NULL)
+          rez.serialize(it->impl->did);
+        else
+          rez.serialize<DistributedID>(0);
       rez.serialize(grants.size());
       for (unsigned idx = 0; idx < grants.size(); idx++)
         pack_grant(grants[idx], rez);
@@ -435,6 +438,8 @@ namespace Legion {
       {
         DistributedID future_did;
         derez.deserialize(future_did);
+        if (future_did == 0)
+          continue;
         FutureImpl *impl = 
           runtime->find_or_create_future(future_did, mutator);
         impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
@@ -4048,7 +4053,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           FutureImpl *impl = futures[idx].impl; 
-          wait_on_events.insert(impl->subscribe(false/*need local data*/));
+          if (impl != NULL)
+            wait_on_events.insert(impl->subscribe(false/*need local data*/));
         }
       }
       // Now add get all the other preconditions for the launch
@@ -4232,6 +4238,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           FutureImpl *impl = futures[idx].impl;
+          if (impl == NULL)
+            continue;
           if (impl->get_ready_event().exists())
             LegionSpy::log_future_use(unique_op_id, impl->get_ready_event());
         }
@@ -5148,14 +5156,7 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
-      if (!launcher.futures.empty())
-      {
-        // Only allow non-empty futures on the way in
-        for (std::vector<Future>::const_iterator it =
-              launcher.futures.begin(); it != launcher.futures.end(); it++)
-          if (it->impl != NULL)
-            futures.push_back(*it);
-      }
+      futures = launcher.futures;
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
@@ -5348,7 +5349,8 @@ namespace Legion {
       // register mapping dependences on futures
       for (std::vector<Future>::const_iterator it = futures.begin();
             it != futures.end(); it++)
-        it->impl->register_dependence(this);
+        if (it->impl != NULL)
+          it->impl->register_dependence(this);
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
       // Also have to register any dependences on our predicate
@@ -6910,14 +6912,7 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
-      if (!launcher.futures.empty())
-      {
-        // Only allow non-empty futures on the way in
-        for (std::vector<Future>::const_iterator it =
-              launcher.futures.begin(); it != launcher.futures.end(); it++)
-          if (it->impl != NULL)
-            futures.push_back(*it);
-      }
+      futures = launcher.futures;
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
@@ -7003,14 +6998,7 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
-      if (!launcher.futures.empty())
-      {
-        // Only allow non-empty futures on the way in
-        for (std::vector<Future>::const_iterator it =
-              launcher.futures.begin(); it != launcher.futures.end(); it++)
-          if (it->impl != NULL)
-            futures.push_back(*it);
-      }
+      futures = launcher.futures;
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
@@ -7236,7 +7224,8 @@ namespace Legion {
       // register mapping dependences on futures
       for (std::vector<Future>::const_iterator it = futures.begin();
             it != futures.end(); it++)
-        it->impl->register_dependence(this);
+        if (it->impl != NULL)
+          it->impl->register_dependence(this);
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
       // Register mapping dependences on any future maps also
