@@ -62,8 +62,12 @@ namespace Legion {
         pack_region_requirement(output_regions[idx], rez);
       rez.serialize(futures.size());
       // If we are remote we can just do the normal pack
-      for (unsigned idx = 0; idx < futures.size(); idx++)
-        futures[idx].impl->pack_future(rez);
+      for (std::vector<Future>::const_iterator it =
+            futures.begin(); it != futures.end(); it++)
+        if (it->impl != NULL)
+          it->impl->pack_future(rez);
+        else
+          rez.serialize<DistributedID>(0);
       rez.serialize(grants.size());
       for (unsigned idx = 0; idx < grants.size(); idx++)
         pack_grant(grants[idx], rez);
@@ -121,6 +125,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < futures.size(); idx++)
       {
         FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, mutator);
+        if (impl == NULL)
+          continue;
         impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
         futures[idx] = Future(impl, false/*need reference*/);
       }
@@ -4362,6 +4368,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           FutureImpl *impl = futures[idx].impl; 
+          if (impl == NULL)
+            continue;
           ApEvent ready;
           if (idx < future_memories.size())
           {
@@ -4580,6 +4588,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           FutureImpl *impl = futures[idx].impl;
+          if (impl == NULL)
+            continue;
           if (impl->get_ready_event().exists())
             LegionSpy::log_future_use(unique_op_id, impl->get_ready_event());
         }
@@ -5575,18 +5585,11 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
+      futures = launcher.futures;
       // If the task has any output requirements, we create fresh region names
       // return them back to the user
       if (outputs != NULL)
         create_output_regions(*outputs);
-      if (!launcher.futures.empty())
-      {
-        // Only allow non-empty futures on the way in
-        for (std::vector<Future>::const_iterator it =
-              launcher.futures.begin(); it != launcher.futures.end(); it++)
-          if (it->impl != NULL)
-            futures.push_back(*it);
-      }
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
@@ -5845,7 +5848,8 @@ namespace Legion {
       // register mapping dependences on futures
       for (std::vector<Future>::const_iterator it = futures.begin();
             it != futures.end(); it++)
-        it->impl->register_dependence(this);
+        if (it->impl != NULL)
+          it->impl->register_dependence(this);
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
       // Also have to register any dependences on our predicate
@@ -8119,18 +8123,11 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
+      futures = launcher.futures;
       // If the task has any output requirements, we create fresh region and
       // partition names and return them back to the user
       if (outputs != NULL)
         create_output_regions(*outputs, launch_sp);
-      if (!launcher.futures.empty())
-      {
-        // Only allow non-empty futures on the way in
-        for (std::vector<Future>::const_iterator it =
-              launcher.futures.begin(); it != launcher.futures.end(); it++)
-          if (it->impl != NULL)
-            futures.push_back(*it);
-      }
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
@@ -8229,18 +8226,11 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
+      futures = launcher.futures;
       // If the task has any output requirements, we create fresh region and
       // partition names and return them back to the user
       if (outputs != NULL)
         create_output_regions(*outputs, launch_sp);
-      if (!launcher.futures.empty())
-      {
-        // Only allow non-empty futures on the way in
-        for (std::vector<Future>::const_iterator it =
-              launcher.futures.begin(); it != launcher.futures.end(); it++)
-          if (it->impl != NULL)
-            futures.push_back(*it);
-      }
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
@@ -8586,7 +8576,8 @@ namespace Legion {
       // register mapping dependences on futures
       for (std::vector<Future>::const_iterator it = futures.begin();
             it != futures.end(); it++)
-        it->impl->register_dependence(this);
+        if (it->impl != NULL)
+          it->impl->register_dependence(this);
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
       // Register mapping dependences on any future maps also
