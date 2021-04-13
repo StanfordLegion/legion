@@ -5680,7 +5680,13 @@ namespace Legion {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_EMPTY_INDEX_TASK_LAUNCH,
           "Ignoring empty index task launch in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
-        return Future();
+        const ReductionOp *reduction_op = runtime->get_reduction(redop);
+        FutureImpl *result = new FutureImpl(runtime, true/*register*/,
+          runtime->get_available_distributed_id(),
+          runtime->address_space, ApEvent::NO_AP_EVENT);
+        result->set_result(reduction_op->identity,
+                           reduction_op->sizeof_rhs, false/*own*/);
+        return Future(result);
       }
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
@@ -5707,7 +5713,15 @@ namespace Legion {
     {
       AutoRuntimeCall call(this); 
       if (future_map.impl == NULL)
-        return Future();
+      {
+        const ReductionOp *reduction_op = runtime->get_reduction(redop);
+        FutureImpl *result = new FutureImpl(runtime, true/*register*/,
+          runtime->get_available_distributed_id(),
+          runtime->address_space, ApEvent::NO_AP_EVENT);
+        result->set_result(reduction_op->identity,
+                           reduction_op->sizeof_rhs, false/*own*/);
+        return Future(result);
+      }
       AllReduceOp *all_reduce_op = runtime->get_available_all_reduce_op();
       Future result = 
         all_reduce_op->initialize(this, future_map, redop, deterministic);
