@@ -8211,11 +8211,13 @@ namespace Legion {
       for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it =
             remote_frontiers.begin(); it != remote_frontiers.end(); it++)
         log_tracing.info() << "events[" << it->second
-                      << "] = Runtime::barrier_advance(" << it->first.id << ")";
+                           << "] = Runtime::barrier_advance("
+                           << std::hex << it->first.id << std::dec << ")";
       for (std::map<unsigned,ApBarrier>::const_iterator it =
             local_frontiers.begin(); it != local_frontiers.end(); it++)
-        log_tracing.info() << "Runtime::phase_barrier_arrive(" <<
-          it->second.id << ", events[" << it->first << "])";
+        log_tracing.info() << "Runtime::phase_barrier_arrive(" 
+                           << std::hex << it->second.id << std::dec
+                           << ", events[" << it->first << "])";
     }
 
     //--------------------------------------------------------------------------
@@ -8287,6 +8289,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       op->elide_fences_post_sync();
+      // Propagate any frontiers through our local frontiers such that
+      // we can update local_frontiers without waiting for frontiers first
+      for (std::map<unsigned,unsigned>::const_iterator it =
+            frontiers.begin(); it != frontiers.end(); it++)
+      {
+        std::map<unsigned,ApBarrier>::iterator finder = 
+          local_frontiers.find(it->second); 
+        if (finder == local_frontiers.end())
+          continue;
+#ifdef DEBUG_LEGION
+        assert(local_frontiers.find(it->first) == local_frontiers.end());
+#endif
+        local_frontiers[it->first] = finder->second;
+        local_frontiers.erase(finder); 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9229,7 +9246,7 @@ namespace Legion {
     {
       std::stringstream ss; 
       ss << "events[" << lhs << "] = Runtime::phase_barrier_arrive("
-         << barrier.id << ", events[" << rhs << "])";
+         << std::hex << barrier.id << std::dec << ", events[" << rhs << "])";
       return ss.str();
     }
 
@@ -9290,7 +9307,7 @@ namespace Legion {
     {
       std::stringstream ss;
       ss << "events[" << lhs << "] = Runtime::barrier_advance("
-         << barrier.id << ")";
+         << std::hex << barrier.id << std::dec << ")";
       return ss.str();
     }
 
