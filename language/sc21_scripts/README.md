@@ -93,14 +93,14 @@ cd soleil-x/src
 mkdir -p runs
 
 # strong scaling
-for n in 1 2; do EXECUTABLE=soleil.exec.idx-no-check SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/strong/$n.json; done
-for n in 1 2; do EXECUTABLE=soleil.exec.idx-dyn-check SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/strong/$n.json; done
-for n in 1 2; do EXECUTABLE=soleil.exec.noidx SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/strong/$n.json; done
+for n in 1 2; do for r in 0 1 2 3 4; do REP=$r EXECUTABLE=soleil.exec.idx-no-check SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/strong/$n.json; done; done
+for n in 1 2; do for r in 0 1 2 3 4; do REP=$r EXECUTABLE=soleil.exec.idx-dyn-check SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/strong/$n.json; done; done
+for n in 1 2; do for r in 0 1 2 3 4; do REP=$r EXECUTABLE=soleil.exec.noidx SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/strong/$n.json; done; done
 
 # weak scaling
-for n in 1 2; do EXECUTABLE=soleil.exec.idx-no-check SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/weak/$n.json; done
-for n in 1 2; do EXECUTABLE=soleil.exec.idx-dyn-check SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/weak/$n.json; done
-for n in 1 2; do EXECUTABLE=soleil.exec.noidx SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/weak/$n.json; done
+for n in 1 2; do for r in 0 1 2 3 4; do REP=$r EXECUTABLE=soleil.exec.idx-no-check SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/weak/$n.json; done; done
+for n in 1 2; do for r in 0 1 2 3 4; do REP=$r EXECUTABLE=soleil.exec.idx-dyn-check SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/weak/$n.json; done; done
+for n in 1 2; do for r in 0 1 2 3 4; do REP=$r EXECUTABLE=soleil.exec.noidx SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/weak/$n.json; done; done
 ```
 
 ### Soleil-X DOM Instructions
