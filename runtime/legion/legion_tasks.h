@@ -588,7 +588,8 @@ namespace Legion {
       ApEvent                               task_effects_complete;
     protected:
       TaskContext*                          execution_context;
-      TraceInfo*                            remote_trace_info;
+      RemoteTraceRecorder*                  remote_trace_recorder;
+      RtEvent                               remote_collect_event;
     protected:
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;
@@ -1222,7 +1223,6 @@ namespace Legion {
       UniqueID remote_unique_id;
       bool origin_mapped;
       UniqueID remote_owner_uid;
-      TraceInfo *remote_trace_info;
       // An event for tracking when origin-mapped slices on the owner
       // node have committed so we can trigger things appropriately
       RtUserEvent origin_mapped_complete;
