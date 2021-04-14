@@ -251,6 +251,11 @@ if(Legion_USE_CUDA)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
   )
 
+  # before cmake 3.13, the CUDAHOSTCXX env variable wasn't propagated to CUDA_HOST_COMPILER automatically
+  if(CMAKE_VERSION VERSION_LESS "3.13" AND DEFINED ENV{CUDAHOSTCXX})
+    set(CUDA_HOST_COMPILER $ENV{CUDAHOSTCXX} CACHE FILEPATH "Host side compiler used by NVCC" FORCE)
+  endif()
+
   # define variable for legion_defines.h
   set(LEGION_USE_CUDA ON)
 
