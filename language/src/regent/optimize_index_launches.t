@@ -1217,9 +1217,9 @@ end
 
 -- Computes: pf.z + pf.y * (bounds.hi.z - bounds.lo.z) + pf.x * (bounds.hi.z - bounds.lo.z) * (bounds.hi.y - bounds.lo.y)
 local function collapse_projection_functor(pf, dim, bounds)
-  local index_types = { std.int1d, std.int2d, std.int3d }
+  local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
 
-  if dim == 1 then
+  if dim == 0 or dim == 1 then
     return pf
   else
     local x = util.mk_expr_field_access(pf, "x", int32)
@@ -1279,8 +1279,8 @@ local function insert_dynamic_check(index_launch_ast, unopt_loop_ast)
        std.is_partition(std.as_read(arg.value.expr_type)) then
 
       local dim = arg.expr_type:ispace().dim
-      local index_types = { std.int1d, std.int2d, std.int3d }
-      local rect_types = { std.rect1d, std.rect2d, std.rect3d }
+      local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
+      local rect_types = { [0] = std.rect1d, std.rect1d, std.rect2d, std.rect3d }
 
       -- Generate the AST for var volume = p.colors.bounds:volume()
       local p_colors = util.mk_expr_field_access(util.mk_expr_id(arg.value.value), "colors", std.ispace(index_types[dim]))
@@ -1327,8 +1327,12 @@ local function insert_dynamic_check(index_launch_ast, unopt_loop_ast)
   end
 
   -- Finally check verdict outside the loop to decide if it's safe to launch or not
-  local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist { util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) .. ": loop ineligible for index launch due to non-injective projection functor", rawstring) }))
-  stats:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), util.mk_stat_block(util.mk_block(abort)), index_launch_ast))
+  if unopt_loop_ast.annotations.index_launch:is(ast.annotation.Demand) then
+    local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist { util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) .. ": loop ineligible for index launch due to non-injective projection functor", rawstring) }))
+    stats:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), util.mk_stat_block(util.mk_block(abort)), index_launch_ast))
+  else
+    stats:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), unopt_loop_ast, index_launch_ast))
+  end
   
   return util.mk_stat_block(util.mk_block(stats))
 end
